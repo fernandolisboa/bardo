@@ -120,6 +120,18 @@ pub enum JobActionError {
     /// from the capture, where its cap, test and checks are asked again.
     #[error("make the take again from its capture")]
     TakeFromItsPage,
+    /// A scene job (plan, images or clips) while a narration of its
+    /// project is being made: what it makes would be out of date at once.
+    #[error("a narration of the project is being made")]
+    NarrationBusy,
+    /// A narration job while scenes of its project are being planned,
+    /// drawn or animated on the current narration.
+    #[error("scenes of the project are being made")]
+    ScenesBusy,
+    /// Running it again would put paid images or clips out of date, or
+    /// discard them, which its stage asks about first: it starts there.
+    #[error("the job starts from its stage, which asks first")]
+    AsksFirst,
     #[error(transparent)]
     NotAllowed(#[from] InvalidJobTransition),
     #[error(transparent)]

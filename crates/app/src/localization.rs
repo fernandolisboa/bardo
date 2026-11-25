@@ -1757,7 +1757,7 @@ mod tests {
 
         done(
             &app,
-            app.generate_narration(version.id, BudgetConsent::Ask)
+            app.generate_narration(version.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
                 .unwrap(),
         );
         let placed = app.place_scenes(version.id).unwrap();
@@ -1828,13 +1828,24 @@ mod tests {
 
         done(
             &app,
-            app.generate_narration(version.id, BudgetConsent::Ask)
+            app.generate_narration(version.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
                 .unwrap(),
         );
         let narration = app.narrations.narration(version.id).unwrap().unwrap();
         let view = app.scenes(version.id).unwrap();
         assert!(view.stale);
         assert!(view.version.as_ref().is_some_and(|v| v.can_place));
+        // Placing is the carried scenes' way onto the narration: they are
+        // not fitted, and nothing is drawn for them until they are placed.
+        assert!(!view.can_fit);
+        assert!(matches!(
+            app.fit_scenes(version.id),
+            Err(crate::SceneError::PlanOutOfDate)
+        ));
+        assert!(matches!(
+            app.regenerate_scene_image(version.id, 0, BudgetConsent::Ask),
+            Err(crate::SceneError::PlanOutOfDate)
+        ));
         let stages = crate::stages::project_stages(
             &app.script(version.id).unwrap(),
             &app.narration(version.id).unwrap(),

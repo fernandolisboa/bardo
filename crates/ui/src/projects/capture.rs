@@ -17,8 +17,8 @@ use bardo_app::bardo_domain::{
 use bardo_app::{
     AnalysisStatus, Bardo, BudgetConsent, CaptureError, CaptureVoiceChoice, ChosenCapture, Control,
     ControlPlayer, ControlStatus, ControlVideoView, PerformedStep, PerformedTakeView,
-    PerformedView, SetChoice, SetPicture, SetScene, SpendEstimate, Stage, TakeAnalysisView, Text,
-    TourAnchor, take_source,
+    PerformedView, PicturesConsent, SetChoice, SetPicture, SetScene, SpendEstimate, Stage,
+    TakeAnalysisView, Text, TourAnchor, take_source,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -35,6 +35,7 @@ use gpui_kit::{
     SharedString, Task, Window, div, img, px,
 };
 
+use super::narration_ask::{NarrationAsk, NarrationWay};
 use super::{ProjectsScreen, clock};
 use crate::appearance::look;
 use crate::guide;
@@ -53,7 +54,7 @@ pub(super) struct CaptureImport {
     /// Whether the user ticked that the recording shows only them.
     pub(super) confirmed: bool,
     /// An import held back at a budget.
-    pub(super) ask: Option<SpendEstimate>,
+    pub(super) ask: Option<NarrationAsk>,
     /// What the Capture stage says went wrong.
     pub(super) error: Option<Text>,
     /// Whether Remove capture waits for the user to confirm it.
@@ -297,8 +298,9 @@ impl ProjectsScreen {
     }
 
     /// Starts importing the chosen capture.
-    fn import_capture(
+    pub(super) fn import_capture(
         &mut self,
+        pictures: PicturesConsent,
         consent: BudgetConsent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -315,6 +317,7 @@ impl ProjectsScreen {
             chosen,
             self.capture.voice,
             self.capture.confirmed,
+            pictures,
             consent,
         ) {
             Ok(_) => {
@@ -322,14 +325,19 @@ impl ProjectsScreen {
                 self.capture.confirmed = false;
                 self.narration_error = None;
             }
-            Err(CaptureError::OverBudget(estimate)) => self.capture.ask = Some(estimate),
+            Err(CaptureError::WouldOutdatePictures(stake)) => {
+                self.capture.ask = Some(NarrationAsk::Pictures(stake));
+            }
+            Err(CaptureError::OverBudget(estimate)) => {
+                self.capture.ask = Some(NarrationAsk::Budget(pictures, estimate));
+            }
             Err(error) => self.narration_error = Some(error.message()),
         }
         self.load(window, cx);
         cx.notify();
     }
 
-    fn cancel_capture(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn cancel_capture(&mut self, cx: &mut Context<Self>) {
         self.capture.chosen = None;
         self.capture.ask = None;
         self.capture.confirmed = false;
@@ -851,17 +859,8 @@ impl ProjectsScreen {
         {
             parts.push(self.render_chosen_capture(chosen, estimate, cx));
         }
-        if let Some(estimate) = &self.capture.ask {
-            parts.push(budget_question(
-                "capture-budget",
-                bardo,
-                estimate,
-                cx,
-                cx.listener(|this, _: &ClickEvent, window, cx| {
-                    this.import_capture(BudgetConsent::Confirmed, window, cx)
-                }),
-                cx.listener(|this, _: &ClickEvent, _, cx| this.cancel_capture(cx)),
-            ));
+        if let Some(ask) = &self.capture.ask {
+            parts.push(self.narration_question(NarrationWay::Capture, ask, cx));
         }
         parts
     }
@@ -987,7 +986,12 @@ impl ProjectsScreen {
                             .disabled(!ready)
                             .label(tr(bardo, Text::UseCapture))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.import_capture(BudgetConsent::Ask, window, cx)
+                                this.import_capture(
+                                    PicturesConsent::Ask,
+                                    BudgetConsent::Ask,
+                                    window,
+                                    cx,
+                                )
                             })),
                     )
                     .child(

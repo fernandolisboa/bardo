@@ -373,6 +373,7 @@ restored = "Isto estava em andamento quando o backup foi feito, então o Bardo n
 checksum = "O instalador não confere com o checksum publicado na versão, então o Bardo não o guardou. Tente de novo; se acontecer outra vez, relate o problema."
 off_script = "A gravação não segue o roteiro de perto o bastante. Grave de novo lendo o roteiro atual e importe."
 vision_models = "Os modelos de rosto, profundidade e máscara estão faltando, danificados ou não rodaram. Reinstale o Bardo para recolocá-los e tente de novo."
+out_of_date = "A narração foi feita de novo depois que estas cenas foram planejadas, então nada mais foi feito para elas. Na etapa Cenas, ajuste as cenas à narração ou planeje de novo (numa versão, posicione as cenas), e comece de novo."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -381,6 +382,9 @@ runs_elsewhere = "O agente em segundo plano está rodando esta tarefa agora. Ten
 superseded = "Uma narração mais nova deste projeto substituiu esta importação, então ela não roda de novo."
 restyled = "O estilo visual do vídeo mudou depois que esta tarefa começou, então ela não roda de novo. Desenhe as cenas pela etapa Cenas, que mostra quanto custam no estilo atual."
 take_from_page = "Nada desta tomada chegou ao provedor ainda. Faça de novo na etapa Captura, que confere antes o teto do vídeo, a tomada de teste e as checagens antes do envio."
+narration_busy = "Há uma narração sendo feita para este projeto, e o que esta tarefa fizesse agora ficaria desatualizado na hora. Quando a narração ficar pronta, traga as cenas para ela na etapa Cenas antes."
+scenes_busy = "Há cenas, imagens ou clipes sendo feitos para este projeto. Execute de novo quando terminarem, ou cancele antes."
+asks_first = "As cenas deste vídeo têm imagens ou clipes que executar isto de novo deixaria desatualizados ou descartaria. Comece pela etapa correspondente no projeto, que mostra o que está em jogo e pergunta antes."
 
 [setup]
 step_by_step = "Passo a passo"
@@ -712,6 +716,8 @@ voice_unchecked = "A voz do narrador ainda não foi verificada na sua conta Elev
 voice_unavailable = "A voz do narrador não está na sua conta ElevenLabs. Resolva na tela Personas ou escolha outro narrador."
 missing_key = "Salve uma chave da ElevenLabs em Configurações para gerar ou importar narração."
 busy = "Já há uma narração sendo feita para este projeto."
+scenes_busy = "Há cenas, imagens ou clipes sendo feitos para este projeto na narração atual. Espere terminarem, ou cancele no painel Tarefas, antes de trocar a narração."
+outdates_pictures = "Uma nova narração deixa desatualizadas as imagens e os clipes das cenas deste vídeo. Confirme para continuar."
 missing = "Gere ou importe a narração primeiro."
 audio_missing = "O arquivo de áudio da narração sumiu da pasta do projeto. Gere de novo."
 cannot_play = "Não foi possível tocar a narração: não há saída de áudio disponível ou o arquivo não pode ser lido."
@@ -720,6 +726,12 @@ recording_unreadable = "Não foi possível ler o arquivo. Confira se ele ainda e
 recording_unsupported = "O Bardo importa gravações em MP3 e WAV sem compressão. Converta o arquivo para um deles e importe de novo."
 recording_empty = "O arquivo não tem áudio."
 recording_too_large = "O arquivo passa de 500 MB. Exporte em MP3 e importe de novo."
+
+[narration.outdates]
+fit = "As cenas deste vídeo têm imagens e clipes nos tempos da narração atual (imagens: {images}, clipes: {clips}). Uma nova narração deixa tudo isso desatualizado. Ela lê o mesmo texto em que as cenas foram planejadas, então depois Ajustar à narração, na etapa Cenas, mantém tudo."
+replan = "As cenas deste vídeo têm imagens e clipes nos tempos da narração atual (imagens: {images}, clipes: {clips}). Uma nova narração deixa tudo isso desatualizado, e o roteiro mudou depois que as cenas foram planejadas, então elas não podem ser ajustadas a ela: as cenas vão ter que ser planejadas de novo, o que descarta essas imagens e clipes."
+confirm = "Trocar a narração"
+cancel = "Manter a narração atual"
 
 [capture]
 import = "Importar captura"
@@ -1000,8 +1012,15 @@ replan_cancel = "Manter estas cenas"
 planning = "Planejando as cenas…"
 drawing = "Desenhando as imagens…"
 stopped = "A última execução parou:"
-stale = "A narração foi gerada de novo depois que estas cenas foram planejadas, então os tempos não batem mais. Planeje de novo."
+stale = "A narração foi feita de novo depois que estas cenas foram planejadas e lê outro texto, então as cenas não podem ser ajustadas a ela. Planeje de novo. Até lá nenhuma imagem ou clipe é feito para elas: sairia nos tempos de uma narração que não existe mais."
+stale_fit = "A narração foi feita de novo depois que estas cenas foram planejadas, então os tempos não batem mais. Ela lê o mesmo texto: Ajustar à narração leva cada cena ao seu novo tempo e mantém todas as imagens e clipes. Até lá nenhuma imagem ou clipe é feito para elas."
 stale_tag = "Desatualizadas"
+fit = "Ajustar à narração"
+fit_title = "Narração nova, mesmo texto"
+fit_hint = "Mantém estas cenas com seus prompts, imagens e clipes, e lê de novo, na nova narração, quando cada uma começa e termina. Não custa nada. Uma cena que agora dura mais que o clipe segura o último quadro dele."
+paid_held = "Desatualizadas. Ajuste as cenas à narração antes."
+paid_held_replan = "Desatualizadas. Planeje as cenas de novo antes, na etapa Cenas."
+paid_held_version = "Desatualizadas. Posicione as cenas nesta narração antes."
 count = "{n} cenas"
 generate_images = "Gerar {n} imagens"
 images_hint = "O Nano Banana desenha cada cena como imagem 16:9 em 2K; o Gemini cobra cada uma. Uma cena recusada pelo provedor não interrompe as outras."
@@ -1055,6 +1074,9 @@ scene_not_found = "Essa cena não existe mais; as cenas podem ter sido planejada
 missing_claude_key = "Salve uma chave do Claude em Configurações para planejar cenas."
 missing_gemini_key = "Salve uma chave do Gemini em Configurações para gerar imagens e clipes do Google."
 busy = "Já há cenas, imagens ou clipes sendo gerados para este projeto."
+narration_busy = "Há uma narração sendo feita para este projeto. Espere terminar, ou cancele no painel Tarefas: cenas planejadas, desenhadas ou animadas agora ficariam desatualizadas assim que ela ficasse pronta."
+plan_out_of_date = "Estas cenas estão desatualizadas: a narração mudou depois que elas foram planejadas, então uma imagem ou um clipe feito agora sairia nos tempos de uma narração que não existe mais. Ajuste as cenas à narração ou planeje de novo antes (numa versão, posicione as cenas)."
+other_text = "A narração lê outro texto, diferente daquele em que estas cenas foram planejadas, então elas não podem ser ajustadas a ela. Planeje de novo."
 would_discard_images = "Planejar de novo descarta as imagens e os clipes destas cenas. Confirme para continuar."
 nothing_to_generate = "Todas as cenas já têm imagem."
 nothing_to_review = "Não há imagem nova para revisar."
@@ -1515,7 +1537,7 @@ previous_frame = "Quadro anterior"
 next_frame = "Próximo quadro"
 building = "Gerando proxies de pré-visualização… {ready} de {total} arquivos"
 keep_editing = "Você pode continuar editando enquanto isso roda"
-stale = "A narração mudou depois que as cenas foram planejadas. Planeje-as de novo para acompanhar."
+stale = "A narração mudou depois que as cenas foram planejadas. Na etapa Cenas, ajuste as cenas a ela, ou planeje de novo quando ela lê outro texto (numa versão, posicione as cenas)."
 
 cut_reset = "As cenas ou a narração mudaram desde a sua última edição, então o corte recomeça do corte bruto."
 [editor.bin]
@@ -3004,8 +3026,8 @@ title = "Todas ou pendentes"
 body = "Pendentes mostra só as cenas com algo por fazer, uma imagem para desenhar ou revisar. Todas mostra cada uma."
 
 [tour.scenes.replan]
-title = "Planeje de novo"
-body = "Quando a narração é feita de novo, as cenas ficam desatualizadas, porque os tempos delas não batem mais. Planejar de novo as substitui, e pergunta antes quando isso descartaria imagens ou clipes."
+title = "Depois de uma nova narração"
+body = "Quando a narração é feita de novo, as cenas ficam desatualizadas e nenhuma imagem ou clipe é feito para elas até baterem com ela. Ajustar à narração mantém todas as imagens e clipes quando o roteiro não mudou. Senão, Planejar de novo substitui as cenas, e pergunta antes quando isso descartaria imagens ou clipes."
 
 [tour.scenes.place]
 title = "Posicionar as cenas"

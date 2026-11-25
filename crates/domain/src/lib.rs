@@ -315,10 +315,10 @@ pub use runner::{
 pub use scene::{
     CastDraft, CastMember, CastRecord, MAX_CAST, MAX_CAST_NAME_CHARS, MAX_PLACES,
     MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes, NoSuchCastMember, NoSuchPlace,
-    NoSuchScene, OtherShot, Place, PlaceDraft, PlaceRecord, PlanDraft, Scene, SceneClip,
-    SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord,
-    ScenePlanRepository, ScenePrompt, SceneRecord, SceneSetting, Sentence, scene_image_prompt,
-    sentences,
+    NoSuchScene, OtherShot, OtherText, PaidPictures, Place, PlaceDraft, PlaceRecord, PlanDraft,
+    Scene, SceneClip, SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId,
+    ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, SceneSetting, Sentence,
+    scene_image_prompt, sentences,
 };
 pub use schedule::{
     DateOrder, LocalTime, Rfc3339, SCHEDULE_GRACE, ScheduleProblem, Zone, check_publish_time,

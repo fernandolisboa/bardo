@@ -421,10 +421,14 @@ pub enum JobFailureKind {
     /// The local vision models are missing, damaged or would not run
     /// (#190): reinstalling Bardo puts them back.
     VisionModels,
+    /// The work is for scenes the narration left behind (#262): nothing
+    /// more is paid for them until they are fitted to the narration or
+    /// planned again.
+    OutOfDate,
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 18] = [
+    pub const ALL: [JobFailureKind; 19] = [
         JobFailureKind::Simulated,
         JobFailureKind::Unexpected,
         JobFailureKind::MissingKey,
@@ -443,6 +447,7 @@ impl JobFailureKind {
         JobFailureKind::Checksum,
         JobFailureKind::OffScript,
         JobFailureKind::VisionModels,
+        JobFailureKind::OutOfDate,
     ];
 
     /// Stable name stored in the database.
@@ -466,6 +471,7 @@ impl JobFailureKind {
             JobFailureKind::Checksum => "checksum",
             JobFailureKind::OffScript => "off_script",
             JobFailureKind::VisionModels => "vision_models",
+            JobFailureKind::OutOfDate => "out_of_date",
         }
     }
 
@@ -488,7 +494,8 @@ impl JobFailureKind {
             | JobFailureKind::Restored
             | JobFailureKind::Checksum
             | JobFailureKind::OffScript
-            | JobFailureKind::VisionModels => false,
+            | JobFailureKind::VisionModels
+            | JobFailureKind::OutOfDate => false,
         }
     }
 }

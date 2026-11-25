@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler};
-use crate::narrations::NarrationError;
+use crate::narrations::{NarrationError, PicturesConsent};
 use crate::{Bardo, KeyState};
 
 /// The largest recording Bardo imports: about 45 minutes of CD-quality
@@ -325,11 +325,14 @@ impl Bardo {
 
     /// Starts a job that copies `recording` into the project folder and
     /// times its words against the current script; it then replaces the
-    /// project's narration. Past ElevenLabs' budget it needs `consent`.
+    /// project's narration, which puts the scenes' images and clips out
+    /// of date: when there are any, it needs `pictures`. Past ElevenLabs'
+    /// budget it needs `consent`.
     pub fn import_narration(
         &self,
         project: VideoProjectId,
         recording: &Recording,
+        pictures: PicturesConsent,
         consent: BudgetConsent,
     ) -> Result<JobId, NarrationError> {
         let project = self.narration_project(project)?;
@@ -337,12 +340,15 @@ impl Bardo {
             .scripts
             .script(project.id)?
             .ok_or(NarrationError::NoScript)?;
-        if self.narration_busy(project.id) || self.takes_busy(project.id) {
-            return Err(NarrationError::Busy);
+        if let Some(held) = self.narration_held(project.id) {
+            return Err(held);
         }
         self.forget_abandoned_imports(project.id)?;
         if self.provider_key(ALIGNER).state == KeyState::NotSet {
             return Err(NarrationError::MissingKey(ALIGNER));
+        }
+        if let Some(stake) = self.pictures_to_ask(project.id, script.text().as_str(), pictures)? {
+            return Err(NarrationError::WouldOutdatePictures(stake));
         }
         if let Err(estimate) = self.check_video_budget(
             project.id,
@@ -508,7 +514,12 @@ mod tests {
 
     fn import(app: &Bardo, project: VideoProjectId, recording: &Recording) -> Job {
         let id = app
-            .import_narration(project, recording, BudgetConsent::Ask)
+            .import_narration(
+                project,
+                recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask,
+            )
             .unwrap();
         let job = wait_done(app, id);
         assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
@@ -650,12 +661,22 @@ mod tests {
 
         app.set_budget(Provider::ElevenLabs, "0.001").unwrap();
         assert!(matches!(
-            app.import_narration(project.id, &recording, BudgetConsent::Ask),
+            app.import_narration(
+                project.id,
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask
+            ),
             Err(NarrationError::OverBudget(_))
         ));
         assert!(
-            app.import_narration(project.id, &recording, BudgetConsent::Confirmed)
-                .is_ok()
+            app.import_narration(
+                project.id,
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Confirmed
+            )
+            .is_ok()
         );
     }
 
@@ -751,14 +772,24 @@ mod tests {
         let mut app = h.start();
         let recording = Recording::open(&user_file(&dir, "take.wav", &silent_wav(1))).unwrap();
         assert!(matches!(
-            app.import_narration(VideoProjectId::new(), &recording, BudgetConsent::Ask),
+            app.import_narration(
+                VideoProjectId::new(),
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask
+            ),
             Err(NarrationError::ProjectNotFound)
         ));
 
         let project = project(&app);
         app.remove_provider_key(Provider::ElevenLabs).unwrap();
         assert!(matches!(
-            app.import_narration(project.id, &recording, BudgetConsent::Ask),
+            app.import_narration(
+                project.id,
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask
+            ),
             Err(NarrationError::MissingKey(Provider::ElevenLabs))
         ));
         app.save_provider_key(Provider::ElevenLabs, ELEVENLABS_KEY)
@@ -766,18 +797,28 @@ mod tests {
 
         *h.speech.delay.lock().unwrap() = Duration::from_millis(100);
         let generating = app
-            .generate_narration(project.id, BudgetConsent::Ask)
+            .generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
             .unwrap();
         assert!(matches!(
-            app.import_narration(project.id, &recording, BudgetConsent::Ask),
+            app.import_narration(
+                project.id,
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask
+            ),
             Err(NarrationError::Busy)
         ));
         wait_done(&app, generating);
         let importing = app
-            .import_narration(project.id, &recording, BudgetConsent::Ask)
+            .import_narration(
+                project.id,
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask,
+            )
             .unwrap();
         assert!(matches!(
-            app.generate_narration(project.id, BudgetConsent::Ask),
+            app.generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask),
             Err(NarrationError::Busy)
         ));
         wait_done(&app, importing);
@@ -811,7 +852,12 @@ mod tests {
         let recording = Recording::open(&user_file(&dir, "take.wav", &silent_wav(1))).unwrap();
 
         assert!(matches!(
-            app.import_narration(project.id, &recording, BudgetConsent::Ask),
+            app.import_narration(
+                project.id,
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask
+            ),
             Err(NarrationError::NoScript)
         ));
     }
@@ -829,7 +875,12 @@ mod tests {
         let recording = Recording::open(&user_file(&dir, "take.wav", &silent_wav(3))).unwrap();
 
         let id = app
-            .import_narration(project.id, &recording, BudgetConsent::Ask)
+            .import_narration(
+                project.id,
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask,
+            )
             .unwrap();
         let job = wait_done(&app, id);
 
@@ -862,7 +913,12 @@ mod tests {
         let recording = Recording::open(&user_file(&dir, "take.wav", &silent_wav(1))).unwrap();
 
         let id = app
-            .import_narration(project.id, &recording, BudgetConsent::Ask)
+            .import_narration(
+                project.id,
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask,
+            )
             .unwrap();
         let job = wait_done(&app, id);
 
@@ -941,7 +997,12 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
 
         let id = app
-            .import_narration(project.id, &recording, BudgetConsent::Ask)
+            .import_narration(
+                project.id,
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask,
+            )
             .unwrap();
         let job = wait_done(&app, id);
 
@@ -968,7 +1029,12 @@ mod tests {
         std::fs::write(&path, silent_wav(30)).unwrap();
 
         let id = app
-            .import_narration(project.id, &recording, BudgetConsent::Ask)
+            .import_narration(
+                project.id,
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask,
+            )
             .unwrap();
         let job = wait_done(&app, id);
 
@@ -993,8 +1059,13 @@ mod tests {
         let recording = Recording::open(&user_file(&dir, "take.wav", &silent_wav(1))).unwrap();
         let failed = wait_done(
             &app,
-            app.import_narration(project.id, &recording, BudgetConsent::Ask)
-                .unwrap(),
+            app.import_narration(
+                project.id,
+                &recording,
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask,
+            )
+            .unwrap(),
         );
         let left = audio_file(
             ImportPayload::parse(failed.payload())

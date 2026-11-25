@@ -1342,7 +1342,11 @@ pub(crate) mod tests {
             *h.speech.failure.lock().unwrap() = Some(lost());
 
             let id = app
-                .generate_narration(project.id, BudgetConsent::Confirmed)
+                .generate_narration(
+                    project.id,
+                    crate::PicturesConsent::Ask,
+                    BudgetConsent::Confirmed,
+                )
                 .unwrap();
             let job = wait_done(&app, id);
 
@@ -1394,7 +1398,11 @@ pub(crate) mod tests {
             });
 
             let id = app
-                .generate_narration(project.id, BudgetConsent::Confirmed)
+                .generate_narration(
+                    project.id,
+                    crate::PicturesConsent::Ask,
+                    BudgetConsent::Confirmed,
+                )
                 .unwrap();
             wait_done(&app, id);
 
