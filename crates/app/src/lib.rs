@@ -1854,6 +1854,38 @@ pub(crate) mod testing {
         pub(crate) submission: String,
     }
 
+    /// A provider call a test holds open, as one still on its way when the
+    /// job is cancelled or the app closes.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum ClipCall {
+        /// Handing a scene's image over.
+        StageImage,
+        /// Submitting a clip: the call that is paid for.
+        Submit,
+    }
+
+    /// Holds the next call of one kind open until `resume`.
+    #[derive(Default)]
+    pub(crate) struct Pause {
+        at: Mutex<Option<ClipCall>>,
+        waiting: std::sync::atomic::AtomicBool,
+        resumed: std::sync::atomic::AtomicBool,
+    }
+
+    impl Pause {
+        /// Waits here when `call` is the one held open.
+        fn pass(&self, call: ClipCall) {
+            use std::sync::atomic::Ordering::SeqCst;
+            if self.at.lock().unwrap().take_if(|at| *at == call).is_none() {
+                return;
+            }
+            self.waiting.store(true, SeqCst);
+            while !self.resumed.load(SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+    }
+
     /// A video provider with two models: `fake/range` (3-15 s) and
     /// `fake/choices` (5 or 10 s). Answers every request as running while
     /// `hold` is set, else as done; a prompt containing a word in `failing`
@@ -1890,6 +1922,8 @@ pub(crate) mod testing {
         pub(crate) lookups: Mutex<u32>,
         /// How many calls the provider refuses the token for first.
         pub(crate) refusals: Mutex<u32>,
+        /// A call held open (`pause_at`).
+        pub(crate) pause: Pause,
     }
 
     impl FakeClips {
@@ -1904,6 +1938,23 @@ pub(crate) mod testing {
 
         pub(crate) fn hold(&self, hold: bool) {
             self.hold.store(hold, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        /// Holds the next `call` open until `resume`.
+        pub(crate) fn pause_at(&self, call: ClipCall) {
+            *self.pause.at.lock().unwrap() = Some(call);
+        }
+
+        /// Whether the call held open was made and waits.
+        pub(crate) fn paused(&self) -> bool {
+            self.pause.waiting.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        /// Lets the call held open go on.
+        pub(crate) fn resume(&self) {
+            self.pause
+                .resumed
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
 
         /// Fails every request whose prompt contains `word` from now on.
@@ -1960,6 +2011,7 @@ pub(crate) mod testing {
             image: &ClipImage,
         ) -> Result<StagedImage, ProviderFailure> {
             self.keys.lock().unwrap().push(key.expose().to_owned());
+            self.pause.pass(ClipCall::StageImage);
             let mut staged = self.staged.lock().unwrap();
             staged.push(image.clone());
             Ok(StagedImage(format!("https://fake/image-{}", staged.len())))
@@ -1977,6 +2029,7 @@ pub(crate) mod testing {
                 return Err(failure);
             }
             *self.sends.lock().unwrap() += 1;
+            self.pause.pass(ClipCall::Submit);
             let timed_out = || {
                 Err(ProviderFailure::new(
                     bardo_domain::ProviderFailureKind::Unreachable,

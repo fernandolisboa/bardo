@@ -1113,9 +1113,13 @@ impl TakeRun<'_> {
     /// Forgets the submission, giving up what it staged, so the next
     /// attempt starts a new one.
     fn restart(&mut self, cx: &mut JobContext) -> Result<(), JobFailure> {
-        self.release(cx.id())?;
+        // The state goes first. A run that lost its job is refused the save
+        // and gives nothing up: the files are still the job's, whose next
+        // run (here or in the other runner) reads them from the saved
+        // state.
         self.state.restart();
-        self.save_state(cx)
+        self.save_state(cx)?;
+        self.release(cx.id())
     }
 
     /// The request ended without a take: a retry by the user submits it

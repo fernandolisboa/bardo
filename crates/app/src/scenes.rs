@@ -1435,6 +1435,9 @@ pub(crate) mod tests {
         pub(crate) clips: Arc<FakeClips>,
         /// Video providers after the fake one.
         pub(crate) more_clips: Vec<Arc<dyn bardo_domain::ClipGenerator>>,
+        /// How long a closing app waits for its handlers
+        /// (`JobSettings::closing_wait`); the default when `None`.
+        pub(crate) closing_wait: Option<Duration>,
         /// Plans signed in to instead of a key (ADR-0028).
         pub(crate) plans: Vec<Arc<dyn bardo_domain::PlanSignIn>>,
         pub(crate) secrets: Arc<MemorySecretStore>,
@@ -1486,6 +1489,7 @@ pub(crate) mod tests {
                 music: Arc::default(),
                 clips: Arc::default(),
                 more_clips: Vec::new(),
+                closing_wait: None,
                 plans: Vec::new(),
                 secrets: Arc::default(),
                 stats: Arc::default(),
@@ -1598,7 +1602,12 @@ pub(crate) mod tests {
                 repositories,
                 self.providers(),
                 Some("en-US"),
-                Self::job_settings(),
+                JobSettings {
+                    closing_wait: self
+                        .closing_wait
+                        .unwrap_or(JobSettings::default().closing_wait),
+                    ..Self::job_settings()
+                },
             )
             .unwrap();
             app.accept_privacy_policy().unwrap();
