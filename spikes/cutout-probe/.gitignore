@@ -1,0 +1,4 @@
+# Converted models and results (tools/convert.py, the probe's own output).
+/models/
+/out/
+/target/
