@@ -24,6 +24,7 @@ icon_assets!(
         Lock,
         Mic,
         MonitorPlay,
+        Package,
         Pencil,
         TrendingUp,
         Scissors,
@@ -61,6 +62,7 @@ pub fn destination(place: Destination) -> Lucide {
     match place {
         Destination::Research => Lucide::Compass,
         Destination::Themes => Lucide::Lightbulb,
+        Destination::Products => Lucide::Package,
         Destination::Performance => Lucide::TrendingUp,
         Destination::Projects => Lucide::Clapperboard,
         Destination::Personas => Lucide::User,

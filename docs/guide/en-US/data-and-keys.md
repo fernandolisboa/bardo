@@ -11,7 +11,7 @@ Bardo keeps everything on your computer, under your Windows account. There is no
 <a id="database"></a>
 ## The database
 
-Your channels, personas, templates, projects and their scripts, research, ideas, costs, jobs, posts and settings are in one database file, `%APPDATA%\Bardo\bardo.db`. It holds no key, secret or sign-in. What Bardo reads from YouTube stays only as long as YouTube's rules allow ([Privacy policy](privacy.md#kept)).
+Your channels, personas, products with their images and logo, templates, projects and their scripts, research, ideas, costs, jobs, posts and settings are in one database file, `%APPDATA%\Bardo\bardo.db`. It holds no key, secret or sign-in. What Bardo reads from YouTube stays only as long as YouTube's rules allow ([Privacy policy](privacy.md#kept)).
 
 <a id="projects"></a>
 ## Project folders
@@ -38,7 +38,7 @@ Bardo writes what it does to `%LOCALAPPDATA%\Bardo\logs\bardo.log`, kept to a bo
 
 Back up from [Settings › Backup](backup.md): one `.zip` file with the database and, if you want, the project folders, made while Bardo is open. Bardo also backs up the database by itself every week to `%LOCALAPPDATA%\Bardo\backups`. Keys, credentials and sign-ins are not in a backup, on purpose: after restoring on another computer, save them again and reconnect each account, as the tab lists ([Moving to another computer](backup.md#moving)).
 
-To take keys, app credentials, preferences, personas and channels to another copy of Bardo without the rest, export a [settings file](backup.md#settings-file): it is encrypted with a password you choose, and you tick what goes in and what comes in.
+To take keys, app credentials, preferences, personas, products and channels to another copy of Bardo without the rest, export a [settings file](backup.md#settings-file): it is encrypted with a password you choose, and you tick what goes in and what comes in.
 
 <a id="source"></a>
 ## A copy built from source

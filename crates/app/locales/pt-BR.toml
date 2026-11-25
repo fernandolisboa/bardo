@@ -1938,6 +1938,7 @@ guide = "Guia"
 performance = "Desempenho"
 research = "Pesquisa"
 themes = "Temas"
+products = "Produtos"
 projects = "Projetos"
 personas = "Personas"
 templates = "Modelos"
@@ -3106,6 +3107,37 @@ body = "Marque quando a voz soa como uma pessoa real, como um clone. As redes pe
 title = "Aparência"
 body = "Como esta persona aparece nos clipes de atuação. Desenhe um personagem original a partir de uma descrição, revise e fique com ele, ou importe uma foto sua. Uma foto sua nunca vai num pacote. Para o Seedance na BytePlus, a aparência também pode ir pelo id dela na sua biblioteca de assets do ModelArk."
 
+[tour.products]
+name = "Tour de Produtos"
+
+[tour.products.library]
+title = "Seus produtos"
+body = "Um produto é o que um anúncio vende: um app, um curso, um objeto, um serviço ou só uma ideia. Escolha um para editar, ou clique em Novo produto."
+
+[tour.products.brief]
+title = "O briefing"
+body = "Diga o que é o produto, para quem é, a oferta, o link e a chamada para ação. O anúncio trabalha só com o que você escreve aqui e com o que confirmar depois."
+
+[tour.products.facts]
+title = "Fatos"
+body = "Um fato por linha: recursos, números, preços. Um anúncio só pode afirmar esses fatos, então deixe de fora o que você não consegue comprovar."
+
+[tour.products.owner]
+title = "De quem é o produto"
+body = "Meu ou de um cliente: isso define como os posts dos anúncios são identificados. Um anúncio precisa dizer e Um anúncio nunca pode dizer guardam as regras a seguir, como uma frase legal obrigatória ou alegações a evitar."
+
+[tour.products.pictures]
+title = "Imagens"
+body = "Até três imagens, cada uma uma foto do produto ou uma tela do app. Antes de cada uma você confirma que pode usá-la. Uma foto com fundo transparente é usada como recorte."
+
+[tour.products.logo]
+title = "Logo"
+body = "Um logo PNG opcional para o cartão final do anúncio. Como as imagens, ele fica no banco de dados do Bardo e entra nos backups."
+
+[tour.products.actions]
+title = "Salvar e organizar"
+body = "Salve o briefing, duplique para uma variação, arquive um produto que você não anuncia mais, ou exclua um que nenhum projeto usa."
+
 [tour.templates]
 name = "Tour dos Modelos"
 
@@ -3814,6 +3846,7 @@ group_keys = "Chaves de API"
 group_apps = "Credenciais de app"
 group_preferences = "Preferências e custos"
 group_personas = "Personas"
+group_products = "Produtos"
 group_channels = "Canais, com as contas nas redes"
 group_sign_ins = "Logins"
 sign_ins_hint = "Em geral, deixe desmarcado e entre de novo na outra cópia. Algumas redes, como o X, mantêm só uma cópia conectada: a primeira que renovar o login desconecta a outra. Um login só vai junto com o canal dele."
@@ -3995,3 +4028,141 @@ all = "Todas as {n}"
 past_clip = "Agora é mais longa que o clipe de {clip} s, que segura o último quadro. Faça um novo clipe ou recorte."
 stretched = "Tinha {was} s, agora {now} s."
 dropped = "Esta versão não narra esta cena; ela fica fora do corte."
+
+# Products (#273).
+
+[products]
+hint = "O que você anuncia, reaproveitado entre canais: o que cada um é, os fatos que você garante, as imagens e o logo."
+empty = "Nenhum produto ainda. Adicione um para fazer anúncios dele."
+not_loaded = "Não foi possível carregar os produtos."
+new = "Novo produto"
+show_archived = "Mostrar arquivados ({n})"
+
+[product]
+new_title = "Novo produto"
+edit_title = "Editar produto"
+brief_hint = "O que você conta ao Bardo sobre o produto. Os anúncios feitos com ele dizem só o que você confirmar."
+name = "Nome"
+name_placeholder = "ex.: Caderno recarregável"
+kind = "Tipo"
+kind_hint = "Uma ideia é algo que ainda não existe: os anúncios a apresentam como ideia, nunca como um produto que já dá para comprar."
+ownership = "De quem é"
+ownership_hint = "Define como os posts dos anúncios são identificados: marca própria, ou parceria paga quando é de um cliente."
+description = "O que é"
+description_placeholder = "O que ele faz e como, em poucas frases."
+audience = "Para quem é"
+audience_placeholder = "Quem compra ou usa, e o que essas pessoas querem."
+facts = "Fatos que você garante"
+facts_placeholder = "Um por linha, ex.: Entrega em 2 dias"
+facts_hint = "Uma afirmação por linha, com suas palavras. São as únicas afirmações que um anúncio pode fazer até você confirmar outras."
+facts_count = "Fatos lidos: {n}"
+offer = "Oferta (opcional)"
+offer_placeholder = "Preço, desconto, prazo"
+link = "Link (opcional)"
+link_placeholder = "exemplo.com.br/produto"
+call_to_action = "Chamada para ação"
+call_to_action_placeholder = "ex.: Garanta o seu no link da bio"
+must_say = "Um anúncio precisa dizer"
+must_say_placeholder = "O que todo anúncio diz, ex.: uma frase legal obrigatória."
+never_say = "Um anúncio nunca pode dizer"
+never_say_placeholder = "Palavras, promessas ou comparações que ficam de fora."
+create = "Criar produto"
+save = "Salvar alterações"
+duplicate = "Duplicar"
+archive = "Arquivar"
+restore = "Restaurar"
+delete = "Excluir…"
+delete_title = "Excluir {name}?"
+delete_hint = "As imagens e o logo vão junto. Não dá para desfazer."
+actions_hint = "Duplicar salva suas alterações e copia o briefing, as imagens e o logo. Arquivar tira o produto da lista e de novos anúncios. Excluir remove o produto com as imagens, a menos que algum vídeo o use."
+confirm_delete = "Excluir"
+cancel = "Cancelar"
+saved = "Salvo."
+duplicated = "Duplicado como {name}."
+archived = "Arquivado: fora da lista e de novos anúncios."
+restored = "Restaurado."
+deleted = "{name} foi excluído."
+archived_tag = "Arquivado"
+copy_suffix = "cópia"
+
+[product.error]
+name_taken = "Já existe um produto com esse nome. Ele pode estar entre os arquivados."
+not_found = "Este produto não existe mais."
+in_use = "Há vídeos que usam este produto, então ele não pode ser excluído. Arquive-o."
+not_saved = "Não foi possível salvar o produto."
+name_required = "Dê um nome ao produto."
+name_too_long = "Use no máximo 80 caracteres."
+description_required = "Diga o que é o produto."
+description_too_long = "Use no máximo 2.000 caracteres."
+audience_too_long = "Use no máximo 1.000 caracteres."
+fact_too_long = "Cada fato pode ter no máximo 300 caracteres."
+too_many_facts = "Liste no máximo 30 fatos."
+offer_too_long = "Use no máximo 300 caracteres."
+link_invalid = "Digite um endereço da web, como exemplo.com.br/produto."
+link_too_long = "Use no máximo 500 caracteres."
+call_to_action_too_long = "Use no máximo 120 caracteres."
+must_say_too_long = "Use no máximo 1.000 caracteres."
+never_say_too_long = "Use no máximo 1.000 caracteres."
+
+[product.pictures]
+title = "Imagens e logo"
+hint = "Até três imagens (PNG, JPEG ou WebP, de 600 a 6.000 px por lado, o lado maior no máximo 3 vezes o menor, até 10 MB) e um logo em PNG. Seus arquivos ficam como estão."
+save_first = "Crie o produto para adicionar as imagens e o logo."
+not_loaded = "Não foi possível carregar as imagens."
+none = "Nenhuma imagem ainda. Um produto pode ficar sem: os anúncios usam cenas desenhadas e um cartão final só com texto."
+count = "Imagens: {n} de 3"
+add_image = "Adicionar imagem…"
+kind_hint = "Uma foto mostra o produto, a embalagem ou um lugar. Uma tela é a captura de um app ou site: o Bardo só a mostra como ela é e nunca a redesenha."
+cut_out = "Recortada"
+size = "{width}×{height} px"
+remove_image = "Remover"
+confirmed_at = "Uso confirmado em {when}"
+rights_title = "Imagens que você pode usar"
+rights_hint = "O Bardo guarda sua confirmação, com a data, junto de cada imagem."
+rights_confirm = "Posso usar esta imagem e a marca que ela mostra em anúncios."
+choose_image = "Escolher imagem…"
+choose_logo = "Escolher logo…"
+image_dialog = "Escolha uma imagem do produto"
+logo_dialog = "Escolha o logo (PNG)"
+logo_title = "Logo"
+logo_hint = "Um PNG, usado só no cartão final do anúncio. Fundo transparente fica melhor."
+logo_none = "Sem logo."
+add_logo = "Adicionar logo…"
+replace_logo = "Trocar logo…"
+remove_logo = "Remover logo"
+remove_image_ask = "Remover esta imagem? A confirmação vai junto."
+remove_logo_ask = "Remover o logo? A confirmação vai junto."
+image_added = "Imagem adicionada."
+image_removed = "Imagem removida."
+logo_added = "Logo salvo."
+logo_removed = "Logo removido."
+
+[product.pictures.error]
+not_confirmed = "Confirme primeiro que você pode usar a imagem."
+too_many = "Um produto tem até três imagens. Remova uma para adicionar outra."
+refused = "Esta imagem não pode ser usada."
+unreadable = "Não foi possível ler o arquivo."
+not_found = "Esta imagem não existe mais."
+no_logo = "O produto não tem logo."
+
+[product.kind_name]
+digital = "Produto digital"
+physical = "Produto físico"
+service = "Serviço"
+idea = "Ideia"
+
+[product.ownership_name]
+mine = "Meu"
+client = "De um cliente"
+
+[product.pictures.kind]
+photo = "Foto"
+screen = "Tela"
+
+[product.pictures.reason]
+not_an_image = "Use um arquivo PNG, JPEG ou WebP."
+logo_not_png = "O logo precisa ser um arquivo PNG."
+too_small = "Ela tem {width}×{height} px: pequena demais. Uma imagem precisa de 600 px em cada lado; um logo, de 64 px em cada lado e 200 px no lado maior."
+too_large = "Ela tem {width}×{height} px; cada lado pode ter no máximo 6.000 px."
+shape = "Ela tem {width}×{height} px: estreita ou larga demais. O lado maior de uma imagem pode ter no máximo 3 vezes o menor; o de um logo, 10 vezes."
+file_too_large = "O arquivo tem {mb} MB; o máximo é 10 MB."

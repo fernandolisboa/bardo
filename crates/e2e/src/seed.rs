@@ -14,6 +14,8 @@
 //! - "Vozes do Mar" (Portuguese, Brazil): one project with a script.
 //! - A persona, this month's spend against two budgets, and a finished and
 //!   a failed job.
+//! - A product to advertise, with a photo, a screen and a logo, and an
+//!   archived one.
 
 use std::path::Path;
 use std::process::Command;
@@ -143,6 +145,7 @@ pub fn seed_showcase(bardo: &mut Bardo) -> anyhow::Result<Value> {
         now,
     )?;
     let probe = render_ready(&db, &templates, &space, &projects_dir, &ffmpeg, now)?;
+    products(&db, profile, &ffmpeg, now)?;
     spend(&db, profile, &space, &sea, &probe, &ship, now)?;
     jobs(&db, profile, now)?;
 
@@ -192,6 +195,105 @@ fn persona(db: &Database, profile: ProfileId) -> anyhow::Result<PersonaId> {
     let persona = Persona::new(profile, details);
     PersonaRepository::save(db, &persona)?;
     Ok(persona.id)
+}
+
+/// A product with its pictures, made by ffmpeg in a scratch folder: a
+/// photo cut out of its background, a screen and a transparent logo; and
+/// an archived idea.
+fn products(
+    db: &Database,
+    profile: ProfileId,
+    ffmpeg: &Path,
+    now: SystemTime,
+) -> anyhow::Result<()> {
+    let brief = ProductBrief::validate(ProductDraft {
+        name: "Orbit Desk Lamp".into(),
+        kind: ProductKind::Physical,
+        description: "A desk lamp shaped like a small planet, with a ring that dims it.".into(),
+        audience: "Students and home-office workers who like space.".into(),
+        facts: "Three light colors\nUSB-C powered\nShips in 2 days".into(),
+        offer: "15% off this week".into(),
+        link: "example.com/orbit-lamp".into(),
+        call_to_action: "Get yours at the link".into(),
+        ownership: ProductOwnership::Client,
+        must_say: "Paid partnership with Orbit Studio.".into(),
+        never_say: "cheap".into(),
+    })
+    .map_err(|errors| anyhow!("the product: {errors:?}"))?;
+    let product = Product::new(profile, brief);
+    ProductRepository::save(db, &product)?;
+
+    let dir = std::env::temp_dir().join(format!("bardo-seed-{}", product.id));
+    std::fs::create_dir_all(&dir)?;
+    let photo = dir.join("photo.png");
+    make(
+        ffmpeg,
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black@0.0:s=800x800,format=rgba,\
+             drawbox=x=200:y=200:w=400:h=400:color=orange@1:t=fill",
+            "-frames:v",
+            "1",
+        ],
+        &photo,
+    )?;
+    let screen = dir.join("screen.png");
+    make(
+        ffmpeg,
+        &["-f", "lavfi", "-i", "testsrc2=s=720x1280", "-frames:v", "1"],
+        &screen,
+    )?;
+    let logo = dir.join("logo.png");
+    make(
+        ffmpeg,
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black@0.0:s=400x160,format=rgba,\
+             drawbox=x=20:y=40:w=360:h=80:color=gold@1:t=fill",
+            "-frames:v",
+            "1",
+        ],
+        &logo,
+    )?;
+    for (file, kind) in [
+        (&photo, ProductImageKind::Photo),
+        (&screen, ProductImageKind::Screen),
+    ] {
+        let picture = ProductPicture::image(std::fs::read(file)?)
+            .map_err(|error| anyhow!("a product image: {error:?}"))?;
+        ProductRepository::add_image(db, &ProductImage::new(product.id, picture, kind, now))?;
+    }
+    let picture = ProductPicture::logo(std::fs::read(&logo)?)
+        .map_err(|error| anyhow!("the product logo: {error:?}"))?;
+    let _ = std::fs::remove_dir_all(&dir);
+    ProductRepository::save_logo(
+        db,
+        &ProductLogo {
+            product: product.id,
+            picture,
+            confirmed_at: now,
+        },
+    )?;
+
+    let idea = ProductBrief::validate(ProductDraft {
+        name: "Moon Calendar".into(),
+        kind: ProductKind::Idea,
+        description: "A wall calendar that shows the moon's phase each night.".into(),
+        ..ProductDraft::default()
+    })
+    .map_err(|errors| anyhow!("the idea: {errors:?}"))?;
+    ProductRepository::save(
+        db,
+        &Product {
+            archived: true,
+            ..Product::new(profile, idea)
+        },
+    )?;
+    Ok(())
 }
 
 fn channel(db: &Database, profile: ProfileId, draft: ChannelDraft) -> anyhow::Result<Channel> {

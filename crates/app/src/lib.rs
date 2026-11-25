@@ -38,6 +38,7 @@ mod persona_package;
 mod personas;
 mod plans;
 mod production;
+mod products;
 mod provider_keys;
 mod proxies;
 mod publications;
@@ -76,13 +77,13 @@ use bardo_domain::{
     LayoutId, LocalizationRepository, MarketData, MediaAssetRepository, MusicGenerator,
     MusicPromptRepository, MusicTrackRepository, NarrationRepository, NetworkAccountRepository,
     NetworkConnectionRepository, NetworkSignIn, NicheResearchRepository, OwnerAnalytics, Persona,
-    PersonaRepository, ProfileRepository, ProjectFiles, PublicationRepository, RUNNER_ALIVE,
-    Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository, ScriptRepository,
-    SecretStore, SpeechAligner, SpeechSynthesizer, SpeechTranscriber, StagingRepository,
-    TemplateRepository, TextGenerator, ThemeRepository, ThumbnailRepository, TimelineRepository,
-    TourProgressRepository, UiLanguage, UiThemePreference, UserProfile, VideoStats, VideoUploader,
-    VoiceChanger, VoiceIsolator, VoiceLibrary, VoicePreviews, VoiceSampleStore, YouTubeDataStore,
-    Zone, running_since,
+    PersonaRepository, ProductRepository, ProfileRepository, ProjectFiles, PublicationRepository,
+    RUNNER_ALIVE, Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository,
+    ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer, SpeechTranscriber,
+    StagingRepository, TemplateRepository, TextGenerator, ThemeRepository, ThumbnailRepository,
+    TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference, UserProfile,
+    VideoStats, VideoUploader, VoiceChanger, VoiceIsolator, VoiceLibrary, VoicePreviews,
+    VoiceSampleStore, YouTubeDataStore, Zone, running_since,
 };
 use bardo_domain::{InstallerRunner, InstallerStore, PlanSignIn, ReleaseFeed, VisionModels};
 use bardo_media::{AudioOutput, MediaEngine};
@@ -169,6 +170,7 @@ pub use plans::{
     PlanStatus,
 };
 pub use production::{ModeEstimate, ProductionView};
+pub use products::ProductError;
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use publications::{
     ChannelMetricsView, ChannelPost, MetricsError, MetricsStatus, OwnerAccess, PublicationError,
@@ -207,9 +209,9 @@ pub use thumbnails::{
     BackgroundChoice, ThumbnailComposer, ThumbnailEdit, ThumbnailError, ThumbnailView,
 };
 pub use tours::{
-    CLIPS, Control, GuideRef, NARRATION, PERFORMANCE, PERSONAS, PROJECTS, RESEARCH, SCENES, SCRIPT,
-    ScreenTour, Side, Spot, TEMPLATES, THEMES, Tour, TourAnchor, TourError, TourMove, TourPlace,
-    TourStep, TourStepView, WELCOME, WhenMissing,
+    CLIPS, Control, GuideRef, NARRATION, PERFORMANCE, PERSONAS, PRODUCTS, PROJECTS, RESEARCH,
+    SCENES, SCRIPT, ScreenTour, Side, Spot, TEMPLATES, THEMES, Tour, TourAnchor, TourError,
+    TourMove, TourPlace, TourStep, TourStepView, WELCOME, WhenMissing,
 };
 pub use updates::{
     AvailableUpdate, CHECK_EVERY, InstallBlock, Installation, UpdateCheck, UpdateCheckResult,
@@ -268,6 +270,8 @@ pub struct Repositories {
     pub scripts: Arc<dyn ScriptRepository>,
     /// The persona library.
     pub personas: Arc<dyn PersonaRepository>,
+    /// The products to advertise, with their images and logos.
+    pub products: Arc<dyn ProductRepository>,
     /// Narrations and their word timings. Shared with the job queue.
     pub narrations: Arc<dyn NarrationRepository>,
     /// Each project's capture and its takes. Shared with the job queue.
@@ -386,6 +390,7 @@ impl Repositories {
             templates: Arc::clone(&db) as _,
             scripts: Arc::clone(&db) as _,
             personas: Arc::clone(&db) as _,
+            products: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
             captures: Arc::clone(&db) as _,
             staging: Arc::clone(&db) as _,
@@ -574,6 +579,7 @@ pub struct Bardo {
     templates: Arc<dyn TemplateRepository>,
     scripts: Arc<dyn ScriptRepository>,
     personas: Arc<dyn PersonaRepository>,
+    products: Arc<dyn ProductRepository>,
     narrations: Arc<dyn NarrationRepository>,
     captures: Arc<dyn CaptureRepository>,
     staging: Arc<dyn StagingRepository>,
@@ -693,6 +699,7 @@ impl Bardo {
             templates,
             scripts,
             personas,
+            products,
             narrations,
             captures,
             staging,
@@ -1079,6 +1086,7 @@ impl Bardo {
             templates,
             scripts,
             personas,
+            products,
             narrations,
             captures,
             staging,
@@ -3251,6 +3259,7 @@ mod tests {
             templates: Arc::clone(&db) as _,
             scripts: Arc::clone(&db) as _,
             personas: Arc::new(FakePersonas::default()),
+            products: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
             captures: Arc::clone(&db) as _,
             staging: Arc::clone(&db) as _,
