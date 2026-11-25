@@ -45,10 +45,11 @@ use std::time::SystemTime;
 use bardo_domain::{
     ApiKey, ChannelId, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel, ClipModelRef,
     ClipRequest, ClipStatus, ClipSubmission, CostPurpose, CostRecordId, Generation, GenerationId,
-    ImageFormat, Job, JobFailure, JobFailureKind, JobId, JobKind, Metered, Money, ProductionMode,
-    ProfileId, Progress, ProjectFiles, Provider, ProviderFailure, ProviderFailureKind,
-    RepositoryError, Scene, SceneClip, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt,
-    SecretStore, StagedImage, StretchLimit, TokenUsage, VideoProject, VideoProjectId,
+    ImageFormat, Job, JobFailure, JobFailureKind, JobId, JobKind, Metered, Money,
+    NarrationRepository, ProductionMode, ProfileId, Progress, ProjectFiles, Provider,
+    ProviderFailure, ProviderFailureKind, RepositoryError, Scene, SceneClip, ScenePlan,
+    ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, StagedImage, StretchLimit,
+    TokenUsage, VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -319,6 +320,8 @@ fn plan_failure(provider: Provider, error: &crate::PlanError) -> JobFailure {
 pub(crate) struct ClipHandler {
     pub(crate) owner: ProfileId,
     pub(crate) plans: Arc<dyn ScenePlanRepository>,
+    /// Says whether the plan is still on the project's narration.
+    pub(crate) narrations: Arc<dyn NarrationRepository>,
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) generators: Vec<Arc<dyn ClipGenerator>>,
     pub(crate) secrets: Arc<dyn SecretStore>,
@@ -562,6 +565,18 @@ impl ClipJob<'_> {
             .filter(|saved| saved.id == self.plan))
     }
 
+    /// Whether the plan is no longer on the project's narration.
+    fn out_of_date(&self) -> Result<bool, JobFailure> {
+        let narration = self
+            .handler
+            .narrations
+            .narration(self.project)
+            .map_err(unexpected)?;
+        Ok(self
+            .saved_plan()?
+            .is_some_and(|plan| plan.is_stale(narration.as_ref())))
+    }
+
     fn save_state(&self, cx: &mut JobContext) -> Result<(), JobFailure> {
         cx.save_external_handle(to_json(&self.state))
             .map_err(unexpected)
@@ -584,6 +599,16 @@ impl ClipJob<'_> {
         let mut key = self.key(generator.provider())?;
         let submitted = self.run_of(order.scene).and_then(|run| run.request.clone());
         let Some(request) = submitted else {
+            // Nothing is paid for a scene the narration left behind (a job
+            // run again after the narration was made again). The requests
+            // already sent are paid: those are still waited for and kept,
+            // and one sent without an answer is still looked for.
+            let maybe_sent = self
+                .run_of(order.scene)
+                .is_some_and(|run| run.sent_at.is_some());
+            if !maybe_sent && self.out_of_date()? {
+                return Ok(Step::Failed(crate::scenes::out_of_date("clips")));
+            }
             return self.submit(order, scene, generator, &mut key, cx);
         };
         let handle = ClipHandle(request);
@@ -680,6 +705,29 @@ impl ClipJob<'_> {
                 "Bardo stopped while the submission was on its way",
                 cx,
             );
+        }
+        // A scene handed over and not sent (the provider was busy, the
+        // job was stopped) may have changed since: fitted to a new
+        // narration, its motion edited, its image replaced. It is handed
+        // over again, so what is sent is the scene as it is now.
+        let stretch = self.stretch;
+        let length = generator
+            .models()
+            .into_iter()
+            .find(|model| model.id.model() == order.model)
+            .map(|model| model.durations.fit(scene.duration(), stretch));
+        let image = scene.image().map(|image| image.generation.id.to_string());
+        if let Some(run) = self.run_of(order.scene)
+            && run.sent_at.is_none()
+            && run.staged.is_some()
+            && (run.prompt != scene.motion_prompt().as_str()
+                || length.as_ref().is_none_or(|length| {
+                    run.seconds != length.seconds
+                        || run.stretch_percent != length.stretch.map_or(0, StretchLimit::percent)
+                })
+                || Some(&run.source_image) != image.as_ref())
+        {
+            run.staged = None;
         }
         let staged = self.run_of(order.scene).and_then(|run| run.staged.clone());
         let staged = match staged {
@@ -1478,12 +1526,15 @@ impl Bardo {
         self.animate(&plan, &view, missing, consent)
     }
 
+    /// The project's plan and its clips, to animate: the plan must be on
+    /// the project's narration, with no other narration on its way.
     fn clips_of(&self, project: VideoProjectId) -> Result<(ScenePlan, ClipsView), SceneError> {
         let project = self.scenes_project(project)?;
         let plan = self
             .scene_plans
             .scene_plan(project.id)?
             .ok_or(SceneError::NoPlan)?;
+        self.scenes_current(&plan)?;
         let view = self.clips_view(&project, Some(&plan))?;
         Ok((plan, view))
     }
@@ -1659,7 +1710,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::scenes::tests::{Harness, done, wait_done};
+    use crate::scenes::tests::{Harness, done, narrate_again, wait_done};
     use crate::testing::{CLIP, ClipCall, SCENE_IMAGE};
     use crate::{Text, testing::FakeClips};
 
@@ -4001,6 +4052,94 @@ mod tests {
         app.retry_job(id).unwrap();
         done(&app, id);
         assert_eq!(h.clips.submissions().len(), 1);
+    }
+
+    #[test]
+    fn a_clip_job_run_again_after_a_new_narration_sends_nothing_new() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.fail("launch pad");
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        wait_done(&app, id);
+        h.clips.succeed_all();
+        let sent = h.clips.submissions().len();
+        narrate_again(&h, &app, &project, Duration::from_secs(4));
+
+        // The scene that failed is not sent for a plan the narration left.
+        app.retry_job(id).unwrap();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::OutOfDate);
+        assert_eq!(h.clips.submissions().len(), sent, "nothing new is paid");
+
+        // Fitted to the narration, the same job sends it.
+        app.fit_scenes(project.id).unwrap();
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), sent + 1);
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes().iter().all(|s| s.pending_clip().is_some()));
+    }
+
+    #[test]
+    fn a_clip_already_sent_is_collected_after_a_new_narration() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.hold(true);
+        let id = app
+            .generate_scene_clip(project.id, 1, BudgetConsent::Ask)
+            .unwrap();
+        wait_for(&h.clips, |clips| !clips.polls.lock().unwrap().is_empty());
+        app.cancel_job(id).unwrap();
+        wait_done(&app, id);
+        narrate_again(&h, &app, &project, Duration::from_secs(4));
+
+        // The request is paid: run again, the job waits for it, and the plan
+        // is not fitted under it.
+        app.retry_job(id).unwrap();
+        assert!(matches!(app.fit_scenes(project.id), Err(SceneError::Busy)));
+        h.clips.hold(false);
+        done(&app, id);
+
+        assert_eq!(h.clips.submissions().len(), 1, "sent once");
+        assert!(plan_of(&app, &project).scenes()[1].pending_clip().is_some());
+        let fitted = app.fit_scenes(project.id).unwrap();
+        assert!(fitted.scenes()[1].pending_clip().is_some());
+    }
+
+    #[test]
+    fn a_scene_handed_over_before_the_scenes_were_fitted_is_sent_as_it_is_now() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        // The scene's image is handed over, and then the key is refused.
+        *h.clips.submit_failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid credentials",
+        ));
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        *h.clips.submit_failure.lock().unwrap() = None;
+        let short = app.scenes(project.id).unwrap().clips.scenes[0].seconds;
+
+        // The narration is read forty times slower and the scenes fitted.
+        narrate_again(&h, &app, &project, Duration::from_secs(40));
+        app.fit_scenes(project.id).unwrap();
+        let long = app.scenes(project.id).unwrap().clips.scenes[0].seconds;
+        assert_ne!(long, short);
+
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        let sent = h.clips.submissions();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(Some(sent[0].seconds), long, "as long as the scene is now");
     }
 
     #[test]

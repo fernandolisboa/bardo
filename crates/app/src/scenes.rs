@@ -27,6 +27,15 @@
 //! scene right before it there, or the video's first image for its look),
 //! so the scenes of a video read as one sequence. The scenes are drawn in
 //! order, which is what gives each one its earlier shots.
+//!
+//! A plan is timed on one narration (#262). Once the narration is made
+//! again the plan is out of date, and nothing more is drawn or animated
+//! for it: its pictures would be timed for a narration that is gone. A new
+//! narration of the same text takes the plan as it is: fitting moves each
+//! scene to where its words are said now and keeps every image and clip.
+//! A narration of other text leaves planning again as the only way. While
+//! scenes are planned, drawn or animated the narration cannot be made
+//! again, and while a narration is being made no scene work starts.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -36,19 +45,19 @@ use bardo_domain::{
     ApiKey, AspectRatio, CastDraft, CastMember, CostPurpose, Generation, GenerationId, ImageFormat,
     ImageGenerator, ImageRequest, ImageShape, Job, JobFailure, JobFailureKind, JobId, JobKind,
     Narration, NarrationId, NarrationRepository, NoPendingClip, NoPendingImage, NoSuchCastMember,
-    NoSuchPlace, NoSuchScene, OtherShot, PlaceDraft, PlanDraft, ProfileId, Progress, ProjectFiles,
-    Provider, ReferenceImage, RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError,
-    SceneImage, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePlanSize, ScenePrompt,
-    SceneSetting, SecretStore, StyleChoice, TemplateKind, TemplateUsed, TemplateVariable,
-    TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest,
-    VideoProject, VideoProjectId, scene_image_prompt, sentences,
+    NoSuchPlace, NoSuchScene, OtherShot, OtherText, PlaceDraft, PlanDraft, ProfileId, Progress,
+    ProjectFiles, Provider, ReferenceImage, RenderedPrompt, RepositoryError, SceneDraft,
+    SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePlanSize,
+    ScenePrompt, SceneSetting, SecretStore, StyleChoice, TemplateKind, TemplateUsed,
+    TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator,
+    TextRequest, VideoProject, VideoProjectId, scene_image_prompt, sentences,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
 
 use crate::clips::{ClipsView, SceneClipView};
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
-use crate::jobs::{JobContext, JobHandler};
+use crate::jobs::{JobActionError, JobContext, JobHandler};
 use crate::{Bardo, KeyState, ScriptError, TemplateError, Text};
 
 #[derive(Debug, thiserror::Error)]
@@ -76,6 +85,21 @@ pub enum SceneError {
     /// Scenes or images of the project are being generated.
     #[error("scenes or images are already being generated for this project")]
     Busy,
+    /// A narration of the project is being made: the scenes wait for it,
+    /// since what is planned, drawn or animated now would be out of date
+    /// as soon as it lands.
+    #[error("a narration is being made for this project")]
+    NarrationBusy,
+    /// The narration was made again since the scenes were planned (or, on
+    /// a version, its scenes are not placed yet): images and clips made
+    /// now would be timed for a narration that is gone. Fit the scenes to
+    /// the narration, or plan them again, first.
+    #[error("the scenes are not on the project's narration")]
+    PlanOutOfDate,
+    /// The narration reads other text than the scenes were planned on, so
+    /// they cannot be fitted to it; planning again is the way.
+    #[error(transparent)]
+    OtherText(#[from] OtherText),
     /// The narration has more scenes than one plan is asked for.
     #[error("the narration is too long to plan its scenes")]
     NarrationTooLong,
@@ -126,6 +150,9 @@ impl SceneError {
             SceneError::MissingKey(Provider::HiggsfieldPlan) => Text::ScenesMissingHiggsfieldPlan,
             SceneError::MissingKey(_) => Text::ScenesMissingGeminiKey,
             SceneError::Busy => Text::ScenesBusy,
+            SceneError::NarrationBusy => Text::ScenesNarrationBusy,
+            SceneError::PlanOutOfDate => Text::ScenesPlanOutOfDate,
+            SceneError::OtherText(_) => Text::ScenesOtherText,
             SceneError::WouldDiscardImages(_) => Text::ScenesWouldDiscardImages,
             SceneError::NothingToGenerate => Text::ScenesNothingToGenerate,
             SceneError::OverBudget(_) => Text::BudgetReachedTitle,
@@ -156,8 +183,15 @@ pub struct ScenesView {
     pub narration: Option<NarrationId>,
     /// `None` until the scenes are planned.
     pub plan: Option<ScenePlan>,
-    /// Whether the narration changed since the plan was made.
+    /// Whether the narration changed since the plan was made. Nothing is
+    /// drawn or animated for the scenes until they are on the narration
+    /// again.
     pub stale: bool,
+    /// Whether the out-of-date scenes can be fitted to the narration: it
+    /// reads the text they were planned on, so they keep their images and
+    /// clips and only their times change. Never for a version's scenes
+    /// that wait to be placed, which is their own way onto a narration.
+    pub can_fit: bool,
     /// The project's latest scene plan or image job.
     pub job: Option<Job>,
     /// The template version the next plan uses.
@@ -539,6 +573,23 @@ fn is_about_the_scene(kind: JobFailureKind) -> bool {
     )
 }
 
+/// Whether `job` plans or draws the scenes of `project`.
+fn is_scene_job_of(job: &Job, project: &str) -> bool {
+    matches!(job.kind(), JobKind::ScenePlan | JobKind::SceneImages)
+        && serde_json::from_str::<ProjectOf>(job.payload()).is_ok_and(|p| p.project == project)
+}
+
+/// Why a job stops paying for scenes the narration left behind.
+pub(crate) fn out_of_date(what: &str) -> JobFailure {
+    JobFailure::new(
+        JobFailureKind::OutOfDate,
+        format!(
+            "the narration was made again since the scenes were planned, so no more {what} \
+             were made for them; fit the scenes to the narration or plan them again"
+        ),
+    )
+}
+
 /// Runs scene plan and image jobs.
 pub(crate) struct SceneHandler {
     pub(crate) owner: ProfileId,
@@ -728,6 +779,19 @@ impl SceneHandler {
             .filter(|saved| saved.id == plan))
     }
 
+    /// Fails when `plan` is no longer on the project's narration: a job
+    /// run again after the narration was made again draws nothing for it.
+    fn on_narration(&self, plan: &ScenePlan) -> Result<(), JobFailure> {
+        let narration = self
+            .narrations
+            .narration(plan.project)
+            .map_err(unexpected)?;
+        match plan.is_stale(narration.as_ref()) {
+            true => Err(out_of_date("images")),
+            false => Ok(()),
+        }
+    }
+
     /// Draws the scenes `job` asked for, saving each image as it arrives,
     /// and before them the portraits asked for and those of the people
     /// the scenes show that have none yet. Without a context (tests
@@ -781,6 +845,7 @@ impl SceneHandler {
                 if cx.as_ref().is_some_and(|cx| cx.should_stop()) {
                     return Ok(());
                 }
+                self.on_narration(&plan)?;
                 let key = match &key {
                     Some(key) => key,
                     None => key.insert(self.key(Provider::Gemini)?),
@@ -808,6 +873,7 @@ impl SceneHandler {
             if cx.as_ref().is_some_and(|cx| cx.should_stop()) {
                 return Ok(());
             }
+            self.on_narration(&plan)?;
             let key = match &key {
                 Some(key) => key,
                 None => key.insert(self.key(Provider::Gemini)?),
@@ -1098,29 +1164,91 @@ impl Bardo {
             .ok_or(SceneError::ProjectNotFound)
     }
 
-    /// Whether a scene plan or image job of the project is running.
+    /// Whether a scene plan or image job of the project is running. Any
+    /// such job counts, not only the latest: an older one run again from
+    /// the Jobs panel plans or draws too.
     pub(crate) fn scenes_busy(&self, project: VideoProjectId) -> bool {
-        self.latest_scene_job(project)
-            .is_some_and(|job| job.state().is_active())
+        let project = project.to_string();
+        self.jobs()
+            .iter()
+            .any(|job| job.state().is_active() && is_scene_job_of(job, &project))
     }
 
     fn latest_scene_job(&self, project: VideoProjectId) -> Option<Job> {
         let project = project.to_string();
-        self.jobs().into_iter().rev().find(|job| {
-            matches!(job.kind(), JobKind::ScenePlan | JobKind::SceneImages)
-                && serde_json::from_str::<ProjectOf>(job.payload())
-                    .is_ok_and(|p| p.project == project)
-        })
+        self.jobs()
+            .into_iter()
+            .rev()
+            .find(|job| is_scene_job_of(job, &project))
     }
 
     fn scenes_idle(&self, project: VideoProjectId) -> Result<(), SceneError> {
-        if self
-            .latest_scene_job(project)
-            .is_some_and(|job| job.state().is_active())
-        {
+        if self.scenes_busy(project) {
             return Err(SceneError::Busy);
         }
         Ok(())
+    }
+
+    /// Paid work on `plan` needs it to be on the project's narration, and
+    /// no other narration on its way: an image or clip made for scenes a
+    /// narration left behind is timed for words that are gone.
+    pub(crate) fn scenes_current(&self, plan: &ScenePlan) -> Result<(), SceneError> {
+        if self.narration_busy(plan.project) {
+            return Err(SceneError::NarrationBusy);
+        }
+        let narration = self
+            .narrations
+            .narration(plan.project)?
+            .ok_or(SceneError::NoNarration)?;
+        if plan.is_stale(Some(&narration)) {
+            return Err(SceneError::PlanOutOfDate);
+        }
+        Ok(())
+    }
+
+    /// Why `job` cannot be run again from the Jobs panel for now. The
+    /// narration and the scenes timed on it are not made at the same time
+    /// there either: a scene job waits for a narration being made, and a
+    /// narration job for scenes being planned, drawn or animated. And what
+    /// its stage asks about first is not skipped: a narration, or a new
+    /// plan, over scenes that hold paid images or clips starts from its
+    /// stage, where the user sees what is at stake.
+    pub(crate) fn retry_held(&self, job: JobId) -> Option<JobActionError> {
+        let job = self
+            .jobs()
+            .into_iter()
+            .find(|candidate| candidate.id() == job)?;
+        let project = serde_json::from_str::<ProjectOf>(job.payload())
+            .ok()
+            .and_then(|payload| payload.project.parse::<uuid::Uuid>().ok())
+            .map(VideoProjectId::from)?;
+        let scenes_busy = || self.scenes_busy(project) || self.clips_busy(project);
+        match job.kind() {
+            JobKind::ScenePlan | JobKind::SceneImages | JobKind::SceneClips
+                if self.narration_busy(project) =>
+            {
+                Some(JobActionError::NarrationBusy)
+            }
+            // Planning replaces the plan other jobs are working on.
+            JobKind::ScenePlan if scenes_busy() => Some(JobActionError::ScenesBusy),
+            JobKind::ScenePlan => self
+                .scene_plans
+                .scene_plan(project)
+                .ok()
+                .flatten()
+                .is_some_and(|plan| !plan.paid_pictures().is_empty())
+                .then_some(JobActionError::AsksFirst),
+            JobKind::SceneImages if self.scenes_busy(project) => Some(JobActionError::ScenesBusy),
+            JobKind::Narration | JobKind::NarrationImport | JobKind::Capture if scenes_busy() => {
+                Some(JobActionError::ScenesBusy)
+            }
+            JobKind::Narration | JobKind::NarrationImport | JobKind::Capture => self
+                .pictures_at_stake(project, "")
+                .ok()
+                .flatten()
+                .map(|_| JobActionError::AsksFirst),
+            _ => None,
+        }
     }
 
     pub(crate) fn require_key(&self, provider: Provider) -> Result<(), SceneError> {
@@ -1168,13 +1296,21 @@ impl Bardo {
         };
         let clips = self.clips_view(&project, plan.as_ref())?;
         let version = self.version_scenes(project.id, plan.as_ref(), narration.as_ref())?;
+        let stale = plan
+            .as_ref()
+            .is_some_and(|plan| plan.is_stale(narration.as_ref()));
+        let can_fit = stale
+            && !version.as_ref().is_some_and(|version| version.can_place)
+            && plan
+                .as_ref()
+                .zip(narration.as_ref())
+                .is_some_and(|(plan, narration)| plan.reads(narration.text.as_str()));
         Ok(ScenesView {
             clips,
             version,
             narration: narration.as_ref().map(|narration| narration.id),
-            stale: plan
-                .as_ref()
-                .is_some_and(|plan| plan.is_stale(narration.as_ref())),
+            stale,
+            can_fit,
             images_estimate: match missing {
                 0 => None,
                 n => Some(self.estimate(&[images_call(n)])?),
@@ -1256,6 +1392,10 @@ impl Bardo {
         if self.clips_busy(project.id) {
             return Err(SceneError::Busy);
         }
+        // A narration on its way would leave the new plan behind at once.
+        if self.narration_busy(project.id) {
+            return Err(SceneError::NarrationBusy);
+        }
         let images = self
             .scene_plans
             .scene_plan(project.id)?
@@ -1277,6 +1417,46 @@ impl Bardo {
         };
         let job = Job::new(self.profile.id, JobKind::ScenePlan, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
+    }
+
+    /// Fits the project's scenes to its narration, when that is a new
+    /// reading of the text they were planned on: every scene keeps its
+    /// words, prompts, people, place, images and clips, and starts and ends
+    /// where the narration says its words now. Costs nothing. A narration
+    /// of other text does not take the plan (`SceneError::OtherText`):
+    /// those scenes are planned again. Scenes already on the narration are
+    /// returned as they are.
+    pub fn fit_scenes(&self, project: VideoProjectId) -> Result<ScenePlan, SceneError> {
+        let plan = self.own_plan(project)?;
+        let narration = self
+            .narrations
+            .narration(plan.project)?
+            .ok_or(SceneError::NoNarration)?;
+        if !plan.is_stale(Some(&narration)) {
+            return Ok(plan);
+        }
+        // A version's carried scenes are placed, which also builds its cut.
+        if self
+            .localizations
+            .localization(plan.project)?
+            .is_some_and(|localization| localization.carries(&plan))
+        {
+            return Err(SceneError::PlanOutOfDate);
+        }
+        // A job saving a scene meanwhile would be written over.
+        self.scenes_idle(plan.project)?;
+        if self.clips_busy(plan.project) {
+            return Err(SceneError::Busy);
+        }
+        if self.narration_busy(plan.project) {
+            return Err(SceneError::NarrationBusy);
+        }
+        let fitted = plan.fitted_to(&narration, SystemTime::now())?;
+        // A cut saved since the narration changed was laid out on the old
+        // times under this same plan and narration: it goes, and the
+        // editor builds the rough cut on the new ones.
+        self.scene_plans.save_fitted_plan(&fitted)?;
+        Ok(fitted)
     }
 
     /// Replaces scene `index`'s prompt with the user's. The next image of
@@ -1330,6 +1510,7 @@ impl Bardo {
         consent: BudgetConsent,
     ) -> Result<JobId, SceneError> {
         self.scenes_idle(plan.project)?;
+        self.scenes_current(plan)?;
         self.require_key(Provider::Gemini)?;
         let project = self
             .themes
@@ -1515,7 +1696,7 @@ pub(crate) mod tests {
         FakeClips, FakeDecisionEngine, FakeImages, FakeKeyChecker, FakeMarketData, FakeSpeech,
         FakeTextGenerator, FakeVoiceLibrary, SCENE_IMAGE,
     };
-    use crate::{JobSettings, Providers, Repositories};
+    use crate::{JobSettings, NarrationError, Providers, Repositories};
 
     const CLAUDE_KEY: &str = "sk-ant-api03-test-key-0001";
     pub(crate) const ELEVENLABS_KEY: &str = "sk_test_elevenlabs_key_0001";
@@ -1790,7 +1971,7 @@ pub(crate) mod tests {
             );
             done(
                 app,
-                app.generate_narration(project.id, BudgetConsent::Ask)
+                app.generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
                     .unwrap(),
             );
             project
@@ -2966,13 +3147,651 @@ pub(crate) mod tests {
 
         done(
             &app,
-            app.generate_narration(project.id, BudgetConsent::Ask)
+            app.generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
                 .unwrap(),
         );
 
         let view = app.scenes(project.id).unwrap();
         assert!(view.stale);
         assert!(view.plan.is_some());
+    }
+
+    /// Reads the project's script again, as long as `length`, whatever
+    /// pictures that leaves behind.
+    pub(crate) fn narrate_again(
+        h: &Harness,
+        app: &Bardo,
+        project: &VideoProject,
+        length: Duration,
+    ) {
+        *h.speech.length.lock().unwrap() = length;
+        done(
+            app,
+            app.generate_narration(project.id, agreed(app, project), BudgetConsent::Ask)
+                .unwrap(),
+        );
+    }
+
+    /// The user's yes to what a new narration of the script puts out of
+    /// date right now; nothing to agree to when nothing is at stake.
+    pub(crate) fn agreed(app: &Bardo, project: &VideoProject) -> crate::PicturesConsent {
+        let script = app.scripts.script(project.id).unwrap().unwrap();
+        match app
+            .pictures_at_stake(project.id, script.text().as_str())
+            .unwrap()
+        {
+            Some(stake) => crate::PicturesConsent::Confirmed(stake),
+            None => crate::PicturesConsent::Ask,
+        }
+    }
+
+    /// A drawn project whose first scene also has a clip in use and a new
+    /// image waiting for review.
+    fn pictured_project(h: &Harness, app: &Bardo) -> (VideoProject, ScenePlan) {
+        let (project, _) = h.drawn_project(app);
+        done(
+            app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        app.accept_scene_clip(project.id, 0).unwrap();
+        done(
+            app,
+            app.regenerate_scene_image(project.id, 1, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        (project, plan)
+    }
+
+    #[test]
+    fn nothing_is_drawn_or_animated_for_a_plan_that_is_out_of_date() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = cast_project(&h, &app);
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        narrate_again(&h, &app, &project, Duration::from_secs(2));
+        assert!(app.scenes(project.id).unwrap().stale);
+        // Scenes left in another style are not drawn again either.
+        app.set_project_style(
+            project.id,
+            Some(StyleChoice::Catalog(
+                bardo_domain::VisualStyle::ClayStopMotion,
+            )),
+        )
+        .unwrap();
+        assert!(!app.scenes(project.id).unwrap().restyled.is_empty());
+        let (drawn, sent) = (h.images.prompts().len(), h.clips.submissions().len());
+
+        let refused = [
+            app.generate_scene_images(project.id, BudgetConsent::Confirmed),
+            app.redraw_restyled_scenes(project.id, BudgetConsent::Confirmed),
+            app.regenerate_scene_image(project.id, 0, BudgetConsent::Confirmed),
+            app.redraw_cast_portrait(project.id, 0, BudgetConsent::Confirmed),
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Confirmed),
+            app.generate_missing_clips(project.id, BudgetConsent::Confirmed),
+        ];
+        for refused in refused {
+            let error = refused.unwrap_err();
+            assert!(matches!(error, SceneError::PlanOutOfDate), "{error:?}");
+            assert_eq!(error.message(), Text::ScenesPlanOutOfDate);
+        }
+        assert_eq!(h.images.prompts().len(), drawn, "no image was paid for");
+        assert_eq!(h.clips.submissions().len(), sent, "no clip was paid for");
+
+        // Free changes still work, and so does what puts the scenes right.
+        app.edit_scene_prompt(project.id, 0, "A probe at dawn.")
+            .unwrap();
+        app.fit_scenes(project.id).unwrap();
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+    }
+
+    #[test]
+    fn the_narration_waits_for_scenes_being_planned_drawn_or_animated() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        let again = |app: &Bardo| {
+            app.generate_narration(project.id, agreed(app, &project), BudgetConsent::Confirmed)
+        };
+
+        // Images being drawn.
+        *h.images.delay.lock().unwrap() = Duration::from_millis(200);
+        let images = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        let held = again(&app).unwrap_err();
+        assert!(matches!(held, NarrationError::ScenesBusy), "{held:?}");
+        assert_eq!(held.message(), Text::NarrationScenesBusy);
+        *h.images.delay.lock().unwrap() = Duration::ZERO;
+        done(&app, images);
+
+        // A clip being made.
+        h.clips.hold(true);
+        let clip = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        assert!(matches!(again(&app), Err(NarrationError::ScenesBusy)));
+        h.clips.hold(false);
+        done(&app, clip);
+
+        // The scenes being planned.
+        *h.text.delay.lock().unwrap() = Duration::from_millis(200);
+        h.answer(plan_answer());
+        let plan = app
+            .plan_scenes(project.id, true, BudgetConsent::Ask)
+            .unwrap();
+        assert!(matches!(again(&app), Err(NarrationError::ScenesBusy)));
+        *h.text.delay.lock().unwrap() = Duration::ZERO;
+        done(&app, plan);
+
+        // Nothing under way: the narration is read again.
+        done(&app, again(&app).unwrap());
+    }
+
+    #[test]
+    fn scenes_wait_for_a_narration_being_made() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        *h.speech.delay.lock().unwrap() = Duration::from_millis(300);
+        let narration = app
+            .generate_narration(project.id, agreed(&app, &project), BudgetConsent::Ask)
+            .unwrap();
+        let (drawn, sent) = (h.images.prompts().len(), h.clips.submissions().len());
+        let planned = h.text.requests().len();
+
+        let held = [
+            app.plan_scenes(project.id, true, BudgetConsent::Confirmed),
+            app.regenerate_scene_image(project.id, 0, BudgetConsent::Confirmed),
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Confirmed),
+            app.generate_missing_clips(project.id, BudgetConsent::Confirmed),
+        ];
+        for held in held {
+            let error = held.unwrap_err();
+            assert!(matches!(error, SceneError::NarrationBusy), "{error:?}");
+            assert_eq!(error.message(), Text::ScenesNarrationBusy);
+        }
+        assert!(matches!(
+            app.fit_scenes(project.id),
+            Ok(plan) if !plan.is_stale(app.narrations.narration(project.id).unwrap().as_ref())
+        ));
+        done(&app, narration);
+        assert_eq!(h.images.prompts().len(), drawn);
+        assert_eq!(h.clips.submissions().len(), sent);
+        assert_eq!(h.text.requests().len(), planned);
+    }
+
+    #[test]
+    fn a_new_narration_over_paid_pictures_asks_first_with_the_counts() {
+        use crate::{PicturesAtStake, PicturesConsent};
+
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = pictured_project(&h, &app);
+        let ask = |app: &Bardo| {
+            app.generate_narration(project.id, PicturesConsent::Ask, BudgetConsent::Confirmed)
+        };
+        let pictures = bardo_domain::PaidPictures {
+            images: 4,
+            clips: 1,
+        };
+        let narrations = h.speech.requests().len();
+
+        // The same script read again: the pictures can be kept.
+        let error = ask(&app).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                NarrationError::WouldOutdatePictures(stake)
+                    if stake == PicturesAtStake { pictures, can_fit: true }
+            ),
+            "{error:?}"
+        );
+        assert_eq!(error.message(), Text::NarrationOutdatesPictures);
+
+        // A changed script: the scenes will have to be planned again.
+        app.edit_script(project.id, "Era uma vez uma sonda perdida.")
+            .unwrap();
+        assert!(matches!(
+            ask(&app),
+            Err(NarrationError::WouldOutdatePictures(stake))
+                if stake == PicturesAtStake { pictures, can_fit: false }
+        ));
+        // A yes given while the pictures could still be kept does not
+        // cover losing them: the question comes again, as it is now.
+        let seen = PicturesAtStake {
+            pictures,
+            can_fit: true,
+        };
+        assert!(matches!(
+            app.generate_narration(
+                project.id,
+                PicturesConsent::Confirmed(seen),
+                BudgetConsent::Confirmed
+            ),
+            Err(NarrationError::WouldOutdatePictures(stake)) if !stake.can_fit
+        ));
+        assert_eq!(h.speech.requests().len(), narrations, "nothing was read");
+
+        // With the user's yes to that, it is read.
+        narrate_again(&h, &app, &project, Duration::from_secs(1));
+        let view = app.scenes(project.id).unwrap();
+        assert!(view.stale && !view.can_fit);
+
+        // The pictures are now out of date for good: another narration
+        // takes nothing more from them, so nothing is asked.
+        done(&app, ask(&app).unwrap());
+    }
+
+    #[test]
+    fn a_recording_or_a_capture_over_paid_pictures_asks_and_waits_too() {
+        use crate::captures::{CaptureError, CaptureVoiceChoice};
+        use crate::narration_import::Recording;
+
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = pictured_project(&h, &app);
+        let folder = tempfile::tempdir().unwrap();
+        let recording = Recording {
+            path: folder.path().join("voice.mp3"),
+            file_name: "voice.mp3".into(),
+            format: bardo_media::AudioFormat::Mp3,
+            duration: Duration::from_secs(4),
+        };
+        let capture = crate::captures::ChosenCapture {
+            path: folder.path().join("Take 1.MOV"),
+            file_name: "Take 1.MOV".into(),
+            video: bardo_domain::CaptureVideo::check(
+                "Take 1.MOV",
+                &bardo_domain::RecordingFacts {
+                    duration: Duration::from_secs(4),
+                    video: Some((1080, 1920, 29.97)),
+                    has_audio: true,
+                },
+            )
+            .unwrap(),
+            size: 10,
+        };
+        let pictures = bardo_domain::PaidPictures {
+            images: 4,
+            clips: 1,
+        };
+
+        // Both read the script, so the plan can be fitted afterwards.
+        match app.import_narration(
+            project.id,
+            &recording,
+            crate::PicturesConsent::Ask,
+            BudgetConsent::Ask,
+        ) {
+            Err(NarrationError::WouldOutdatePictures(stake)) => {
+                assert_eq!((stake.pictures, stake.can_fit), (pictures, true));
+            }
+            other => panic!("{other:?}"),
+        }
+        match app.import_capture(
+            project.id,
+            &capture,
+            CaptureVoiceChoice::Own,
+            true,
+            crate::PicturesConsent::Ask,
+            BudgetConsent::Ask,
+        ) {
+            Err(CaptureError::WouldOutdatePictures(stake)) => {
+                assert_eq!((stake.pictures, stake.can_fit), (pictures, true));
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // And neither starts under a scene being animated, even confirmed.
+        h.clips.hold(true);
+        let id = app
+            .generate_scene_clip(project.id, 2, BudgetConsent::Ask)
+            .unwrap();
+        let error = app
+            .import_narration(
+                project.id,
+                &recording,
+                agreed(&app, &project),
+                BudgetConsent::Confirmed,
+            )
+            .unwrap_err();
+        assert!(matches!(error, NarrationError::ScenesBusy));
+        assert_eq!(error.message(), Text::NarrationScenesBusy);
+        let error = app
+            .import_capture(
+                project.id,
+                &capture,
+                CaptureVoiceChoice::Own,
+                true,
+                agreed(&app, &project),
+                BudgetConsent::Confirmed,
+            )
+            .unwrap_err();
+        assert!(matches!(error, CaptureError::ScenesBusy));
+        assert_eq!(error.message(), Text::NarrationScenesBusy);
+        h.clips.hold(false);
+        done(&app, id);
+    }
+
+    #[test]
+    fn a_narration_over_scenes_without_pictures_asks_nothing() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        done(
+            &app,
+            app.generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
+                .unwrap(),
+        );
+    }
+
+    #[test]
+    fn a_narration_of_the_same_text_takes_the_plan_with_every_picture() {
+        use bardo_domain::CostRepository;
+
+        let h = Harness::new();
+        let app = h.start();
+        let (project, plan) = pictured_project(&h, &app);
+        let view = app.scenes(project.id).unwrap();
+        assert!(!view.stale && !view.can_fit);
+        let paid = || {
+            let records = h.db.project_costs(project.id).unwrap();
+            let narrations = records
+                .iter()
+                .filter(|record| record.purpose == CostPurpose::Narration)
+                .count();
+            (narrations, records.len() - narrations)
+        };
+        let (narrations, rest) = paid();
+
+        // Read again four times slower.
+        narrate_again(&h, &app, &project, Duration::from_secs(4));
+        let narration = app.narrations.narration(project.id).unwrap().unwrap();
+        let view = app.scenes(project.id).unwrap();
+        assert!(view.stale && view.can_fit);
+        assert_eq!(view.plan.as_ref(), Some(&plan), "untouched until fitted");
+
+        let fitted = app.fit_scenes(project.id).unwrap();
+
+        let view = app.scenes(project.id).unwrap();
+        assert!(!view.stale && !view.can_fit);
+        let saved = view.plan.unwrap();
+        assert_eq!(saved.scenes(), fitted.scenes(), "saved as returned");
+        assert_eq!(saved.narration, fitted.narration);
+        assert_eq!(fitted.id, plan.id);
+        assert_eq!(fitted.narration, narration.id);
+        // Every scene is where the new narration says its words.
+        let spoken = sentences(&narration);
+        let times: Vec<_> = fitted.scenes().iter().map(|s| (s.start, s.end)).collect();
+        assert_eq!(
+            times,
+            [
+                (Duration::ZERO, spoken[1].start),
+                (spoken[1].start, spoken[2].start),
+                (spoken[2].start, narration.duration),
+            ]
+        );
+        assert!(fitted.scenes()[1].start > plan.scenes()[1].start * 3);
+        // And holds what it held: prompts, images, the new image waiting,
+        // the clip, and their files.
+        for (fitted, scene) in fitted.scenes().iter().zip(plan.scenes()) {
+            assert_eq!(fitted.text, scene.text);
+            assert_eq!(fitted.prompt(), scene.prompt());
+            assert_eq!(fitted.image(), scene.image());
+            assert_eq!(fitted.pending(), scene.pending());
+            assert_eq!(fitted.clip(), scene.clip());
+            assert_eq!(fitted.pending_clip(), scene.pending_clip());
+        }
+        assert_eq!(fitted.paid_pictures(), plan.paid_pictures());
+        assert_eq!(plan.files().count(), 5);
+        for file in plan.files() {
+            assert!(h.files.exists(project.id, file), "{file} is gone");
+        }
+        // Only the narration was paid for, and paid work is allowed again.
+        assert_eq!(paid(), (narrations + 1, rest));
+        app.accept_scene_image(project.id, 1).unwrap();
+        done(
+            &app,
+            app.generate_missing_clips(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+    }
+
+    #[test]
+    fn a_narration_of_other_text_does_not_take_the_plan() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, plan) = pictured_project(&h, &app);
+        app.edit_script(
+            project.id,
+            "Era uma vez uma sonda perdida. Ninguém sabe por quê.",
+        )
+        .unwrap();
+        narrate_again(&h, &app, &project, Duration::from_secs(1));
+        let view = app.scenes(project.id).unwrap();
+        assert!(view.stale && !view.can_fit);
+
+        let error = app.fit_scenes(project.id).unwrap_err();
+        assert!(matches!(error, SceneError::OtherText(_)), "{error:?}");
+        assert_eq!(error.message(), Text::ScenesOtherText);
+        assert_eq!(app.scenes(project.id).unwrap().plan, Some(plan));
+
+        // Planning again is the way, with its own question.
+        assert!(matches!(
+            app.plan_scenes(project.id, false, BudgetConsent::Ask),
+            Err(SceneError::WouldDiscardImages(5))
+        ));
+    }
+
+    #[test]
+    fn fitting_needs_planned_scenes_of_the_users_own_project() {
+        let h = Harness::new();
+        let app = h.start();
+        let bare = project(&app);
+        assert!(matches!(app.fit_scenes(bare.id), Err(SceneError::NoPlan)));
+        assert!(matches!(
+            app.fit_scenes(VideoProjectId::new()),
+            Err(SceneError::ProjectNotFound)
+        ));
+        // Scenes already on the narration come back as they are.
+        let (project, plan) = h.planned_project(&app);
+        assert_eq!(app.fit_scenes(project.id).unwrap(), plan);
+    }
+
+    #[test]
+    fn an_image_job_run_again_after_a_new_narration_draws_nothing() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        h.images.decline("control room");
+        let images = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, images).state(), JobState::Failed);
+        h.images.accept_all();
+        narrate_again(&h, &app, &project, Duration::from_secs(2));
+        let drawn = h.images.prompts().len();
+
+        // From the jobs panel, which asks the scenes panel nothing.
+        app.retry_job(images).unwrap();
+        let job = wait_done(&app, images);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::OutOfDate);
+        assert_eq!(h.images.prompts().len(), drawn, "nothing was paid for");
+        assert_eq!(app.scenes(project.id).unwrap().missing_images(), 1);
+
+        // Fitted, the same job draws what it still owed.
+        app.fit_scenes(project.id).unwrap();
+        app.retry_job(images).unwrap();
+        done(&app, images);
+        assert_eq!(h.images.prompts().len(), drawn + 1);
+        assert_eq!(app.scenes(project.id).unwrap().missing_images(), 0);
+    }
+
+    #[test]
+    fn jobs_run_again_from_the_panel_wait_for_each_other_too() {
+        use crate::jobs::JobActionError;
+
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        // A narration job and an image job that both failed.
+        *h.speech.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid key",
+        ));
+        let narration = app
+            .generate_narration(project.id, agreed(&app, &project), BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, narration).state(), JobState::Failed);
+        *h.speech.failure.lock().unwrap() = None;
+        h.images.decline("control room");
+        let images = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, images).state(), JobState::Failed);
+        h.images.accept_all();
+
+        // The image job runs again: the narration job waits for it.
+        *h.images.delay.lock().unwrap() = Duration::from_millis(300);
+        app.retry_job(images).unwrap();
+        let held = app.retry_job(narration).unwrap_err();
+        assert!(matches!(held, JobActionError::ScenesBusy), "{held:?}");
+        assert_eq!(held.message(), Text::JobScenesBusy);
+        *h.images.delay.lock().unwrap() = Duration::ZERO;
+        done(&app, images);
+
+        // The scenes hold images now. The narration job was started before
+        // there were any, so running it again would skip the question the
+        // Narration stage asks: it starts from there.
+        let read = h.speech.requests().len();
+        let held = app.retry_job(narration).unwrap_err();
+        assert!(matches!(held, JobActionError::AsksFirst), "{held:?}");
+        assert_eq!(held.message(), Text::JobAsksFirst);
+        assert_eq!(h.speech.requests().len(), read);
+
+        // A narration being made: scene jobs wait for it.
+        *h.speech.delay.lock().unwrap() = Duration::from_millis(300);
+        let narration = app
+            .generate_narration(project.id, agreed(&app, &project), BudgetConsent::Ask)
+            .unwrap();
+        let held = app.retry_job(images).unwrap_err();
+        assert!(matches!(held, JobActionError::NarrationBusy), "{held:?}");
+        assert_eq!(held.message(), Text::JobNarrationBusy);
+        done(&app, narration);
+    }
+
+    #[test]
+    fn an_older_job_run_again_holds_the_others_like_a_new_one() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        // An older narration job that failed, and a newer one that is done.
+        *h.speech.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid key",
+        ));
+        let old_narration = app
+            .generate_narration(project.id, agreed(&app, &project), BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, old_narration).state(), JobState::Failed);
+        *h.speech.failure.lock().unwrap() = None;
+        narrate_again(&h, &app, &project, Duration::from_secs(2));
+        app.fit_scenes(project.id).unwrap();
+
+        // The older one run again is a narration being made, though the
+        // latest narration job is done.
+        *h.speech.delay.lock().unwrap() = Duration::from_millis(300);
+        app.retry_job(old_narration).unwrap();
+        assert!(matches!(
+            app.generate_scene_images(project.id, BudgetConsent::Ask),
+            Err(SceneError::NarrationBusy)
+        ));
+        done(&app, old_narration);
+        *h.speech.delay.lock().unwrap() = Duration::ZERO;
+        app.fit_scenes(project.id).unwrap();
+
+        // An older image job that failed, and a newer one that is done.
+        h.images.decline("control room");
+        let old_images = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, old_images).state(), JobState::Failed);
+        h.images.accept_all();
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+
+        // The older one run again is scenes being drawn.
+        *h.images.delay.lock().unwrap() = Duration::from_millis(300);
+        app.retry_job(old_images).unwrap();
+        assert!(matches!(
+            app.generate_narration(project.id, agreed(&app, &project), BudgetConsent::Ask),
+            Err(NarrationError::ScenesBusy)
+        ));
+        done(&app, old_images);
+    }
+
+    #[test]
+    fn fitting_waits_for_a_narration_being_made() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        narrate_again(&h, &app, &project, Duration::from_secs(2));
+        *h.speech.delay.lock().unwrap() = Duration::from_millis(300);
+        let narration = app
+            .generate_narration(project.id, agreed(&app, &project), BudgetConsent::Ask)
+            .unwrap();
+
+        assert!(matches!(
+            app.fit_scenes(project.id),
+            Err(SceneError::NarrationBusy)
+        ));
+        done(&app, narration);
+        assert!(!app.fit_scenes(project.id).unwrap().scenes().is_empty());
+    }
+
+    #[test]
+    fn a_plan_job_run_again_over_paid_pictures_starts_from_its_stage() {
+        use crate::jobs::JobActionError;
+
+        let h = Harness::new();
+        let app = h.start();
+        let (project, planned) = h.planned_project(&app);
+        // Planning again fails; then the scenes it would replace are drawn.
+        h.answer(r#"{"scenes": []}"#.to_owned());
+        let plan = app
+            .plan_scenes(project.id, false, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, plan).state(), JobState::Failed);
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let asked = h.text.requests().len();
+
+        // Run again from the panel, it would discard the images unasked.
+        h.answer(plan_answer());
+        let held = app.retry_job(plan).unwrap_err();
+        assert!(matches!(held, JobActionError::AsksFirst), "{held:?}");
+        assert_eq!(h.text.requests().len(), asked, "Claude is not asked");
+        let kept = app.scenes(project.id).unwrap().plan.unwrap();
+        assert_eq!(kept.id, planned.id);
+        assert!(kept.scenes().iter().all(|scene| scene.image().is_some()));
     }
 
     #[test]
