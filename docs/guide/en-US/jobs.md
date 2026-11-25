@@ -32,6 +32,8 @@ When a provider fails for a passing reason (a connection that could not be made,
 
 A paid request for text, an image, a voice or music that was sent and got no answer is not tried again by itself: the provider may have done the work and charged for it. The job stops as **Failed** and says so, and [Costs](costs.md#spent) counts an estimate of what it may have cost. See [A paid request got no answer](troubleshooting.md#answer-lost).
 
+A clip request the provider took and that then ended without a clip (failed, cancelled or forgotten there) is not sent again by itself either, since sending it again is a new request. Its scene shows the failure, the job stops as **Failed** once the other scenes are done, and **Retry** is what sends it again ([Clips](clips.md)).
+
 **Retry**, on a failed or cancelled job, queues it again. It goes on from the last point it saved rather than from the start. Fix what the failure names first: see [Troubleshooting](troubleshooting.md).
 
 <a id="restart"></a>

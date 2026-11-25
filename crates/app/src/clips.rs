@@ -14,6 +14,15 @@
 //! clip from it. A new clip waits beside the current one until the user
 //! accepts it, like a new image.
 //!
+//! A scene whose request ended without a clip (the provider failed it,
+//! declined it or lost it) is sent again only when the user retries the
+//! job: a new submission is a new paid request. The job notes the end in
+//! its saved state, so neither the queue trying again after an outage nor
+//! a run picked up after the app closed sends it, and its failure is
+//! never one the queue retries, whatever the provider called it. The
+//! queue tells the handler when the user retries (`asked_again`), in the
+//! same save as the retry, and only then are the notes dropped.
+//!
 //! A clip is billed when its provider makes it, not when Bardo fetches it,
 //! so its cost is recorded when the provider accepts the request: a clip
 //! still being made counts against the video's cap and the budgets, and so
@@ -133,6 +142,17 @@ struct ClipOrder {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct ClipsState {
     scenes: Vec<ClipRun>,
+    /// The scenes whose requests ended without a clip, or that the
+    /// provider would not take. While a scene is here the job leaves it
+    /// alone: sending it again is a new paid request, which only the user
+    /// asks for, by retrying the job (`ClipHandler::asked_again`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ended: Vec<Ended>,
+    /// The scenes the user's last retry asked again for. A run still
+    /// stopping then may save its old notes over them; they are dropped
+    /// again (`ClipHandler::saved_after_ask`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    asked: Vec<usize>,
 }
 
 /// One scene's submission.
@@ -168,8 +188,25 @@ struct ClipRun {
     cost: Option<String>,
 }
 
+/// A scene's failure, as the job keeps it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct Ended {
+    scene: usize,
+    kind: String,
+    detail: String,
+}
+
+impl Ended {
+    fn failure(&self) -> JobFailure {
+        JobFailure::new(
+            self.kind.parse().unwrap_or(JobFailureKind::RequestFailed),
+            self.detail.clone(),
+        )
+    }
+}
+
 impl ClipRun {
-    /// Forgets the submission, so the next attempt starts a new one.
+    /// Forgets the submission, so the next one is new.
     fn restart(&mut self) {
         self.submission += 1;
         self.staged = None;
@@ -272,6 +309,33 @@ struct ClipJob<'a> {
 }
 
 impl JobHandler for ClipHandler {
+    /// The user's retry is what asks again for the scenes whose requests
+    /// ended: they are no longer left alone.
+    fn asked_again(&self, external_handle: Option<&str>) -> Option<String> {
+        let mut state: ClipsState = serde_json::from_str(external_handle?).ok()?;
+        if state.ended.is_empty() && state.asked.is_empty() {
+            return None;
+        }
+        state.asked = state.ended.drain(..).map(|ended| ended.scene).collect();
+        Some(to_json(&state))
+    }
+
+    /// A run cancelled and retried before it returned may still note a
+    /// scene's end after the retry: that note stays, since the user has
+    /// not seen it yet. Only the notes the retry cleared are dropped.
+    fn saved_after_ask(&self, asked: Option<&str>, saved: String) -> String {
+        let asked = asked.and_then(|asked| serde_json::from_str::<ClipsState>(asked).ok());
+        let (Some(asked), Ok(mut state)) = (asked, serde_json::from_str::<ClipsState>(&saved))
+        else {
+            return saved;
+        };
+        state
+            .ended
+            .retain(|ended| !asked.asked.contains(&ended.scene));
+        state.asked = asked.asked;
+        to_json(&state)
+    }
+
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
         let payload: ClipsPayload = parse(payload)?;
         let state = match cx.external_handle() {
@@ -303,7 +367,22 @@ impl ClipJob<'_> {
     fn run(&mut self, orders: &[ClipOrder], cx: &mut JobContext) -> Result<(), JobFailure> {
         let total = orders.len() as u64;
         self.record_accepted(orders, cx)?;
+        // Scenes whose requests ended in an earlier run stay failed, and
+        // show it (a run cut right after noting the end had not yet).
         let mut failed: Vec<(usize, JobFailure)> = Vec::new();
+        for ended in self.state.ended.clone() {
+            let failure = ended.failure();
+            if let Some(order) = orders.iter().find(|order| order.scene == ended.scene)
+                && let Err(error) = self.show_failed(order, &failure)
+            {
+                tracing::warn!(
+                    "could not show scene {}'s failure: {}",
+                    ended.scene,
+                    error.detail
+                );
+            }
+            failed.push((ended.scene, failure));
+        }
         let mut polls = 0;
         let mut hiccups = 0;
         loop {
@@ -490,7 +569,7 @@ impl ClipJob<'_> {
             Ok(ClipStatus::Failed(failure)) => {
                 // The provider says it made nothing: not billed.
                 self.take_back(order.scene);
-                self.scene_failed(order, failure, cx)
+                self.request_ended(order, failure, cx)
             }
             Ok(ClipStatus::Lost(failure)) => {
                 // No clip, and no word that none was made: its cost stays.
@@ -501,7 +580,7 @@ impl ClipJob<'_> {
                         failure.detail
                     ),
                 );
-                self.scene_failed(order, failure, cx)
+                self.request_ended(order, failure, cx)
             }
             Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
                 Ok(Step::Hiccup(self.failure(order, failure)))
@@ -868,19 +947,61 @@ impl ClipJob<'_> {
         self.scene_failed(order, failure, cx)
     }
 
-    /// The scene's request ended without a clip: the scene shows why, and
-    /// the next attempt submits it again.
+    /// The scene's request ended without a clip, or the provider will not
+    /// take the scene: the scene shows why. Sending it again is a new
+    /// request, so the job notes the end and leaves the scene alone until
+    /// the user retries the job; the queue trying again after an outage
+    /// (of this scene's provider or another's) never sends it, nor does a
+    /// run picked up after the app closed. Whatever the provider called
+    /// the failure, it is not one that passes.
     fn scene_failed(
         &mut self,
         order: &ClipOrder,
         failure: ProviderFailure,
         cx: &mut JobContext,
     ) -> Result<Step, JobFailure> {
-        let failure = self.failure(order, failure);
+        let mut failure = self.failure(order, failure);
+        if failure.kind.is_transient() {
+            failure.kind = JobFailureKind::RequestFailed;
+        }
+        self.note_ended(order, failure, cx)
+    }
+
+    /// The provider took the scene's request and it ended there without a
+    /// clip: failed, cancelled or forgotten. It says so as such, unless
+    /// the provider's safety rules declined it.
+    fn request_ended(
+        &mut self,
+        order: &ClipOrder,
+        failure: ProviderFailure,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let mut failure = self.failure(order, failure);
+        if failure.kind != JobFailureKind::Declined {
+            failure.kind = JobFailureKind::RequestFailed;
+        }
+        self.note_ended(order, failure, cx)
+    }
+
+    /// Notes the scene's end, so only the user's retry sends it again, and
+    /// shows it on the scene.
+    fn note_ended(
+        &mut self,
+        order: &ClipOrder,
+        failure: JobFailure,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
         if let Some(run) = self.run_of(order.scene) {
             run.restart();
-            self.save_state(cx)?;
         }
+        self.state.ended.retain(|ended| ended.scene != order.scene);
+        self.state.ended.push(Ended {
+            scene: order.scene,
+            kind: failure.kind.code().to_owned(),
+            // Kept in storage like a job's failure: known keys masked.
+            detail: cx.redact(&failure.detail),
+        });
+        self.save_state(cx)?;
         self.show_failed(order, &failure)?;
         Ok(Step::Failed(failure))
     }
@@ -1352,6 +1473,21 @@ mod tests {
 
     fn plan_of(app: &Bardo, project: &VideoProject) -> ScenePlan {
         app.scenes(project.id).unwrap().plan.unwrap()
+    }
+
+    /// Waits until `scene` shows that its clip failed.
+    fn wait_until_failed(app: &Bardo, project: &VideoProject, scene: usize) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while plan_of(app, project).scenes()[scene]
+            .clip_failure()
+            .is_none()
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the scene never failed"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 
     /// Waits until `ready` holds for the fake provider.
@@ -2407,6 +2543,271 @@ mod tests {
     }
 
     #[test]
+    fn a_clip_its_provider_failed_is_not_sent_again_until_the_user_retries() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        // The provider reports the request as failed, in an outage's words.
+        *h.clips.provider_failures.lock().unwrap() = 1;
+
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "the queue did not try again");
+        assert_eq!(
+            job.failure().unwrap().kind,
+            JobFailureKind::RequestFailed,
+            "a request that ended is not an outage that passes"
+        );
+        assert_eq!(h.clips.submissions().len(), 1, "one click, one request");
+        assert_eq!(
+            plan_of(&app, &project).scenes()[0].clip_failure(),
+            Some(JobFailureKind::RequestFailed)
+        );
+
+        // The user's retry is the one that asks for a new request.
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 2);
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+    }
+
+    #[test]
+    fn the_queue_trying_again_after_an_outage_leaves_a_failed_scene_alone() {
+        let mut h = Harness::new();
+        // Scene 1 is made by a second provider, which is down.
+        let down = Arc::new(FakeClips {
+            provider: Some(Provider::Kling),
+            submit_failure: Mutex::new(Some(ProviderFailure::new(
+                ProviderFailureKind::ProviderDown,
+                "HTTP 503",
+            ))),
+            ..FakeClips::default()
+        });
+        h.more_clips.push(Arc::clone(&down) as _);
+        let mut app = h.start();
+        app.save_provider_key(Provider::Kling, "kling-test-key-0001")
+            .unwrap();
+        let (project, _) = h.drawn_project(&app);
+        let kling = ClipModelRef::new(Provider::Kling, "fake/range").unwrap();
+        app.set_scene_clip_model(project.id, 1, Some(kling))
+            .unwrap();
+        h.clips.fail("launch pad");
+
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        // The outage is waited out by the queue, attempt after attempt,
+        // and none of them sends scene 0 again: its request ended.
+        assert_eq!(job.state(), JobState::Failed);
+        assert!(job.attempts() > 1, "the queue tried again for scene 1");
+        let failure = job.failure().unwrap();
+        assert_eq!(failure.kind, JobFailureKind::ProviderUnavailable);
+        assert_eq!(
+            h.clips.submissions().len(),
+            2,
+            "scenes 0 and 2, once each: {failure:?}"
+        );
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes()[0].clip_failure().is_some());
+        assert!(plan.scenes()[2].pending_clip().is_some());
+
+        // The provider is back and the user retries: both missing scenes go.
+        *down.submit_failure.lock().unwrap() = None;
+        h.clips.succeed_all();
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 3, "scene 0, asked for again");
+        assert_eq!(down.submissions().len(), 1);
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes().iter().all(|s| s.pending_clip().is_some()));
+    }
+
+    #[test]
+    fn retrying_a_cancelled_job_sends_again_the_scene_whose_request_ended() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.fail("launch pad");
+        h.clips.hold_unless(&["launch pad"]);
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        wait_until_failed(&app, &project, 0);
+
+        // Cancelled with scene 0 failed and the others being made.
+        app.cancel_job(id).unwrap();
+        wait_done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 3);
+
+        // The retry is the user asking: scene 0 goes again, the others are
+        // picked up where they were.
+        h.clips.succeed_all();
+        h.clips.hold(false);
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 4);
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes().iter().all(|s| s.pending_clip().is_some()));
+    }
+
+    /// Scene 0 refused by its provider (`refuse` sets how), and scenes 1
+    /// and 2 on a second provider that is down, so the queue goes again
+    /// until its attempts run out. How many calls scene 0's provider got.
+    fn refused_while_another_provider_is_down(refuse: impl Fn(&FakeClips)) -> usize {
+        let mut h = Harness::new();
+        let down = Arc::new(FakeClips {
+            provider: Some(Provider::Kling),
+            submit_failure: Mutex::new(Some(ProviderFailure::new(
+                ProviderFailureKind::ProviderDown,
+                "HTTP 503",
+            ))),
+            ..FakeClips::default()
+        });
+        h.more_clips.push(Arc::clone(&down) as _);
+        let mut app = h.start();
+        app.save_provider_key(Provider::Kling, "kling-test-key-0001")
+            .unwrap();
+        let (project, _) = h.drawn_project(&app);
+        let kling = ClipModelRef::new(Provider::Kling, "fake/range").unwrap();
+        for scene in [1, 2] {
+            app.set_scene_clip_model(project.id, scene, Some(kling.clone()))
+                .unwrap();
+        }
+        refuse(&h.clips);
+
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert!(job.attempts() > 1, "the queue tried again for the outage");
+        assert_eq!(
+            plan_of(&app, &project).scenes()[0].clip_failure(),
+            Some(JobFailureKind::Declined)
+        );
+        h.clips.keys.lock().unwrap().len()
+    }
+
+    #[test]
+    fn a_scene_declined_at_submission_is_left_alone_by_the_queue_too() {
+        let calls = refused_while_another_provider_is_down(|clips| {
+            *clips.submit_failure.lock().unwrap() = Some(ProviderFailure::new(
+                ProviderFailureKind::Declined,
+                "the prompt was declined",
+            ));
+        });
+        assert_eq!(
+            calls, 2,
+            "handed over and submitted once, on the first attempt"
+        );
+    }
+
+    #[test]
+    fn a_scene_whose_image_is_declined_is_left_alone_by_the_queue_too() {
+        // Declined before the scene was ever submitted.
+        let calls = refused_while_another_provider_is_down(|clips| {
+            *clips.stage_failure.lock().unwrap() = Some(ProviderFailure::new(
+                ProviderFailureKind::Declined,
+                "the image was declined",
+            ));
+        });
+        assert_eq!(calls, 1, "handed over once, on the first attempt");
+    }
+
+    #[test]
+    fn a_scene_that_ends_after_its_cancelled_job_was_retried_waits_for_the_next_retry() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        // Scene 0 fails and scene 2 is made at once; scene 1 is held.
+        h.clips.fail("launch pad");
+        h.clips.hold_unless(&["launch pad", "control room"]);
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        wait_until_failed(&app, &project, 0);
+        while plan_of(&app, &project).scenes()[2].pending_clip().is_none() {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        // Scene 1's status call is on its way when the user cancels and
+        // retries; it then answers that the request failed.
+        h.clips.pause_at(ClipCall::Status);
+        wait_for(&h.clips, FakeClips::paused);
+        app.cancel_job(id).unwrap();
+        app.retry_job(id).unwrap();
+        h.clips.succeed_all();
+        h.clips.fail("drifting");
+        h.clips.hold(false);
+        h.clips.resume();
+        let job = wait_done(&app, id);
+
+        // The retry asked again for scene 0, which the user had seen fail;
+        // scene 1's failure came after it and is shown, not paid again.
+        assert_eq!(job.state(), JobState::Failed);
+        assert!(job.failure().unwrap().detail.contains("drifting"));
+        assert_eq!(h.clips.submissions().len(), 4, "3, then scene 0 again");
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes()[0].pending_clip().is_some());
+        assert_eq!(
+            plan.scenes()[1].clip_failure(),
+            Some(JobFailureKind::RequestFailed)
+        );
+
+        // The next retry is the user asking for scene 1.
+        h.clips.succeed_all();
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 5);
+    }
+
+    #[test]
+    fn a_run_picked_up_after_the_app_closed_leaves_a_failed_scene_alone() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.fail("launch pad");
+        // Scene 0's request ends at once; the others are held.
+        h.clips.hold_unless(&["launch pad"]);
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        wait_until_failed(&app, &project, 0);
+        assert_eq!(h.clips.submissions().len(), 3);
+
+        // The app closes with the run under way, and opens again.
+        drop(app);
+        h.clips.hold(false);
+        let app = h.start();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(
+            h.clips.submissions().len(),
+            3,
+            "nobody asked for scene 0 again"
+        );
+        let failure = job.failure().unwrap();
+        assert!(
+            failure.detail.contains("1 of 3 clips") && failure.detail.contains("launch pad"),
+            "{failure:?}"
+        );
+        let plan = plan_of(&app, &project);
+        assert!(
+            plan.scenes()[1..]
+                .iter()
+                .all(|s| s.pending_clip().is_some())
+        );
+    }
+
+    #[test]
     fn a_clip_its_provider_no_longer_knows_keeps_its_cost() {
         let h = Harness::new();
         let app = h.start();
@@ -2568,7 +2969,7 @@ mod tests {
 
         assert_eq!(job.state(), JobState::Failed);
         let failure = job.failure().unwrap();
-        assert_eq!(failure.kind, JobFailureKind::UnexpectedAnswer);
+        assert_eq!(failure.kind, JobFailureKind::RequestFailed);
         assert!(
             failure.detail.contains("1 of 3 clips"),
             "{}",
@@ -2578,7 +2979,7 @@ mod tests {
         let plan = plan_of(&app, &project);
         assert_eq!(
             plan.scenes()[0].clip_failure(),
-            Some(JobFailureKind::UnexpectedAnswer)
+            Some(JobFailureKind::RequestFailed)
         );
         assert!(plan.scenes()[0].pending_clip().is_none());
         assert!(
