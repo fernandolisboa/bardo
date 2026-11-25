@@ -241,8 +241,11 @@ impl ProductRepository for Database {
         if taken.len() >= MAX_PRODUCT_IMAGES {
             return Ok(false);
         }
-        // Removing an image closes the gap, so the next place is the end.
-        let position = taken.len() as i64;
+        // Removing an image closes the gap, so the next place is the end;
+        // rows left with a gap some other way still get a free place.
+        let position = (0..MAX_PRODUCT_IMAGES as i64)
+            .find(|position| !taken.contains(position))
+            .unwrap_or(taken.len() as i64);
         tx.execute(
             "INSERT INTO product_image (id, product_id, position, kind, image, format, width,
                                         height, confirmed_at)
@@ -552,6 +555,33 @@ mod tests {
             .map(|image| image.id)
             .collect();
         assert_eq!(ids, [images[1].id, images[2].id, images[3].id]);
+    }
+
+    #[test]
+    fn an_image_added_after_a_gap_takes_the_free_place() {
+        let (db, owner) = database_with_profile();
+        let saved = product(owner, "Notebook");
+        ProductRepository::save(&db, &saved).unwrap();
+        let images: Vec<_> = (1..=3)
+            .map(|mark| image(saved.id, mark, ProductImageKind::Photo))
+            .collect();
+        assert!(db.add_image(&images[0]).unwrap());
+        assert!(db.add_image(&images[1]).unwrap());
+        // A gap left some other way than by removing an image.
+        db.conn()
+            .execute(
+                "UPDATE product_image SET position = 2 WHERE position = 1",
+                [],
+            )
+            .unwrap();
+        assert!(db.add_image(&images[2]).unwrap());
+        let ids: Vec<_> = db
+            .images(saved.id)
+            .unwrap()
+            .into_iter()
+            .map(|image| image.id)
+            .collect();
+        assert_eq!(ids, [images[0].id, images[2].id, images[1].id]);
     }
 
     #[test]

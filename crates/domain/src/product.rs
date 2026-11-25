@@ -130,18 +130,19 @@ pub enum ProductFieldError {
 }
 
 impl ProductFieldError {
+    /// In the order the form shows its fields.
     pub const ALL: [ProductFieldError; 13] = [
         ProductFieldError::NameRequired,
         ProductFieldError::NameTooLong,
         ProductFieldError::DescriptionRequired,
         ProductFieldError::DescriptionTooLong,
         ProductFieldError::AudienceTooLong,
-        ProductFieldError::FactTooLong,
-        ProductFieldError::TooManyFacts,
         ProductFieldError::OfferTooLong,
         ProductFieldError::LinkInvalid,
         ProductFieldError::LinkTooLong,
         ProductFieldError::CallToActionTooLong,
+        ProductFieldError::FactTooLong,
+        ProductFieldError::TooManyFacts,
         ProductFieldError::MustSayTooLong,
         ProductFieldError::NeverSayTooLong,
     ];
@@ -190,8 +191,15 @@ impl ProductBrief {
             text
         };
 
+        // One line each: a line break or another control character typed
+        // or brought in by a file reads as a space.
+        let line = |raw: &str| -> String {
+            raw.chars()
+                .map(|c| if c.is_control() { ' ' } else { c })
+                .collect()
+        };
         let name = text(
-            &draft.name,
+            &line(&draft.name),
             Self::MAX_NAME_CHARS,
             ProductFieldError::NameTooLong,
         );
@@ -206,12 +214,12 @@ impl ProductBrief {
             ProductFieldError::AudienceTooLong,
         );
         let offer = text(
-            &draft.offer,
+            &line(&draft.offer),
             Self::MAX_OFFER_CHARS,
             ProductFieldError::OfferTooLong,
         );
         let call_to_action = text(
-            &draft.call_to_action,
+            &line(&draft.call_to_action),
             Self::MAX_CALL_TO_ACTION_CHARS,
             ProductFieldError::CallToActionTooLong,
         );
@@ -362,18 +370,23 @@ fn too_long(text: &str, max_chars: usize) -> bool {
     text.chars().count() > max_chars
 }
 
-/// The facts of a brief: one per line, trimmed, blank lines dropped. A
-/// list mark the user typed or pasted before a fact (`-`, `*`, `•`, `–`
-/// and a space) is not part of the statement.
+/// The facts of a brief: one per line, trimmed, blank lines dropped. The
+/// list marks the user typed or pasted before a fact (`-`, `*`, `•`, `·`,
+/// `▪`, `–`, `—`, each followed by a space or a tab) are not part of the
+/// statement. Every leading mark goes, so a fact read back splits the
+/// same way.
 pub fn split_facts(text: &str) -> Vec<String> {
+    const MARKS: [char; 7] = ['-', '*', '•', '·', '▪', '–', '—'];
     text.lines()
         .map(|line| {
-            let line = line.trim();
-            ["- ", "* ", "• ", "– ", "— "]
-                .iter()
-                .find_map(|mark| line.strip_prefix(mark))
-                .unwrap_or(line)
-                .trim()
+            let mut line = line.trim();
+            while let Some(rest) = line
+                .strip_prefix(MARKS)
+                .filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+            {
+                line = rest.trim_start();
+            }
+            line
         })
         .filter(|line| !line.is_empty())
         .map(str::to_owned)
@@ -392,7 +405,15 @@ fn normalize_link(text: &str) -> Option<String> {
     if text.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return None;
     }
-    let (scheme, rest) = match text.split_once("://") {
+    // A scheme is letters before the first `://`; one later in the text
+    // (`example.com/r?to=https://…`) belongs to the path.
+    let typed = text.split_once("://").filter(|(scheme, _)| {
+        !scheme.is_empty()
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+')
+    });
+    let (scheme, rest) = match typed {
         Some((scheme, rest)) if scheme.eq_ignore_ascii_case("https") => ("https", rest),
         Some((scheme, rest)) if scheme.eq_ignore_ascii_case("http") => ("http", rest),
         Some(_) => return None,
@@ -406,7 +427,7 @@ fn normalize_link(text: &str) -> Option<String> {
     }
     let host = match authority.rsplit_once(':') {
         Some((host, port)) => {
-            if port.is_empty() || port.len() > 5 || !port.chars().all(|c| c.is_ascii_digit()) {
+            if !port.chars().all(|c| c.is_ascii_digit()) || port.parse::<u16>().is_err() {
                 return None;
             }
             host
@@ -943,6 +964,53 @@ mod tests {
     }
 
     #[test]
+    fn every_leading_list_mark_goes_so_facts_read_back_the_same() {
+        let facts = split_facts("- - Refillable\n•\tA5 size\n▪ · Ships fast\n- \n—");
+        assert_eq!(facts, ["Refillable", "A5 size", "Ships fast"]);
+        assert_eq!(split_facts(&facts.join("\n")), facts);
+        // A statement that starts with a mark and no space keeps it.
+        assert_eq!(
+            split_facts("*new* formula\n–5 °C"),
+            ["*new* formula", "–5 °C"]
+        );
+    }
+
+    #[test]
+    fn single_line_fields_read_line_breaks_as_spaces() {
+        let brief = ProductBrief::validate(ProductDraft {
+            offer: "20% off\nuntil Friday".into(),
+            call_to_action: "Get\tyours\0".into(),
+            ..draft("Refillable\r\nnotebook")
+        })
+        .unwrap();
+        assert_eq!(brief.name(), "Refillable  notebook");
+        assert_eq!(brief.offer(), "20% off until Friday");
+        assert_eq!(brief.call_to_action(), "Get yours");
+    }
+
+    #[test]
+    fn errors_come_in_the_order_the_form_shows_its_fields() {
+        let long = |n: usize| "x".repeat(n + 1);
+        assert_eq!(
+            errors(ProductDraft {
+                facts: long(ProductBrief::MAX_FACT_CHARS),
+                link: "not a link".into(),
+                call_to_action: long(ProductBrief::MAX_CALL_TO_ACTION_CHARS),
+                must_say: long(ProductBrief::MAX_NOTE_CHARS),
+                ..ProductDraft::default()
+            }),
+            [
+                ProductFieldError::NameRequired,
+                ProductFieldError::DescriptionRequired,
+                ProductFieldError::LinkInvalid,
+                ProductFieldError::CallToActionTooLong,
+                ProductFieldError::FactTooLong,
+                ProductFieldError::MustSayTooLong,
+            ]
+        );
+    }
+
+    #[test]
     fn a_fact_too_long_and_too_many_facts_are_one_error_each() {
         let long_fact = "x".repeat(ProductBrief::MAX_FACT_CHARS + 1);
         assert_eq!(
@@ -991,6 +1059,19 @@ mod tests {
             "http://example.com:8080/a"
         );
         assert_eq!(link("café.example").unwrap(), "https://café.example");
+        // A scheme later in the text belongs to the path.
+        assert_eq!(
+            link("example.com/r?to=https://shop.example").unwrap(),
+            "https://example.com/r?to=https://shop.example"
+        );
+        assert_eq!(
+            link("example.com/@handle").unwrap(),
+            "https://example.com/@handle"
+        );
+        assert_eq!(
+            link("192.168.0.10:65535").unwrap(),
+            "https://192.168.0.10:65535"
+        );
     }
 
     #[test]
@@ -1005,6 +1086,9 @@ mod tests {
             "https://example..com",
             "https://-example.com",
             "https://example.com:port",
+            "https://example.com:65536",
+            "https://example.com:",
+            "://example.com",
             "javascript:alert(1)",
             "example.com/a b",
         ] {

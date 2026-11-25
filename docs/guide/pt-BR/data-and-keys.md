@@ -11,7 +11,7 @@ O Bardo guarda tudo no seu computador, na sua conta do Windows. Não existe serv
 <a id="database"></a>
 ## O banco de dados
 
-Seus canais, personas, modelos, projetos e os roteiros deles, pesquisas, ideias, custos, tarefas, posts e configurações ficam num único arquivo de banco de dados, `%APPDATA%\Bardo\bardo.db`. Ele não guarda nenhuma chave, chave secreta nem login. O que o Bardo lê do YouTube fica só pelo tempo que as regras do YouTube permitem ([Política de privacidade](privacy.md#kept)).
+Seus canais, personas, produtos com as imagens e o logo, modelos, projetos e os roteiros deles, pesquisas, ideias, custos, tarefas, posts e configurações ficam num único arquivo de banco de dados, `%APPDATA%\Bardo\bardo.db`. Ele não guarda nenhuma chave, chave secreta nem login. O que o Bardo lê do YouTube fica só pelo tempo que as regras do YouTube permitem ([Política de privacidade](privacy.md#kept)).
 
 <a id="projects"></a>
 ## Pastas dos projetos
@@ -38,7 +38,7 @@ O Bardo registra o que faz em `%LOCALAPPDATA%\Bardo\logs\bardo.log`, com tamanho
 
 Faça backup em [Configurações › Backup](backup.md): um arquivo `.zip` com o banco de dados e, se quiser, as pastas dos projetos, feito com o Bardo aberto. O Bardo também faz sozinho um backup do banco de dados toda semana em `%LOCALAPPDATA%\Bardo\backups`. Chaves, credenciais e logins não entram no backup, de propósito: depois de restaurar em outro computador, salve tudo de novo e reconecte cada conta, como a aba lista ([Trocar de computador](backup.md#moving)).
 
-Para levar chaves, credenciais de app, preferências, personas e canais para outra cópia do Bardo sem o resto, exporte um [arquivo de configurações](backup.md#settings-file): ele é criptografado com uma senha que você escolhe, e você marca o que vai e o que entra.
+Para levar chaves, credenciais de app, preferências, personas, produtos e canais para outra cópia do Bardo sem o resto, exporte um [arquivo de configurações](backup.md#settings-file): ele é criptografado com uma senha que você escolhe, e você marca o que vai e o que entra.
 
 <a id="source"></a>
 ## Uma cópia compilada do código

@@ -401,6 +401,9 @@ struct RateEntry {
 #[derive(Serialize, Deserialize)]
 struct ProductEntry {
     name: String,
+    /// Missing or unknown: the entry is listed as one this copy cannot
+    /// read, and the rest of the file still comes in.
+    #[serde(default)]
     kind: String,
     #[serde(default)]
     description: String,
@@ -414,6 +417,7 @@ struct ProductEntry {
     link: String,
     #[serde(default)]
     call_to_action: String,
+    #[serde(default)]
     ownership: String,
     #[serde(default)]
     must_say: String,
@@ -2019,21 +2023,30 @@ mod tests {
 
     #[test]
     fn a_product_this_copy_cannot_read_is_listed_not_brought() {
-        let entry: ProductEntry = serde_json::from_str(
-            r#"{"name": "Novo", "kind": "hologram", "description": "x", "ownership": "mine"}"#,
-        )
-        .unwrap();
-        assert!(entry.brief().is_none());
-        let blank: ProductEntry = serde_json::from_str(
-            r#"{"name": "Sem descrição", "kind": "idea", "ownership": "mine"}"#,
-        )
-        .unwrap();
-        assert!(blank.brief().is_none());
-        let old: ProductEntry = serde_json::from_str(
-            r#"{"name": "Ok", "kind": "service", "description": "x", "ownership": "client"}"#,
-        )
-        .unwrap();
-        assert_eq!(old.brief().unwrap().kind(), ProductKind::Service);
+        let json = serde_json::json!({
+            "products": [
+                {"name": "Novo", "kind": "hologram", "description": "x", "ownership": "mine"},
+                {"name": "Sem descrição", "kind": "idea", "ownership": "mine"},
+                {"name": "Sem tipo", "description": "x"},
+                {"name": "Ok", "kind": "service", "description": "x", "ownership": "client"},
+            ],
+        });
+        let bytes = seal_cheaply(json.to_string().as_bytes(), &password());
+        let h = Harness::new();
+        let mut app = h.start();
+        let file = open_bytes(&bytes, &password(), PathBuf::from("x")).unwrap();
+        let choices = app.settings_to_import(&file);
+        let problems: Vec<_> = choices.iter().map(|choice| choice.problem).collect();
+        let unreadable = Some(ItemProblem::NotReadable);
+        assert_eq!(problems, [unreadable, unreadable, unreadable, None]);
+        assert!(choices[..3].iter().all(|choice| !choice.ticked));
+
+        let outcome = app.import_settings(&file, &items(&choices));
+        assert_eq!(outcome.brought.len(), 1);
+        let products = app.products().unwrap();
+        assert_eq!(products.len(), 1);
+        assert_eq!(products[0].brief.name(), "Ok");
+        assert_eq!(products[0].brief.kind(), ProductKind::Service);
     }
 
     #[test]

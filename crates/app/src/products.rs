@@ -251,9 +251,6 @@ impl Bardo {
         if !confirmed {
             return Err(ProductError::NotConfirmed);
         }
-        if self.products.images(id)?.len() >= MAX_PRODUCT_IMAGES {
-            return Err(ProductError::TooManyImages);
-        }
         let picture = ProductPicture::image(read_picture(path)?).map_err(ProductError::Image)?;
         let image = ProductImage::new(
             id,

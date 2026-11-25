@@ -9,9 +9,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use bardo_app::bardo_domain::{
-    ImageFormat, MAX_PRODUCT_IMAGES, Product, ProductDraft, ProductFieldError, ProductId,
-    ProductImage, ProductImageError, ProductImageId, ProductImageKind, ProductKind, ProductLogo,
-    ProductOwnership, ProductPicture, split_facts,
+    ImageFormat, MAX_PRODUCT_IMAGES, Product, ProductBrief, ProductDraft, ProductFieldError,
+    ProductId, ProductImage, ProductImageError, ProductImageId, ProductImageKind, ProductKind,
+    ProductLogo, ProductOwnership, ProductPicture, split_facts,
 };
 use bardo_app::{Bardo, Control, Destination, ProductError, Text, TourAnchor};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
@@ -86,6 +86,13 @@ enum Importing {
     Logo,
 }
 
+/// The picture the user is asked whether to remove.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Removing {
+    Image(ProductImageId),
+    Logo,
+}
+
 /// A picture ready to show: decoded once.
 fn decoded(picture: &ProductPicture) -> Arc<Image> {
     let format = match picture.format() {
@@ -126,6 +133,8 @@ pub struct ProductsScreen {
     ownership: ProductOwnership,
     must_say: Entity<TextareaState>,
     never_say: Entity<TextareaState>,
+    /// The saved brief the form was filled from; `None` for a new product.
+    filled: Option<ProductBrief>,
     field_errors: Vec<ProductFieldError>,
     notice: Option<Notice>,
     /// Asking whether to delete the edited product.
@@ -133,6 +142,12 @@ pub struct ProductsScreen {
     images: Vec<ShownImage>,
     logo: Option<ShownLogo>,
     pictures_failed: bool,
+    /// The pictures on show are not the edited product's (or not yet
+    /// read): the next frame reads them, so they are read only while the
+    /// screen shows.
+    pictures_pending: bool,
+    /// Asking whether to remove a picture.
+    confirm_remove: Option<Removing>,
     /// The rights card, and whether its box is ticked.
     importing: Option<(Importing, bool)>,
     /// A file dialog that is open.
@@ -204,12 +219,15 @@ impl ProductsScreen {
             ownership: ProductOwnership::default(),
             must_say,
             never_say,
+            filled: None,
             field_errors: Vec::new(),
             notice: None,
             confirm_delete: false,
             images: Vec::new(),
             logo: None,
             pictures_failed: false,
+            pictures_pending: false,
+            confirm_remove: None,
             importing: None,
             dialog: None,
             picture_notice: None,
@@ -228,12 +246,31 @@ impl ProductsScreen {
     /// file may have changed them.
     pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.reload_list(cx);
-        match self.editing {
-            Some(id) if self.products.iter().any(|p| p.id == id) => self.load_pictures(cx),
-            Some(_) => self.start_new(window, cx),
-            None => {}
+        if let Some(id) = self.editing {
+            let stored = self
+                .products
+                .iter()
+                .find(|p| p.id == id)
+                .map(|p| p.brief.clone());
+            match stored {
+                // Changed elsewhere: show it, unless the form holds edits
+                // of the user's own.
+                Some(stored) if self.filled.as_ref() != Some(&stored) && !self.dirty(cx) => {
+                    self.edit(id, window, cx)
+                }
+                Some(_) => self.pictures_pending = true,
+                None => self.start_new(window, cx),
+            }
         }
         cx.notify();
+    }
+
+    /// Whether the form differs from the saved brief it was filled from.
+    fn dirty(&self, cx: &App) -> bool {
+        match (&self.filled, ProductBrief::validate(self.draft(cx))) {
+            (Some(filled), Ok(now)) => *filled != now,
+            _ => true,
+        }
     }
 
     fn reload_list(&mut self, cx: &mut Context<Self>) {
@@ -262,18 +299,19 @@ impl ProductsScreen {
         self.products.iter().filter(|p| p.archived).count()
     }
 
+    /// Reads the edited product's pictures. Pictures already on show
+    /// keep their decoding; the ones that left free theirs.
     fn load_pictures(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self.editing else {
-            self.images.clear();
-            self.logo = None;
-            self.pictures_failed = false;
-            return;
-        };
-        let bardo = self.bardo.read(cx);
-        match (bardo.product_images(id), bardo.product_logo(id)) {
-            (Ok(images), Ok(logo)) => {
-                // Decoding is kept for pictures already shown.
-                let mut kept: Vec<ShownImage> = std::mem::take(&mut self.images);
+        self.pictures_pending = false;
+        let mut kept: Vec<ShownImage> = std::mem::take(&mut self.images);
+        let old_logo = self.logo.take();
+        let read = self.editing.map(|id| {
+            let bardo = self.bardo.read(cx);
+            (bardo.product_images(id), bardo.product_logo(id))
+        });
+        self.pictures_failed = false;
+        match read {
+            Some((Ok(images), Ok(logo))) => {
                 self.images = images
                     .into_iter()
                     .map(
@@ -290,20 +328,35 @@ impl ProductsScreen {
                         },
                     )
                     .collect();
-                self.logo = logo.map(|logo| match self.logo.take() {
+                let mut old_logo = old_logo;
+                self.logo = logo.map(|logo| match old_logo.take() {
                     Some(shown) if shown.logo == logo => shown,
-                    _ => ShownLogo {
-                        picture: decoded(&logo.picture),
-                        logo,
-                    },
+                    other => {
+                        old_logo = other;
+                        ShownLogo {
+                            picture: decoded(&logo.picture),
+                            logo,
+                        }
+                    }
                 });
-                self.pictures_failed = false;
+                if let Some(shown) = old_logo {
+                    shown.picture.remove_asset(cx);
+                }
             }
-            _ => {
-                self.images.clear();
-                self.logo = None;
+            Some(_) => {
                 self.pictures_failed = true;
+                if let Some(shown) = old_logo {
+                    shown.picture.remove_asset(cx);
+                }
             }
+            None => {
+                if let Some(shown) = old_logo {
+                    shown.picture.remove_asset(cx);
+                }
+            }
+        }
+        for shown in kept {
+            shown.picture.remove_asset(cx);
         }
     }
 
@@ -399,14 +452,19 @@ impl ProductsScreen {
         self.notice = None;
         self.confirm_delete = false;
         self.importing = None;
+        self.confirm_remove = None;
         self.picture_notice = None;
+        // A file dialog still open was for the product on show before:
+        // dropping it stops waiting for its answer.
+        self.dialog = None;
     }
 
     fn start_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.editing = None;
+        self.filled = None;
         self.reset_feedback();
         self.fill(&ProductDraft::default(), window, cx);
-        self.load_pictures(cx);
+        self.pictures_pending = true;
         cx.notify();
     }
 
@@ -415,43 +473,60 @@ impl ProductsScreen {
             return;
         };
         let draft = ProductDraft::from(&product.brief);
+        self.filled = Some(product.brief.clone());
         self.editing = Some(id);
         self.reset_feedback();
         self.fill(&draft, window, cx);
-        self.load_pictures(cx);
+        self.pictures_pending = true;
         cx.notify();
     }
 
-    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Saves the form; `false` when it could not be, with the reason on
+    /// show.
+    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let draft = self.draft(cx);
         let bardo = self.bardo.read(cx);
         let result = match self.editing {
             Some(id) => bardo.update_product(id, draft),
             None => bardo.create_product(draft),
         };
-        match result {
+        let saved = match result {
             Ok(saved) => {
                 self.reload_list(cx);
                 let created = self.editing.is_none();
                 self.editing = Some(saved.id);
-                self.reset_feedback();
+                // The pictures section stays as it is: saving the brief
+                // says nothing about a picture being chosen.
+                self.field_errors.clear();
+                self.confirm_delete = false;
                 // Show the normalized values (trimmed text, the link's
                 // scheme, the facts one per line).
                 self.fill(&ProductDraft::from(&saved.brief), window, cx);
+                self.filled = Some(saved.brief);
                 if created {
-                    self.load_pictures(cx);
+                    self.pictures_pending = true;
                 }
                 self.notice = Some(Notice::Saved);
+                true
             }
-            Err(error) => self.show_error(&error),
-        }
+            Err(error) => {
+                self.show_error(&error);
+                false
+            }
+        };
         cx.notify();
+        saved
     }
 
     fn duplicate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.editing else {
             return;
         };
+        // The copy is of what the form shows: edits not yet saved are
+        // saved first, and a form that cannot be saved is not copied.
+        if self.dirty(cx) && !self.save(window, cx) {
+            return;
+        }
         match self.bardo.read(cx).duplicate_product(id) {
             Ok(copy) => {
                 self.reload_list(cx);
@@ -538,6 +613,12 @@ impl ProductsScreen {
             let chosen = chosen.await;
             let _ = this.update(cx, |this, cx| {
                 this.dialog = None;
+                // Only for the product and the ticked card it was opened
+                // from: the user may have unticked or closed it meanwhile.
+                if this.editing != Some(product) || this.importing != Some((target, true)) {
+                    cx.notify();
+                    return;
+                }
                 match chosen {
                     Ok(Ok(Some(paths))) => {
                         if let Some(path) = paths.first() {
@@ -557,8 +638,7 @@ impl ProductsScreen {
                                 }
                                 Err(error) => this.picture_failed(&error),
                             }
-                            this.reload_list(cx);
-                            this.load_pictures(cx);
+                            this.pictures_pending = true;
                         }
                     }
                     Ok(Ok(None)) | Err(_) => {}
@@ -587,10 +667,17 @@ impl ProductsScreen {
             .read(cx)
             .set_product_image_kind(product, image, kind)
         {
-            Ok(()) => self.picture_notice = None,
-            Err(error) => self.picture_failed(&error),
+            Ok(()) => {
+                self.picture_notice = None;
+                if let Some(shown) = self.images.iter_mut().find(|s| s.image.id == image) {
+                    shown.image.kind = kind;
+                }
+            }
+            Err(error) => {
+                self.picture_failed(&error);
+                self.pictures_pending = true;
+            }
         }
-        self.load_pictures(cx);
         cx.notify();
     }
 
@@ -598,12 +685,12 @@ impl ProductsScreen {
         let Some(product) = self.editing else {
             return;
         };
+        self.confirm_remove = None;
         match self.bardo.read(cx).remove_product_image(product, image) {
             Ok(()) => self.picture_notice = Some(PictureNotice::ImageRemoved),
             Err(error) => self.picture_failed(&error),
         }
-        self.reload_list(cx);
-        self.load_pictures(cx);
+        self.pictures_pending = true;
         cx.notify();
     }
 
@@ -611,11 +698,12 @@ impl ProductsScreen {
         let Some(product) = self.editing else {
             return;
         };
+        self.confirm_remove = None;
         match self.bardo.read(cx).remove_product_logo(product) {
             Ok(()) => self.picture_notice = Some(PictureNotice::LogoRemoved),
             Err(error) => self.picture_failed(&error),
         }
-        self.load_pictures(cx);
+        self.pictures_pending = true;
         cx.notify();
     }
 
@@ -848,11 +936,75 @@ impl ProductsScreen {
             .into_any_element()
     }
 
-    fn render_image(&self, ix: usize, shown: &ShownImage, cx: &mut Context<Self>) -> AnyElement {
+    /// Asks before a picture and its confirmation go: that cannot be
+    /// undone.
+    fn render_remove_ask(
+        &self,
+        id: (&'static str, usize),
+        ask: Text,
+        remove: Text,
+        on_remove: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
+        v_flex()
+            .gap_1()
+            .child(div().text_xs().child(tr(bardo, ask)))
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap_1()
+                    .child(
+                        Button::new((SharedString::from(format!("confirm-remove-{}", id.0)), id.1))
+                            .xsmall()
+                            .danger()
+                            .label(tr(bardo, remove))
+                            .on_click(on_remove),
+                    )
+                    .child(
+                        Button::new((SharedString::from(format!("cancel-remove-{}", id.0)), id.1))
+                            .xsmall()
+                            .ghost()
+                            .label(tr(bardo, Text::ProductCancel))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.confirm_remove = None;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_image(&self, ix: usize, shown: &ShownImage, cx: &mut Context<Self>) -> AnyElement {
         let image = &shown.image;
         let id = image.id;
+        let remove = if self.confirm_remove == Some(Removing::Image(id)) {
+            let on_remove =
+                cx.listener(move |this, _: &ClickEvent, _, cx| this.remove_image(id, cx));
+            self.render_remove_ask(
+                ("product-image", ix),
+                Text::ProductImageRemoveAsk,
+                Text::RemoveProductImage,
+                on_remove,
+                cx,
+            )
+        } else {
+            let label = tr(self.bardo.read(cx), Text::RemoveProductImage);
+            h_flex()
+                .child(
+                    Button::new(("remove-product-image", ix))
+                        .xsmall()
+                        .outline()
+                        .label(label)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.confirm_remove = Some(Removing::Image(id));
+                            cx.notify();
+                        })),
+                )
+                .into_any_element()
+        };
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
         let kinds = ButtonGroup::new(("product-image-kind", ix))
             .xsmall()
             .outline()
@@ -901,17 +1053,7 @@ impl ProductsScreen {
                     .text_color(theme.muted_foreground)
                     .child(SharedString::from(confirmed)),
             )
-            .child(
-                h_flex().child(
-                    Button::new(("remove-product-image", ix))
-                        .xsmall()
-                        .outline()
-                        .label(tr(bardo, Text::RemoveProductImage))
-                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.remove_image(id, cx)
-                        })),
-                ),
-            )
+            .child(remove)
             .into_any_element()
     }
 
@@ -1038,6 +1180,15 @@ impl ProductsScreen {
             }
             _ => None,
         };
+        let remove_ask = (self.confirm_remove == Some(Removing::Logo)).then(|| {
+            self.render_remove_ask(
+                ("product-logo", 0),
+                Text::ProductLogoRemoveAsk,
+                Text::RemoveProductLogo,
+                cx.listener(|this, _: &ClickEvent, _, cx| this.remove_logo(cx)),
+                cx,
+            )
+        });
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let current = match &self.logo {
@@ -1106,6 +1257,7 @@ impl ProductsScreen {
                     )),
             )
             .child(current)
+            .children(remove_ask)
             .map(|col| match rights {
                 Some(rights) => col.child(rights),
                 None => col.child(
@@ -1130,8 +1282,10 @@ impl ProductsScreen {
                                     .small()
                                     .ghost()
                                     .label(tr(bardo, Text::RemoveProductLogo))
+                                    .disabled(self.confirm_remove == Some(Removing::Logo))
                                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                        this.remove_logo(cx)
+                                        this.confirm_remove = Some(Removing::Logo);
+                                        cx.notify();
                                     })),
                             )
                         }),
@@ -1312,9 +1466,9 @@ impl ProductsScreen {
                 Button::new("save-product")
                     .primary()
                     .label(tr(bardo, action))
-                    .on_click(
-                        cx.listener(|this, _: &ClickEvent, window, cx| this.save(window, cx)),
-                    ),
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.save(window, cx);
+                    })),
             )
             .when(self.editing.is_some(), |row| {
                 row.child(
@@ -1354,7 +1508,7 @@ impl ProductsScreen {
                 .child(guide::info(
                     bardo,
                     "product-archive-info",
-                    tr(bardo, Text::ProductDeleteHint),
+                    tr(bardo, Text::ProductActionsHint),
                     guide::refs::PRODUCTS_ARCHIVE,
                 ))
             })
@@ -1449,6 +1603,9 @@ impl ProductsScreen {
 
 impl Render for ProductsScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.pictures_pending {
+            self.load_pictures(cx);
+        }
         let collection = self.collection(cx);
         let form = self.render_form(cx).into_any_element();
         let archived = self.archived_count();

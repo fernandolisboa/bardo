@@ -14,7 +14,7 @@ O Bardo ajuda você a tocar canais sem rosto no YouTube, TikTok, Instagram Reels
 
 Tudo no Bardo pertence a um de quatro pilares, nesta ordem:
 
-- **Estratégia**: escolher um nicho e uma ideia de vídeo. A [Pesquisa](bardo:go/research) pontua nichos por concorrência e tendência, [Temas](bardo:go/themes) sugere e ranqueia ideias de vídeo, e [Desempenho](bardo:go/performance) mostra como foram os vídeos que você publicou.
+- **Estratégia**: escolher um nicho e uma ideia de vídeo. A [Pesquisa](bardo:go/research) pontua nichos por concorrência e tendência, [Temas](bardo:go/themes) sugere e ranqueia ideias de vídeo, [Produtos](bardo:go/products) guarda o que você anuncia, e [Desempenho](bardo:go/performance) mostra como foram os vídeos que você publicou.
 - **Produção**: fazer o material do vídeo. Um [projeto](bardo:go/projects) vai do roteiro à narração, às imagens das cenas e aos clipes. As [Personas](bardo:go/personas) são os seus narradores, e os [Modelos](bardo:go/templates) guardam as instruções que a IA segue para escrever.
 - **Edição**: o editor, onde você corta a imagem, mixa o áudio, posiciona as legendas e enquadra o vídeo para cada rede, e depois renderiza.
 - **Publicação**: seus [canais](bardo:go/channels) e as [contas](bardo:go/accounts) de cada um nas redes, o texto de cada post, os envios, os agendamentos e as exportações.
