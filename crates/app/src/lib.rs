@@ -2054,6 +2054,8 @@ pub(crate) mod testing {
         pub(crate) lost: Mutex<u32>,
         /// How many submissions are lost before reaching the provider.
         pub(crate) unseen: Mutex<u32>,
+        /// Also offers `nameless/one`, a model no rate covers.
+        pub(crate) nameless: std::sync::atomic::AtomicBool,
         /// Credit checks and lookups for a lost submission.
         pub(crate) checks: Mutex<u32>,
         pub(crate) lookups: Mutex<u32>,
@@ -2143,7 +2145,7 @@ pub(crate) mod testing {
         }
 
         fn models(&self) -> Vec<ClipModel> {
-            vec![
+            let mut models = vec![
                 ClipModel {
                     id: ClipModelRef::new(self.provider(), "fake/range").unwrap(),
                     name: "Fake Range".into(),
@@ -2154,7 +2156,15 @@ pub(crate) mod testing {
                     name: "Fake Choices".into(),
                     durations: ClipDurations::Choices(vec![5, 10]),
                 },
-            ]
+            ];
+            if self.nameless.load(std::sync::atomic::Ordering::SeqCst) {
+                models.push(ClipModel {
+                    id: ClipModelRef::new(self.provider(), "nameless/one").unwrap(),
+                    name: "Nameless One".into(),
+                    durations: ClipDurations::Range { min: 3, max: 15 },
+                });
+            }
+            models
         }
 
         fn stage_image(

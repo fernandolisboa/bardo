@@ -167,6 +167,12 @@ pub enum JobActionError {
     /// A product's sheet job while another one fills the same sheet.
     #[error("the product's sheet is being written")]
     SheetBusy,
+    /// An image or clip job whose scenes still to pay for would reach a
+    /// budget or pass the video's cap, or have no price, or a product's
+    /// sheet job whose calls left would: the estimate to ask about before
+    /// it is run again (#268).
+    #[error("the rest of the job needs a go-ahead on its cost")]
+    OverBudget(Box<crate::SpendEstimate>),
     #[error(transparent)]
     NotAllowed(#[from] InvalidJobTransition),
     #[error(transparent)]

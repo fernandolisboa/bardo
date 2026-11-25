@@ -359,7 +359,7 @@ impl Theme {
             persona: None,
             format: None,
             production: None,
-            spend_cap: None,
+            spend_cap: SpendCap::Default,
             length: None,
             style: None,
         })
@@ -400,8 +400,8 @@ pub struct VideoProject {
     /// How it is produced, instead of the channel's default mode; `None`
     /// follows the channel.
     pub production: Option<ProductionMode>,
-    /// What it may cost before Bardo asks (#248); `None` has no cap.
-    pub spend_cap: Option<Money>,
+    /// What it may cost before Bardo asks (#248, #268).
+    pub spend_cap: SpendCap,
     /// How long its script runs instead of its format's length (#253);
     /// `None` follows the format.
     pub length: Option<VideoLength>,
@@ -410,7 +410,95 @@ pub struct VideoProject {
     pub style: Option<StyleChoice>,
 }
 
+/// What a Short may cost before Bardo asks, unless the user says
+/// otherwise (#268).
+pub const DEFAULT_SHORT_CAP: Money = Money::from_cents(500);
+
+/// What a long video may cost before Bardo asks, unless the user says
+/// otherwise (#268).
+pub const DEFAULT_LONG_CAP: Money = Money::from_cents(2_000);
+
+/// The cap a video of `format` has by default.
+pub const fn default_spend_cap(format: VideoFormat) -> Money {
+    match format {
+        VideoFormat::Short => DEFAULT_SHORT_CAP,
+        VideoFormat::Long => DEFAULT_LONG_CAP,
+    }
+}
+
+/// A video's spend cap (#248, #268): what the video may cost before a
+/// paid job of it asks first. A video has one from the start, so that
+/// nothing set up by the user never means nothing asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpendCap {
+    /// The default of the video's format, which it follows when the
+    /// format changes. What a new project has.
+    Default,
+    /// The amount the user set.
+    Own(Money),
+    /// The user chose to have none.
+    Off,
+    /// A project from before videos started with a cap: it has none, and
+    /// the user is offered the default once. Either answer ends the offer.
+    NotOffered,
+}
+
+/// A stored spend cap that does not read.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown spend cap: {0}")]
+pub struct UnknownSpendCap(pub String);
+
+impl SpendCap {
+    /// The amount in force for a video of `format`; `None` without a cap.
+    pub fn amount(self, format: VideoFormat) -> Option<Money> {
+        match self {
+            SpendCap::Default => Some(default_spend_cap(format)),
+            SpendCap::Own(amount) => Some(amount),
+            SpendCap::Off | SpendCap::NotOffered => None,
+        }
+    }
+
+    /// The amount the user set, which is stored beside the code.
+    pub fn own(self) -> Option<Money> {
+        match self {
+            SpendCap::Own(amount) => Some(amount),
+            _ => None,
+        }
+    }
+
+    /// Whether the default is still to be offered to the user.
+    pub fn is_offer_due(self) -> bool {
+        self == SpendCap::NotOffered
+    }
+
+    pub fn code(self) -> &'static str {
+        match self {
+            SpendCap::Default => "default",
+            SpendCap::Own(_) => "own",
+            SpendCap::Off => "off",
+            SpendCap::NotOffered => "not_offered",
+        }
+    }
+
+    /// The cap stored as `code`, with the user's `amount` beside it.
+    pub fn restore(code: &str, amount: Option<Money>) -> Result<Self, UnknownSpendCap> {
+        match (code, amount) {
+            ("default", _) => Ok(SpendCap::Default),
+            ("own", Some(amount)) => Ok(SpendCap::Own(amount)),
+            ("off", _) => Ok(SpendCap::Off),
+            ("not_offered", _) => Ok(SpendCap::NotOffered),
+            _ => Err(UnknownSpendCap(code.to_owned())),
+        }
+    }
+}
+
 impl VideoProject {
+    /// What the video may cost before Bardo asks, given its channel's
+    /// format; `None` without a cap.
+    pub fn cap(&self, channel_default: VideoFormat) -> Option<Money> {
+        self.spend_cap.amount(self.format(channel_default))
+    }
+
     /// Who narrates the video: its own persona, else the channel's default.
     pub fn narrator(&self, channel_default: Option<PersonaId>) -> Option<PersonaId> {
         self.persona.or(channel_default)
@@ -480,12 +568,11 @@ pub trait ThemeRepository: Send + Sync {
         mode: Option<ProductionMode>,
     ) -> Result<(), RepositoryError>;
 
-    /// Sets or clears (`None`, no cap) what the project may cost before
-    /// Bardo asks.
+    /// Sets what the project may cost before Bardo asks.
     fn set_project_spend_cap(
         &self,
         id: VideoProjectId,
-        cap: Option<Money>,
+        cap: SpendCap,
     ) -> Result<(), RepositoryError>;
 
     /// Sets or clears (`None`, the format's) the project's length.
@@ -555,7 +642,7 @@ impl<T: ThemeRepository + ?Sized> ThemeRepository for Arc<T> {
     fn set_project_spend_cap(
         &self,
         id: VideoProjectId,
-        cap: Option<Money>,
+        cap: SpendCap,
     ) -> Result<(), RepositoryError> {
         (**self).set_project_spend_cap(id, cap)
     }
@@ -744,6 +831,49 @@ mod tests {
         assert_eq!(project.title, "The lost cosmonauts");
         assert_eq!(project.created_at, at(99));
         assert_eq!(project.persona, None, "follows the channel's persona");
+    }
+
+    #[test]
+    fn a_new_project_has_the_default_cap_of_its_format() {
+        let mut project = theme("The lost cosmonauts").approve(at(1)).unwrap();
+        assert_eq!(project.spend_cap, SpendCap::Default);
+        assert_eq!(
+            project.cap(VideoFormat::Short),
+            Some(Money::from_cents(500))
+        );
+        assert_eq!(
+            project.cap(VideoFormat::Long),
+            Some(Money::from_cents(2_000))
+        );
+        // Its own format decides, and the cap follows it.
+        project.format = Some(VideoFormat::Long);
+        assert_eq!(project.cap(VideoFormat::Short), Some(DEFAULT_LONG_CAP));
+
+        project.spend_cap = SpendCap::Own(Money::from_cents(750));
+        assert_eq!(
+            project.cap(VideoFormat::Short),
+            Some(Money::from_cents(750))
+        );
+        for none in [SpendCap::Off, SpendCap::NotOffered] {
+            project.spend_cap = none;
+            assert_eq!(project.cap(VideoFormat::Short), None);
+        }
+        assert!(SpendCap::NotOffered.is_offer_due());
+        assert!(!SpendCap::Off.is_offer_due(), "the user answered");
+    }
+
+    #[test]
+    fn a_spend_cap_is_stored_as_a_code_and_the_users_amount() {
+        let own = SpendCap::Own(Money::from_cents(750));
+        for cap in [SpendCap::Default, own, SpendCap::Off, SpendCap::NotOffered] {
+            assert_eq!(SpendCap::restore(cap.code(), cap.own()), Ok(cap));
+        }
+        assert_eq!(
+            SpendCap::restore("own", None),
+            Err(UnknownSpendCap("own".into())),
+            "an own cap without its amount"
+        );
+        assert!(SpendCap::restore("someday", None).is_err());
     }
 
     #[test]

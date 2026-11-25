@@ -62,10 +62,38 @@ fn parse_rates(text: &str) -> Result<Vec<Rate>, String> {
     Ok(rates)
 }
 
+/// Prices for the models of the test providers (`fake...`), so a test's
+/// job is priced like a real one: a model without a rate asks before it
+/// runs (#268), which is tested with models of its own.
+#[cfg(test)]
+const TEST_RATES: &str = r#"
+[higgsfield."fake"]
+video_seconds = "0.05"
+
+[higgsfield-plan."fake"]
+video_seconds = "0.05"
+
+[byteplus."fake"]
+video_seconds = "0.05"
+output_tokens = "0.10"
+
+[kling."fake"]
+video_seconds = "0.05"
+
+[gemini."fake"]
+video_seconds = "0.05"
+"#;
+
 /// The built-in rates, read once.
 pub(crate) fn default_rates() -> &'static [Rate] {
     static RATES: OnceLock<Vec<Rate>> = OnceLock::new();
-    RATES.get_or_init(|| parse_rates(DEFAULT_RATES).expect("the built-in rates are valid"))
+    RATES.get_or_init(|| {
+        #[allow(unused_mut)]
+        let mut rates = parse_rates(DEFAULT_RATES).expect("the built-in rates are valid");
+        #[cfg(test)]
+        rates.extend(parse_rates(TEST_RATES).expect("the test rates are valid"));
+        rates
+    })
 }
 
 /// What a planned generation would spend with one provider, and where that
@@ -88,6 +116,9 @@ pub struct SpendEstimate {
     pub providers: Vec<ProviderEstimate>,
     /// Set when the job would take its video past the video's cap.
     pub cap: Option<CapReached>,
+    /// The models it would call that no rate covers, each once: what they
+    /// cost is unknown, so the amounts leave them out.
+    pub unpriced: Vec<(Provider, String)>,
 }
 
 /// A job that would take its video's spend past the video's cap (#248).
@@ -124,6 +155,13 @@ impl SpendEstimate {
             .filter_map(|provider| provider.level)
             .max()
             .unwrap_or(BudgetLevel::Under)
+    }
+
+    /// Whether the job asks before it starts: it would reach a provider's
+    /// budget or pass its video's cap, or some call of it has no rate, so
+    /// what it costs is unknown (#268).
+    pub fn asks(&self) -> bool {
+        self.level() == BudgetLevel::Reached || self.cap.is_some() || self.is_partial()
     }
 
     /// The providers whose budget the job would reach or has reached.
@@ -797,12 +835,25 @@ impl CostBook {
     /// What `call` would use, from the last calls for the same purpose or
     /// a first guess, with what is known before the job in place.
     fn typical(&self, call: &PlannedCall) -> Result<Metered, RepositoryError> {
+        self.typical_at(call, &self.rates()?)
+    }
+
+    /// `typical` under `rates`. A past call that used something the
+    /// call's model has no rate for (another model of the provider, billed
+    /// another way) says nothing about this one and is left out: counted
+    /// in, it would leave a model that has a rate without a price.
+    fn typical_at(
+        &self,
+        call: &PlannedCall,
+        rates: &RateTable,
+    ) -> Result<Metered, RepositoryError> {
         let samples: Vec<Metered> = self
             .costs
             .recent_costs(self.owner, call.purpose, ESTIMATE_SAMPLES)?
             .into_iter()
             .filter(|record| record.provider == call.provider)
             .map(|record| record.usage)
+            .filter(|usage| rates.price(call.provider, &call.model, usage).is_some())
             .collect();
         let usage =
             Metered::mean(&samples).unwrap_or_else(|| first_guess(call.purpose, call.provider));
@@ -823,10 +874,10 @@ impl CostBook {
 
     /// What `call` is estimated at: its ceiling when it has one, else
     /// what such calls usually use.
-    fn planned(&self, call: &PlannedCall) -> Result<Metered, RepositoryError> {
+    fn planned(&self, call: &PlannedCall, rates: &RateTable) -> Result<Metered, RepositoryError> {
         match call.ceiling {
             Some(most) => Ok(most.times(call.calls)),
-            None => self.typical(call),
+            None => self.typical_at(call, rates),
         }
     }
 
@@ -837,7 +888,7 @@ impl CostBook {
         let mut total = Money::ZERO;
         let mut partial = false;
         for call in calls.iter().filter(|call| call.calls > 0) {
-            match rates.price(call.provider, &call.model, &self.planned(call)?) {
+            match rates.price(call.provider, &call.model, &self.planned(call, &rates)?) {
                 Some(amount) => total = total.saturating_add(amount),
                 None => partial = true,
             }
@@ -852,8 +903,13 @@ impl CostBook {
         let spend = self.month_spend(Month::of(SystemTime::now()))?;
         let budgets = self.costs.budgets(self.owner)?;
         let mut providers: Vec<ProviderEstimate> = Vec::new();
+        let mut unpriced: Vec<(Provider, String)> = Vec::new();
         for call in calls.iter().filter(|call| call.calls > 0) {
-            let amount = rates.price(call.provider, &call.model, &self.planned(call)?);
+            let amount = rates.price(call.provider, &call.model, &self.planned(call, &rates)?);
+            let model = (call.provider, call.model.to_string());
+            if amount.is_none() && !unpriced.contains(&model) {
+                unpriced.push(model);
+            }
             match providers.iter_mut().find(|p| p.provider == call.provider) {
                 Some(estimate) => {
                     estimate.amount = estimate
@@ -880,6 +936,7 @@ impl CostBook {
         Ok(SpendEstimate {
             providers,
             cap: None,
+            unpriced,
         })
     }
 }
@@ -1043,9 +1100,10 @@ impl Bardo {
             return Ok(Ok(()));
         }
         let estimate = self.estimate(calls)?;
-        Ok(match estimate.level() {
-            BudgetLevel::Reached => Err(estimate),
-            _ => Ok(()),
+        Ok(if estimate.asks() {
+            Err(estimate)
+        } else {
+            Ok(())
         })
     }
 
@@ -1368,13 +1426,16 @@ pub(crate) mod tests {
                 },
             ],
             cap: None,
+            unpriced: vec![(Provider::TypeSafe, "jev-next".into())],
         };
         assert_eq!(estimate.total(), Money::from_cents(5));
         assert!(estimate.is_partial());
         assert_eq!(estimate.level(), BudgetLevel::Warning);
         assert_eq!(estimate.near_budget().count(), 1);
         assert_eq!(estimate.over_budget().count(), 0);
+        assert!(estimate.asks(), "a price nobody knows is asked about");
         assert_eq!(SpendEstimate::default().level(), BudgetLevel::Under);
+        assert!(!SpendEstimate::default().asks());
     }
 
     /// A paid call's failure when its request was sent and no answer came.
@@ -1685,6 +1746,50 @@ pub(crate) mod tests {
                 lost.usage.input_tokens,
                 (prompt as u64).div_ceil(CHARS_PER_TOKEN),
                 "the prompt that was sent, not the last one's"
+            );
+        }
+
+        #[test]
+        fn a_past_call_the_model_has_no_rate_for_does_not_hide_its_price() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = crate::scenes::tests::project(&app);
+            // A take whose provider gave no usage is in Costs by its
+            // seconds, on a model billed by its tokens alone.
+            app.cost_book.record_for_project(
+                PaidCall {
+                    provider: Provider::BytePlus,
+                    model: "fake-tokens",
+                    purpose: CostPurpose::TakeFinal,
+                    usage: Metered::video_seconds(5),
+                    job: None,
+                    reported: Some(Money::from_micros(400_000)),
+                },
+                project.id,
+            );
+            let rates = RateTable::new(
+                parse_rates("[byteplus.\"fake-tokens\"]\noutput_tokens = \"0.10\"\n").unwrap(),
+            );
+            let call = PlannedCall::new(Provider::BytePlus, CostPurpose::TakeFinal, 1)
+                .with_model("fake-tokens")
+                .with_output_tokens(2_000_000);
+
+            let usage = app.cost_book.typical_at(&call, &rates).unwrap();
+
+            assert_eq!(
+                usage,
+                Metered {
+                    output_tokens: 2_000_000,
+                    ..Metered::default()
+                }
+            );
+            assert!(rates.price(call.provider, &call.model, &usage).is_some());
+            // A model no rate covers stays without a price.
+            let nameless = call.clone().with_model("nameless-9");
+            let usage = app.cost_book.typical_at(&nameless, &rates).unwrap();
+            assert_eq!(
+                rates.price(nameless.provider, &nameless.model, &usage),
+                None
             );
         }
 

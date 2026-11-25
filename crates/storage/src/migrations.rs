@@ -69,7 +69,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0065_job_paid_call.sql"),
     include_str!("../migrations/0066_product.sql"),
     include_str!("../migrations/0067_scene_portraits.sql"),
-    include_str!("../migrations/0068_product_sheet.sql"),
+    include_str!("../migrations/0068_spend_cap_kind.sql"),
+    include_str!("../migrations/0069_product_sheet.sql"),
 ];
 
 /// The schema version this build migrates every database to (SQLite's
@@ -675,6 +676,54 @@ mod tests {
                 [],
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn projects_from_before_default_caps_keep_the_cap_they_had() {
+        let before = MIGRATIONS
+            .iter()
+            .position(|sql| sql.contains("ADD COLUMN spend_cap_kind"))
+            .expect("the migration that adds the kind of cap");
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..before] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", before as i64)
+            .unwrap();
+        // One with a cap its user typed, one without.
+        conn.execute_batch(
+            "INSERT INTO user_profile (id, ui_language) VALUES ('p', 'en-US');
+             INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language,
+                 country)
+             VALUES ('c', 'p', 'Space', '', '', 'en', 'US');
+             INSERT INTO theme (id, profile_id, channel_id, niche, title, angle, status,
+                 suggested_at, position)
+             VALUES ('t1', 'p', 'c', 'space', 'One', '', 'approved', 0, 0),
+                    ('t2', 'p', 'c', 'space', 'Two', '', 'approved', 0, 1);
+             INSERT INTO video_project (id, profile_id, channel_id, theme_id, niche, title,
+                 created_at, spend_cap_micros)
+             VALUES ('typed', 'p', 'c', 't1', 'space', 'One', 1, 2500000),
+                    ('none', 'p', 'c', 't2', 'space', 'Two', 2, NULL);",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let cap = |id: &str| -> (String, Option<i64>) {
+            conn.query_row(
+                "SELECT spend_cap_kind, spend_cap_micros FROM video_project WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(cap("typed"), ("own".to_owned(), Some(2_500_000)));
+        assert_eq!(
+            cap("none"),
+            ("not_offered".to_owned(), None),
+            "offered the default once, not given it"
         );
     }
 

@@ -857,6 +857,37 @@ impl Bardo {
             .is_some_and(|(product, _)| self.sheet_is_busy(product))
     }
 
+    /// The paid calls a retry of the sheet job `job` would still make: the
+    /// research at the ceiling its limits allow unless the job holds its
+    /// notes, and the sheet unless it holds the answer. `None` when it is
+    /// no sheet job, its product is gone or nothing is left to pay for.
+    pub(crate) fn sheet_calls_left(&self, job: &Job) -> Option<Vec<PlannedCall>> {
+        if job.kind() != JobKind::ProductResearch {
+            return None;
+        }
+        let (id, source) = job_of(job)?;
+        let product = self.sheet_product(id).ok()?;
+        let pictures = self.products.image_count(id).ok()?;
+        let held: Checkpoint = job
+            .checkpoint()
+            .and_then(|saved| serde_json::from_str(saved).ok())
+            .unwrap_or_default();
+        if held.sheet.is_some() {
+            return None;
+        }
+        Some(match source {
+            SheetRun::Research if held.notes.is_none() => {
+                self.research_calls(&product, pictures, true).to_vec()
+            }
+            SheetRun::Research => vec![PlannedCall::new(
+                Provider::Claude,
+                CostPurpose::ProductSheet,
+                1,
+            )],
+            SheetRun::Brief => self.brief_calls(&product, pictures).to_vec(),
+        })
+    }
+
     /// The calls of a research: the research itself and the sheet written
     /// from its notes. `at_most` counts the research at the ceiling its
     /// limits allow, as the estimate before a run shows it; otherwise at
@@ -1688,6 +1719,58 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(h.researcher.requests().len(), 1);
+    }
+
+    #[test]
+    fn a_failed_research_run_again_from_jobs_asks_about_the_budget_first() {
+        let h = Harness::new();
+        let app = h.start();
+        let product = product(&app);
+        // The research failed after Claude billed part of it.
+        *h.researcher.failure.lock().unwrap() = Some(
+            ProviderFailure::new(ProviderFailureKind::ProviderDown, "overloaded")
+                .billed("claude-opus-5-5", FakeResearcher::usage()),
+        );
+        let job = app
+            .research_product(product.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, job).state(), JobState::Failed);
+        *h.researcher.failure.lock().unwrap() = None;
+        assert!(app.retry_question(job).is_none(), "no budget, no question");
+
+        // A new research at its ceiling would pass the budget set since.
+        app.set_budget(Provider::Claude, "1.00").unwrap();
+        let Err(crate::JobActionError::OverBudget(estimate)) = app.retry_job(job) else {
+            panic!("the retry went ahead");
+        };
+        assert_eq!(
+            estimate.total(),
+            app.product_sheet(product.id).unwrap().research.total()
+        );
+        assert_eq!(h.researcher.requests().len(), 1, "nothing was sent");
+        assert_eq!(app.retry_question(job), Some(*estimate));
+
+        // With the user's word, it runs; its sheet call then fails.
+        *h.text.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::ProviderDown,
+            "overloaded",
+        ));
+        app.retry_job_with(job, BudgetConsent::Confirmed).unwrap();
+        assert_eq!(wait_done(&app, job).state(), JobState::Failed);
+        assert_eq!(h.researcher.requests().len(), 2);
+
+        // The notes are held: only the sheet is left to pay for, and that
+        // fits the budget.
+        *h.text.failure.lock().unwrap() = None;
+        h.answer(sheet_answer(usual_claims()));
+        assert!(app.retry_question(job).is_none());
+        app.retry_job(job).unwrap();
+        done(&app, job);
+        assert_eq!(h.researcher.requests().len(), 2, "the notes were kept");
+        assert!(
+            app.retry_question(job).is_none(),
+            "a job that is done has nothing to ask"
+        );
     }
 
     #[test]

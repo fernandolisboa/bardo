@@ -448,7 +448,7 @@ mod tests {
                 persona: None,
                 format: None,
                 production: None,
-                spend_cap: None,
+                spend_cap: crate::SpendCap::Default,
                 style: None,
                 length: None,
             };

@@ -1,7 +1,7 @@
 use bardo_domain::{
     ChannelId, Confidence, EvidenceScope, JobId, Money, Niche, PerformanceEvidence,
     PerformanceReason, PersonaId, ProductionMode, ProfileId, Reason, RepositoryError, Score,
-    StyleChoice, Theme, ThemeId, ThemeIdea, ThemeRanking, ThemeRecord, ThemeRepository,
+    SpendCap, StyleChoice, Theme, ThemeId, ThemeIdea, ThemeRanking, ThemeRecord, ThemeRepository,
     VideoFormat, VideoLength, VideoProject, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
@@ -18,7 +18,8 @@ const SELECT_THEME: &str = "SELECT id, profile_id, channel_id, niche, title, ang
     FROM theme";
 
 pub(crate) const SELECT_PROJECT: &str = "SELECT id, profile_id, channel_id, niche, theme_id, title, created_at, persona_id, \
-     video_format, production_mode, spend_cap_micros, video_length, visual_style \
+     video_format, production_mode, spend_cap_micros, video_length, visual_style, \
+     spend_cap_kind \
      FROM video_project";
 
 #[derive(Debug, thiserror::Error)]
@@ -257,6 +258,7 @@ pub(crate) struct ProjectRow {
     spend_cap: Option<i64>,
     length: Option<String>,
     style: Option<String>,
+    spend_cap_kind: String,
 }
 
 impl ProjectRow {
@@ -275,6 +277,7 @@ impl ProjectRow {
             spend_cap: row.get(10)?,
             length: row.get(11)?,
             style: row.get(12)?,
+            spend_cap_kind: row.get(13)?,
         })
     }
 
@@ -299,10 +302,13 @@ impl ProjectRow {
                 .production
                 .map(|code| code.parse::<ProductionMode>().map_err(boxed))
                 .transpose()?,
-            spend_cap: self
-                .spend_cap
-                .map(|micros| u64::try_from(micros).map(Money::from_micros).map_err(boxed))
-                .transpose()?,
+            spend_cap: SpendCap::restore(
+                &self.spend_cap_kind,
+                self.spend_cap
+                    .map(|micros| u64::try_from(micros).map(Money::from_micros).map_err(boxed))
+                    .transpose()?,
+            )
+            .map_err(boxed)?,
             length: self
                 .length
                 .map(|code| code.parse::<VideoLength>().map_err(boxed))
@@ -323,8 +329,9 @@ pub(crate) fn insert_project(
     tx.execute(
         "INSERT INTO video_project (id, profile_id, channel_id, niche, theme_id, title,
                                     created_at, persona_id, video_format, production_mode,
-                                    spend_cap_micros, video_length, visual_style)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                    spend_cap_micros, video_length, visual_style,
+                                    spend_cap_kind)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             project.id.to_string(),
             project.owner.to_string(),
@@ -336,9 +343,10 @@ pub(crate) fn insert_project(
             project.persona.map(|id| id.to_string()),
             project.format.map(VideoFormat::code),
             project.production.map(ProductionMode::code),
-            project.spend_cap.map(micros).transpose()?,
+            project.spend_cap.own().map(micros).transpose()?,
             project.length.map(VideoLength::code),
             project.style.map(StyleChoice::code),
+            project.spend_cap.code(),
         ],
     )
     .map_err(boxed)?;
@@ -463,12 +471,17 @@ impl ThemeRepository for Database {
     fn set_project_spend_cap(
         &self,
         id: VideoProjectId,
-        cap: Option<Money>,
+        cap: SpendCap,
     ) -> Result<(), RepositoryError> {
         self.conn()
             .execute(
-                "UPDATE video_project SET spend_cap_micros = ?2 WHERE id = ?1",
-                params![id.to_string(), cap.map(micros).transpose()?],
+                "UPDATE video_project SET spend_cap_micros = ?2, spend_cap_kind = ?3
+                 WHERE id = ?1",
+                params![
+                    id.to_string(),
+                    cap.own().map(micros).transpose()?,
+                    cap.code()
+                ],
             )
             .map_err(boxed)?;
         Ok(())
@@ -719,19 +732,66 @@ mod tests {
         let project = approved.approve(time(1_800_000_200)).unwrap();
         db.start_project(&approved, &project).unwrap();
         let stored = || db.project(project.id).unwrap().unwrap();
-        assert_eq!((stored().production, stored().spend_cap), (None, None));
+        assert_eq!(
+            (stored().production, stored().spend_cap),
+            (None, SpendCap::Default),
+            "a new project starts with the default cap"
+        );
 
         db.set_project_production(project.id, Some(ProductionMode::Economy))
             .unwrap();
-        db.set_project_spend_cap(project.id, Some(Money::from_cents(250)))
-            .unwrap();
+        let own = SpendCap::Own(Money::from_cents(250));
+        db.set_project_spend_cap(project.id, own).unwrap();
         assert_eq!(stored().production, Some(ProductionMode::Economy));
-        assert_eq!(stored().spend_cap, Some(Money::from_cents(250)));
+        assert_eq!(stored().spend_cap, own);
         assert_eq!(db.projects(channel.id).unwrap(), [stored()]);
 
         db.set_project_production(project.id, None).unwrap();
-        db.set_project_spend_cap(project.id, None).unwrap();
-        assert_eq!((stored().production, stored().spend_cap), (None, None));
+        for cap in [SpendCap::Off, SpendCap::NotOffered, SpendCap::Default] {
+            db.set_project_spend_cap(project.id, cap).unwrap();
+            assert_eq!((stored().production, stored().spend_cap), (None, cap));
+        }
+    }
+
+    #[test]
+    fn projects_from_before_default_caps_read_as_what_they_had() {
+        let (db, channel) = setup();
+        let mut themes = [
+            theme(&channel, "The lost cosmonauts", 0),
+            theme(&channel, "The last lighthouse", 1),
+        ];
+        db.save_themes(&themes).unwrap();
+        let mut ids = Vec::new();
+        for theme in &mut themes {
+            let project = theme.approve(time(1_800_000_200)).unwrap();
+            db.start_project(theme, &project).unwrap();
+            ids.push(project.id);
+        }
+        // As the migration leaves them (see `migrations`): a cap the user
+        // typed, and none.
+        db.conn()
+            .execute(
+                "UPDATE video_project SET spend_cap_kind = 'own', spend_cap_micros = ?2
+                 WHERE id = ?1",
+                params![ids[0].to_string(), 2_500_000_i64],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE video_project SET spend_cap_kind = 'not_offered', spend_cap_micros = NULL
+                 WHERE id = ?1",
+                params![ids[1].to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            db.project(ids[0]).unwrap().unwrap().spend_cap,
+            SpendCap::Own(Money::from_cents(250))
+        );
+        assert_eq!(
+            db.project(ids[1]).unwrap().unwrap().spend_cap,
+            SpendCap::NotOffered,
+            "offered the default once"
+        );
     }
 
     #[test]

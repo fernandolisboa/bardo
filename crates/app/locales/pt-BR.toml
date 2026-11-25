@@ -398,6 +398,7 @@ scenes_taken = "Outra tarefa está trabalhando nestas cenas agora. Tente esta de
 take_from_page = "Nada desta tomada chegou ao provedor ainda. Faça de novo na etapa Captura, que confere antes o teto do vídeo, a tomada de teste e as checagens antes do envio."
 narration_busy = "Há uma narração sendo feita para este projeto, e o que esta tarefa fizesse agora ficaria desatualizado na hora. Quando a narração ficar pronta, traga as cenas para ela na etapa Cenas antes."
 scenes_busy = "Há cenas, imagens ou clipes sendo feitos para este projeto, ou uma tarefa cancelada ainda está parando. Execute de novo quando terminarem, ou cancele antes."
+over_budget = "O que falta desta tarefa precisa da sua confirmação de gasto. Tente de novo pelo painel de Tarefas, que pergunta."
 asks_first = "As cenas deste vídeo têm imagens ou clipes que executar isto de novo deixaria desatualizados ou descartaria. Comece pela etapa correspondente no projeto, que mostra o que está em jogo e pergunta antes."
 
 [setup]
@@ -651,12 +652,18 @@ estimate_partial = "Vídeo inteiro: cerca de {total}, mais chamadas sem preço (
 
 [projects.cap]
 label = "Teto"
-hint = "Quanto este vídeo pode custar antes de o Bardo perguntar. Um passo pago que passaria dele pergunta antes, com quanto o resto do vídeo custa. Vazio: sem teto."
+hint = "O teto é quanto este vídeo pode custar antes de o Bardo perguntar. Um vídeo novo começa com o padrão do seu formato e o acompanha se o formato mudar; digite outro valor, ou deixe vazio para não ter teto. Um passo pago que passaria dele pergunta antes, com quanto o resto do vídeo custa."
 placeholder = "Sem teto"
 save = "Salvar"
 saved = "Teto salvo."
 invalid = "Digite um valor acima de zero, como 5.00, ou deixe vazio para não ter teto."
 over = "Acima do teto de {cap}"
+default = "Padrão"
+use_default = "Usar o padrão ({cap})"
+offer = "Vídeos novos começam com um teto de {cap}: o Bardo pergunta antes de um passo pago levar o vídeo além dele. Este vídeo começou antes disso e não tem teto."
+offer_accept = "Usar {cap}"
+offer_decline = "Continuar sem teto"
+kept = "Este vídeo continua sem teto."
 
 [projects.error]
 not_loaded = "Não foi possível carregar os projetos de vídeo."
@@ -1539,6 +1546,8 @@ project_spent = "Este vídeo até agora: {amount}"
 [budget]
 reached_title = "Orçamento atingido"
 reached_line = "{provider}: {spent} do orçamento de {budget} gastos este mês, e isto custa cerca de {amount}."
+unknown_title = "Preço desconhecido"
+unknown_line = "{provider}: nenhuma tarifa cobre {model}, então não se sabe quanto isto custa. Você pode adicionar uma na tela Custos."
 cap_title = "Acima do teto deste vídeo"
 cap_line = "Este vídeo já custou {spent} do teto de {cap}; este passo custa cerca de {amount}, e o resto do vídeo cerca de {rest}."
 question = "Gerar mesmo assim?"
@@ -2944,7 +2953,7 @@ body = "Um Short é um vídeo vertical de 45 a 60 segundos; um vídeo longo é 1
 
 [tour.projects.mode]
 title = "Como é produzido, e quanto custa"
-body = "O modo diz quais cenas viram clipes de IA e com qual modelo: Econômico mantém imagens com movimento, Gancho animado anima os primeiros 10 segundos, Tudo animado e premium animam todas as cenas. Cada opção mostra quanto o vídeo inteiro custaria antes de gerar qualquer coisa, e o teto faz o Bardo perguntar antes de um passo que passaria dele."
+body = "O modo diz quais cenas viram clipes de IA e com qual modelo: Econômico mantém imagens com movimento, Gancho animado anima os primeiros 10 segundos, Tudo animado e premium animam todas as cenas. Cada opção mostra quanto o vídeo inteiro custaria antes de gerar qualquer coisa, e o teto faz o Bardo perguntar antes de um passo que passaria dele: US$ 5 para um Short e US$ 20 para um vídeo longo, a não ser que você defina o seu."
 
 [tour.projects.stages]
 title = "As etapas"
@@ -3469,7 +3478,7 @@ body = "Cancelar para uma tarefa em execução ou na fila e guarda o que ela fez
 
 [tour.jobs.retry]
 title = "Tentar de novo"
-body = "Uma falha passageira, como uma conexão que não pôde ser feita, faz a tarefa tentar de novo sozinha, até quatro tentativas no total. Uma duradoura para a tarefa: resolva o que ela diz, e Tentar de novo continua de onde parou. Um pedido pago que foi enviado e ficou sem resposta não é reenviado sozinho, porque o provedor pode ter cobrado por ele."
+body = "Uma falha passageira, como uma conexão que não pôde ser feita, faz a tarefa tentar de novo sozinha, até quatro tentativas no total. Uma duradoura para a tarefa: resolva o que ela diz, e Tentar de novo continua de onde parou, e pergunta antes quando as imagens ou os clipes ainda a pagar passariam do teto do vídeo ou de um orçamento, ou não têm preço. Um pedido pago que foi enviado e ficou sem resposta não é reenviado sozinho, porque o provedor pode ter cobrado por ele."
 
 [tour.jobs.restart]
 title = "Fechar o Bardo no meio de uma tarefa"

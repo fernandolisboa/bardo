@@ -1731,6 +1731,7 @@ mod tests {
                  ALTER TABLE cost_record DROP COLUMN cache_read_tokens;
                  ALTER TABLE cost_record DROP COLUMN cache_write_tokens;
                  ALTER TABLE cost_record DROP COLUMN searches;
+                 ALTER TABLE video_project DROP COLUMN spend_cap_kind;
                  ALTER TABLE scene_cast DROP COLUMN described_only;
                  ALTER TABLE scene DROP COLUMN pending_portraits;
                  ALTER TABLE scene DROP COLUMN image_portraits;
