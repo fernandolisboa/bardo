@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=utf-8
+
+{"data":[{"id":"1880028106020516020","text":"Unrelated.","edit_history_tweet_ids":["1880028106020516020"]},{"id":"1880028106020516015","text":"@someone thanks!","edit_history_tweet_ids":["1880028106020516015"]}],"meta":{"newest_id":"1880028106020516020","oldest_id":"1880028106020516015","result_count":2,"next_token":"7140dibdnow9c7btw482gs8uvjq5c0lp26b8ipt9kkl2"}}

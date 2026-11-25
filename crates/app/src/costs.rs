@@ -169,7 +169,7 @@ pub(crate) struct PlannedCall {
     /// Seconds of audio, when known before the job.
     pub(crate) audio_seconds: Option<u64>,
     /// Output tokens, when known before the job (a take model billed by
-    /// its video's tokens).
+    /// its video's tokens, a scene plan sized from its narration).
     pub(crate) output_tokens: Option<u64>,
 }
 
@@ -1141,15 +1141,17 @@ pub(crate) mod tests {
             assert_eq!(record.model, bardo_ai::claude::MODEL);
             assert_eq!(record.job, Some(id));
             assert_eq!(record.channel, Some(project.channel));
-            // The prompt is known; the answer is the first guess of a plan.
+            // The prompt is known; the answer is what a plan of this
+            // narration usually takes, thought included.
             let request = asked.last().unwrap();
             let chars = request.instructions.chars().count() + request.prompt.chars().count();
+            let narration = app.narrations.narration(project.id).unwrap().unwrap();
             assert_eq!(
                 record.usage,
                 Metered {
                     input_tokens: (chars as u64).div_ceil(4),
-                    output_tokens: first_guess(CostPurpose::ScenePlan, Provider::Claude)
-                        .output_tokens,
+                    output_tokens: bardo_domain::ScenePlanSize::of(&narration)
+                        .output_tokens_usually(),
                     ..Metered::default()
                 }
             );

@@ -231,7 +231,7 @@ impl ProjectsScreen {
         let states = scene_states(view, stage);
         let selected = self.shown_scene(&states);
         parts.toolbar = Some(self.scenes_toolbar(stage, view, &states, cx));
-        parts.notices.extend(self.scenes_notices(view, cx));
+        parts.notices.extend(self.scenes_notices(stage, view, cx));
         parts.collection = Some(self.scene_grid(stage, view, &states, selected, cx));
         parts.inspector = view
             .plan
@@ -417,8 +417,10 @@ impl ProjectsScreen {
             .version
             .as_ref()
             .is_some_and(|version| version.can_place);
-        let plans_first = plan.is_none() || (stale && !can_place && !view.can_fit);
-        let can_plan = !busy && !view.is_animating() && view.narration.is_some();
+        let can_plan = !busy && !view.is_animating() && view.narration.is_some() && !view.too_long;
+        // A plan that cannot be asked for leads nothing; nor does one whose
+        // scenes can be fitted, which keeps their pictures.
+        let plans_first = (plan.is_none() || (stale && !can_place && !view.can_fit)) && can_plan;
         let plan_button = can_plan.then(|| {
             let button = Button::new("plan-scenes").small().label(tr(
                 bardo,
@@ -463,6 +465,9 @@ impl ProjectsScreen {
         });
         let hint = match (view.narration, plan) {
             (None, _) => tr(bardo, Text::ScenesNoNarration),
+            // With a plan the notice above says it; the hint is about the
+            // images still to draw.
+            (Some(_), None) if view.too_long => tr(bardo, Text::ScenesNarrationTooLong),
             (Some(_), None) => SharedString::from(bardo.text_with(
                 Text::PlanScenesHint,
                 &[("n", &view.template.number.to_string())],
@@ -842,7 +847,12 @@ impl ProjectsScreen {
     /// What happened to the scenes: an error, the job, why nothing can be
     /// planned yet, and the questions before discarding images or going
     /// past a budget.
-    fn scenes_notices(&self, view: &ScenesView, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn scenes_notices(
+        &self,
+        stage: Stage,
+        view: &ScenesView,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let job = view
             .job
             .as_ref()
@@ -909,6 +919,12 @@ impl ProjectsScreen {
         let no_narration = view.narration.is_none().then(|| {
             kit::notice(Tone::Info, tr(bardo, Text::ScenesNoNarration), cx).into_any_element()
         });
+        // Where the plan is asked for: the clips of a plan already made
+        // do not wait for another.
+        let too_long = (view.too_long && stage == Stage::Scenes).then(|| {
+            kit::notice(Tone::Warning, tr(bardo, Text::ScenesNarrationTooLong), cx)
+                .into_any_element()
+        });
         let place = self.render_place_scenes(view, cx);
         let fit = self.render_fit_scenes(view, cx);
         let restyled = self.render_restyled(view, cx);
@@ -918,6 +934,7 @@ impl ProjectsScreen {
             .into_iter()
             .chain(job)
             .chain(no_narration)
+            .chain(too_long)
             .chain(place)
             .chain(fit)
             .chain(restyled)

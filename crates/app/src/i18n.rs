@@ -919,6 +919,7 @@ pub enum Text {
     RejectSceneClip,
     ScenesNoNarration,
     ScenesNoPlan,
+    ScenesNarrationTooLong,
     SceneNotFound,
     ScenesMissingClaudeKey,
     ScenesMissingGeminiKey,
@@ -1973,6 +1974,8 @@ pub enum Text {
     UploadRestrictedCauses,
     UploadFailureQuota,
     UploadFailureCredits,
+    /// A post that was sent and got no answer: it may be live.
+    UploadFailureAnswerLost,
     UploadFailureUploadLimit,
     UploadFailureReconnect,
     UploadFailureRejected,
@@ -3583,6 +3586,7 @@ impl Text {
             Text::RejectSceneClip => "scenes.clip.reject",
             Text::ScenesNoNarration => "scenes.error.no_narration",
             Text::ScenesNoPlan => "scenes.error.no_plan",
+            Text::ScenesNarrationTooLong => "scenes.error.narration_too_long",
             Text::SceneNotFound => "scenes.error.scene_not_found",
             Text::ScenesMissingClaudeKey => "scenes.error.missing_claude_key",
             Text::ScenesMissingGeminiKey => "scenes.error.missing_gemini_key",
@@ -4622,6 +4626,7 @@ impl Text {
             Text::UploadRestrictedCauses => "upload.restricted_causes",
             Text::UploadFailureQuota => "upload.failure.quota",
             Text::UploadFailureCredits => "upload.failure.credits",
+            Text::UploadFailureAnswerLost => "upload.failure.answer_lost",
             Text::UploadFailureUploadLimit => "upload.failure.upload_limit",
             Text::UploadFailureReconnect => "upload.failure.reconnect",
             Text::UploadFailureRejected => "upload.failure.rejected",
@@ -5966,6 +5971,7 @@ mod tests {
             Text::RejectSceneClip,
             Text::ScenesNoNarration,
             Text::ScenesNoPlan,
+            Text::ScenesNarrationTooLong,
             Text::SceneNotFound,
             Text::ScenesMissingClaudeKey,
             Text::ScenesMissingGeminiKey,
@@ -7212,6 +7218,7 @@ mod tests {
         texts.push(Text::UploadRestrictedCauses);
         texts.push(Text::UploadFailureQuota);
         texts.push(Text::UploadFailureCredits);
+        texts.push(Text::UploadFailureAnswerLost);
         texts.push(Text::UploadFailureUploadLimit);
         texts.push(Text::UploadFailureReconnect);
         texts.push(Text::UploadFailureRejected);

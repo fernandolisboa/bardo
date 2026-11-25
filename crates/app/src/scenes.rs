@@ -47,10 +47,10 @@ use bardo_domain::{
     Narration, NarrationId, NarrationRepository, NoPendingClip, NoPendingImage, NoSuchCastMember,
     NoSuchPlace, NoSuchScene, OtherShot, OtherText, PlaceDraft, PlanDraft, ProfileId, Progress,
     ProjectFiles, Provider, ReferenceImage, RenderedPrompt, RepositoryError, SceneDraft,
-    SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt,
-    SceneSetting, SecretStore, StyleChoice, TemplateKind, TemplateUsed, TemplateVariable,
-    TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest,
-    VideoProject, VideoProjectId, scene_image_prompt, sentences,
+    SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePlanSize,
+    ScenePrompt, SceneSetting, SecretStore, StyleChoice, TemplateKind, TemplateUsed,
+    TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator,
+    TextRequest, VideoProject, VideoProjectId, scene_image_prompt, sentences,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
@@ -100,6 +100,9 @@ pub enum SceneError {
     /// they cannot be fitted to it; planning again is the way.
     #[error(transparent)]
     OtherText(#[from] OtherText),
+    /// The narration has more scenes than one plan is asked for.
+    #[error("the narration is too long to plan its scenes")]
+    NarrationTooLong,
     /// Planning again would discard this many images; ask first.
     #[error("planning again discards {0} images")]
     WouldDiscardImages(usize),
@@ -137,6 +140,7 @@ impl SceneError {
             SceneError::ProjectNotFound => Text::ProjectNotFound,
             SceneError::NoNarration => Text::ScenesNoNarration,
             SceneError::NoPlan => Text::ScenesNoPlan,
+            SceneError::NarrationTooLong => Text::ScenesNarrationTooLong,
             SceneError::SceneNotFound(_)
             | SceneError::CastMemberNotFound(_)
             | SceneError::PlaceNotFound(_) => Text::SceneNotFound,
@@ -192,8 +196,12 @@ pub struct ScenesView {
     pub job: Option<Job>,
     /// The template version the next plan uses.
     pub template: TemplateVersion,
-    /// What planning the scenes would cost; `None` without a narration.
+    /// What planning the scenes would cost; `None` without a narration or
+    /// with one too long to plan.
     pub plan_estimate: Option<SpendEstimate>,
+    /// The narration is too long to plan its scenes: **Plan scenes** would
+    /// refuse it.
+    pub too_long: bool,
     /// What drawing the missing images would cost; `None` when none is
     /// missing.
     pub images_estimate: Option<SpendEstimate>,
@@ -215,10 +223,25 @@ pub struct ScenesView {
     pub restyle_estimate: Option<SpendEstimate>,
 }
 
-/// Claude's call that plans scenes from `rendered`.
-fn plan_call(rendered: &RenderedPrompt) -> PlannedCall {
+/// Claude's call that plans the scenes of a narration of `size`. What the
+/// plan writes follows the narration's length, so it is estimated from
+/// that and not from what plans of other videos took.
+pub(crate) fn sized_plan_call(size: ScenePlanSize) -> PlannedCall {
     PlannedCall::new(Provider::Claude, CostPurpose::ScenePlan, 1)
+        .with_output_tokens(size.output_tokens_usually())
+}
+
+/// Claude's call that plans the scenes of `narration` from `rendered`.
+fn plan_call(rendered: &RenderedPrompt, narration: &Narration) -> PlannedCall {
+    sized_plan_call(ScenePlanSize::of(narration))
         .with_prompt(&rendered.instructions, &rendered.prompt)
+}
+
+/// Whether a plan of `narration` is too large to ask for: its room passes
+/// what Claude can be asked to leave for one answer. A plan cut at the
+/// model's limit is paid for and lost.
+fn too_long_to_plan(narration: &Narration) -> bool {
+    ScenePlanSize::of(narration).answer_tokens_at_most() > bardo_ai::claude::longest_answer()
 }
 
 /// Nano Banana's calls that draw `images` images, portraits included.
@@ -625,9 +648,19 @@ impl SceneHandler {
                 JobFailure::unexpected("the narration changed while the scenes were planned")
             })?;
 
+        // Asked before the job was queued, and again here: a job queued
+        // before the question existed, or tried again from the queue, did
+        // not pass it.
+        if too_long_to_plan(&narration) {
+            return Err(JobFailure::unexpected(
+                "the narration is too long to plan its scenes in one answer",
+            ));
+        }
         let key = self.key(Provider::Claude)?;
+        let size = ScenePlanSize::of(&narration);
         let request = TextRequest {
             effort: TextEffort::Careful,
+            answer_tokens: Some(size.answer_tokens_at_most()),
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),
@@ -637,9 +670,11 @@ impl SceneHandler {
         };
         let generated = self.text.generate(&key, &request).map_err(|failure| {
             // An answer that was lost or cut may still have been billed.
+            // One that was lost is recorded as a plan of this length, as
+            // it was estimated: what other plans took says little.
             self.costs.record_failed_for_project(
                 &failure,
-                &PlannedCall::text(CostPurpose::ScenePlan, &request),
+                &sized_plan_call(size).with_prompt(&request.instructions, &request.prompt),
                 Some(job),
                 project,
             );
@@ -1236,12 +1271,13 @@ impl Bardo {
         let narration = self.narrations.narration(project.id)?;
         let plan = self.scene_plans.scene_plan(project.id)?;
         let template = self.current_template(TemplateKind::ImagePrompt)?;
+        let too_long = narration.as_ref().is_some_and(too_long_to_plan);
         let plan_estimate = match &narration {
-            Some(narration) => {
+            Some(narration) if !too_long => {
                 let rendered = self.render_plan(&project, narration, &template)?;
-                Some(self.estimate(&[plan_call(&rendered)])?)
+                Some(self.estimate(&[plan_call(&rendered, narration)])?)
             }
-            None => None,
+            _ => None,
         };
         let style = self.video_style(&project)?;
         let missing = plan.as_ref().map_or(0, |plan| {
@@ -1292,6 +1328,7 @@ impl Bardo {
             job: self.latest_scene_job(project.id),
             template,
             plan_estimate,
+            too_long,
             project,
             style,
             restyled,
@@ -1348,6 +1385,9 @@ impl Bardo {
             .narrations
             .narration(project.id)?
             .ok_or(SceneError::NoNarration)?;
+        if too_long_to_plan(&narration) {
+            return Err(SceneError::NarrationTooLong);
+        }
         self.scenes_idle(project.id)?;
         if self.clips_busy(project.id) {
             return Err(SceneError::Busy);
@@ -1366,7 +1406,7 @@ impl Bardo {
         self.require_key(Provider::Claude)?;
         let template = self.current_template(TemplateKind::ImagePrompt)?;
         let rendered = self.render_plan(&project, &narration, &template)?;
-        self.scenes_budget(project.id, plan_call(&rendered), consent)?;
+        self.scenes_budget(project.id, plan_call(&rendered, &narration), consent)?;
         let payload = PlanPayload {
             project: project.id.to_string(),
             narration: narration.id.to_string(),
@@ -1646,7 +1686,8 @@ pub(crate) mod tests {
     use std::time::Instant;
 
     use bardo_domain::{
-        ChannelDraft, ContentLanguage, Country, JobState, ProviderFailure, ProviderFailureKind,
+        Alignment, ChannelDraft, CharTiming, ContentLanguage, Country, JobState, ProviderFailure,
+        ProviderFailureKind, ScriptText, TokenUsage, WordTimings,
     };
     use bardo_storage::{Database, MemoryProjectFiles, MemorySecretStore};
 
@@ -2079,6 +2120,213 @@ pub(crate) mod tests {
         assert_eq!(generation.prompt, request.prompt);
         assert_eq!(generation.output, plan_answer());
         assert_eq!(generation.job, Some(job.id()));
+    }
+
+    /// Replaces `project`'s narration with one of `sentences` short
+    /// sentences that lasts `length`.
+    fn narrate_at_length(
+        app: &Bardo,
+        project: &VideoProject,
+        sentences: usize,
+        length: Duration,
+    ) -> Narration {
+        let mut narration = app.narrations.narration(project.id).unwrap().unwrap();
+        let text = vec!["Segue."; sentences].join(" ");
+        let chars: Vec<char> = text.chars().collect();
+        let step = length / chars.len() as u32;
+        let alignment = Alignment {
+            chars: chars
+                .iter()
+                .enumerate()
+                .map(|(n, c)| CharTiming {
+                    text: c.to_string(),
+                    start: step * n as u32,
+                    end: step * (n as u32 + 1),
+                })
+                .collect(),
+        };
+        narration.words = WordTimings::from_alignment(&text, &alignment);
+        narration.text = ScriptText::new(&text).unwrap();
+        narration.duration = length;
+        app.narrations.save_narration(&narration).unwrap();
+        narration
+    }
+
+    #[test]
+    fn the_plan_asks_for_room_by_the_length_of_the_narration() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = h.narrated_project(&app);
+        // The harness narrates for one second: one scene at most.
+        h.answer(plan_answer());
+        done(
+            &app,
+            app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let request = h.text.requests().pop().unwrap();
+        let short = app.narrations.narration(project.id).unwrap().unwrap();
+        assert_eq!(
+            request.answer_tokens,
+            Some(ScenePlanSize::of(&short).answer_tokens_at_most())
+        );
+
+        // Ten minutes with a sentence every four seconds: up to 150 scenes,
+        // sixteen times the plan above.
+        let narration = narrate_at_length(&app, &project, 150, Duration::from_secs(600));
+        h.answer(plan_answer());
+        done(
+            &app,
+            app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let request = h.text.requests().pop().unwrap();
+        assert_eq!(request.effort, TextEffort::Careful);
+        let size = ScenePlanSize::of(&narration);
+        assert_eq!(size.scenes_at_most(), 150);
+        assert_eq!(request.answer_tokens, Some(size.answer_tokens_at_most()));
+    }
+
+    /// The most sentences, one every four seconds, a narration can have and
+    /// still be planned.
+    fn most_scenes() -> usize {
+        let fits = |scenes: usize| {
+            ScenePlanSize::new(scenes, Duration::from_secs(4 * scenes as u64))
+                .answer_tokens_at_most()
+                <= bardo_ai::claude::longest_answer()
+        };
+        let most = (1..2_000).take_while(|scenes| fits(*scenes)).count();
+        assert!((200..300).contains(&most), "{most}");
+        most
+    }
+
+    #[test]
+    fn a_narration_too_long_for_one_plan_is_refused_before_it_costs() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let asked = h.text.requests().len();
+        let jobs = app.jobs().len();
+        let most = most_scenes();
+
+        // One scene more than a plan is asked for.
+        narrate_at_length(
+            &app,
+            &project,
+            most + 1,
+            Duration::from_secs(4 * (most as u64 + 1)),
+        );
+        // Refused before the question about the images a new plan discards.
+        let error = app
+            .plan_scenes(project.id, false, BudgetConsent::Ask)
+            .unwrap_err();
+        assert!(matches!(error, SceneError::NarrationTooLong));
+        assert_eq!(error.message(), Text::ScenesNarrationTooLong);
+        assert_eq!(h.text.requests().len(), asked, "Claude was not asked");
+        assert_eq!(app.jobs().len(), jobs, "and no job waits to ask");
+        // The stage says so up front, and prices nothing.
+        let view = app.scenes(project.id).unwrap();
+        assert!(view.too_long);
+        assert_eq!(view.plan_estimate, None);
+
+        // One scene fewer fits.
+        let narration =
+            narrate_at_length(&app, &project, most, Duration::from_secs(4 * most as u64));
+        let view = app.scenes(project.id).unwrap();
+        assert!(!view.too_long);
+        assert!(view.plan_estimate.is_some());
+        h.answer(plan_answer());
+        done(
+            &app,
+            app.plan_scenes(project.id, true, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let request = h.text.requests().pop().unwrap();
+        assert_eq!(
+            request.answer_tokens,
+            Some(ScenePlanSize::of(&narration).answer_tokens_at_most())
+        );
+    }
+
+    #[test]
+    fn a_queued_plan_of_a_narration_too_long_fails_without_asking_claude() {
+        // A job from before the question existed, or one tried again from
+        // the queue, reaches the handler without passing `plan_scenes`.
+        let h = Harness::new();
+        let app = h.start();
+        let project = h.narrated_project(&app);
+        let narration = narrate_at_length(&app, &project, 400, Duration::from_secs(30 * 60));
+        let asked = h.text.requests().len();
+        let payload = PlanPayload {
+            project: project.id.to_string(),
+            narration: narration.id.to_string(),
+            template: app
+                .current_template(TemplateKind::ImagePrompt)
+                .unwrap()
+                .id
+                .to_string(),
+            template_number: 1,
+            instructions: "Plan the scenes.".into(),
+            prompt: "Every sentence.".into(),
+        };
+        let job = Job::new(app.profile.id, JobKind::ScenePlan, to_json(&payload));
+        let job = wait_done(&app, app.jobs.enqueue(job).unwrap());
+        assert_eq!(job.state(), JobState::Failed);
+        assert!(
+            job.failure().unwrap().detail.contains("too long"),
+            "{:?}",
+            job.failure()
+        );
+        assert_eq!(h.text.requests().len(), asked, "Claude was not asked");
+        assert_eq!(app.scenes(project.id).unwrap().plan, None);
+    }
+
+    #[test]
+    fn the_estimate_of_a_plan_follows_the_length_of_the_narration() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = h.narrated_project(&app);
+        let template = app.current_template(TemplateKind::ImagePrompt).unwrap();
+        let with_output = |narration: &Narration, tokens: u64| {
+            let rendered = app.render_plan(&project, narration, &template).unwrap();
+            let call = PlannedCall::new(Provider::Claude, CostPurpose::ScenePlan, 1)
+                .with_prompt(&rendered.instructions, &rendered.prompt)
+                .with_output_tokens(tokens);
+            app.estimate(&[call]).unwrap()
+        };
+        let estimate = || app.scenes(project.id).unwrap().plan_estimate.unwrap();
+
+        // The harness narrates for one second: one scene, and the thought
+        // a plan takes.
+        let short = app.narrations.narration(project.id).unwrap().unwrap();
+        let size = ScenePlanSize::of(&short);
+        assert_eq!(size.output_tokens_usually(), 760 + 10_000);
+        assert_eq!(
+            estimate(),
+            with_output(&short, size.output_tokens_usually())
+        );
+
+        // Ten minutes: a hundred scenes usually, and their thought.
+        let long = narrate_at_length(&app, &project, 150, Duration::from_secs(600));
+        let size = ScenePlanSize::of(&long);
+        assert_eq!(size.output_tokens_usually(), 16_600 + 10_000);
+        assert_eq!(estimate(), with_output(&long, size.output_tokens_usually()));
+        assert!(estimate().total() > with_output(&long, 10_760).total());
+
+        // What the plan of a long video took says nothing about a short
+        // one: after one is paid for, a Short is estimated as before.
+        *h.text.usage.lock().unwrap() = TokenUsage {
+            input_tokens: 9_000,
+            output_tokens: 40_000,
+        };
+        h.answer(plan_answer());
+        done(
+            &app,
+            app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let short = narrate_at_length(&app, &project, 4, Duration::from_secs(1));
+        assert_eq!(estimate(), with_output(&short, 10_760));
     }
 
     /// The plan of `plan_answer` with a chef in the first and last scenes.

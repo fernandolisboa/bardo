@@ -60,14 +60,14 @@ use std::time::{Duration, SystemTime};
 use bardo_domain::{
     CostPurpose, DraftRoom, DueStep, Job, JobFailure, JobFailureKind, JobId, JobKind,
     JobRepository, JobState, LIMIT_RECHECK, MetadataProblem, Metered, Network, NetworkAccount,
-    NetworkAccountId, NetworkAccountRepository, Post, Progress, ProjectFiles, Provider,
-    Publication, PublicationId, PublicationKind, PublicationRepository, ReelFile, ReelSpecProblem,
-    Render, RenderRepository, RepositoryError, ScheduleProblem, SecretText, SignInFailureKind,
-    TIKTOK_DRAFT_WINDOW, TIKTOK_PENDING_DRAFTS, ThumbnailOutcome, TikTokFile, TikTokSpecProblem,
-    Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus,
-    VideoProjectId, VideoState, VideoUpload, VideoUploader, Visibility, check_publish_time,
-    check_reel, check_tiktok, draft_room, due_step, mp4_layout, prepare_at, video_container,
-    x_post_model,
+    NetworkAccountId, NetworkAccountRepository, NetworkPost, Post, Progress, ProjectFiles,
+    Provider, Publication, PublicationId, PublicationKind, PublicationRepository, ReelFile,
+    ReelSpecProblem, Render, RenderRepository, RepositoryError, ScheduleProblem, SecretText,
+    SignInFailureKind, TIKTOK_DRAFT_WINDOW, TIKTOK_PENDING_DRAFTS, ThumbnailOutcome, TikTokFile,
+    TikTokSpecProblem, Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome,
+    UploadRun, UploadStatus, VideoProjectId, VideoState, VideoUpload, VideoUploader, Visibility,
+    check_publish_time, check_reel, check_tiktok, draft_room, due_step, mp4_layout, prepare_at,
+    video_container, x_post_model,
 };
 use serde::{Deserialize, Serialize};
 
@@ -658,6 +658,23 @@ struct UploadCheckpoint {
     /// against the inbox's cap from then.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     sessions: Vec<u64>,
+    /// A post the job asked for and does not know the end of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    posting: Option<Posting>,
+}
+
+/// A request to publish whose end the job does not know: its answer never
+/// came, the network failed on it, or Bardo closed while it waited. The
+/// network may have made the post, so the job looks for it before it asks
+/// again (ADR-0030).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct Posting {
+    /// When the first such request went, in Unix milliseconds: the post
+    /// is no older.
+    since: u64,
+    /// Its price is in Costs already, as what X may have billed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    recorded: bool,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -716,9 +733,15 @@ fn failure_of(error: &UploadError, network: Network) -> (JobFailure, Option<Uplo
         UploadErrorKind::RateLimited
         | UploadErrorKind::NetworkDown
         | UploadErrorKind::Unreachable => (JobFailureKind::ProviderUnavailable, None),
+        // The post may be live: the job does not ask again by itself.
+        UploadErrorKind::AnswerLost => (
+            JobFailureKind::AnswerLost,
+            Some(UploadFailure::Job(JobFailureKind::AnswerLost)),
+        ),
         // Not ready and expired are handled where they come (publishing);
         // anywhere else they are answers Bardo did not expect.
         UploadErrorKind::Invalid
+        | UploadErrorKind::Duplicate
         | UploadErrorKind::Unexpected
         | UploadErrorKind::NotReady
         | UploadErrorKind::Expired => (
@@ -966,6 +989,8 @@ fn live_session(cx: &JobContext, checkpoint: &UploadCheckpoint) -> Option<String
 /// How the publish step of a processed upload ended, short of a failure.
 enum Publishing {
     Done,
+    /// The run was told to stop before the post went.
+    Stopped,
     /// The network is not done with it after all: check again.
     NotReady,
     /// Over the publishing limit.
@@ -1331,10 +1356,76 @@ impl UploadHandler {
         );
     }
 
+    /// The answer to a request says `post` was made now: on the
+    /// publication, and in Costs when the network bills it.
+    fn published(
+        &self,
+        payload: &UploadPayload,
+        post: NetworkPost,
+        publication: PublicationId,
+        job: JobId,
+        network: Network,
+    ) -> Result<(), JobFailure> {
+        if let Some(issue) = &post.issue {
+            tracing::info!(network = network.code(), %issue, "published with an issue");
+        }
+        if network.bills_posts() {
+            self.record_post(payload, job);
+        }
+        self.update(publication, job, |p| p.published(post, SystemTime::now()))
+    }
+
+    /// The network shows `post`, made by a request of `posting` whose
+    /// answer never came: on the publication as posted when that request
+    /// went, and in Costs unless that request is there already.
+    fn posted(
+        &self,
+        payload: &UploadPayload,
+        post: NetworkPost,
+        posting: Posting,
+        publication: PublicationId,
+        job: JobId,
+        network: Network,
+    ) -> Result<(), JobFailure> {
+        if network.bills_posts() && !posting.recorded {
+            self.record_post(payload, job);
+        }
+        self.update(publication, job, |p| {
+            p.published(post, from_millis(posting.since))
+        })
+    }
+
+    /// The post an earlier request of the job made with `video`, when the
+    /// job does not know how that request ended.
+    fn find_post(
+        &self,
+        uploader: &dyn VideoUploader,
+        account: &NetworkAccount,
+        payload: &UploadPayload,
+        video: &str,
+        posting: Posting,
+    ) -> Result<Option<NetworkPost>, UploadError> {
+        let token = access_token(&self.connections, account)?;
+        uploader.find_post(
+            &token,
+            &payload.destination,
+            video,
+            from_millis(posting.since),
+        )
+    }
+
     /// Publishes the processed upload `video`, within the publishing limit.
+    ///
+    /// A post cannot be asked for twice, so the job keeps that it asked
+    /// before it does (`checkpoint.posting`), and a run that finds that
+    /// mark looks for the post before anything else (`run`): the earlier
+    /// request may have made it. A request whose answer never came fails
+    /// the job once, after one look, with its price in Costs (ADR-0030).
     #[allow(clippy::too_many_arguments)]
     fn publish(
         &self,
+        cx: &mut JobContext,
+        checkpoint: &mut UploadCheckpoint,
         uploader: &dyn VideoUploader,
         account: &NetworkAccount,
         payload: &UploadPayload,
@@ -1349,33 +1440,137 @@ impl UploadHandler {
             Err(error) => return Err(self.failed(publication, job, &error, network)),
         }
         let upload = payload.video()?;
-        let post = access_token(&self.connections, account)
-            .and_then(|token| uploader.publish(&token, &payload.destination, video, &upload));
-        match post {
-            Ok(post) => {
-                if let Some(issue) = &post.issue {
-                    tracing::info!(network = network.code(), %issue, "published with an issue");
-                }
-                if network.bills_posts() {
-                    self.record_post(payload, job);
-                }
-                self.update(publication, job, |p| p.published(post, SystemTime::now()))?;
-                Ok(Publishing::Done)
-            }
-            Err(error) => match error.kind {
-                UploadErrorKind::NotReady => Ok(Publishing::NotReady),
-                UploadErrorKind::Expired => Ok(Publishing::Expired),
-                // Over the limit after all (another app published in
-                // between): read it again later.
-                UploadErrorKind::UploadLimit => Ok(Publishing::Held(Held {
-                    until: to_millis(SystemTime::now() + LIMIT_RECHECK),
-                    frees: false,
-                    used: None,
-                    total: None,
-                })),
-                _ => Err(self.failed(publication, job, &error, network)),
-            },
+        let token = match access_token(&self.connections, account) {
+            Ok(token) => token,
+            Err(error) => return Err(self.failed(publication, job, &error, network)),
+        };
+        // Told to stop since the run last looked: no post starts now.
+        if cx.should_stop() {
+            return Ok(Publishing::Stopped);
         }
+        // Kept before the request goes: a run cut short while it waits for
+        // the answer looks for the post before it asks again. A mark that
+        // cannot be kept (the run lost the job) stops the run here.
+        let earlier = checkpoint.posting;
+        let posting = earlier.unwrap_or(Posting {
+            since: to_millis(SystemTime::now()),
+            recorded: false,
+        });
+        checkpoint.posting = Some(posting);
+        cx.save_checkpoint(to_json(checkpoint), sending_progress(9, 10))
+            .map_err(unexpected)?;
+        let error = match uploader.publish(&token, &payload.destination, video, &upload) {
+            Ok(post) => {
+                self.published(payload, post, publication, job, network)?;
+                return Ok(Publishing::Done);
+            }
+            Err(error) => error,
+        };
+        let look = || self.find_post(uploader, account, payload, video, posting);
+        match error.kind {
+            // Sent, and no answer: the post may be live. One look for it;
+            // when it does not show (yet), the job stops here with what
+            // the network may have billed in Costs, and looks again when
+            // the user retries.
+            UploadErrorKind::AnswerLost => {
+                // This request is not in Costs yet, whatever an earlier
+                // one is.
+                let asked = Posting {
+                    recorded: false,
+                    ..posting
+                };
+                if let Ok(Some(post)) = look() {
+                    self.posted(payload, post, asked, publication, job, network)?;
+                    return Ok(Publishing::Done);
+                }
+                Err(self.maybe_posted(
+                    cx,
+                    checkpoint,
+                    asked,
+                    payload,
+                    publication,
+                    job,
+                    network,
+                    &error,
+                ))
+            }
+            // The network says it has this post already, after a request
+            // of the job whose end is not known: that request made it,
+            // though a look before this one did not show it.
+            UploadErrorKind::Duplicate if earlier.is_some() => {
+                if let Ok(Some(post)) = look() {
+                    self.posted(payload, post, posting, publication, job, network)?;
+                    return Ok(Publishing::Done);
+                }
+                Err(self.maybe_posted(
+                    cx,
+                    checkpoint,
+                    posting,
+                    payload,
+                    publication,
+                    job,
+                    network,
+                    &error,
+                ))
+            }
+            // The network failed on the request and may have made the post
+            // all the same: the mark stays for the queue's next attempt.
+            UploadErrorKind::NetworkDown => Err(self.failed(publication, job, &error, network)),
+            _ => {
+                // Refused, or never sent: this request made no post. An
+                // earlier one still may have.
+                if earlier.is_none() {
+                    checkpoint.posting = None;
+                    cx.save_checkpoint(to_json(checkpoint), sending_progress(9, 10))
+                        .map_err(unexpected)?;
+                }
+                match error.kind {
+                    UploadErrorKind::NotReady => Ok(Publishing::NotReady),
+                    UploadErrorKind::Expired => Ok(Publishing::Expired),
+                    // Over the limit after all (another app published in
+                    // between): read it again later.
+                    UploadErrorKind::UploadLimit => Ok(Publishing::Held(Held {
+                        until: to_millis(SystemTime::now() + LIMIT_RECHECK),
+                        frees: false,
+                        used: None,
+                        total: None,
+                    })),
+                    _ => Err(self.failed(publication, job, &error, network)),
+                }
+            }
+        }
+    }
+
+    /// The post of `posting` may be live and the network does not show it:
+    /// its price goes to Costs unless it is there, the upload fails saying
+    /// so, and the mark stays for the user's retry to look again.
+    #[allow(clippy::too_many_arguments)]
+    fn maybe_posted(
+        &self,
+        cx: &mut JobContext,
+        checkpoint: &mut UploadCheckpoint,
+        posting: Posting,
+        payload: &UploadPayload,
+        publication: PublicationId,
+        job: JobId,
+        network: Network,
+        error: &UploadError,
+    ) -> JobFailure {
+        if network.bills_posts() && !posting.recorded {
+            self.record_post(payload, job);
+        }
+        checkpoint.posting = Some(Posting {
+            recorded: network.bills_posts(),
+            ..posting
+        });
+        let lost = UploadError::new(UploadErrorKind::AnswerLost, error.detail.clone());
+        let failure = self.failed(publication, job, &lost, network);
+        // After the failure is on the publication: a mark that cannot be
+        // kept costs a second record at most.
+        if let Err(error) = cx.save_checkpoint(to_json(checkpoint), sending_progress(9, 10)) {
+            tracing::warn!("could not keep that the post is in Costs: {error}");
+        }
+        failure
     }
 }
 
@@ -1564,6 +1759,25 @@ impl JobHandler for UploadHandler {
             }
             p.sent(link)
         })?;
+        // An earlier run asked for the post and never knew the end of it:
+        // the network may have made it, so it is asked before anything
+        // else, even where the upload stands (X drops the media of a post
+        // it made, like one it never used). Nothing goes while it cannot
+        // say.
+        if let Some(posting) = checkpoint.posting {
+            match self.find_post(uploader.as_ref(), &account, &payload, &video, posting) {
+                Ok(Some(post)) => {
+                    tracing::info!(
+                        network = network.code(),
+                        "found the post an earlier request made"
+                    );
+                    return self.posted(&payload, post, posting, publication_id, job, network);
+                }
+                Ok(None) => {}
+                Err(_) if cx.should_stop() => return Ok(()),
+                Err(error) => return Err(self.failed(publication_id, job, &error, network)),
+            }
+        }
         if !claim_due()? {
             return Ok(());
         }
@@ -1591,13 +1805,13 @@ impl JobHandler for UploadHandler {
             }
             let state = access_token(&self.connections, &account)
                 .and_then(|token| uploader.state(&token, &video));
-            // Not published by the cut-short run: the user decides.
             if check_only
                 && matches!(
                     state,
                     Ok(VideoState::Processing | VideoState::Processed | VideoState::Expired)
                 )
             {
+                // Not published by the cut-short run: the user decides.
                 return Err(self.miss(publication_id, job, network));
             }
             let outcome = match state {
@@ -1619,6 +1833,8 @@ impl JobHandler for UploadHandler {
                         return Ok(());
                     }
                     match self.publish(
+                        cx,
+                        &mut checkpoint,
                         uploader.as_ref(),
                         &account,
                         &payload,
@@ -1627,7 +1843,7 @@ impl JobHandler for UploadHandler {
                         job,
                         network,
                     )? {
-                        Publishing::Done => return Ok(()),
+                        Publishing::Done | Publishing::Stopped => return Ok(()),
                         Publishing::Held(held) => {
                             return Self::hold(cx, checkpoint, held, payload.size);
                         }
@@ -1752,6 +1968,10 @@ impl Bardo {
                 self.text(Text::UploadFailureScheduleMissed).into_owned()
             }
             UploadFailure::AccountChanged => with(Text::UploadFailureAccountChanged, ""),
+            // A post that was sent and got no answer.
+            UploadFailure::Job(JobFailureKind::AnswerLost) => {
+                with(Text::UploadFailureAnswerLost, "")
+            }
             UploadFailure::Job(kind) => self.text(Text::JobFailureKindName(*kind)).into_owned(),
         }
     }
@@ -2361,7 +2581,7 @@ pub(crate) mod testing {
     use std::collections::{HashMap, VecDeque};
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     use bardo_domain::{
         Network, NetworkPost, PostLink, PublishingLimit, ScheduleChange, ScheduleOutcome,
@@ -2403,6 +2623,11 @@ pub(crate) mod testing {
         pub(crate) publishes: Mutex<VecDeque<Result<NetworkPost, UploadErrorKind>>>,
         /// Every publish: the account and the upload.
         pub(crate) published: Mutex<Vec<(String, String)>>,
+        /// Answers to looking for a post made earlier; when empty, the
+        /// network shows none.
+        pub(crate) finds: Mutex<VecDeque<Result<Option<NetworkPost>, UploadErrorKind>>>,
+        /// Every such look: the account, the upload and from when.
+        pub(crate) looked: Mutex<Vec<(String, String, SystemTime)>>,
         /// The videos as each publish described them.
         pub(crate) posted: Mutex<Vec<VideoUpload>>,
         /// The account each upload went to.
@@ -2434,6 +2659,10 @@ pub(crate) mod testing {
         pub(crate) stall_publish: AtomicBool,
         /// A publish is hanging.
         pub(crate) stalled: AtomicBool,
+        /// A processing check hangs until this is cleared.
+        pub(crate) stall_state: AtomicBool,
+        /// A processing check is hanging.
+        pub(crate) state_stalled: AtomicBool,
         /// Every thumbnail set: the video and the picture.
         pub(crate) thumbnails: Mutex<Vec<(String, Vec<u8>)>>,
         /// Answers to setting a thumbnail; when empty, it is set.
@@ -2471,6 +2700,10 @@ pub(crate) mod testing {
 
         pub(crate) fn publish_answer(&self, post: Result<NetworkPost, UploadErrorKind>) {
             self.publishes.lock().unwrap().push_back(post);
+        }
+
+        pub(crate) fn find_answer(&self, post: Result<Option<NetworkPost>, UploadErrorKind>) {
+            self.finds.lock().unwrap().push_back(post);
         }
 
         pub(crate) fn will(&self, attempt: Attempt) {
@@ -2554,6 +2787,28 @@ pub(crate) mod testing {
             self.limit_reads.lock().unwrap().push(account.to_owned());
             match self.limits.lock().unwrap().pop_front() {
                 Some(Ok(limit)) => Ok(Some(limit)),
+                Some(Err(kind)) => Err(UploadError::new(kind, "the fake failed")),
+                None => Ok(None),
+            }
+        }
+
+        fn find_post(
+            &self,
+            access_token: &SecretText,
+            account: &str,
+            id: &str,
+            since: SystemTime,
+        ) -> Result<Option<NetworkPost>, UploadError> {
+            self.tokens
+                .lock()
+                .unwrap()
+                .push(access_token.expose().to_owned());
+            self.looked
+                .lock()
+                .unwrap()
+                .push((account.to_owned(), id.to_owned(), since));
+            match self.finds.lock().unwrap().pop_front() {
+                Some(Ok(post)) => Ok(post),
                 Some(Err(kind)) => Err(UploadError::new(kind, "the fake failed")),
                 None => Ok(None),
             }
@@ -2678,6 +2933,12 @@ pub(crate) mod testing {
                 .unwrap()
                 .push(access_token.expose().to_owned());
             self.checks.lock().unwrap().push(id.to_owned());
+            if self.stall_state.load(Ordering::SeqCst) {
+                self.state_stalled.store(true, Ordering::SeqCst);
+                while self.stall_state.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            }
             match self.states.lock().unwrap().pop_front() {
                 // Instagram drops the container and its bytes.
                 Some(Ok(VideoState::Expired)) => {
@@ -4649,11 +4910,12 @@ mod tiktok_tests {
 /// makes once X processed the video, and what it costs.
 #[cfg(test)]
 mod x_tests {
+    use std::sync::atomic::Ordering;
     use std::time::{Duration, SystemTime};
 
     use bardo_domain::{
         ConnectedIdentity, ConnectionSecrets, ConnectionStatus, CostRepository, Money,
-        NetworkConnection, NetworkConnectionRepository, TokenGrant, TokenSet,
+        NetworkConnection, NetworkConnectionRepository, PostLink, TokenGrant, TokenSet,
     };
 
     use super::*;
@@ -4663,6 +4925,14 @@ mod x_tests {
     const USER_ID: &str = "1840000000000000001";
     const ACCESS: &str = "x-access-token";
     const TEXT: &str = "Nobody found the probe. #space";
+
+    fn wait_until(what: &str, mut check: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !check() {
+            assert!(std::time::Instant::now() < deadline, "never {what}");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
 
     fn x_account(s: &Setup) -> NetworkAccount {
         NetworkAccountRepository::list(&*s.h.db, s.project.channel)
@@ -4873,6 +5143,375 @@ mod x_tests {
                 .upload_failure_text(&failure, Network::X)
                 .contains("credits")
         );
+        assert!(posts_recorded(&s).is_empty());
+    }
+
+    /// The post X shows for the upload, as a look for it answers.
+    fn live_post() -> NetworkPost {
+        NetworkPost {
+            id: "1880028106020515777".into(),
+            link: PostLink::parse(Network::X, "https://x.com/i/status/1880028106020515777").ok(),
+            issue: None,
+        }
+    }
+
+    fn posts_asked(s: &Setup) -> usize {
+        s.h.x.published.lock().unwrap().len()
+    }
+
+    fn looks(s: &Setup) -> usize {
+        s.h.x.looked.lock().unwrap().len()
+    }
+
+    fn start(s: &Setup) -> JobId {
+        let review = review(s);
+        s.app.start_upload(&review, review.choices()).unwrap()
+    }
+
+    #[test]
+    fn a_post_whose_answer_is_lost_finishes_with_the_post_x_shows() {
+        let s = ready(TEXT);
+        s.h.x.publish_answer(Err(UploadErrorKind::AnswerLost));
+        s.h.x.find_answer(Ok(Some(live_post())));
+        let before = SystemTime::now();
+        let job = done(&s.app, start(&s));
+
+        assert_eq!(job.attempts(), 1);
+        assert_eq!(posts_asked(&s), 1, "asked once");
+        let looked = s.h.x.looked.lock().unwrap().clone();
+        assert_eq!(looked.len(), 1);
+        assert_eq!(looked[0].0, USER_ID);
+        assert_eq!(looked[0].1, s.h.x.published.lock().unwrap()[0].1);
+        let since = looked[0].2;
+        assert!(since + Duration::from_secs(1) >= before && since <= SystemTime::now());
+        let publication = upload(&s);
+        assert_eq!(
+            s.app.upload_state(&publication),
+            Some(UploadState::Published)
+        );
+        assert_eq!(
+            publication.link.unwrap().url(),
+            "https://x.com/i/status/1880028106020515777"
+        );
+        let recorded = posts_recorded(&s);
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].job, Some(job.id()));
+    }
+
+    /// A post whose answer never came and that X does not show: the job
+    /// failed once, with the post's price in Costs.
+    fn lost_post() -> (Setup, JobId) {
+        let s = ready(TEXT);
+        s.h.x.publish_answer(Err(UploadErrorKind::AnswerLost));
+        let job = wait_done(&s.app, start(&s));
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(job.attempts(), 1, "not sent again by the queue");
+        assert_eq!(posts_asked(&s), 1);
+        assert_eq!(looks(&s), 1, "looked for once");
+        let id = job.id();
+        (s, id)
+    }
+
+    #[test]
+    fn a_post_whose_answer_is_lost_and_does_not_show_fails_once_and_is_in_costs() {
+        let (s, job) = lost_post();
+        let Some(UploadState::Failed { failure, .. }) = s.app.upload_state(&upload(&s)) else {
+            panic!("the post failed");
+        };
+        assert_eq!(failure, UploadFailure::Job(JobFailureKind::AnswerLost));
+        let text = s.app.upload_failure_text(&failure, Network::X);
+        assert!(text.contains("may be live"), "{text}");
+        let recorded = posts_recorded(&s);
+        assert_eq!(recorded.len(), 1, "what X may have billed");
+        assert_eq!(recorded[0].provider, Provider::X);
+        assert_eq!(recorded[0].model, "post");
+        assert_eq!(recorded[0].cost.amount(), Money::from_micros(15_000));
+        assert_eq!(recorded[0].job, Some(job));
+        assert_eq!(recorded[0].project, Some(s.project.id));
+    }
+
+    #[test]
+    fn a_retry_after_a_lost_answer_takes_the_post_x_shows_by_then() {
+        let (s, job) = lost_post();
+        s.h.x.find_answer(Ok(Some(live_post())));
+        s.app.resume_upload(job).unwrap();
+        done(&s.app, job);
+
+        assert_eq!(posts_asked(&s), 1, "not posted twice");
+        let publication = upload(&s);
+        assert_eq!(
+            s.app.upload_state(&publication),
+            Some(UploadState::Published)
+        );
+        assert_eq!(
+            publication.link.unwrap().url(),
+            "https://x.com/i/status/1880028106020515777"
+        );
+        assert_eq!(posts_recorded(&s).len(), 1, "in Costs already");
+        // Both looks go from when the first request went, and the post is
+        // dated then, not at the retry.
+        let looked = s.h.x.looked.lock().unwrap().clone();
+        assert_eq!(looked.len(), 2);
+        assert_eq!(looked[0].2, looked[1].2);
+        assert_eq!(upload(&s).posted_at, looked[0].2);
+    }
+
+    #[test]
+    fn a_retry_looks_for_the_post_before_it_asks_where_the_upload_stands() {
+        // X no longer has the media a day later, whether the post was
+        // made with it or not: the upload must not start over on that.
+        let (s, job) = lost_post();
+        s.h.x.find_answer(Ok(Some(live_post())));
+        s.h.x.answer(Ok(VideoState::Expired));
+        s.app.resume_upload(job).unwrap();
+        done(&s.app, job);
+
+        assert_eq!(posts_asked(&s), 1, "not posted twice");
+        assert_eq!(s.h.x.files.lock().unwrap().len(), 1, "not sent again");
+        assert_eq!(
+            s.app.upload_state(&upload(&s)),
+            Some(UploadState::Published)
+        );
+        assert_eq!(posts_recorded(&s).len(), 1);
+    }
+
+    #[test]
+    fn a_duplicate_refusal_after_a_request_x_failed_on_says_the_post_may_be_live() {
+        // X made the post despite its 502, its list did not show it yet
+        // when the queue tried again, and it refuses the same text.
+        let s = ready(TEXT);
+        s.h.x.publish_answer(Err(UploadErrorKind::NetworkDown));
+        s.h.x.publish_answer(Err(UploadErrorKind::Duplicate));
+        let job = wait_done(&s.app, start(&s));
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!((looks(&s), posts_asked(&s)), (2, 2));
+        let Some(UploadState::Failed { failure, .. }) = s.app.upload_state(&upload(&s)) else {
+            panic!("the post failed");
+        };
+        assert_eq!(failure, UploadFailure::Job(JobFailureKind::AnswerLost));
+        assert_eq!(posts_recorded(&s).len(), 1, "the post X made");
+
+        // Retried once X lists it: taken, and not recorded again.
+        s.h.x.find_answer(Ok(Some(live_post())));
+        s.app.resume_upload(job.id()).unwrap();
+        done(&s.app, job.id());
+        assert_eq!(posts_asked(&s), 2);
+        assert_eq!(posts_recorded(&s).len(), 1);
+
+        // The list shows it right after the refusal: the upload ends posted.
+        let s = ready(TEXT);
+        s.h.x.publish_answer(Err(UploadErrorKind::NetworkDown));
+        s.h.x.publish_answer(Err(UploadErrorKind::Duplicate));
+        s.h.x.find_answer(Ok(None));
+        s.h.x.find_answer(Ok(Some(live_post())));
+        done(&s.app, start(&s));
+        assert_eq!(
+            s.app.upload_state(&upload(&s)),
+            Some(UploadState::Published)
+        );
+        assert_eq!(posts_recorded(&s).len(), 1);
+    }
+
+    #[test]
+    fn a_duplicate_refusal_of_a_first_request_is_only_a_refusal() {
+        let s = ready(TEXT);
+        s.h.x.publish_answer(Err(UploadErrorKind::Duplicate));
+        let job = wait_done(&s.app, start(&s));
+        assert_eq!(
+            job.failure().unwrap().kind,
+            JobFailureKind::UnexpectedAnswer
+        );
+        assert_eq!((looks(&s), posts_asked(&s)), (0, 1));
+        assert!(posts_recorded(&s).is_empty());
+    }
+
+    #[test]
+    fn a_job_stopped_while_it_checks_the_upload_does_not_post() {
+        let s = ready(TEXT);
+        s.h.x.stall_state.store(true, Ordering::SeqCst);
+        let job = start(&s);
+        wait_until("checking", || s.h.x.state_stalled.load(Ordering::SeqCst));
+        s.app.cancel_job(job).unwrap();
+        s.h.x.stall_state.store(false, Ordering::SeqCst);
+        wait_until("the run ended", || !s.app.jobs.runs_here(job));
+        assert_eq!(posts_asked(&s), 0, "no post starts once told to stop");
+        assert!(posts_recorded(&s).is_empty());
+    }
+
+    #[test]
+    fn a_retry_after_a_lost_answer_posts_again_when_x_still_shows_none() {
+        let (s, job) = lost_post();
+        s.app.resume_upload(job).unwrap();
+        done(&s.app, job);
+
+        assert_eq!(looks(&s), 2, "looked for before it went again");
+        assert_eq!(posts_asked(&s), 2);
+        assert_eq!(
+            s.app.upload_state(&upload(&s)),
+            Some(UploadState::Published)
+        );
+        assert_eq!(posts_recorded(&s).len(), 2, "every request X may bill");
+    }
+
+    #[test]
+    fn a_post_x_failed_on_is_looked_for_before_the_queue_sends_it_again() {
+        let s = ready(TEXT);
+        s.h.x.publish_answer(Err(UploadErrorKind::NetworkDown));
+        s.h.x.find_answer(Ok(Some(live_post())));
+        let job = done(&s.app, start(&s));
+        assert_eq!(job.attempts(), 2, "retried by the queue");
+        assert_eq!(posts_asked(&s), 1, "X made it despite its answer");
+        assert_eq!(looks(&s), 1);
+        assert_eq!(
+            upload(&s).link.unwrap().url(),
+            "https://x.com/i/status/1880028106020515777"
+        );
+        assert_eq!(posts_recorded(&s).len(), 1);
+
+        // Not there: the post goes again.
+        let s = ready(TEXT);
+        s.h.x.publish_answer(Err(UploadErrorKind::NetworkDown));
+        let job = done(&s.app, start(&s));
+        assert_eq!(job.attempts(), 2);
+        assert_eq!((looks(&s), posts_asked(&s)), (1, 2));
+        assert_eq!(posts_recorded(&s).len(), 1);
+    }
+
+    #[test]
+    fn nothing_goes_again_while_x_cannot_say_whether_the_post_is_there() {
+        let s = ready(TEXT);
+        s.h.x.publish_answer(Err(UploadErrorKind::NetworkDown));
+        s.h.x.find_answer(Err(UploadErrorKind::NetworkDown));
+        let job = wait_done(&s.app, start(&s));
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(
+            job.failure().unwrap().kind,
+            JobFailureKind::ProviderUnavailable
+        );
+        assert_eq!(posts_asked(&s), 1);
+        assert!(posts_recorded(&s).is_empty());
+
+        // Retried once X answers: it looks first, then posts.
+        s.app.resume_upload(job.id()).unwrap();
+        done(&s.app, job.id());
+        assert_eq!((looks(&s), posts_asked(&s)), (2, 2));
+    }
+
+    #[test]
+    fn a_post_that_never_left_or_that_x_refused_is_not_looked_for() {
+        let s = ready(TEXT);
+        s.h.x.publish_answer(Err(UploadErrorKind::Unreachable));
+        let job = done(&s.app, start(&s));
+        assert_eq!(job.attempts(), 2, "retried by the queue");
+        assert_eq!((looks(&s), posts_asked(&s)), (0, 2));
+        assert_eq!(posts_recorded(&s).len(), 1);
+
+        let s = ready(TEXT);
+        s.h.x.publish_answer(Err(UploadErrorKind::Invalid));
+        let job = wait_done(&s.app, start(&s));
+        assert_eq!(job.state(), JobState::Failed);
+        s.app.resume_upload(job.id()).unwrap();
+        done(&s.app, job.id());
+        assert_eq!((looks(&s), posts_asked(&s)), (0, 2));
+        assert_eq!(posts_recorded(&s).len(), 1);
+    }
+
+    #[test]
+    fn a_post_bardo_closed_on_is_looked_for_when_it_opens_again() {
+        let s = ready(TEXT);
+        s.h.x.stall_publish.store(true, Ordering::SeqCst);
+        let job = start(&s);
+        wait_until("posting", || s.h.x.stalled.load(Ordering::SeqCst));
+        s.h.x.find_answer(Ok(Some(live_post())));
+        let s = s.restart();
+        done(&s.app, job);
+        s.h.x.stall_publish.store(false, Ordering::SeqCst);
+
+        assert_eq!(posts_asked(&s), 1, "not posted twice");
+        assert_eq!(looks(&s), 1);
+        assert_eq!(
+            upload(&s).link.unwrap().url(),
+            "https://x.com/i/status/1880028106020515777"
+        );
+        assert_eq!(posts_recorded(&s).len(), 1);
+    }
+
+    /// A post due now that Bardo closed on while X answered, opened again
+    /// long after its time.
+    fn due_post_cut_short() -> (Setup, JobId) {
+        const MINUTE: Duration = Duration::from_secs(60);
+        let s = ready(TEXT);
+        s.h.x.stall_publish.store(true, Ordering::SeqCst);
+        let mut delay = Duration::from_millis(300);
+        let job = loop {
+            let review = review(&s);
+            let choices = UploadChoices {
+                publish_at: Some(crate::publications::whole_millis(SystemTime::now() + delay)),
+                ..review.choices()
+            };
+            match s.app.start_upload(&review, choices) {
+                Ok(job) => break job,
+                Err(UploadReviewError::Schedule(ScheduleProblem::Past)) if delay < MINUTE => {
+                    delay *= 2;
+                }
+                Err(error) => panic!("not scheduled: {error:?}"),
+            }
+        };
+        wait_until("posting", || s.h.x.stalled.load(Ordering::SeqCst));
+        let mut publication = upload(&s);
+        let due = publication.upload_mut().unwrap();
+        due.publish_at = Some(crate::publications::whole_millis(
+            SystemTime::now() - 30 * MINUTE,
+        ));
+        due.claimed_at = Some(crate::publications::whole_millis(
+            SystemTime::now() - 29 * MINUTE,
+        ));
+        s.app.publications.save_publication(&publication).unwrap();
+        (s, job)
+    }
+
+    #[test]
+    fn a_due_post_cut_short_long_before_bardo_opens_again_takes_what_x_shows() {
+        let (s, job) = due_post_cut_short();
+        s.h.x.find_answer(Ok(Some(live_post())));
+        let s = s.restart();
+        done(&s.app, job);
+        s.h.x.stall_publish.store(false, Ordering::SeqCst);
+        assert_eq!(posts_asked(&s), 1, "not posted twice");
+        assert_eq!(
+            s.app.upload_state(&upload(&s)),
+            Some(UploadState::Published)
+        );
+        assert_eq!(posts_recorded(&s).len(), 1);
+        assert!(s.app.missed_posts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_due_post_cut_short_is_not_missed_while_x_cannot_say() {
+        let (s, job) = due_post_cut_short();
+        s.h.x.find_answer(Err(UploadErrorKind::NetworkDown));
+        s.h.x.find_answer(Err(UploadErrorKind::NetworkDown));
+        let s = s.restart();
+        let ended = wait_done(&s.app, job);
+        s.h.x.stall_publish.store(false, Ordering::SeqCst);
+        assert_eq!(
+            ended.failure().unwrap().kind,
+            JobFailureKind::ProviderUnavailable
+        );
+        assert_eq!(posts_asked(&s), 1);
+        assert!(s.app.missed_posts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_due_post_cut_short_that_x_does_not_show_waits_for_the_user() {
+        let (s, job) = due_post_cut_short();
+        let s = s.restart();
+        let ended = wait_done(&s.app, job);
+        s.h.x.stall_publish.store(false, Ordering::SeqCst);
+        assert_eq!(ended.failure().unwrap().kind, JobFailureKind::Missed);
+        assert_eq!((looks(&s), posts_asked(&s)), (1, 1));
+        assert_eq!(s.app.missed_posts().unwrap().len(), 1);
         assert!(posts_recorded(&s).is_empty());
     }
 

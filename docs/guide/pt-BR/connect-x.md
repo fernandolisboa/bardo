@@ -42,6 +42,7 @@ Quanto custam as chamadas do Bardo, pelos preços do X em 14/10/2026:
 | Um post com link no texto | US$ 0,20 |
 | Enviar o vídeo | Não é cobrado |
 | Ler a conta ao conectar ou ao clicar em **Verificar** | US$ 0,010 |
+| Procurar um post que ficou sem resposta (veja "Um post que ficou sem resposta do X") | US$ 0,001 por post que o X lista, até US$ 0,10 por procura |
 
 O X pode mudar os preços; o Developer Console sempre mostra os atuais. Quando os créditos acabam ou o limite é atingido, o X recusa o post e o Bardo avisa: adicione créditos e clique em **Tentar de novo**.
 
@@ -83,6 +84,18 @@ Na etapa Publicar, uma conta do X conectada oferece **Revisar envio** quando o p
 - **Parar e retomar.** Um envio parado ou interrompido continua depois da última parte que o X recebeu. O X guarda um envio por 24 horas; um envio que passou disso, ou que o X descartou, vai de novo do início, no máximo duas vezes.
 - **Duração do vídeo.** O X aceita vídeos de até 2 minutos e 20 segundos da maioria das contas, que é a duração do preset do X no Bardo. Vídeos mais longos precisam de uma conta do X que possa postá-los; senão o X recusa o post e o Bardo mostra o motivo dado pelo X.
 
+<a id="post-unanswered"></a>
+## Um post que ficou sem resposta do X
+
+Mandar um post duas vezes faz dois posts, então o Bardo manda uma vez só. Quando o post foi enviado e a resposta não voltou (a conexão caiu, ou a espera de um minuto acabou), o X pode ter feito o post mesmo assim. O Bardo então pede ao X os posts da própria conta, a partir de um dia antes do envio do post, e procura um com este vídeo:
+
+- **O X mostra o post.** O envio termina como publicado, com o link do post e o preço dele em Custos, como se a resposta tivesse chegado.
+- **O X não mostra nenhum.** O envio falha dizendo que o post pode estar no ar, e o preço dele entra em Custos, porque o X pode ter cobrado. Confira a conta no X. **Tentar de novo** procura o post mais uma vez e só posta de novo se ele ainda não estiver lá; esse segundo post é um novo pedido pago.
+
+O Bardo procura do mesmo jeito antes de postar de novo depois de um erro do lado do X, e quando ele foi fechado enquanto um post esperava a resposta. Se não for possível perguntar ao X (sem internet, ou o X falhando), nada é postado até que seja. Um post que nem saiu do computador não custa nada e é repetido sozinho.
+
+A procura vale o que a lista do X mostra: um post pode levar um instante para aparecer nela. Se depois o X recusar o segundo post como duplicado, o Bardo entende que o primeiro está no ar e avisa do mesmo jeito. O X cobra cada post que lista numa procura como leitura dos seus próprios posts, respostas incluídas.
+
 <a id="schedule"></a>
 ## Agendar um post
 
@@ -93,4 +106,4 @@ Deixe o Bardo aberto nessa hora e o computador ligado, ou ligue o [agente em seg
 <a id="costs"></a>
 ## O post na tela Custos
 
-Cada post que o Bardo faz é registrado na tela [Custos](costs.md) em X, com o vídeo e o canal a que se refere, pelo preço da tabela de preços (US$ 0,015, ou US$ 0,20 com link). O Bardo cobra como post com link quando o texto tem um endereço ou um domínio que o X transformaria em link, como `exemplo.com`. Um post que o X recusou não é cobrado nem registrado. As leituras da conta ao conectar ou verificar não são registradas; o Developer Console mostra essas.
+Cada post que o Bardo faz é registrado na tela [Custos](costs.md) em X, com o vídeo e o canal a que se refere, pelo preço da tabela de preços (US$ 0,015, ou US$ 0,20 com link). O Bardo cobra como post com link quando o texto tem um endereço ou um domínio que o X transformaria em link, como `exemplo.com`. Um post que o X recusou não é cobrado nem registrado. Um post que foi enviado e ficou sem resposta é registrado, porque o X pode ter feito e cobrado o post ([Um post que ficou sem resposta do X](#post-unanswered)). As leituras da conta ao conectar ou verificar, e as leituras dos seus próprios posts quando o Bardo procura um, não são registradas; o Developer Console mostra essas.

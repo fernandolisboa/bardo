@@ -2,8 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-11-25
-- Issue: #266
+- Issue: #266, and #290 for the post on X
 - Builds on: the job queue's retry policy and the cost records of the MVP spec, ADR-0028 (never paying twice for a clip on the plan)
+- Amended by: ADR-0031 (Claude's answers are streamed: its adapter applies the same rules itself instead of `send_paid`, read after the status and before the answer, over `UreqTransport::for_streams`; Claude's own timeout and a failure it asks not to be sent again are lost answers; a refusal carries its usage only when Claude bills it)
 
 ## Context
 
@@ -28,7 +29,14 @@ Clips and takes are asynchronous (submit, then poll) and have their own handling
 7. **Scope.** Applied to Claude (text), Gemini (images), ElevenLabs (speech, music, speech-to-text, voice changer, isolator, forced alignment) and JEV (decisions). Out of it:
    - Clip and take adapters keep their own submission rules (a saved request id, a note of what was sent; #263 for the two that lack one).
    - A paid call in flight when the app closes or crashes never returns a failure to decide on; the job resumes and sends it again (#289).
-   - A post on X is a paid synchronous call on the publishing side and still retries after a lost answer (#290).
+8. **A post on X is looked for before it is sent again (#290).** The post is the one paid, synchronous call on the publishing side, and unlike a generation its result can be found afterwards: `GET /2/users/{id}/tweets` with `tweet.fields=attachments` lists the account's own posts with their media keys, and a key ends in the id of the uploaded media. So:
+   - The X adapter reports a post that was sent and got no answer, or a success whose body does not say which post it made, as `UploadErrorKind::AnswerLost` (not transient); one that never left stays `Unreachable`. Every other step of an upload (a chunk, the finalize, a status) can be made again and keeps `Unreachable`. The post and the look go on a new connection, follow no redirect, and wait one minute.
+   - `VideoUploader::find_post` answers `None` only when X's own list says so, read to its end (five answers of 100 posts at most, from a day before the request, replies included since X may keep a post that opens with a mention as one). An answer that is not that list, or a list too long to read, is an error: the caller posts again on `None`.
+   - The upload job writes a mark in its checkpoint before it asks for the post, and does not ask once told to stop. A run that finds the mark (the queue's retry after X failed with a 5xx, the user's retry, a restart after Bardo closed mid-request, a missed due time) asks X for the post before anything else, the state of the upload included, and finishes with it when it is there, dated when the request went. When X cannot be asked, nothing is posted. A refusal (4xx, a request that never left) clears a mark the same request set.
+   - After a lost answer the job looks once, right away. When the post is not there (yet), the job fails once as `answer_lost`, the upload says the post may be live, and the post's price is recorded (a post's price is known, so it is no estimate of quantity, only of whether X billed). The mark stays, so the user's retry looks again before it posts.
+   - X's refusal of a duplicate text (`UploadErrorKind::Duplicate`), after a request of the job whose end is not known, means that request made the post although the look before did not show it: the job looks once more and otherwise fails the same way, as a post that may be live, with its price recorded.
+   - What is recorded: every request whose answer was lost, once; a request X failed on (5xx) only when its post is found or a duplicate refusal shows it was made; a post found by a look unless its request already was. The looks are owned reads X bills at US$ 0.001 a post listed (US$ 0.10 for a full answer); like the account read at sign-in they are not recorded.
+   - Instagram needs none of this: its container says `PUBLISHED`, which the job reads before it publishes. TikTok's draft is not billed and its init makes no post.
 
 ## Consequences
 
@@ -37,5 +45,8 @@ Clips and takes are asynchronous (submit, then poll) and have their own handling
 - A lost answer's record cannot be told from a real charge afterwards: it has no mark of its own, Costs shows totals, and it cannot be taken back when the provider turns out not to have charged. It also counts among the recent calls later estimates are averaged from, which changes little since it was itself built from them. Marking such records would need a schema change, left for when it is needed.
 - "Handed over" is a safe upper bound, not proof of arrival: the last piece of a body given to the connection may not have been written, so a few requests that never arrived are reported as lost answers and estimated in Costs. The error never goes the other way.
 - An answered call whose JSON is valid but lacks what Bardo needs (a transcript without words, a timing without characters) fails as unexpected and, where the answer states no usage, records nothing.
-- A retry after a lost answer is a new paid request. Where the provider offers an idempotency key or streaming, using it would let a retry collect the first result instead; streaming for long text answers is tracked in #267.
-- Every new paid adapter must choose `send_paid`, name its provider's error report and attach billed usage to its failures, and every new paid job must call `record_failed`.
+- A retry after a lost answer is a new paid request. Where the provider offers an idempotency key, using it would let a retry collect the first result instead. Streaming does not: Claude's answers are streamed since ADR-0031, which keeps an answer from being cut by a clock, and one that stops midway is still lost.
+- The look for a post on X trusts three things X does not promise in writing: that a media key ends in the media id (its examples show it), that a post shows in the account's list within seconds, and that the computer's clock is within a day of X's. When one fails, the look finds nothing: after a lost answer that is the "may be live" failure, and a second post then meets X's refusal of duplicate text, which the job reads as the first one being live. That refusal is told by its wording, which X does not document either.
+- A look X refuses (a scope taken away, a request X no longer takes) fails every retry of that job at the look, with X's reason. Reviewing the upload again starts a new one. The query was written from X's reference and has not run against X yet; the regression pass checks it with a real account.
+- A job whose processing wait ran out after a request of unknown end, checked again later, starts a new job without the mark. It needs X to say the media is not ready after having failed on a post of it, which leaves no post to find.
+- Every new paid adapter must choose `send_paid` (or, when it reads its answer as a stream, apply the same rules as Claude's does), name its provider's error report and attach billed usage to its failures, and every new paid job must call `record_failed`.

@@ -5,7 +5,7 @@ mod common;
 
 use std::time::{Duration, SystemTime};
 
-use bardo_ai::http::Method;
+use bardo_ai::http::{Method, TransportError};
 use bardo_domain::{
     SecretText, UploadError, UploadErrorKind, UploadOutcome, UploadRun, UploadedVideo, VideoState,
     VideoUpload, VideoUploader, Visibility,
@@ -18,6 +18,7 @@ const API: &str = "https://api.x.com";
 const MEDIA_ID: &str = "1880028106020515840";
 const NEW_MEDIA_ID: &str = "1880028106020515841";
 const POST_ID: &str = "1880028106020515999";
+const USER_ID: &str = "1840000000000000001";
 /// Small chunks so the file in memory stays small.
 const CHUNK: u64 = 10;
 /// Two whole chunks and a short last one.
@@ -465,7 +466,7 @@ fn publish(
     video: &VideoUpload,
 ) -> (Result<bardo_domain::NetworkPost, UploadError>, Vec<Sent>) {
     let uploader = uploader(names);
-    let post = uploader.publish(&token(), "1840000000000000001", MEDIA_ID, video);
+    let post = uploader.publish(&token(), USER_ID, MEDIA_ID, video);
     (post, uploader.transport().sent())
 }
 
@@ -525,12 +526,288 @@ fn post_errors_say_what_x_refused() {
         "{}",
         error.detail
     );
+    // A text the account already posted: its own kind, since after a
+    // request whose end is not known it means that request made the post.
     let (post, _) = publish(&["post-duplicate"], &video());
-    assert!(post.unwrap_err().detail.contains("duplicate content"));
+    let error = post.unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::Duplicate);
+    assert!(error.detail.contains("duplicate content"));
     let (post, _) = publish(&["credits-depleted"], &video());
     assert_eq!(post.unwrap_err().kind, UploadErrorKind::QuotaExceeded);
     let (post, _) = publish(&["rate-limited"], &video());
     assert_eq!(post.unwrap_err().kind, UploadErrorKind::RateLimited);
+}
+
+/// An uploader whose transport fails with `error` on its first request.
+fn failing(error: TransportError, then: &[&str]) -> XUploader<Scripted> {
+    let mut answers = vec![Err(error)];
+    answers.extend(then.iter().map(|name| Ok(fixture("x-upload", name))));
+    XUploader::with_transport(Scripted::script(answers)).with_chunk(CHUNK)
+}
+
+#[test]
+fn a_post_that_was_sent_and_got_no_answer_may_be_live_and_is_not_an_outage() {
+    let uploader = failing(TransportError::unanswered("timeout: no answer"), &[]);
+    let error = uploader
+        .publish(&token(), USER_ID, MEDIA_ID, &video())
+        .unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::AnswerLost);
+    assert!(!error.kind.is_transient(), "the queue would post it again");
+    assert_eq!(uploader.transport().sent().len(), 1, "asked once");
+}
+
+#[test]
+fn a_post_that_never_left_is_an_outage_the_queue_retries() {
+    let uploader = failing(TransportError::not_sent("dns error: no such host"), &[]);
+    let error = uploader
+        .publish(&token(), USER_ID, MEDIA_ID, &video())
+        .unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::Unreachable);
+    assert!(error.kind.is_transient());
+}
+
+#[test]
+fn a_post_x_made_whose_answer_cannot_be_read_may_be_live() {
+    let (post, sent) = publish(&["post-created-unreadable"], &video());
+    assert_eq!(post.unwrap_err().kind, UploadErrorKind::AnswerLost);
+    assert_eq!(sent.len(), 1);
+}
+
+#[test]
+fn a_post_x_failed_on_is_a_failure_on_its_side() {
+    let (post, _) = publish(&["post-bad-gateway"], &video());
+    assert_eq!(post.unwrap_err().kind, UploadErrorKind::NetworkDown);
+}
+
+#[test]
+fn every_other_step_without_an_answer_is_an_outage_to_retry() {
+    let lost = || TransportError::unanswered("connection reset");
+    let script = |answers: Vec<Result<bardo_ai::http::HttpResponse, TransportError>>| {
+        XUploader::with_transport(Scripted::script(answers)).with_chunk(CHUNK)
+    };
+    let ok = |name: &str| Ok(fixture("x-upload", name));
+    // The start of an upload: at worst X keeps one nobody finishes.
+    let uploader = script(vec![Err(lost())]);
+    let error = uploader.upload(&video(), &mut FakeRun::new()).unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::Unreachable);
+    // A chunk X may have taken goes again with the same number.
+    let uploader = script(vec![ok("initialize-ok"), Err(lost())]);
+    let error = uploader.upload(&video(), &mut FakeRun::new()).unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::Unreachable);
+    assert_eq!(uploader.transport().sent().len(), 2);
+    // A finalize sent twice is asked about.
+    let uploader = script(vec![Err(lost())]);
+    let mut run = FakeRun::resuming(SIZE, Duration::from_secs(60 * 60));
+    let error = uploader.upload(&video(), &mut run).unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::Unreachable);
+    // A status and a look for a post only read.
+    let uploader = script(vec![Err(lost())]);
+    let error = uploader.state(&token(), MEDIA_ID).unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::Unreachable);
+    let uploader = script(vec![Err(lost())]);
+    let error = uploader
+        .find_post(&token(), USER_ID, MEDIA_ID, SystemTime::now())
+        .unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::Unreachable);
+}
+
+#[test]
+fn the_post_and_the_look_for_it_go_through_their_own_connection() {
+    let poster = Scripted::new(vec![
+        fixture("x-upload", "post-created"),
+        fixture("x-upload", "posts-none"),
+    ]);
+    let uploader = uploader(&["status-succeeded"]).with_poster(poster);
+    uploader.state(&token(), MEDIA_ID).unwrap();
+    uploader
+        .publish(&token(), USER_ID, MEDIA_ID, &video())
+        .unwrap();
+    uploader
+        .find_post(&token(), USER_ID, MEDIA_ID, noon())
+        .unwrap();
+    // The scripted transports fail the test on a request they do not
+    // expect: the status went through the upload's, the rest did not.
+    assert_eq!(uploader.transport().sent().len(), 1);
+}
+
+#[test]
+fn a_post_x_made_whose_answer_has_no_id_may_be_live() {
+    for body in ["{}", r#"{"data":{"id":1880028106020515999}}"#, ""] {
+        let answer = bardo_ai::http::HttpResponse::from_recording(&format!(
+            "HTTP/2 201 \ncontent-type: application/json\n\n{body}"
+        ))
+        .unwrap();
+        let uploader = XUploader::with_transport(Scripted::new(vec![answer]));
+        let error = uploader
+            .publish(&token(), USER_ID, MEDIA_ID, &video())
+            .unwrap_err();
+        assert_eq!(error.kind, UploadErrorKind::AnswerLost, "{body:?}");
+    }
+}
+
+/// 2026-11-25 12:00:00 UTC.
+fn noon() -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_secs(1_795_608_000)
+}
+
+#[test]
+fn a_lost_post_is_found_among_the_accounts_posts_by_its_video() {
+    let uploader = uploader(&["posts-with-video"]);
+    let post = uploader
+        .find_post(&token(), USER_ID, MEDIA_ID, noon())
+        .unwrap()
+        .expect("the post with the video");
+    assert_eq!(post.id, POST_ID);
+    assert_eq!(
+        post.link.unwrap().url(),
+        format!("https://x.com/i/status/{POST_ID}")
+    );
+    assert_eq!(post.issue, None);
+
+    let sent = uploader.transport().sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].method, Method::Get);
+    let (path, query) = sent[0].url.split_once('?').unwrap();
+    assert_eq!(path, format!("{API}/2/users/{USER_ID}/tweets"));
+    let query: Vec<(String, String)> = form_urlencoded::parse(query.as_bytes())
+        .into_owned()
+        .collect();
+    let pair = |name: &str, value: &str| (name.to_owned(), value.to_owned());
+    assert_eq!(
+        query,
+        [
+            pair("max_results", "100"),
+            // Replies stay in: a post that opens with a mention may be one.
+            pair("exclude", "retweets"),
+            // A day before the post was asked for, by X's clock.
+            pair("start_time", "2026-11-24T12:00:00Z"),
+            pair("tweet.fields", "attachments"),
+        ]
+    );
+    assert_eq!(
+        sent[0].header("authorization"),
+        Some("Bearer fixture-access-token")
+    );
+}
+
+#[test]
+fn a_post_with_another_video_or_none_is_not_the_lost_one() {
+    let uploader = uploader(&["posts-with-video", "posts-none"]);
+    // No post carries this upload.
+    let found = uploader.find_post(&token(), USER_ID, "1880028106020515", noon());
+    assert_eq!(found.unwrap(), None);
+    let found = uploader.find_post(&token(), USER_ID, MEDIA_ID, noon());
+    assert_eq!(found.unwrap(), None);
+}
+
+#[test]
+fn the_newest_post_with_the_video_is_the_one_whatever_kind_its_key_names() {
+    let uploader = uploader(&["posts-same-video-twice"]);
+    let post = uploader
+        .find_post(&token(), USER_ID, MEDIA_ID, noon())
+        .unwrap()
+        .unwrap();
+    assert_eq!(post.id, "1880028106020516030");
+}
+
+#[test]
+fn a_look_reads_on_while_x_has_more_posts() {
+    let uploader = uploader(&["posts-more-to-come", "posts-with-video"]);
+    let post = uploader
+        .find_post(&token(), USER_ID, MEDIA_ID, noon())
+        .unwrap()
+        .unwrap();
+    assert_eq!(post.id, POST_ID);
+    let sent = uploader.transport().sent();
+    assert_eq!(sent.len(), 2);
+    let token_of = |sent: &Sent| {
+        form_urlencoded::parse(sent.url.split_once('?').unwrap().1.as_bytes())
+            .find(|(name, _)| name == "pagination_token")
+            .map(|(_, value)| value.into_owned())
+    };
+    assert_eq!(token_of(&sent[0]), None);
+    assert_eq!(
+        token_of(&sent[1]).as_deref(),
+        Some("7140dibdnow9c7btw482gs8uvjq5c0lp26b8ipt9kkl2")
+    );
+
+    // The last page without it: the post is not there.
+    let uploader = self::uploader(&["posts-more-to-come", "posts-none"]);
+    let found = uploader.find_post(&token(), USER_ID, MEDIA_ID, noon());
+    assert_eq!(found.unwrap(), None);
+}
+
+#[test]
+fn a_look_that_cannot_read_every_post_does_not_say_none() {
+    let uploader = uploader(&["posts-more-to-come"; 5]);
+    let error = uploader
+        .find_post(&token(), USER_ID, MEDIA_ID, noon())
+        .unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::Unexpected);
+    assert_eq!(uploader.transport().sent().len(), 5);
+}
+
+#[test]
+fn an_answer_that_is_not_xs_list_does_not_say_none() {
+    // "None" lets the post go again, so only X's own list may say it.
+    let recorded = |raw: &str| bardo_ai::http::HttpResponse::from_recording(raw).unwrap();
+    for (what, answer) in [
+        ("only errors", fixture("x-upload", "posts-errors-only")),
+        (
+            "a page from something in between",
+            recorded("HTTP/1.1 200 OK\ncontent-type: text/html\n\n<html>Sign in</html>"),
+        ),
+        (
+            "nothing",
+            recorded("HTTP/2 200 \ncontent-type: application/json\n\n"),
+        ),
+        (
+            "an empty object",
+            recorded("HTTP/2 200 \ncontent-type: application/json\n\n{}"),
+        ),
+        (
+            "a post without a usable id",
+            recorded(
+                "HTTP/2 200 \ncontent-type: application/json\n\n\
+                 {\"data\":[{\"id\":\"x\",\"attachments\":{\"media_keys\":[\"7_1880028106020515840\"]}}],\
+                 \"meta\":{\"result_count\":1}}",
+            ),
+        ),
+    ] {
+        let uploader = XUploader::with_transport(Scripted::new(vec![answer]));
+        let error = uploader
+            .find_post(&token(), USER_ID, MEDIA_ID, noon())
+            .unwrap_err();
+        assert_eq!(error.kind, UploadErrorKind::Unexpected, "{what}");
+    }
+}
+
+#[test]
+fn looking_for_a_post_takes_only_x_ids_and_says_why_it_failed() {
+    let uploader = uploader(&[]);
+    assert!(
+        uploader
+            .find_post(&token(), "me/../x", MEDIA_ID, noon())
+            .is_err()
+    );
+    assert!(
+        uploader
+            .find_post(&token(), USER_ID, "7_1880028106020515840", noon())
+            .is_err()
+    );
+    assert!(uploader.transport().sent().is_empty());
+
+    for (name, kind) in [
+        ("rate-limited", UploadErrorKind::RateLimited),
+        ("not-a-user-token", UploadErrorKind::Refused),
+        ("post-bad-gateway", UploadErrorKind::NetworkDown),
+    ] {
+        let uploader = self::uploader(&[name]);
+        let error = uploader
+            .find_post(&token(), USER_ID, MEDIA_ID, noon())
+            .unwrap_err();
+        assert_eq!(error.kind, kind, "{name}");
+    }
 }
 
 #[test]

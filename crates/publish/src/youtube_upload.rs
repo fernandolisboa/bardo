@@ -392,7 +392,6 @@ impl<T: Transport> YouTubeUploader<T> {
             ),
             headers: Vec::new(),
             body: Some(image.to_vec()),
-            timeout: None,
         }
         .header("authorization", format!("Bearer {}", access_token.expose()))
         .header("content-type", "image/jpeg")
