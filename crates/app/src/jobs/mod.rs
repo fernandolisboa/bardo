@@ -119,7 +119,9 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::NicheResearch, Arc::new(research));
     handlers.insert(JobKind::ThemeSuggestion, Arc::clone(&themes) as _);
     handlers.insert(JobKind::ThemeRanking, themes);
-    handlers.insert(JobKind::ScriptGeneration, Arc::new(scripts));
+    let scripts = Arc::new(scripts);
+    handlers.insert(JobKind::ScriptGeneration, Arc::clone(&scripts) as _);
+    handlers.insert(JobKind::ClaimsCheck, scripts);
     handlers.insert(JobKind::Localization, Arc::new(localizations));
     handlers.insert(JobKind::Narration, Arc::new(narrations));
     handlers.insert(JobKind::NarrationImport, Arc::new(imports));

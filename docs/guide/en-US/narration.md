@@ -13,7 +13,7 @@ The narration is the script read aloud by the project's narrator, with the time 
 <a id="generate"></a>
 ## Generating it
 
-**Generate narration** has ElevenLabs read the current script with the narrator's voice and generation presets ([Personas](personas.md#presets)). ElevenLabs bills by character; the ⓘ next to the button says how many characters this script has, and the estimate under it what that costs. It runs as a job; you need an ElevenLabs key ([Your API keys](api-keys.md#providers)).
+**Generate narration** has ElevenLabs read the current script with the narrator's voice and generation presets ([Personas](personas.md#presets)). ElevenLabs bills by character; the ⓘ next to the button says how many characters this script has, and the estimate under it what that costs. For an ad, a line beside the estimate says when the script states things no claim of the brief backs, or was not checked as it reads now ([The claims check](script.md#claims)); it is a reminder and holds nothing back. It runs as a job; you need an ElevenLabs key ([Your API keys](api-keys.md#providers)).
 
 The button waits until there is a script and a narrator whose voice is in your ElevenLabs account. If the narrator's voice was never checked or is missing, the stage says so; fix it on [Personas](personas.md#voice) or pick another [narrator](projects.md#narrator).
 

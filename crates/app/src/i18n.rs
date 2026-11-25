@@ -2806,6 +2806,34 @@ pub enum Text {
     AdFrameworkSteps(AdFramework),
     /// An ad's script is asked for while its confirmed brief is incomplete again.
     ScriptBriefNotReady,
+    /// An ad project's hint on Generate script. Placeholder: `{n}`.
+    GenerateAdScriptHint,
+    ScriptClaimsRunning,
+    ScriptClaimsStopped,
+    /// The claims check of an ad script (#276).
+    ScriptClaimsTitle,
+    ScriptClaimsInfo,
+    ScriptClaimsNotChecked,
+    ScriptClaimsClean,
+    /// Placeholder: `{n}`.
+    ScriptClaimsUnbacked,
+    ScriptClaimsUnbackedOne,
+    ScriptClaimsOutdated,
+    ScriptClaimsOutdatedHint,
+    ScriptClaimsUnbackedTitle,
+    ScriptClaimsNoSentence,
+    ScriptClaimsUsedTitle,
+    ScriptClaimsSensitiveTitle,
+    ScriptClaimsNoneUsed,
+    CheckScriptClaims,
+    CheckScriptClaimsAgain,
+    /// Placeholder: `{when}`, as `time_ago` says it.
+    ScriptClaimsCheckedAt,
+    ScriptClaimsPendingMissing,
+    /// Beside a narration's estimate, for an ad. Placeholder: `{n}`.
+    NarrationClaimsUnbacked,
+    NarrationClaimsUnbackedOne,
+    NarrationClaimsNotChecked,
 }
 
 impl Text {
@@ -3033,6 +3061,7 @@ impl Text {
                 VideoFormat::Long => "video_format.long_length",
             },
             Text::VideoLengthName(length) => match length {
+                VideoLength::Seconds15 => "video_length.seconds_15",
                 VideoLength::Seconds30 => "video_length.seconds_30",
                 VideoLength::Minute1 => "video_length.minute_1",
                 VideoLength::Minutes3 => "video_length.minutes_3",
@@ -5826,6 +5855,29 @@ impl Text {
                 AdFramework::Offer => "ad_framework.steps.offer",
             },
             Text::ScriptBriefNotReady => "script.error.brief_not_ready",
+            Text::GenerateAdScriptHint => "script.generate_hint_ad",
+            Text::ScriptClaimsRunning => "script.claims.running",
+            Text::ScriptClaimsStopped => "script.claims.stopped",
+            Text::ScriptClaimsTitle => "script.claims.title",
+            Text::ScriptClaimsInfo => "script.claims.info",
+            Text::ScriptClaimsNotChecked => "script.claims.not_checked",
+            Text::ScriptClaimsClean => "script.claims.clean",
+            Text::ScriptClaimsUnbacked => "script.claims.unbacked",
+            Text::ScriptClaimsUnbackedOne => "script.claims.unbacked_one",
+            Text::ScriptClaimsOutdated => "script.claims.outdated",
+            Text::ScriptClaimsOutdatedHint => "script.claims.outdated_hint",
+            Text::ScriptClaimsUnbackedTitle => "script.claims.unbacked_title",
+            Text::ScriptClaimsNoSentence => "script.claims.no_sentence",
+            Text::ScriptClaimsUsedTitle => "script.claims.used_title",
+            Text::ScriptClaimsSensitiveTitle => "script.claims.sensitive_title",
+            Text::ScriptClaimsNoneUsed => "script.claims.none_used",
+            Text::CheckScriptClaims => "script.claims.check",
+            Text::CheckScriptClaimsAgain => "script.claims.check_again",
+            Text::ScriptClaimsCheckedAt => "script.claims.checked_at",
+            Text::ScriptClaimsPendingMissing => "script.claims.pending_missing",
+            Text::NarrationClaimsUnbacked => "narration.claims.unbacked",
+            Text::NarrationClaimsUnbackedOne => "narration.claims.unbacked_one",
+            Text::NarrationClaimsNotChecked => "narration.claims.not_checked",
         };
         Cow::Borrowed(key)
     }
@@ -7963,6 +8015,29 @@ mod tests {
         texts.extend(AdFramework::ALL.map(Text::AdFrameworkName));
         texts.extend(AdFramework::ALL.map(Text::AdFrameworkSteps));
         texts.push(Text::ScriptBriefNotReady);
+        texts.push(Text::GenerateAdScriptHint);
+        texts.push(Text::ScriptClaimsRunning);
+        texts.push(Text::ScriptClaimsStopped);
+        texts.push(Text::ScriptClaimsTitle);
+        texts.push(Text::ScriptClaimsInfo);
+        texts.push(Text::ScriptClaimsNotChecked);
+        texts.push(Text::ScriptClaimsClean);
+        texts.push(Text::ScriptClaimsUnbacked);
+        texts.push(Text::ScriptClaimsUnbackedOne);
+        texts.push(Text::ScriptClaimsOutdated);
+        texts.push(Text::ScriptClaimsOutdatedHint);
+        texts.push(Text::ScriptClaimsUnbackedTitle);
+        texts.push(Text::ScriptClaimsNoSentence);
+        texts.push(Text::ScriptClaimsUsedTitle);
+        texts.push(Text::ScriptClaimsSensitiveTitle);
+        texts.push(Text::ScriptClaimsNoneUsed);
+        texts.push(Text::CheckScriptClaims);
+        texts.push(Text::CheckScriptClaimsAgain);
+        texts.push(Text::ScriptClaimsCheckedAt);
+        texts.push(Text::ScriptClaimsPendingMissing);
+        texts.push(Text::NarrationClaimsUnbacked);
+        texts.push(Text::NarrationClaimsUnbackedOne);
+        texts.push(Text::NarrationClaimsNotChecked);
         texts.extend(Stage::ALL.map(Text::StageName));
         texts.extend(Stage::ALL.map(Text::StageAfter));
         texts.push(Text::RenderNoCut);

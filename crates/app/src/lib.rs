@@ -11,6 +11,7 @@ mod backup;
 mod captures;
 mod channels;
 mod chapters;
+mod claims_check;
 mod clips;
 mod connections;
 mod control_videos;
@@ -118,6 +119,7 @@ pub use bardo_media::ffmpeg::{CaptionLook, caption_look, highlight_colour};
 pub use captures::{CaptureError, CaptureReader, CaptureVoiceChoice, ChosenCapture, take_source};
 pub use channels::ChannelError;
 pub use chapters::{ChapterRow, ChaptersError, ChaptersView};
+pub use claims_check::{ClaimsCheckView, NarrationClaims, ScriptClaims, UnbackedStatement};
 pub use clips::{ClipsView, SceneClipView};
 pub use connections::{
     AccountChoice, AppCredentialsStatus, CONSENT_TIMEOUT, ConnectAttempt, ConnectResult,
@@ -806,6 +808,7 @@ impl Bardo {
         let script_handler = ScriptHandler {
             owner: profile.id,
             scripts: Arc::clone(&scripts),
+            ads: Arc::clone(&ads),
             text: Arc::clone(&providers.text),
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
@@ -1495,6 +1498,13 @@ pub(crate) mod testing {
     pub(crate) struct FakeTextGenerator {
         pub(crate) requests: Mutex<Vec<TextRequest>>,
         pub(crate) answers: Mutex<Vec<String>>,
+        /// What each claims check is answered with, in order; one that
+        /// finds nothing to state once the queue is empty. Apart from
+        /// `answers`, so a test that writes an ad's script need not answer
+        /// its check.
+        pub(crate) checks: Mutex<Vec<String>>,
+        /// What a claims check fails with, when set.
+        pub(crate) check_failure: Mutex<Option<ProviderFailure>>,
         pub(crate) failure: Mutex<Option<ProviderFailure>>,
         /// Reported with every answer.
         pub(crate) usage: Mutex<TokenUsage>,
@@ -1540,6 +1550,30 @@ pub(crate) mod testing {
         /// How many requests came with a stop nobody can ask.
         pub(crate) fn unstoppable(&self) -> u32 {
             self.unstoppable.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        /// Queues a claims check's answer: each statement with the number
+        /// of its sentence and of the claim that backs it (0 for none).
+        pub(crate) fn check_with(&self, statements: &[(i64, &str, i64)]) {
+            let statements: Vec<_> = statements
+                .iter()
+                .map(|(sentence, says, claim)| {
+                    serde_json::json!({"sentence": sentence, "says": says, "claim": claim})
+                })
+                .collect();
+            self.checks
+                .lock()
+                .unwrap()
+                .push(serde_json::json!({ "statements": statements }).to_string());
+        }
+
+        /// The requests that were claims checks.
+        pub(crate) fn check_requests(&self) -> Vec<TextRequest> {
+            self.requests().into_iter().filter(Self::is_check).collect()
+        }
+
+        fn is_check(request: &TextRequest) -> bool {
+            request.instructions == crate::claims_check::CHECK_INSTRUCTIONS
         }
 
         /// Queues an answer proposing these titles, each with an angle.
@@ -1624,8 +1658,19 @@ pub(crate) mod testing {
             if let Some(failure) = self.failure.lock().unwrap().clone() {
                 return Err(failure);
             }
+            let check = Self::is_check(request);
+            if check && let Some(failure) = self.check_failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
             let mut answers = self.answers.lock().unwrap();
-            let text = if answers.is_empty() {
+            let text = if check {
+                let mut checks = self.checks.lock().unwrap();
+                if checks.is_empty() {
+                    r#"{"statements":[]}"#.to_owned()
+                } else {
+                    checks.remove(0)
+                }
+            } else if answers.is_empty() {
                 let titles: Vec<String> = (1..=10).map(|n| format!("Idea {n}")).collect();
                 ideas_json(&titles.iter().map(String::as_str).collect::<Vec<_>>())
             } else {

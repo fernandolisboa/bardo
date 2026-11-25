@@ -36,7 +36,7 @@ The copies are the video's own: editing or rejecting a claim in the product neve
 
 **Offer**, **Call to action** and **Link or handle** start as the product's own and belong to this video from then on: changing them here changes neither the product nor another video. The offer holds up to 300 characters, the call to action up to 120 and the link or handle up to 500; the link is kept as you type it, so an `@handle` works. **Save the words** keeps them. The call to action is required, since it is what the viewer is asked to do.
 
-**Length** is how long the ad runs: 30 seconds, 1 minute or 3 minutes. An ad starts at 30 seconds, and the choice is the same as [Length](projects.md#length) at the top of the project.
+**Length** is how long the ad runs: 15 seconds, 30 seconds, 1 minute or 3 minutes. An ad starts at 30 seconds, and the choice is the same as [Length](projects.md#length) at the top of the project. The script aims 2 seconds under it ([Script](script.md#write)).
 
 <a id="confirm"></a>
 ## Confirming the brief

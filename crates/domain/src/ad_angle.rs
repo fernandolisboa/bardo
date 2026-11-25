@@ -13,9 +13,9 @@
 use std::time::SystemTime;
 
 use crate::{
-    AdBrief, AdFramework, ChannelId, ClaimId, Confidence, JobId, Niche, ProductId, ProductSheet,
-    ProfileId, Reason, RepositoryError, Score, Theme, ThemeFieldError, ThemeId, ThemeIdea,
-    ThemeStatus, VideoLength, VideoProject, VideoProjectId,
+    AdBrief, AdFramework, ChannelId, CheckedScript, ClaimId, ClaimsCheck, Confidence, JobId, Niche,
+    ProductId, ProductSheet, ProfileId, Reason, RepositoryError, Score, Theme, ThemeFieldError,
+    ThemeId, ThemeIdea, ThemeStatus, VideoLength, VideoProject, VideoProjectId,
 };
 
 uuid_id!(
@@ -454,6 +454,29 @@ pub trait AdRepository: Send + Sync {
 
     /// The briefs of every ad project of the product.
     fn briefs_of(&self, product: ProductId) -> Result<Vec<AdBrief>, RepositoryError>;
+
+    /// The claims check of one of the project's scripts, if it was
+    /// checked.
+    fn claims_check(
+        &self,
+        project: VideoProjectId,
+        of: CheckedScript,
+    ) -> Result<Option<ClaimsCheck>, RepositoryError>;
+
+    /// Saves a check in place of the one its script had.
+    fn save_claims_check(&self, check: &ClaimsCheck) -> Result<(), RepositoryError>;
+
+    /// Forgets the check of one of the project's scripts.
+    fn drop_claims_check(
+        &self,
+        project: VideoProjectId,
+        of: CheckedScript,
+    ) -> Result<(), RepositoryError>;
+
+    /// The regenerated script was accepted: its check, if it has one,
+    /// becomes the current script's, and the check of the script it
+    /// replaced is forgotten either way. All or none.
+    fn accept_claims_check(&self, project: VideoProjectId) -> Result<(), RepositoryError>;
 }
 
 impl<T: AdRepository + ?Sized> AdRepository for std::sync::Arc<T> {
@@ -496,6 +519,30 @@ impl<T: AdRepository + ?Sized> AdRepository for std::sync::Arc<T> {
 
     fn briefs_of(&self, product: ProductId) -> Result<Vec<AdBrief>, RepositoryError> {
         (**self).briefs_of(product)
+    }
+
+    fn claims_check(
+        &self,
+        project: VideoProjectId,
+        of: CheckedScript,
+    ) -> Result<Option<ClaimsCheck>, RepositoryError> {
+        (**self).claims_check(project, of)
+    }
+
+    fn save_claims_check(&self, check: &ClaimsCheck) -> Result<(), RepositoryError> {
+        (**self).save_claims_check(check)
+    }
+
+    fn drop_claims_check(
+        &self,
+        project: VideoProjectId,
+        of: CheckedScript,
+    ) -> Result<(), RepositoryError> {
+        (**self).drop_claims_check(project, of)
+    }
+
+    fn accept_claims_check(&self, project: VideoProjectId) -> Result<(), RepositoryError> {
+        (**self).accept_claims_check(project)
     }
 }
 

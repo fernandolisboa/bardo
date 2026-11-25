@@ -529,8 +529,14 @@ impl VideoProject {
     }
 
     /// What the script template asks for: its own length, else its
-    /// format's.
+    /// format's. An ad's script runs 2 seconds under it, for the end
+    /// card's tail.
     pub fn target_length(&self, format: VideoFormat) -> &'static str {
+        if self.is_ad() {
+            return self
+                .length
+                .map_or_else(|| format.ad_target_length(), VideoLength::ad_target_length);
+        }
         self.length
             .map_or_else(|| format.target_length(), VideoLength::target_length)
     }

@@ -67,7 +67,7 @@ pub fn sentences(narration: &Narration) -> Vec<Sentence> {
 /// The sentences of `text` as runs of its `words` (their places in
 /// `text`, in order), by the rules of [`sentences`]. They depend on the
 /// text alone, not on when it is spoken.
-fn sentence_spans(text: &str, words: &[Range<usize>]) -> Vec<Range<usize>> {
+pub(crate) fn sentence_spans(text: &str, words: &[Range<usize>]) -> Vec<Range<usize>> {
     let mut spans = Vec::new();
     let mut first = 0;
     for (index, word) in words.iter().enumerate() {

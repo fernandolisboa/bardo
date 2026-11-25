@@ -216,6 +216,7 @@ short_length = "45 to 60 s"
 long_length = "8 to 10 min"
 
 [video_length]
+seconds_15 = "15 seconds"
 seconds_30 = "30 seconds"
 minute_1 = "1 minute"
 minutes_3 = "3 minutes"
@@ -358,6 +359,7 @@ staging_cleanup = "Staged files cleanup"
 look_framing = "Look framing"
 ad_angle_suggestion = "Ad angle suggestion"
 ad_angle_ranking = "Ad angle ranking"
+claims_check = "Claims check"
 
 [job.state]
 queued = "Queued"
@@ -691,6 +693,7 @@ words = "{n} words"
 current = "Current script"
 brief_changed = "The brief changed after this script was written. Read the script against it, then keep it or write it again."
 keep_after_brief = "The script still holds"
+generate_hint_ad = "Claude writes it from the ad script template (version {n}) with the product, the angle and the claims of the brief, then checks what it states against those claims."
 
 [script.pending]
 title = "New script to review"
@@ -1170,6 +1173,7 @@ localization = "Localized version"
 look_prompt = "Look prompt"
 take_prompt = "Take prompt"
 ad_angles = "Ad angles"
+ad_script = "Ad script"
 
 [templates.variable]
 channel_name = "The channel's name."
@@ -1186,7 +1190,7 @@ narration_sentences = "The narration, one numbered sentence per line with when i
 video_length = "The video's length, from its narration (\"not known yet\" before there is one)."
 script = "The approved script."
 networks = "The channel's network accounts, one per line, with each network's fields and limits, the account's language, default tags and footer."
-target_length = "How long the script runs: the project's length when it picks one, else from the video's format: under a minute for a Short, 8 to 10 minutes for a long video."
+target_length = "How long the script runs: the project's length when it picks one, else from the video's format: under a minute for a Short, 8 to 10 minutes for a long video. An ad's script runs 2 seconds under it, to leave room for the end card."
 frame_shape = "The shape of the pictures, from the video's format: tall (9:16) for a Short, wide (16:9) for a long video."
 video_title = "The video's title on YouTube once the metadata is written, else its working title."
 source_language = "The language the version is adapted from: the source channel's."
@@ -1204,6 +1208,15 @@ product_notes = "What the advertiser asks for: the offer, the call to action, wh
 ad_frameworks = "Bardo's ad frameworks, one per line: the code, the name and the steps."
 angles_to_avoid = "The titles of the angles already proposed for this product on this channel (\"none yet\" before the first run)."
 angle_count = "How many angles one run asks for."
+product_concept = "Whether the product is a concept: an idea that does not exist yet (a product of kind Idea)."
+ad_segment = "The part of the audience the ad speaks to, from its angle."
+ad_hook = "A draft of the ad's first words, from its angle."
+ad_framework = "The framework the ad follows: its name and its steps in order."
+brief_claims = "The claims this video uses, numbered, one per line: the Brief stage's own copies."
+offer = "What the viewer gets, as the Brief stage has it (\"not set\" when empty)."
+call_to_action = "What the viewer is asked to do, in your words, from the Brief stage."
+must_say = "What every ad for the product must say, from the product's brief."
+never_say = "What no ad for the product may say, from the product's brief."
 
 [templates.error]
 not_saved = "Could not save the template. Try again."
@@ -2998,15 +3011,11 @@ name = "Script tour"
 
 [tour.script.write]
 title = "Generate, then edit"
-body = "Claude writes the script from the script template, the channel, the theme and the narrator. Once it is here, edit it as you like: it is yours."
+body = "Claude writes the script from the script template, the channel, the theme and the narrator. Once it is here, it is yours: edit it, and Save keeps what you typed. A narration made from an older script then shows as out of date."
 
 [tour.script.review]
 title = "A new version to review"
 body = "Regenerate writes a new script without touching yours. It waits beside the current one until you accept it or keep the current one."
-
-[tour.script.save]
-title = "Save your edits"
-body = "Save keeps what you typed, and Discard changes goes back to the saved script. A narration made from an older script then shows as out of date."
 
 [tour.script.cost]
 title = "What it costs"
@@ -4560,3 +4569,33 @@ body = "Approving an angle starts an ad project in that channel, at its Brief st
 [tour.products-angles.ranking]
 title = "What an angle says"
 body = "Each angle shows its format, who it speaks to, its first words and the claims it leans on. Priority weighs the hook, the audience fit and the clarity; Bardo itself marks an angle that leans on a sensitive claim."
+
+[script.claims]
+running = "Checking the script against the brief's claims…"
+stopped = "The claims check stopped:"
+title = "Claims check"
+info = "Claude lists what the script states about the product and ties each statement to a claim of the brief. What no claim backs is listed here. It locks nothing: you decide whether the sentence stays, changes or goes."
+not_checked = "This script was not checked yet."
+clean = "Everything it states is backed"
+unbacked = "{n} statements without backing"
+unbacked_one = "1 statement without backing"
+outdated = "Out of date"
+outdated_hint = "The script or the brief changed after this check. Check again to see where the script stands now."
+unbacked_title = "What no claim of the brief backs"
+no_sentence = "The check did not say which sentence states it."
+used_title = "Claims this script uses"
+sensitive_title = "Sensitive claims this script uses"
+none_used = "The script states nothing that a claim of the brief backs."
+check = "Check claims"
+check_again = "Check again"
+checked_at = "Checked {when}"
+pending_missing = "This new script was not checked. Accept it and check its claims, or generate again."
+
+[narration.claims]
+unbacked = "The script states {n} things that no claim of the brief backs. They are listed in the claims check on the Script stage."
+unbacked_one = "The script states 1 thing that no claim of the brief backs. It is listed in the claims check on the Script stage."
+not_checked = "The script was not checked against the brief's claims as it reads now. Check its claims on the Script stage first if you want to know."
+
+[tour.script.claims]
+title = "The claims check"
+body = "For an ad, Claude lists what the script states about the product. A statement that no claim of the brief backs is marked here, and you decide what to do with the sentence. After an edit, check again."

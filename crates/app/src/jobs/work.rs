@@ -19,7 +19,8 @@ use crate::Bardo;
 /// its busy check is theirs too. Scenes have their own (`scenes_busy`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Work {
-    /// The project's script: written, or adapted again for a version.
+    /// The project's script: written, adapted again for a version, or an
+    /// ad's checked against its brief's claims.
     Script(String),
     /// The versions made of the project for other channels.
     Versions(String),
@@ -71,6 +72,7 @@ impl Work {
         if !matches!(
             kind,
             JobKind::ScriptGeneration
+                | JobKind::ClaimsCheck
                 | JobKind::Localization
                 | JobKind::Chapters
                 | JobKind::Thumbnail
@@ -90,7 +92,7 @@ impl Work {
         }
         let on: WorksOn = serde_json::from_str(job.payload()).ok()?;
         Some(match kind {
-            JobKind::ScriptGeneration => Self::Script(on.project?),
+            JobKind::ScriptGeneration | JobKind::ClaimsCheck => Self::Script(on.project?),
             // With a channel it makes a version of the project for it;
             // without, it adapts the version's script again.
             JobKind::Localization => match on.channel {
@@ -173,6 +175,8 @@ mod tests {
         let on_project = serde_json::json!({"project": "p", "prompt": "…"});
         for (kind, expected) in [
             (JobKind::ScriptGeneration, Work::Script("p".into())),
+            // A check works on the script it reads.
+            (JobKind::ClaimsCheck, Work::Script("p".into())),
             (JobKind::Chapters, Work::Chapters("p".into())),
             (JobKind::Thumbnail, Work::Thumbnail("p".into())),
             (JobKind::ThumbnailImage, Work::Thumbnail("p".into())),

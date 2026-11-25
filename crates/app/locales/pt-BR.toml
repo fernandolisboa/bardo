@@ -216,6 +216,7 @@ short_length = "45 a 60 s"
 long_length = "8 a 10 min"
 
 [video_length]
+seconds_15 = "15 segundos"
 seconds_30 = "30 segundos"
 minute_1 = "1 minuto"
 minutes_3 = "3 minutos"
@@ -358,6 +359,7 @@ staging_cleanup = "Limpeza de arquivos enviados"
 look_framing = "Enquadramento da aparência"
 ad_angle_suggestion = "Sugestão de ângulos de anúncio"
 ad_angle_ranking = "Ranqueamento de ângulos de anúncio"
+claims_check = "Checagem de afirmações"
 
 [job.state]
 queued = "Na fila"
@@ -691,6 +693,7 @@ words = "{n} palavras"
 current = "Roteiro atual"
 brief_changed = "O briefing mudou depois que este roteiro foi escrito. Leia o roteiro com o briefing ao lado e mantenha ou escreva de novo."
 keep_after_brief = "O roteiro continua valendo"
+generate_hint_ad = "O Claude escreve a partir do modelo de roteiro de anúncio (versão {n}), com o produto, o ângulo e as afirmações do briefing, e depois confere o que o roteiro diz com essas afirmações."
 
 [script.pending]
 title = "Novo roteiro para revisar"
@@ -1170,6 +1173,7 @@ localization = "Versão localizada"
 look_prompt = "Prompt de aparência"
 take_prompt = "Prompt da tomada"
 ad_angles = "Ângulos de anúncio"
+ad_script = "Roteiro de anúncio"
 
 [templates.variable]
 channel_name = "O nome do canal."
@@ -1186,7 +1190,7 @@ narration_sentences = "A narração, uma frase numerada por linha com o momento 
 video_length = "A duração do vídeo, pela narração (\"not known yet\" enquanto não houver uma)."
 script = "O roteiro aprovado."
 networks = "As contas de rede do canal, uma por linha, com os campos e limites de cada rede, o idioma, as tags padrão e o rodapé da conta."
-target_length = "O tamanho do roteiro: a duração do projeto quando ele escolhe uma, senão pelo formato do vídeo: menos de um minuto para um Short, de 8 a 10 minutos para um vídeo longo."
+target_length = "O tamanho do roteiro: a duração do projeto quando ele escolhe uma, senão pelo formato do vídeo: menos de um minuto para um Short, de 8 a 10 minutos para um vídeo longo. O roteiro de um anúncio fica 2 segundos abaixo disso, para caber o cartão final."
 frame_shape = "O formato das imagens, pelo formato do vídeo: em pé (9:16) para um Short, deitado (16:9) para um vídeo longo."
 video_title = "O título do vídeo no YouTube depois que os metadados forem escritos; antes disso, o título provisório."
 source_language = "O idioma de onde a versão é adaptada: o do canal de origem."
@@ -1204,6 +1208,15 @@ product_notes = "O que o anunciante pede: a oferta, a chamada para ação, o que
 ad_frameworks = "Os formatos de anúncio do Bardo, um por linha: o código, o nome e os passos."
 angles_to_avoid = "Os títulos dos ângulos já propostos para este produto neste canal (\"none yet\" antes da primeira execução)."
 angle_count = "Quantos ângulos uma execução pede."
+product_concept = "Se o produto é um conceito: uma ideia que ainda não existe (um produto do tipo Ideia)."
+ad_segment = "A parte do público com quem o anúncio fala, vinda do ângulo."
+ad_hook = "Um rascunho das primeiras palavras do anúncio, vindo do ângulo."
+ad_framework = "O formato que o anúncio segue: o nome e os passos em ordem."
+brief_claims = "As afirmações que este vídeo usa, numeradas, uma por linha: as cópias da própria etapa Briefing."
+offer = "O que o espectador ganha, como está na etapa Briefing (\"not set\" quando vazio)."
+call_to_action = "O que se pede ao espectador, nas suas palavras, vindo da etapa Briefing."
+must_say = "O que todo anúncio do produto precisa dizer, vindo do briefing do produto."
+never_say = "O que nenhum anúncio do produto pode dizer, vindo do briefing do produto."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."
@@ -2998,15 +3011,11 @@ name = "Tour do Roteiro"
 
 [tour.script.write]
 title = "Gere e depois edite"
-body = "O Claude escreve o roteiro a partir do modelo de roteiro, do canal, do tema e do narrador. Depois que ele chega aqui, edite à vontade: o roteiro é seu."
+body = "O Claude escreve o roteiro a partir do modelo de roteiro, do canal, do tema e do narrador. Depois que ele chega aqui, o roteiro é seu: edite, e Salvar guarda o que você digitou. Uma narração feita a partir de um roteiro anterior passa a aparecer como desatualizada."
 
 [tour.script.review]
 title = "Uma nova versão para revisar"
 body = "Gerar de novo escreve um novo roteiro sem mexer no seu. Ele espera ao lado do atual até você aceitá-lo ou manter o atual."
-
-[tour.script.save]
-title = "Salve suas edições"
-body = "Salvar guarda o que você digitou, e Descartar alterações volta ao roteiro salvo. Uma narração feita a partir de um roteiro anterior passa a aparecer como desatualizada."
 
 [tour.script.cost]
 title = "Quanto custa"
@@ -4560,3 +4569,33 @@ body = "Aprovar um ângulo começa um projeto de anúncio naquele canal, na etap
 [tour.products-angles.ranking]
 title = "O que um ângulo diz"
 body = "Cada ângulo mostra o formato, com quem fala, as primeiras palavras e as afirmações que usa. A prioridade pesa o gancho, o encaixe com o público e a clareza; o próprio Bardo marca um ângulo que usa uma afirmação sensível."
+
+[script.claims]
+running = "Conferindo o roteiro com as afirmações do briefing…"
+stopped = "A checagem de afirmações parou:"
+title = "Checagem de afirmações"
+info = "O Claude lista o que o roteiro diz sobre o produto e liga cada ponto a uma afirmação do briefing. O que nenhuma afirmação sustenta aparece aqui. Isso não trava nada: você decide se a frase fica, muda ou sai."
+not_checked = "Este roteiro ainda não foi conferido."
+clean = "Tudo o que diz tem base"
+unbacked = "{n} pontos sem base"
+unbacked_one = "1 ponto sem base"
+outdated = "Desatualizada"
+outdated_hint = "O roteiro ou o briefing mudou depois desta checagem. Confira de novo para ver como o roteiro está agora."
+unbacked_title = "O que nenhuma afirmação do briefing sustenta"
+no_sentence = "A checagem não disse qual frase diz isso."
+used_title = "Afirmações que este roteiro usa"
+sensitive_title = "Afirmações sensíveis que este roteiro usa"
+none_used = "O roteiro não diz nada que uma afirmação do briefing sustente."
+check = "Conferir afirmações"
+check_again = "Conferir de novo"
+checked_at = "Conferido {when}"
+pending_missing = "Este roteiro novo não foi conferido. Aceite e confira as afirmações, ou gere de novo."
+
+[narration.claims]
+unbacked = "O roteiro diz {n} coisas que nenhuma afirmação do briefing sustenta. Elas estão na checagem de afirmações da etapa Roteiro."
+unbacked_one = "O roteiro diz 1 coisa que nenhuma afirmação do briefing sustenta. Ela está na checagem de afirmações da etapa Roteiro."
+not_checked = "O roteiro não foi conferido com as afirmações do briefing como está agora. Se quiser saber, confira as afirmações na etapa Roteiro antes."
+
+[tour.script.claims]
+title = "A checagem de afirmações"
+body = "Em um anúncio, o Claude lista o que o roteiro diz sobre o produto. O que nenhuma afirmação do briefing sustenta fica marcado aqui, e você decide o que fazer com a frase. Depois de editar, confira de novo."

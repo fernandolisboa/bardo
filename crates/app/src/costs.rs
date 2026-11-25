@@ -406,6 +406,9 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         CostPurpose::AdAngles => tokens(2_000, 2_000),
         // Five angles, three questions each.
         CostPurpose::AdAngleRanking => tokens(1_500, 0),
+        // The brief's claims and a short script in, a statement per
+        // sentence as JSON out.
+        CostPurpose::ClaimsCheck => tokens(1_200, 700),
         CostPurpose::PersonaLook => match provider {
             Provider::Claude => tokens(700, 400),
             _ => Metered {

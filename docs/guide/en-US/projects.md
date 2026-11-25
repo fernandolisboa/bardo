@@ -30,9 +30,9 @@ The format applies to what is made next: the next script's length, the shape of 
 <a id="length"></a>
 ## How long it runs
 
-**Length**, beside the format, says how long this video's script runs. **Format's** keeps the format's length: 45 to 60 seconds for a Short, 8 to 10 minutes for a long video. Pick **30 seconds**, **1 minute** or **3 minutes** for this video alone. Every length stays under 3:00, the longest YouTube Shorts and Instagram Reels take, so a 3-minute Short still posts as a Short (its script aims at about 2:40 to leave room); X takes only 2:20, so a 3-minute video is blocked for X; a long video of 3 minutes is a short 16:9 upload for YouTube.
+**Length**, beside the format, says how long this video's script runs. **Format's** keeps the format's length: 45 to 60 seconds for a Short, 8 to 10 minutes for a long video. Pick **15 seconds**, **30 seconds**, **1 minute** or **3 minutes** for this video alone. Fifteen seconds is about 30 to 38 words, and every network takes it. Every length stays under 3:00, the longest YouTube Shorts and Instagram Reels take, so a 3-minute Short still posts as a Short (its script aims at about 2:40 to leave room); X takes only 2:20, so a 3-minute video is blocked for X; a long video of 3 minutes is a short 16:9 upload for YouTube.
 
-The length sets only how long the next script runs and the [whole-video estimate](#mode) before a script exists; the format still sets the shape of the pictures, the cut and the [render preset](render.md#targets). A script already written keeps its length: write it again after switching. The narration runs as long as the script reads, so check its length on the Narration stage before moving on.
+The length sets only how long the next script runs and the [whole-video estimate](#mode) before a script exists; the format still sets the shape of the pictures, the cut and the [render preset](render.md#targets). A script already written keeps its length: write it again after switching. An [ad](brief.md)'s script aims 2 seconds under its length, so the video ends on time. The narration runs as long as the script reads, so check its length on the Narration stage before moving on.
 
 <a id="style"></a>
 ## How it is drawn

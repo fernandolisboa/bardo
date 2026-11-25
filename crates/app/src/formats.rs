@@ -134,6 +134,18 @@ mod tests {
             economy(&app).saturating_add(Money::from_micros(45_000 + 5 * (101_570 + 3_200))),
             minute
         );
+        let thirty = economy(&app);
+        app.set_project_length(project.id, Some(VideoLength::Seconds15))
+            .unwrap();
+        // Fifteen seconds: 225 characters and three scenes.
+        assert_eq!(
+            economy(&app).saturating_add(Money::from_micros(22_500 + 2 * (101_570 + 3_200))),
+            thirty
+        );
+        assert_eq!(
+            app.themes.project(project.id).unwrap().unwrap().length,
+            Some(VideoLength::Seconds15)
+        );
         app.set_project_length(project.id, Some(VideoLength::Minutes3))
             .unwrap();
 
