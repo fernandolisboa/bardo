@@ -860,10 +860,12 @@ mod tests {
         scene.accept_clip().unwrap();
         s.db.save_scene_plan(&plan).unwrap();
         {
-            // As the database was before migration 64, then migrated.
+            // As the database was before migration 64 (and the one after),
+            // then migrated.
             let mut conn = s.db.conn();
             conn.execute_batch(
-                "ALTER TABLE scene_clip DROP COLUMN stretch_percent;
+                "ALTER TABLE job DROP COLUMN paid_call;
+                 ALTER TABLE scene_clip DROP COLUMN stretch_percent;
                  ALTER TABLE channel DROP COLUMN clip_stretch_percent;
                  ALTER TABLE channel DROP COLUMN clip_fit;
                  PRAGMA user_version = 63;",

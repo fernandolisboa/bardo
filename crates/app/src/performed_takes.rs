@@ -746,16 +746,18 @@ impl JobHandler for TakePromptHandler {
                 schema: PROMPT_SCHEMA.to_owned(),
             },
         };
-        let generated = self.text.generate(&key, &request).map_err(|failure| {
-            // An answer that was lost or cut may still have been billed.
-            self.costs.record_failed_for_project(
-                &failure,
-                &PlannedCall::text(CostPurpose::TakePrompt, &request),
-                Some(cx.id()),
-                project,
-            );
-            JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-        })?;
+        let paid_call = PlannedCall::text(CostPurpose::TakePrompt, &request);
+        let generated = {
+            let _paying = self
+                .costs
+                .paying_for_project(cx.id(), &paid_call, project)?;
+            self.text.generate(&key, &request).map_err(|failure| {
+                // An answer that was lost or cut may still have been billed.
+                self.costs
+                    .record_failed_for_project(&failure, &paid_call, Some(cx.id()), project);
+                JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
+            })
+        }?;
         self.costs.record_for_project(
             PaidCall {
                 provider: Provider::Claude,

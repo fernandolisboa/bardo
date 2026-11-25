@@ -306,17 +306,16 @@ impl PersonaLookHandler {
                 schema: WRITE_SCHEMA.to_owned(),
             },
         };
-        let generated = self.text.generate(&key, &request).map_err(|failure| {
-            // An answer that was lost or cut may still have been billed.
-            self.costs.record_failed(
-                &failure,
-                &PlannedCall::text(CostPurpose::PersonaLook, &request),
-                Some(job),
-                None,
-                None,
-            );
-            JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-        })?;
+        let paid_call = PlannedCall::text(CostPurpose::PersonaLook, &request);
+        let generated = {
+            let _paying = self.costs.paying(job, &paid_call, None, None)?;
+            self.text.generate(&key, &request).map_err(|failure| {
+                // An answer that was lost or cut may still have been billed.
+                self.costs
+                    .record_failed(&failure, &paid_call, Some(job), None, None);
+                JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
+            })
+        }?;
         self.costs.record(
             PaidCall {
                 provider: Provider::Claude,
@@ -367,17 +366,16 @@ impl PersonaLookHandler {
             shape: ImageShape::Portrait,
             references: Vec::new(),
         };
-        let image = self.images.generate(&key, &request).map_err(|failure| {
-            // An answer that was lost may still have been billed.
-            self.costs.record_failed(
-                &failure,
-                &PlannedCall::new(Provider::Gemini, CostPurpose::PersonaLook, 1),
-                Some(job),
-                None,
-                None,
-            );
-            JobFailure::new(failure.kind.into(), format!("Gemini: {}", failure.detail))
-        })?;
+        let paid_call = PlannedCall::new(Provider::Gemini, CostPurpose::PersonaLook, 1);
+        let image = {
+            let _paying = self.costs.paying(job, &paid_call, None, None)?;
+            self.images.generate(&key, &request).map_err(|failure| {
+                // An answer that was lost may still have been billed.
+                self.costs
+                    .record_failed(&failure, &paid_call, Some(job), None, None);
+                JobFailure::new(failure.kind.into(), format!("Gemini: {}", failure.detail))
+            })
+        }?;
         self.costs.record(
             PaidCall {
                 provider: Provider::Gemini,

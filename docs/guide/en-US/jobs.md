@@ -39,7 +39,7 @@ A clip request the provider took and that then ended without a clip (failed, can
 <a id="restart"></a>
 ## Closing Bardo mid-job
 
-Closing Bardo, or the computer, never loses a job. The next time Bardo opens, each running job picks up from the last point it saved, and the attempt it was on does not count against its retries. A job that had already handed work to a provider (a clip being made, an upload being processed) asks the provider how it went rather than paying for it twice. A job waiting to retry, or waiting for its time, keeps waiting.
+Closing Bardo, or the computer, never loses a job. The next time Bardo opens, each running job picks up from the last point it saved, and the attempt it was on does not count against its retries. A job that had already handed work to a provider (a clip being made, an upload being processed) asks the provider how it went rather than paying for it twice. A job that was waiting for the answer to a paid request for text, an image, a voice or music, which cannot be asked about, does not send it again: it stops as **Failed**, as for [a paid request that got no answer](troubleshooting.md#answer-lost), and [Costs](costs.md#spent) counts an estimate of what it may have cost. A job waiting to retry, or waiting for its time, keeps waiting.
 
 <a id="test"></a>
 ## Test jobs

@@ -12,7 +12,7 @@ use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 /// The columns `JobRow::read` reads, in its order.
 const JOB_COLUMNS: &str = "id, profile_id, kind, payload, state, progress, attempts, checkpoint,
-     external_handle, failure_kind, failure_detail, retry_at, run_at";
+     external_handle, failure_kind, failure_detail, retry_at, run_at, paid_call";
 
 /// How long a runner that stopped saying it is up keeps its row.
 const FORGET_RUNNER_AFTER_MILLIS: i64 = 24 * 60 * 60 * 1000;
@@ -32,6 +32,7 @@ struct JobRow {
     failure_detail: Option<String>,
     retry_at: Option<i64>,
     run_at: Option<i64>,
+    paid_call: Option<String>,
 }
 
 impl JobRow {
@@ -50,6 +51,7 @@ impl JobRow {
             failure_detail: row.get(10)?,
             retry_at: row.get(11)?,
             run_at: row.get(12)?,
+            paid_call: row.get(13)?,
         })
     }
 
@@ -72,6 +74,7 @@ impl JobRow {
             attempts: u32::try_from(self.attempts).map_err(boxed)?,
             checkpoint: self.checkpoint,
             external_handle: self.external_handle,
+            paid_call: self.paid_call,
             failure,
             retry_at: self.retry_at.map(from_unix_millis),
             run_at: self.run_at.map(from_unix_millis),
@@ -105,8 +108,8 @@ impl JobRepository for Database {
             .execute(
                 "INSERT INTO job (id, profile_id, kind, payload, state, progress, attempts,
                                   checkpoint, external_handle, failure_kind, failure_detail,
-                                  retry_at, run_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                                  retry_at, run_at, paid_call)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?16)
                  ON CONFLICT (id) DO UPDATE SET
                      state = excluded.state,
                      progress = excluded.progress,
@@ -117,6 +120,7 @@ impl JobRepository for Database {
                      failure_detail = excluded.failure_detail,
                      retry_at = excluded.retry_at,
                      run_at = excluded.run_at,
+                     paid_call = excluded.paid_call,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                  WHERE job.leased_by IS NULL OR job.leased_by = ?14
                        OR job.leased_until <= ?15",
@@ -136,6 +140,7 @@ impl JobRepository for Database {
                     job.run_at().map(to_unix_millis),
                     self.runner(),
                     to_unix_millis(SystemTime::now()),
+                    job.paid_call(),
                 ],
             )
             .map_err(boxed)?;
