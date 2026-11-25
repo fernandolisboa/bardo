@@ -25,8 +25,8 @@ use bardo_domain::{
     ApiKey, AppCredentials, Budget, CaptionHighlight, ChannelDraft, ClipModelRef,
     ConnectedIdentity, ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart,
     Money, MotionDefault, Network, NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona,
-    ProductionMode, Provider, Rate, Resolution, Score, ThumbnailLook, TokenSet, Transition,
-    UiLanguage, UiThemePreference, VideoFormat, VoiceFlag,
+    ProductionMode, Provider, Rate, Resolution, Score, StyleChoice, ThumbnailLook, TokenSet,
+    Transition, UiLanguage, UiThemePreference, VideoFormat, VoiceFlag,
 };
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
@@ -425,6 +425,11 @@ struct ChannelEntry {
     /// animated with the channel's clip model, as those channels made.
     #[serde(default)]
     production: Option<String>,
+    /// Missing from files made before visual styles: the look comes from
+    /// the aesthetic notes, as those channels' did. A style this version
+    /// does not know is read the same way.
+    #[serde(default)]
+    style: Option<String>,
     /// Missing from files made before the word highlight: off, as those
     /// channels' captions were.
     #[serde(default)]
@@ -566,6 +571,10 @@ impl ChannelEntry {
                 Some(mode) => mode.parse().ok()?,
                 None => ProductionMode::ChannelModel,
             },
+            style: self
+                .style
+                .as_deref()
+                .map_or_else(StyleChoice::default, StyleChoice::from_code),
         })
     }
 
@@ -926,6 +935,7 @@ impl Bardo {
                     strength: details.motion().strength.code().to_owned(),
                 }),
                 production: Some(details.production().code().to_owned()),
+                style: Some(details.style().code().to_owned()),
                 accounts,
             });
         }
@@ -1450,6 +1460,7 @@ mod tests {
                     bardo_domain::MotionStrength::Subtle,
                 ),
                 format: VideoFormat::Short,
+                style: StyleChoice::Catalog(bardo_domain::VisualStyle::Anime),
                 ..ChannelDraft::default()
             })
             .unwrap();
@@ -1494,6 +1505,26 @@ mod tests {
         let entry: ChannelEntry =
             serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
         assert_eq!(entry.draft(None).unwrap().format, VideoFormat::Long);
+    }
+
+    #[test]
+    fn a_channel_from_a_file_made_before_styles_or_with_one_unknown_here_follows_its_notes() {
+        let before: ChannelEntry =
+            serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
+        assert_eq!(before.draft(None).unwrap().style, StyleChoice::FromNotes);
+        let newer: ChannelEntry = serde_json::from_str(
+            r#"{"name": "New", "language": "en", "country": "US", "style": "holo-9000"}"#,
+        )
+        .unwrap();
+        assert_eq!(newer.draft(None).unwrap().style, StyleChoice::FromNotes);
+        let manga: ChannelEntry = serde_json::from_str(
+            r#"{"name": "M", "language": "en", "country": "US", "style": "manga"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            manga.draft(None).unwrap().style,
+            StyleChoice::Catalog(bardo_domain::VisualStyle::Manga)
+        );
     }
 
     #[test]
@@ -1699,6 +1730,10 @@ mod tests {
             Transition::new(bardo_domain::TransitionKind::WipeRight, 21)
         );
         assert_eq!(channel.details.format(), VideoFormat::Short);
+        assert_eq!(
+            channel.details.style(),
+            StyleChoice::Catalog(bardo_domain::VisualStyle::Anime)
+        );
         assert_eq!(channel.details.caption_highlight(), CaptionHighlight::Cyan);
         assert_eq!(channel.details.thumbnail_look(), ThumbnailLook::Banner);
         assert_eq!(

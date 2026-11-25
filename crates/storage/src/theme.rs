@@ -1,8 +1,8 @@
 use bardo_domain::{
     ChannelId, Confidence, EvidenceScope, JobId, Money, Niche, PerformanceEvidence,
-    PerformanceReason, PersonaId, ProductionMode, ProfileId, Reason, RepositoryError, Score, Theme,
-    ThemeId, ThemeIdea, ThemeRanking, ThemeRecord, ThemeRepository, VideoFormat, VideoLength,
-    VideoProject, VideoProjectId,
+    PerformanceReason, PersonaId, ProductionMode, ProfileId, Reason, RepositoryError, Score,
+    StyleChoice, Theme, ThemeId, ThemeIdea, ThemeRanking, ThemeRecord, ThemeRepository,
+    VideoFormat, VideoLength, VideoProject, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -18,7 +18,8 @@ const SELECT_THEME: &str = "SELECT id, profile_id, channel_id, niche, title, ang
     FROM theme";
 
 pub(crate) const SELECT_PROJECT: &str = "SELECT id, profile_id, channel_id, niche, theme_id, title, created_at, persona_id, \
-     video_format, production_mode, spend_cap_micros, video_length FROM video_project";
+     video_format, production_mode, spend_cap_micros, video_length, visual_style \
+     FROM video_project";
 
 #[derive(Debug, thiserror::Error)]
 #[error("stored theme is invalid: {0}")]
@@ -255,6 +256,7 @@ pub(crate) struct ProjectRow {
     production: Option<String>,
     spend_cap: Option<i64>,
     length: Option<String>,
+    style: Option<String>,
 }
 
 impl ProjectRow {
@@ -272,6 +274,7 @@ impl ProjectRow {
             production: row.get(9)?,
             spend_cap: row.get(10)?,
             length: row.get(11)?,
+            style: row.get(12)?,
         })
     }
 
@@ -304,6 +307,8 @@ impl ProjectRow {
                 .length
                 .map(|code| code.parse::<VideoLength>().map_err(boxed))
                 .transpose()?,
+            // A style of a newer Bardo reads as the notes.
+            style: self.style.as_deref().map(StyleChoice::from_code),
         })
     }
 }
@@ -318,8 +323,8 @@ pub(crate) fn insert_project(
     tx.execute(
         "INSERT INTO video_project (id, profile_id, channel_id, niche, theme_id, title,
                                     created_at, persona_id, video_format, production_mode,
-                                    spend_cap_micros, video_length)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                                    spend_cap_micros, video_length, visual_style)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             project.id.to_string(),
             project.owner.to_string(),
@@ -333,6 +338,7 @@ pub(crate) fn insert_project(
             project.production.map(ProductionMode::code),
             project.spend_cap.map(micros).transpose()?,
             project.length.map(VideoLength::code),
+            project.style.map(StyleChoice::code),
         ],
     )
     .map_err(boxed)?;
@@ -477,6 +483,20 @@ impl ThemeRepository for Database {
             .execute(
                 "UPDATE video_project SET video_length = ?2 WHERE id = ?1",
                 params![id.to_string(), length.map(VideoLength::code)],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn set_project_style(
+        &self,
+        id: VideoProjectId,
+        style: Option<StyleChoice>,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "UPDATE video_project SET visual_style = ?2 WHERE id = ?1",
+                params![id.to_string(), style.map(StyleChoice::code)],
             )
             .map_err(boxed)?;
         Ok(())
@@ -712,6 +732,32 @@ mod tests {
         db.set_project_production(project.id, None).unwrap();
         db.set_project_spend_cap(project.id, None).unwrap();
         assert_eq!((stored().production, stored().spend_cap), (None, None));
+    }
+
+    #[test]
+    fn a_project_keeps_its_own_style_or_follows_its_channel() {
+        let (db, channel) = setup();
+        let mut approved = theme(&channel, "The lost cosmonauts", 0);
+        db.save_themes(std::slice::from_ref(&approved)).unwrap();
+        let project = approved.approve(time(1_800_000_200)).unwrap();
+        db.start_project(&approved, &project).unwrap();
+        let stored = || db.project(project.id).unwrap().unwrap().style;
+        assert_eq!(stored(), None);
+
+        // Every choice round trips, the notes as a choice of its own.
+        for choice in StyleChoice::all() {
+            db.set_project_style(project.id, Some(choice)).unwrap();
+            assert_eq!(stored(), Some(choice), "{choice}");
+        }
+        assert_eq!(db.projects(channel.id).unwrap()[0].style, stored());
+        db.set_project_style(project.id, None).unwrap();
+        assert_eq!(stored(), None);
+
+        // A style this version does not know reads as the notes.
+        db.conn()
+            .execute("UPDATE video_project SET visual_style = 'holo-9000'", [])
+            .unwrap();
+        assert_eq!(stored(), Some(StyleChoice::FromNotes));
     }
 
     #[test]

@@ -54,6 +54,7 @@ mod settings_transfer;
 mod shortcuts;
 mod showcase;
 mod stages;
+mod styles;
 mod take_analysis;
 mod templates;
 mod themes;

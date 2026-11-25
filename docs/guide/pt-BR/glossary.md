@@ -84,6 +84,8 @@ As palavras que o Bardo usa, em termos simples.
 
 **Lugar**: um lugar em que mais de uma cena acontece, descrito uma vez no plano de cenas para que toda cena ali seja desenhada igual ([O mesmo lugar de cena em cena](scenes.md#same-place)).
 
+**Estilo visual**: como as imagens de um vídeo são desenhadas (fotorrealista, anime, mangá, aquarela, massinha e assim por diante), escolhido por canal e trocável por projeto. O Bardo o acrescenta a cada imagem de cena, retrato e fundo de miniatura ([Estilo visual](channels.md#style)).
+
 **Cena**: um trecho da narração com uma imagem e, se quiser, um clipe.
 
 **Clipe**: um vídeo curto que um modelo de vídeo faz a partir da imagem de uma cena. Opcional.

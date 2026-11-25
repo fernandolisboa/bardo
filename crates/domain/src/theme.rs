@@ -9,7 +9,7 @@ use std::time::SystemTime;
 
 use crate::{
     ChannelId, Confidence, JobId, Money, Niche, PerformanceReason, PersonaId, ProductionMode,
-    ProfileId, RepositoryError, Score, VideoFormat, VideoLength,
+    ProfileId, RepositoryError, Score, StyleChoice, VideoFormat, VideoLength,
 };
 
 uuid_id!(
@@ -361,6 +361,7 @@ impl Theme {
             production: None,
             spend_cap: None,
             length: None,
+            style: None,
         })
     }
 }
@@ -404,6 +405,9 @@ pub struct VideoProject {
     /// How long its script runs instead of its format's length (#253);
     /// `None` follows the format.
     pub length: Option<VideoLength>,
+    /// Its visual style instead of the channel's (#259); `None` follows
+    /// the channel.
+    pub style: Option<StyleChoice>,
 }
 
 impl VideoProject {
@@ -420,6 +424,11 @@ impl VideoProject {
     /// How it is produced: its own mode, else the channel's.
     pub fn production(&self, channel_default: ProductionMode) -> ProductionMode {
         self.production.unwrap_or(channel_default)
+    }
+
+    /// How its pictures are rendered: its own style, else the channel's.
+    pub fn style(&self, channel_default: StyleChoice) -> StyleChoice {
+        self.style.unwrap_or(channel_default)
     }
 
     /// What the script template asks for: its own length, else its
@@ -484,6 +493,13 @@ pub trait ThemeRepository: Send + Sync {
         &self,
         id: VideoProjectId,
         length: Option<VideoLength>,
+    ) -> Result<(), RepositoryError>;
+
+    /// Sets or clears (`None`, the channel's) the project's visual style.
+    fn set_project_style(
+        &self,
+        id: VideoProjectId,
+        style: Option<StyleChoice>,
     ) -> Result<(), RepositoryError>;
 }
 
@@ -550,6 +566,14 @@ impl<T: ThemeRepository + ?Sized> ThemeRepository for Arc<T> {
         length: Option<VideoLength>,
     ) -> Result<(), RepositoryError> {
         (**self).set_project_length(id, length)
+    }
+
+    fn set_project_style(
+        &self,
+        id: VideoProjectId,
+        style: Option<StyleChoice>,
+    ) -> Result<(), RepositoryError> {
+        (**self).set_project_style(id, style)
     }
 }
 

@@ -24,7 +24,18 @@ A lista mostra cada canal com o nicho e o país. Escolha um para editá-lo ao la
 <a id="look"></a>
 ## Notas de estética
 
-Como os vídeos do canal devem parecer: o estilo visual, a paleta, o clima, o que evitar. Ideias e roteiros levam essas notas junto, e os prompts das cenas escritos a partir do roteiro também, para todo vídeo manter a cara do canal.
+Como os vídeos do canal devem parecer: a paleta, o clima, a época, o que evitar. Ideias e roteiros levam essas notas junto, e os prompts das cenas escritos a partir do roteiro também, para todo vídeo manter a cara do canal. Sem um [estilo visual](#style) escolhido, as notas também dizem como as imagens são desenhadas.
+
+<a id="style"></a>
+## Estilo visual
+
+Como as imagens do canal são desenhadas. Escolha um de 26 estilos: Fotorrealista, Cinematográfico, Foto documental, Foto analógica antiga, Film noir, Animação 3D, Desenho animado 2D, Anime, Mangá, História em quadrinhos, Livro ilustrado, Aquarela, Pintura a óleo, Esboço a lápis, Desenho a nanquim, Ilustração flat, Recorte de papel, Massinha (stop motion), Pixel art, Low poly, Isométrico, Cyberpunk neon, Synthwave, Fantasia sombria, Xilogravura colorida e Quadro-negro. O menu filtra enquanto você digita.
+
+O Bardo acrescenta o texto próprio do estilo a cada imagem de cena, a cada retrato do elenco e ao fundo da miniatura, e diz ao Claude qual é o estilo, para os prompts das cenas descreverem o que se vê e deixarem o desenho por conta do estilo. Toda imagem é pedida com o mesmo visual, nas mesmas palavras, sem que nenhum prompt precise repeti-lo. Com um estilo escolhido, deixe nas notas de estética só o que o estilo não decide: o clima, a época, o que evitar.
+
+**Pelas notas do canal** não acrescenta nada: o visual vem das notas de estética, como o Claude as lê e repete em cada prompt, do jeito que todo canal funcionava antes dos estilos. Canais criados antes dos estilos ficam assim até você escolher um.
+
+Cada projeto segue o estilo do canal, a não ser que escolha o próprio ([Projetos](projects.md#style)). Trocar o estilo não desenha nada e não muda nada do que já foi desenhado; a etapa [Cenas](scenes.md#style) diz quantas cenas estão em outro estilo e oferece desenhá-las de novo. Isso vale para todo vídeo que segue o canal, inclusive os prontos: um vídeo que você quer manter como está não precisa de nada, e um que ainda está sendo desenhado continua no estilo novo, a não ser que você escolha o anterior no projeto.
 
 <a id="market"></a>
 ## Idioma e país

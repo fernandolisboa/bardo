@@ -111,6 +111,11 @@ pub enum JobActionError {
     /// A newer narration of the project replaced what the job would make.
     #[error("a newer job replaced it")]
     Superseded,
+    /// An image job started when its video had another visual style: its
+    /// scenes are drawn again from the Scenes stage, in the style and at
+    /// the cost shown there.
+    #[error("the video's visual style changed since the job started")]
+    Restyled,
     /// A performed take that never reached its provider: it is made again
     /// from the capture, where its cap, test and checks are asked again.
     #[error("make the take again from its capture")]

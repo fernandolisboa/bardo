@@ -57,9 +57,9 @@ const IMAGE_PROMPT_INSTRUCTIONS: &str = "\
 You plan the visuals of a faceless YouTube video as a storyboard: a narrator speaks over a \
 sequence of images, one per scene, and some of them become short video clips. Watched in order \
 with the sound off, the images tell the same story as the narration: each scene shows what its \
-sentences say and follows from the scene before it. You split the narration into scenes and \
-write, for each scene, the prompt an image model draws it from and the motion prompt a video \
-model animates that image with.
+sentences say and follows from the scene before it. You split the narration into scenes and write, \
+for each scene, the prompt an image model draws it from and the motion prompt a video model \
+animates that image with.
 
 First write `story`: one short paragraph with the story the images tell from the first to the \
 last, in order: who is in it, where it happens, and how it moves from place to place and from \
@@ -70,56 +70,69 @@ and runs until the next scene starts. Change scene when the subject, place or mo
 about every 4 to 8 seconds of narration; a long sentence may hold a scene on its own. Stay in a \
 place for several scenes in a row, each from the distance and the angle that fit its moment, \
 instead of jumping to a new place at every sentence. When the narration turns abstract, stay in \
-the video's visual world: show what its people do, what its place looks like at that moment, or \
-a concrete picture of the idea that belongs in that world.
+the video's visual world: show what its people do, what its place looks like at that moment, or a \
+concrete picture of the idea that belongs in that world.
 
-The cast: when the same person appears in more than one scene (a recurring character such as \
-\"the chef\" or \"the detective\"), list them once in `cast`, at most three, with a short \
-name and one fixed appearance: sex, adult age, skin tone, hair, one or two features of the \
-face that set them apart, build and clothes, precise enough to draw the very same person again, \
-in the channel's visual style. Each scene lists in `cast` the members it shows, by their \
-position in `cast` (from 0); its prompt calls them by that name and adds only what is particular \
-to the shot (what they do, their expression), never their appearance. Who a person is comes \
-from this video: when the narration does not say, choose the sex, age and looks that fit its \
-subject, period and place, a particular person rather than a generic one. A person seen once, \
-crowds and scenes without people need no cast member; leave `cast` empty when nobody recurs.
+The cast: when the same person appears in more than one scene (a recurring character such as \"the \
+chef\" or \"the detective\"), list them once in `cast`, at most three, with a short name and one \
+fixed appearance: sex, adult age, skin tone, hair, one or two features of the face that set them \
+apart, build and clothes, precise enough to draw the very same person again. Each scene lists in \
+`cast` the members it shows, by their position in `cast` (from 0); its prompt calls them by that \
+name and adds only what is particular to the shot (what they do, their expression), never their \
+appearance. Who a person is comes from this video: when the narration does not say, choose the \
+sex, age and looks that fit its subject, period and place, a particular person rather than a \
+generic one. A person seen once, crowds and scenes without people need no cast member; leave \
+`cast` empty when nobody recurs.
 
-The places: when more than one scene happens in the same place (\"the kitchen\", \"the \
-control room\"), list it once in `places`, at most eight, with a short name and one fixed \
-description: what the place is, its period, its main objects and where they stand, the time of \
-day, the weather, the light and the colors, precise enough to draw the very same place again, \
-in the channel's visual style. Each scene gives in `place` the position of its place in \
-`places` (from 0), or -1 when no other scene happens there; its prompt calls the place by that \
-name and adds only what is particular to the shot, never the place's description. A place the \
-story returns to at another time or in another state (the same street at night, the house years \
-later) is another entry in the list. When the video has more than eight such places, list the \
-eight with the most scenes; a scene in another one has -1 and describes its place in its prompt.
+The places: when more than one scene happens in the same place (\"the kitchen\", \"the control \
+room\"), list it once in `places`, at most eight, with a short name and one fixed description: \
+what the place is, its period, its main objects and where they stand, the time of day, the \
+weather, the light and the colors, precise enough to draw the very same place again. Each scene \
+gives in `place` the position of its place in `places` (from 0), or -1 when no other scene happens \
+there; its prompt calls the place by that name and adds only what is particular to the shot, never \
+the place's description. A place the story returns to at another time or in another state (the \
+same street at night, the house years later) is another entry in the list. When the video has more \
+than eight such places, list the eight with the most scenes; a scene in another one has -1 and \
+describes its place in its prompt.
+
+The look: the prompt below may have a line that starts with \"Visual style:\". When that line \
+names a style and says Bardo adds it, Bardo adds the style's words to every image and every \
+portrait itself, so in the prompts and in the descriptions of the cast and the places write only \
+what is seen and leave out every word about how it is rendered: the medium, the line, the texture, \
+the kind of drawing, film or lens, the focus, the grain, and quality words such as \
+\"photorealistic\" or \"highly detailed\". Leave out as well what the style's words settle: colors \
+when the style has none, the light or the angle when it sets one. From the aesthetic notes keep \
+only what the style does not decide, such as the mood and the period. In every other case (the \
+line says none was chosen, or there is no such line) the look comes from the aesthetic notes: \
+describe the cast and the places in it and repeat it in the same words in every prompt, so the \
+images look like one video. When the notes are not set either, choose one look that fits the niche \
+and repeat it the same way.
 
 Each image prompt is one shot: what is seen, who does what, and from where it is seen (wide, \
-medium or close, and the angle), at that moment of the narration. A scene in the same place as \
-the scene before it shows the next moment there: nothing changes that the narration does not \
-change (the time of day, the weather, what people wear or hold, where things are). Every prompt \
-names what is seen in its own words and never points at another scene (no \"still\", \"again\" \
-or \"as before\"). For a scene in a place of its own, the prompt also describes the place, its \
-period and its light. Repeat the channel's visual style in every prompt so the images look \
-like one video. The image model sees one prompt at a time, so Bardo adds to each scene the \
-appearance and reference portrait of its cast members, the description of its place, and \
-earlier images of the same place as references; do not write those out again. Frames are {{frame_shape}}. Write the prompts, and \
-the names and descriptions of the cast and the places, in English, whatever the narration's \
-language ({{language}}).
+medium or close, and the angle), at that moment of the narration. A scene in the same place as the \
+scene before it shows the next moment there: nothing changes that the narration does not change \
+(the time of day, the weather, what people wear or hold, where things are). Every prompt names \
+what is seen in its own words and never points at another scene (no \"still\", \"again\" or \"as \
+before\"). For a scene in a place of its own, the prompt also describes the place, its period and \
+its light. The image model sees one prompt at a time, so Bardo adds to each scene the appearance \
+and reference portrait of its cast members, the description of its place, the chosen visual style, \
+and earlier images of the same place as references; do not write those out again. Frames are \
+{{frame_shape}}. Write the prompts, and the names and descriptions of the cast and the places, in \
+English, whatever the narration's language ({{language}}).
 
 The motion prompt says how the image moves in a clip of a few seconds: one camera move (slow push \
 in, pan, tilt, orbit or static) and at most one simple, natural action of the subject that fits \
 the narration. Describe motion only: no new people or objects, no cuts, text or sound. One or two \
 sentences, in English.
 
-The images are original: no recognizable real people, logos, brands or copyrighted characters, \
-and no text, captions or watermarks in the image. Keep them safe for advertisers.";
+The images are original: no recognizable real people, logos, brands or copyrighted characters, and \
+no text, captions or watermarks in the image. Keep them safe for advertisers.";
 
 const IMAGE_PROMPT_PROMPT: &str = "\
 Channel: {{channel_name}}
 Channel niche: {{channel_niche}}
-Visual style (aesthetic notes): {{aesthetic_notes}}
+Aesthetic notes: {{aesthetic_notes}}
+Visual style: {{visual_style}}
 
 Video niche: {{niche}}
 Video title: {{theme_title}}
@@ -202,14 +215,18 @@ video's title instead of repeating it: a question, a stake or a contradiction th
 want to know more. No hashtags, emoji or quotes, and no claim the video does not pay off.
 
 The background prompt is in English, whatever the video's language. Describe one strong subject \
-with high contrast and a clear, uncluttered side where the text can sit, in the channel's visual \
-style, wide (16:9). The picture is original: no recognizable real people, logos, brands or \
-copyrighted characters, and no text, letters or watermarks in it. Keep it safe for advertisers.";
+with high contrast and a clear, uncluttered side where the text can sit, wide (16:9). The prompt \
+below may have a line that starts with \"Visual style:\". When that line names a style and says \
+Bardo adds it, Bardo adds the style's words to the background prompt itself: leave out every word \
+about how the picture is rendered. In every other case, write the look of the aesthetic notes into \
+the prompt. The picture is original: no recognizable real people, logos, brands or copyrighted \
+characters, and no text, letters or watermarks in it. Keep it safe for advertisers.";
 
 const THUMBNAIL_PROMPT: &str = "\
 Channel: {{channel_name}}
 Channel niche: {{channel_niche}}
-Visual style (aesthetic notes): {{aesthetic_notes}}
+Aesthetic notes: {{aesthetic_notes}}
+Visual style: {{visual_style}}
 
 Video niche: {{niche}}
 Video title on YouTube: {{video_title}}
@@ -398,6 +415,112 @@ List the recurring characters, then split the narration into scenes. For each sc
 number of the sentence it starts at, the image prompt that draws it, the cast members it shows \
 and its motion prompt.";
 
+/// The scene plan default from the storyboard (#258) to visual styles (#259).
+const RETIRED_IMAGE_PROMPT_INSTRUCTIONS_4: &str = "\
+You plan the visuals of a faceless YouTube video as a storyboard: a narrator speaks over a \
+sequence of images, one per scene, and some of them become short video clips. Watched in order \
+with the sound off, the images tell the same story as the narration: each scene shows what its \
+sentences say and follows from the scene before it. You split the narration into scenes and \
+write, for each scene, the prompt an image model draws it from and the motion prompt a video \
+model animates that image with.
+
+First write `story`: one short paragraph with the story the images tell from the first to the \
+last, in order: who is in it, where it happens, and how it moves from place to place and from \
+moment to moment. The cast, the places and the scenes follow from it.
+
+Scenes follow the narration in order and together cover all of it: a scene starts at a sentence \
+and runs until the next scene starts. Change scene when the subject, place or moment changes, \
+about every 4 to 8 seconds of narration; a long sentence may hold a scene on its own. Stay in a \
+place for several scenes in a row, each from the distance and the angle that fit its moment, \
+instead of jumping to a new place at every sentence. When the narration turns abstract, stay in \
+the video's visual world: show what its people do, what its place looks like at that moment, or \
+a concrete picture of the idea that belongs in that world.
+
+The cast: when the same person appears in more than one scene (a recurring character such as \
+\"the chef\" or \"the detective\"), list them once in `cast`, at most three, with a short \
+name and one fixed appearance: sex, adult age, skin tone, hair, one or two features of the \
+face that set them apart, build and clothes, precise enough to draw the very same person again, \
+in the channel's visual style. Each scene lists in `cast` the members it shows, by their \
+position in `cast` (from 0); its prompt calls them by that name and adds only what is particular \
+to the shot (what they do, their expression), never their appearance. Who a person is comes \
+from this video: when the narration does not say, choose the sex, age and looks that fit its \
+subject, period and place, a particular person rather than a generic one. A person seen once, \
+crowds and scenes without people need no cast member; leave `cast` empty when nobody recurs.
+
+The places: when more than one scene happens in the same place (\"the kitchen\", \"the \
+control room\"), list it once in `places`, at most eight, with a short name and one fixed \
+description: what the place is, its period, its main objects and where they stand, the time of \
+day, the weather, the light and the colors, precise enough to draw the very same place again, \
+in the channel's visual style. Each scene gives in `place` the position of its place in \
+`places` (from 0), or -1 when no other scene happens there; its prompt calls the place by that \
+name and adds only what is particular to the shot, never the place's description. A place the \
+story returns to at another time or in another state (the same street at night, the house years \
+later) is another entry in the list. When the video has more than eight such places, list the \
+eight with the most scenes; a scene in another one has -1 and describes its place in its prompt.
+
+Each image prompt is one shot: what is seen, who does what, and from where it is seen (wide, \
+medium or close, and the angle), at that moment of the narration. A scene in the same place as \
+the scene before it shows the next moment there: nothing changes that the narration does not \
+change (the time of day, the weather, what people wear or hold, where things are). Every prompt \
+names what is seen in its own words and never points at another scene (no \"still\", \"again\" \
+or \"as before\"). For a scene in a place of its own, the prompt also describes the place, its \
+period and its light. Repeat the channel's visual style in every prompt so the images look \
+like one video. The image model sees one prompt at a time, so Bardo adds to each scene the \
+appearance and reference portrait of its cast members, the description of its place, and \
+earlier images of the same place as references; do not write those out again. Frames are {{frame_shape}}. Write the prompts, and \
+the names and descriptions of the cast and the places, in English, whatever the narration's \
+language ({{language}}).
+
+The motion prompt says how the image moves in a clip of a few seconds: one camera move (slow push \
+in, pan, tilt, orbit or static) and at most one simple, natural action of the subject that fits \
+the narration. Describe motion only: no new people or objects, no cuts, text or sound. One or two \
+sentences, in English.
+
+The images are original: no recognizable real people, logos, brands or copyrighted characters, \
+and no text, captions or watermarks in the image. Keep them safe for advertisers.";
+
+const RETIRED_IMAGE_PROMPT_PROMPT_3: &str = "\
+Channel: {{channel_name}}
+Channel niche: {{channel_niche}}
+Visual style (aesthetic notes): {{aesthetic_notes}}
+
+Video niche: {{niche}}
+Video title: {{theme_title}}
+Angle: {{theme_angle}}
+
+The narration, one sentence per line: its number, when it is spoken, and its text.
+{{narration_sentences}}
+
+Write the story the images tell, list the recurring characters and the recurring places, then \
+split the narration into scenes. For each scene give the number of the sentence it starts at, \
+its place, the image prompt that draws it, the cast members it shows and its motion prompt.";
+
+/// The thumbnail default from before visual styles (#259).
+const RETIRED_THUMBNAIL_INSTRUCTIONS: &str = "\
+You write the YouTube thumbnail of a faceless long-form video: a short text that Bardo draws in \
+big letters over a background picture, and the prompt an image model draws that background from.
+
+The text is a hook of one to five words, at most 40 characters, in {{language}}. It adds to the \
+video's title instead of repeating it: a question, a stake or a contradiction that makes people \
+want to know more. No hashtags, emoji or quotes, and no claim the video does not pay off.
+
+The background prompt is in English, whatever the video's language. Describe one strong subject \
+with high contrast and a clear, uncluttered side where the text can sit, in the channel's visual \
+style, wide (16:9). The picture is original: no recognizable real people, logos, brands or \
+copyrighted characters, and no text, letters or watermarks in it. Keep it safe for advertisers.";
+
+const RETIRED_THUMBNAIL_PROMPT: &str = "\
+Channel: {{channel_name}}
+Channel niche: {{channel_niche}}
+Visual style (aesthetic notes): {{aesthetic_notes}}
+
+Video niche: {{niche}}
+Video title on YouTube: {{video_title}}
+Working title: {{theme_title}}
+Angle: {{theme_angle}}
+
+Write the thumbnail's text and the prompt for its background.";
+
 const LOOK_PROMPT_INSTRUCTIONS: &str = "\
 You write the prompt an image model draws a persona's look from: the character a faceless \
 channel's narrator appears as on screen, whose face and body a video model later moves with the \
@@ -486,6 +609,10 @@ fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
                     RETIRED_IMAGE_PROMPT_INSTRUCTIONS_3,
                     RETIRED_IMAGE_PROMPT_PROMPT_2,
                 ),
+                (
+                    RETIRED_IMAGE_PROMPT_INSTRUCTIONS_4,
+                    RETIRED_IMAGE_PROMPT_PROMPT_3,
+                ),
             ]
             .into_iter()
             .map(|(instructions, prompt)| {
@@ -494,9 +621,9 @@ fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
             })
             .collect();
         }
+        TemplateKind::Thumbnail => (RETIRED_THUMBNAIL_INSTRUCTIONS, RETIRED_THUMBNAIL_PROMPT),
         TemplateKind::MusicPrompt
         | TemplateKind::Metadata
-        | TemplateKind::Thumbnail
         | TemplateKind::Chapters
         | TemplateKind::Localization
         | TemplateKind::LookPrompt
@@ -788,6 +915,41 @@ mod tests {
             assert!(scenes.instructions().contains(part), "{part}");
         }
         assert!(!scenes.instructions().contains("stands alone"));
+    }
+
+    #[test]
+    fn the_defaults_from_before_visual_styles_move_on_to_them() {
+        for kind in [TemplateKind::ImagePrompt, TemplateKind::Thumbnail] {
+            let retired = retired_defaults(kind).pop().unwrap();
+            assert!(!retired.instructions().contains("{{visual_style}}"));
+            assert!(!retired.prompt().contains("{{visual_style}}"));
+            let db = Arc::new(Database::open_in_memory().unwrap());
+            let app = start(&db);
+            db.add_template_version(&TemplateVersion::first(
+                app.profile().id,
+                retired,
+                SystemTime::now(),
+            ))
+            .unwrap();
+            let current = app.current_template(kind).unwrap();
+            assert_eq!(current.number, 2);
+            assert_eq!(current.body, default_template(kind));
+            // The planner is told the style and what to do with it.
+            assert!(current.body.prompt().contains("{{visual_style}}"));
+            assert!(
+                current
+                    .body
+                    .instructions()
+                    .contains("names a style and says Bardo adds it")
+            );
+            assert!(current.body.instructions().contains("In every other case"));
+            assert!(
+                !current
+                    .body
+                    .instructions()
+                    .contains("channel's visual style")
+            );
+        }
     }
 
     #[test]

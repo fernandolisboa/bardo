@@ -577,8 +577,8 @@ pub const PERFORMANCE: Tour = {
     }
 };
 
-/// Projects: the project and its narrator, its format, length and
-/// production mode, the stages and how they open, and what the project has
+/// Projects: the project and its narrator, its format, length, visual
+/// style and production mode, the stages and how they open, and what the project has
 /// cost.
 pub const PROJECTS: Tour = {
     const AT: Destination = Destination::Projects;
@@ -586,7 +586,7 @@ pub const PROJECTS: Tour = {
     const HEADER: WhenMissing = WhenMissing::LightPart(TourAnchor::Header);
     Tour {
         id: TourId::Projects,
-        version: 4,
+        version: 5,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "switcher", control(Control::ProjectSwitcher))
@@ -716,7 +716,7 @@ pub const CAPTURE: Tour = {
 };
 
 /// Scenes: planning them, the scene list, a scene's image and prompt,
-/// drawing it again, the filter, planning again, and placing a version's
+/// drawing it again (one scene, or all those in another style), the filter, planning again, and placing a version's
 /// scenes on its narration.
 pub const SCENES: Tour = {
     const AT: Stage = Stage::Scenes;
@@ -724,7 +724,7 @@ pub const SCENES: Tour = {
     const TOOLBAR: WhenMissing = WhenMissing::LightPart(TourAnchor::Toolbar);
     Tour {
         id: TourId::Scenes,
-        version: 4,
+        version: 5,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "plan", control(Control::ScenesPlan))
@@ -937,7 +937,7 @@ pub const CHANNELS: Tour = {
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Channels,
-        version: 3,
+        version: 4,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "list", TourAnchor::Collection).learn(PAGE, "list"),

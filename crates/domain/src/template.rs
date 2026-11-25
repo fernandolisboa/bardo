@@ -94,6 +94,7 @@ impl TemplateKind {
                 TemplateVariable::ChannelName,
                 TemplateVariable::ChannelNiche,
                 TemplateVariable::AestheticNotes,
+                TemplateVariable::VisualStyle,
                 TemplateVariable::Language,
                 TemplateVariable::Niche,
                 TemplateVariable::ThemeTitle,
@@ -126,6 +127,7 @@ impl TemplateKind {
                 TemplateVariable::ChannelName,
                 TemplateVariable::ChannelNiche,
                 TemplateVariable::AestheticNotes,
+                TemplateVariable::VisualStyle,
                 TemplateVariable::Language,
                 TemplateVariable::Niche,
                 TemplateVariable::ThemeTitle,
@@ -237,10 +239,13 @@ pub enum TemplateVariable {
     Words,
     /// What the take model must do with its inputs, fixed per model.
     Instruction,
+    /// The video's visual style (#259): that one was chosen and the text
+    /// Bardo adds to every image for it, or that none was chosen.
+    VisualStyle,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 24] = [
+    pub const ALL: [TemplateVariable; 25] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -265,6 +270,7 @@ impl TemplateVariable {
         TemplateVariable::Set,
         TemplateVariable::Words,
         TemplateVariable::Instruction,
+        TemplateVariable::VisualStyle,
     ];
 
     /// The name written between the braces.
@@ -294,6 +300,7 @@ impl TemplateVariable {
             TemplateVariable::Set => "set",
             TemplateVariable::Words => "words",
             TemplateVariable::Instruction => "instruction",
+            TemplateVariable::VisualStyle => "visual_style",
         }
     }
 

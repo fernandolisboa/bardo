@@ -84,6 +84,8 @@ format = "Formato do vídeo"
 format_hint = "Short: vídeo vertical de menos de um minuto, para todas as redes. Longo: vídeo 16:9 de 8 a 10 minutos, para o YouTube. Define o tamanho do roteiro, o formato das imagens e do corte, e o preset do YouTube. Cada projeto pode escolher o outro."
 production = "Modo de produção"
 production_hint = "Como os vídeos deste canal são feitos: quais cenas viram clipes de IA e com qual modelo; o resto fica em imagens com movimento. Cada projeto pode escolher outro e mostra quanto o vídeo inteiro custa em cada modo antes de gerar qualquer coisa."
+style = "Estilo visual"
+style_hint = "Como os vídeos deste canal são desenhados: fotografia, desenho animado, mangá, massinha e assim por diante. O Bardo acrescenta o estilo a cada imagem de cena, a cada retrato do elenco e ao fundo da miniatura, para toda imagem ser pedida com o mesmo visual. \"Pelas notas do canal\" tira o visual das notas de estética, como o Claude as lê. Cada projeto pode escolher outro; os que não escolhem seguem esta opção quando ela muda."
 transition = "Transição padrão"
 transition_hint = "O que o editor põe num corte quando você aperta T ou escolhe uma transição. Qualquer corte pode usar outra."
 transition_length = "Duração"
@@ -212,6 +214,35 @@ long_length = "8 a 10 min"
 seconds_30 = "30 segundos"
 minute_1 = "1 minuto"
 minutes_3 = "3 minutos"
+
+[visual_style]
+notes = "Pelas notas do canal"
+photo = "Fotorrealista"
+cinematic = "Cinematográfico"
+documentary = "Foto documental"
+vintage_film = "Foto analógica antiga"
+noir = "Film noir"
+animation_3d = "Animação 3D"
+cartoon = "Desenho animado 2D"
+anime = "Anime"
+manga = "Mangá"
+comic = "História em quadrinhos"
+storybook = "Livro ilustrado"
+watercolor = "Aquarela"
+oil = "Pintura a óleo"
+pencil = "Esboço a lápis"
+ink = "Desenho a nanquim"
+flat_vector = "Ilustração flat"
+paper_cutout = "Recorte de papel"
+clay = "Massinha (stop motion)"
+pixel_art = "Pixel art"
+low_poly = "Low poly"
+isometric = "Isométrico"
+cyberpunk = "Cyberpunk neon"
+synthwave = "Synthwave"
+dark_fantasy = "Fantasia sombria"
+woodblock = "Xilogravura colorida"
+chalkboard = "Quadro-negro"
 
 [production_mode]
 economy = "Econômico"
@@ -348,6 +379,7 @@ not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
 not_started = "Não foi possível iniciar a tarefa. Tente de novo."
 runs_elsewhere = "O agente em segundo plano está rodando esta tarefa agora. Tente de novo quando ela terminar."
 superseded = "Uma narração mais nova deste projeto substituiu esta importação, então ela não roda de novo."
+restyled = "O estilo visual do vídeo mudou depois que esta tarefa começou, então ela não roda de novo. Desenhe as cenas pela etapa Cenas, que mostra quanto custam no estilo atual."
 take_from_page = "Nada desta tomada chegou ao provedor ainda. Faça de novo na etapa Captura, que confere antes o teto do vídeo, a tomada de teste e as checagens antes do envio."
 
 [setup]
@@ -586,6 +618,10 @@ format_hint = "Short ou vídeo longo. Define o tamanho do próximo roteiro (a me
 length = "Duração"
 length_format = "Do formato: {length}"
 length_hint = "Quanto dura o próximo roteiro: a duração do formato, ou 30 segundos, 1 minuto ou 3 minutos, abaixo dos 3:00 que Shorts e Reels aceitam (o X aceita 2:20). O formato continua definindo a forma da imagem (vertical ou 16:9) e o preset. A estimativa do vídeo inteiro segue a duração até existir um roteiro."
+style = "Estilo visual"
+style_channel = "Do canal: {style}"
+style_channel_notes = "Do canal: as notas de estética"
+style_hint = "Como as imagens deste vídeo são desenhadas: o estilo visual do canal, ou um próprio. Vale para o próximo plano de cenas, as próximas imagens, retratos e fundo de miniatura. Trocar não custa nada e o que já foi desenhado fica como está; a etapa Cenas diz quantas cenas estão em outro estilo e oferece desenhá-las de novo, com cobrança por imagem. Prompts já planejados podem continuar citando o visual anterior: planeje as cenas de novo para uma troca limpa."
 mode = "Modo"
 mode_channel = "Do canal: {mode}"
 mode_option = "{mode} · cerca de {amount}"
@@ -1100,6 +1136,7 @@ look = "A aparência da persona: a descrição de uma aparência desenhada, ou a
 set = "Onde a tomada acontece: descrito a partir de um quadro do vídeo de controle, para o seu ambiente; senão, a imagem de cenário que já está nele."
 words = "O que a persona diz na tomada."
 instruction = "O que o modelo de vídeo faz com o vídeo de controle e a aparência, fixo para o modo da tomada."
+visual_style = "O estilo visual do vídeo: que um foi escolhido e o texto que o Bardo acrescenta a cada imagem por ele, ou que nenhum foi escolhido e o visual vem das notas de estética."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."
@@ -1831,6 +1868,11 @@ edit = "Editar aparência"
 redraw = "Desenhar retrato de novo"
 failed = "O retrato não foi desenhado:"
 edited = "Editado"
+
+[scenes.restyled]
+title = "Cenas em outro estilo: {n}"
+hint = "Estas imagens não foram desenhadas no estilo visual atual do vídeo ({style}). Elas ficam como estão até serem desenhadas de novo, e não vão como referência para imagens novas, para não puxar as próximas de volta ao visual antigo. Cada imagem nova espera a revisão ao lado da atual. Se os prompts das cenas foram planejados com outro visual, eles podem continuar citando-o: planeje as cenas de novo antes."
+redraw = "Desenhar todas de novo"
 
 [scenes.same_place]
 title = "Lugar"
@@ -2835,7 +2877,7 @@ body = "O narrador lê a narração deste vídeo e dá forma ao roteiro. É a pe
 
 [tour.projects.format]
 title = "Short ou longo, e quanto dura"
-body = "Um Short é um vídeo vertical de 45 a 60 segundos; um vídeo longo é 16:9 e tem de 8 a 10 minutos. O projeto segue o canal, a não ser que você escolha o outro aqui. Isso define o formato das próximas imagens e dos novos cortes, e o preset do YouTube. Duração, ao lado, faz o roteiro deste vídeo ter 30 segundos, 1 minuto ou 3 minutos em vez da duração do formato."
+body = "Um Short é um vídeo vertical de 45 a 60 segundos; um vídeo longo é 16:9 e tem de 8 a 10 minutos. O projeto segue o canal, a não ser que você escolha o outro aqui. Isso define o formato das próximas imagens e dos novos cortes, e o preset do YouTube. Duração, ao lado, faz o roteiro deste vídeo ter 30 segundos, 1 minuto ou 3 minutos em vez da duração do formato, e Estilo escolhe como as imagens deste vídeo são desenhadas em vez do estilo visual do canal."
 
 [tour.projects.mode]
 title = "Como é produzido, e quanto custa"
@@ -2955,7 +2997,7 @@ body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o pro
 
 [tour.scenes.redraw]
 title = "Desenhe de novo"
-body = "Desenhar de novo faz uma nova imagem a partir do prompt. Ela espera ao lado da atual até você usá-la ou manter a atual."
+body = "Desenhar de novo faz uma nova imagem a partir do prompt, no estilo visual do vídeo. Ela espera ao lado da atual até você usá-la ou manter a atual. Depois de trocar o estilo, a etapa diz quantas cenas estão em outro estilo e oferece desenhá-las de novo de uma vez, depois de mostrar o custo."
 
 [tour.scenes.filter]
 title = "Todas ou pendentes"
@@ -3140,7 +3182,7 @@ body = "Cada canal é um nicho para um mercado. Escolha um canal para editá-lo,
 
 [tour.channels.niche]
 title = "Nicho, temas e estética"
-body = "O nicho diz do que o canal trata, os temas listam os assuntos a que ele volta, um por linha, e as notas de estética dizem como os vídeos dele devem parecer. A pesquisa e as ideias partem do nicho e dos temas; ideias, roteiros e prompts de cena levam as notas junto."
+body = "O nicho diz do que o canal trata, os temas listam os assuntos a que ele volta, um por linha, e as notas de estética dizem como os vídeos dele devem parecer. A pesquisa e as ideias partem do nicho e dos temas; ideias, roteiros e prompts de cena levam as notas junto. Estilo visual escolhe como as imagens são desenhadas, de fotorrealista a mangá ou massinha: o Bardo o acrescenta a cada imagem, para o vídeo inteiro ter um só visual."
 
 [tour.channels.market]
 title = "Idioma e país"

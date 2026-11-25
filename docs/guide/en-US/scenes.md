@@ -13,7 +13,7 @@ Scenes cut the narration into the shots the video shows, each with an image. The
 <a id="plan"></a>
 ## Planning and drawing
 
-**Plan scenes** has Claude turn the narration into a storyboard, from the **image prompt template** ([Templates](templates.md)) and the channel's aesthetic notes. It first writes down the story the images tell from the first to the last, then splits the narration into scenes on its sentences, so that each scene follows from the one before it, and writes an image prompt and a [motion prompt](clips.md#motion) for each one. It also lists the [people who come back](#cast) and the [places the video returns to](#same-place).
+**Plan scenes** has Claude turn the narration into a storyboard, from the **image prompt template** ([Templates](templates.md)), the channel's aesthetic notes and the video's [visual style](#style). It first writes down the story the images tell from the first to the last, then splits the narration into scenes on its sentences, so that each scene follows from the one before it, and writes an image prompt and a [motion prompt](clips.md#motion) for each one. It also lists the [people who come back](#cast) and the [places the video returns to](#same-place).
 
 **Generate N images** then draws every scene still without an image, in one job, in order: each image is drawn with [earlier images of the video](#same-place) beside its prompt, so the scenes look like one video. Nano Banana draws each at 2K in the shape of the video's [format](projects.md#format), 9:16 for a Short and 16:9 for a long video, and Gemini bills each one; a scene the provider declines does not stop the others. The estimate under the leading button says what the run costs. Planning needs a Claude key, and drawing a Gemini key ([Your API keys](api-keys.md#providers)).
 
@@ -54,6 +54,19 @@ The very first image has nothing to follow, so it sets the look of the video. A 
 **Edit place** changes the description for every scene of the place; a place you changed is marked **Edited**. Scenes already drawn keep their image: draw them again to use the new description. The images drawn from the old description stop holding the place together, so draw the place's first scene again, accept the new image, and the scenes drawn after it follow it. A place cannot be edited while images are being drawn. If you rewrite a scene's prompt so that it no longer names its place (the name as whole words, with or without "the"), the scene leaves the place and is drawn without it.
 
 A plan keeps at most eight places, the ones with the most scenes; a scene in any other carries the description in its own prompt. Scenes planned before places existed have none; they still get the video's first image for its look. **Plan again** gives them places. A scene plan [template](templates.md) you edited yourself gets places too, but not the default template's storyboard rules (one story in order, staying in a place for several scenes).
+
+<a id="style"></a>
+## One style for the whole video
+
+The video's [visual style](projects.md#style) is added by Bardo to every scene image and every portrait, in the same words each time, after the scene's people and place. With **From the channel's notes**, nothing is added and the look is whatever the scene prompts say.
+
+Changing the style, on the project or on its channel, leaves the images as they are. The stage then shows **Scenes in another style** with how many there are:
+
+- **Draw them again** draws every one of them in the current style, after showing what it costs. A person's portrait in the old style is drawn again first, once, and counted in the estimate; it takes the place of the old one, so going back to the earlier style draws it once more and the person can come out a little different from the scenes already drawn. Each new image waits for review beside the current one, like any scene drawn again.
+- An image in another style is never sent as a reference, so it cannot pull the next images back to the old look. The first scene drawn in the new style is drawn from its prompt, its place and its people alone; the ones after it go by the new images, even while those wait for review.
+- Drawing a single scene again does the same for that scene. The scenes drawn after it follow its new image.
+
+The scene prompts themselves were written for the style the video had when it was planned. If they name another look (a plan made from the notes often does), **Plan again** rewrites them for the new style; that discards the images, so do it before drawing.
 
 <a id="filter"></a>
 ## All or pending
