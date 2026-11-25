@@ -78,6 +78,7 @@ pub fn destination(place: Destination) -> Lucide {
 
 pub fn stage(stage: Stage) -> Lucide {
     match stage {
+        Stage::Brief => Lucide::ClipboardList,
         Stage::Script => Lucide::FileText,
         Stage::Narration => Lucide::Mic,
         Stage::Capture => Lucide::Webcam,

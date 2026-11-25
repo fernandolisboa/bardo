@@ -62,6 +62,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) thumbnails: ThumbnailHandler,
     pub(crate) looks: PersonaLookHandler,
     pub(crate) sheets: crate::product_sheets::ProductSheetHandler,
+    pub(crate) ad_angles: crate::ad_angles::AdAngleHandler,
     pub(crate) chapters: ChaptersHandler,
     pub(crate) renders: RenderHandler,
     pub(crate) metadata: MetadataHandler,
@@ -100,6 +101,7 @@ pub(crate) fn built_in_handlers(
         thumbnails,
         looks,
         sheets,
+        ad_angles,
         chapters,
         renders,
         metadata,
@@ -140,6 +142,9 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::ThumbnailImage, thumbnails);
     handlers.insert(JobKind::PersonaLook, Arc::new(looks));
     handlers.insert(JobKind::ProductResearch, Arc::new(sheets));
+    let ad_angles = Arc::new(ad_angles);
+    handlers.insert(JobKind::AdAngleSuggestion, Arc::clone(&ad_angles) as _);
+    handlers.insert(JobKind::AdAngleRanking, ad_angles);
     handlers.insert(JobKind::Chapters, Arc::new(chapters));
     handlers.insert(JobKind::Render, Arc::new(renders));
     handlers.insert(JobKind::Metadata, Arc::new(metadata));
@@ -2172,6 +2177,7 @@ mod tests {
             scripts: Arc::clone(db) as _,
             personas: Arc::clone(db) as _,
             products: Arc::clone(db) as _,
+            ads: Arc::clone(db) as _,
             narrations: Arc::clone(db) as _,
             captures: Arc::clone(db) as _,
             staging: Arc::clone(db) as _,

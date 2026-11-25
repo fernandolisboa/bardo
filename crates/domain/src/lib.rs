@@ -39,6 +39,9 @@ macro_rules! uuid_id {
     };
 }
 
+mod ad_angle;
+mod ad_brief;
+mod ad_framework;
 mod agent_task;
 mod appearance;
 mod backup;
@@ -119,6 +122,15 @@ mod voice_sample;
 mod web_research;
 mod youtube_policy;
 
+pub use ad_angle::{
+    AD_START_LENGTH, AdAngle, AdAngleFieldError, AdAngleId, AdAngleIdea, AdAngleNotSuggested,
+    AdAngleRecord, AdRanking, AdRepository, AdStart, rank_ad_angles,
+};
+pub use ad_brief::{
+    AdBrief, AdBriefRecord, BriefClaim, BriefClaimError, BriefFieldError, BriefNotReady, BriefText,
+    ClaimDrift, ClaimSeen,
+};
+pub use ad_framework::AdFramework;
 pub use agent_task::{AgentTask, AgentTaskError};
 pub use appearance::{
     LayoutId, ThemeFamily, ThemeMode, UiTheme, UiThemePreference, UnknownLayout, UnknownUiTheme,

@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::{
-    ChannelId, Confidence, JobId, Money, Niche, PerformanceReason, PersonaId, ProductionMode,
-    ProfileId, RepositoryError, Score, StyleChoice, VideoFormat, VideoLength,
+    ChannelId, Confidence, JobId, Money, Niche, PerformanceReason, PersonaId, ProductId,
+    ProductionMode, ProfileId, RepositoryError, Score, StyleChoice, VideoFormat, VideoLength,
 };
 
 uuid_id!(
@@ -362,6 +362,7 @@ impl Theme {
             spend_cap: SpendCap::Default,
             length: None,
             style: None,
+            product: None,
         })
     }
 }
@@ -408,6 +409,9 @@ pub struct VideoProject {
     /// Its visual style instead of the channel's (#259); `None` follows
     /// the channel.
     pub style: Option<StyleChoice>,
+    /// The product it advertises: an ad project (#275) keeps its product
+    /// and starts at the Brief stage. `None` for every other video.
+    pub product: Option<ProductId>,
 }
 
 /// What a Short may cost before Bardo asks, unless the user says
@@ -493,6 +497,11 @@ impl SpendCap {
 }
 
 impl VideoProject {
+    /// Whether the video advertises a product.
+    pub fn is_ad(&self) -> bool {
+        self.product.is_some()
+    }
+
     /// What the video may cost before Bardo asks, given its channel's
     /// format; `None` without a cap.
     pub fn cap(&self, channel_default: VideoFormat) -> Option<Money> {
@@ -530,7 +539,9 @@ impl VideoProject {
 /// Persistence port for themes and the video projects they start. Shared
 /// with job worker threads.
 pub trait ThemeRepository: Send + Sync {
-    /// Every theme of the channel, in any status.
+    /// Every theme of the channel, in any status. The theme an approved
+    /// ad angle became is not one of them: it holds an ad project's title
+    /// and angle, and is reached by its id only.
     fn themes(&self, channel: ChannelId) -> Result<Vec<Theme>, RepositoryError>;
 
     fn theme(&self, id: ThemeId) -> Result<Option<Theme>, RepositoryError>;

@@ -4,6 +4,7 @@
 //! installer leaves for the next start, backups, and the installers of
 //! updates.
 
+mod ad;
 mod agent_task;
 mod backup;
 mod capture;

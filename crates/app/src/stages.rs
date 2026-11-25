@@ -14,6 +14,9 @@ use crate::{Bardo, ExportSummary, NarrationView, RenderSummary, ScenesView, Scri
 /// A step of making a video, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Stage {
+    /// What an ad says about its product: the first stage of an ad
+    /// project, and of no other.
+    Brief,
     Script,
     Narration,
     /// The takes of a capture (#189): shown only while the narration is a
@@ -27,7 +30,8 @@ pub enum Stage {
 }
 
 impl Stage {
-    pub const ALL: [Stage; 8] = [
+    pub const ALL: [Stage; 9] = [
+        Stage::Brief,
         Stage::Script,
         Stage::Narration,
         Stage::Capture,
@@ -43,7 +47,8 @@ impl Stage {
     pub fn is_page(self) -> bool {
         matches!(
             self,
-            Stage::Script
+            Stage::Brief
+                | Stage::Script
                 | Stage::Narration
                 | Stage::Capture
                 | Stage::Scenes
@@ -56,6 +61,7 @@ impl Stage {
     /// The stage's name in links (`bardo:go/projects/script`).
     pub fn code(self) -> &'static str {
         match self {
+            Stage::Brief => "brief",
             Stage::Script => "script",
             Stage::Narration => "narration",
             Stage::Capture => "capture",
@@ -92,7 +98,18 @@ pub enum StageState {
 /// The stage's status line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StageNote {
+    /// The brief waits for the user to confirm it.
+    BriefToConfirm,
+    /// Claims the video copied were edited or rejected in the product;
+    /// each waits to be kept or dropped.
+    BriefClaimsChanged(usize),
+    /// A confirmed brief that lost its last claim or its call to action.
+    BriefIncomplete,
+    /// A confirmed brief and the claims the video uses.
+    BriefClaims(usize),
     ScriptMissing,
+    /// The brief changed after the script was written.
+    ScriptBriefChanged,
     ScriptToReview,
     ScriptWords(usize),
     NarrationMissing,
@@ -164,8 +181,9 @@ impl StageStatus {
 }
 
 /// Every stage of a project, in order, from its script, narration, scenes,
-/// renders and exports as the projects screen loads them. The Capture
-/// stage is there only while the narration is a capture's.
+/// renders and exports as the projects screen loads them. The Brief stage
+/// is there only for an ad project, and the Capture stage only while the
+/// narration is a capture's.
 pub fn project_stages(
     script: &ScriptView,
     narration: &NarrationView,
@@ -175,7 +193,33 @@ pub fn project_stages(
 ) -> Vec<StageStatus> {
     let running = |job: Option<&bardo_domain::Job>| job.is_some_and(|job| job.state().is_active());
 
-    let script_stage = if running(script.job.as_ref()) {
+    let brief_stage = script.brief.map(|brief| {
+        if brief.to_decide > 0 {
+            StageStatus::new(
+                Stage::Brief,
+                StageState::Attention,
+                StageNote::BriefClaimsChanged(brief.to_decide),
+            )
+        } else if !brief.confirmed {
+            StageStatus::new(Stage::Brief, StageState::Open, StageNote::BriefToConfirm)
+        } else if !brief.ready {
+            StageStatus::new(
+                Stage::Brief,
+                StageState::Attention,
+                StageNote::BriefIncomplete,
+            )
+        } else {
+            StageStatus::new(
+                Stage::Brief,
+                StageState::Done,
+                StageNote::BriefClaims(brief.claims),
+            )
+        }
+    });
+
+    let script_stage = if script.brief.is_some_and(|brief| !brief.confirmed) {
+        StageStatus::locked(Stage::Script, StageNote::After(Stage::Brief))
+    } else if running(script.job.as_ref()) {
         StageStatus::working(Stage::Script)
     } else {
         match &script.script {
@@ -184,6 +228,11 @@ pub fn project_stages(
                 Stage::Script,
                 StageState::Attention,
                 StageNote::ScriptToReview,
+            ),
+            Some(_) if script.brief.is_some_and(|brief| brief.script_outdated) => StageStatus::new(
+                Stage::Script,
+                StageState::Attention,
+                StageNote::ScriptBriefChanged,
             ),
             Some(script) => StageStatus::new(
                 Stage::Script,
@@ -397,8 +446,9 @@ pub fn project_stages(
         StageStatus::new(Stage::Publish, StageState::Open, StageNote::ExportReady)
     };
 
-    [script_stage, narration_stage]
+    brief_stage
         .into_iter()
+        .chain([script_stage, narration_stage])
         .chain(capture_stage)
         .chain([
             scenes_stage,
@@ -421,6 +471,15 @@ impl Bardo {
             )
         };
         match note {
+            StageNote::BriefToConfirm => self.text(Text::StageBriefToConfirm).into_owned(),
+            StageNote::BriefClaimsChanged(1) => {
+                self.text(Text::StageBriefClaimChanged).into_owned()
+            }
+            StageNote::BriefClaimsChanged(claims) => n(Text::StageBriefClaimsChanged, claims),
+            StageNote::BriefIncomplete => self.text(Text::StageBriefIncomplete).into_owned(),
+            StageNote::BriefClaims(1) => self.text(Text::StageBriefClaim).into_owned(),
+            StageNote::BriefClaims(claims) => n(Text::StageBriefClaims, claims),
+            StageNote::ScriptBriefChanged => self.text(Text::StageScriptBriefChanged).into_owned(),
             StageNote::ScriptMissing => self.text(Text::StageScriptMissing).into_owned(),
             StageNote::ScriptToReview => self.text(Text::StageScriptToReview).into_owned(),
             StageNote::ScriptWords(words) => n(Text::StageScriptWords, words),
@@ -573,12 +632,13 @@ mod tests {
         let app = h.start();
         let stages = stages(&app, &project(&app));
 
-        // The Capture stage shows only with a capture.
+        // The Brief stage shows only for an ad, and the Capture stage
+        // only with a capture.
         assert_eq!(
             stages.iter().map(|s| s.stage).collect::<Vec<_>>(),
             Stage::ALL
                 .into_iter()
-                .filter(|stage| *stage != Stage::Capture)
+                .filter(|stage| !matches!(stage, Stage::Brief | Stage::Capture))
                 .collect::<Vec<_>>()
         );
         assert_eq!(
@@ -822,9 +882,9 @@ mod tests {
         let done = |stage| StageStatus::new(stage, StageState::Done, StageNote::Working);
         let mut stages: Vec<_> = Stage::ALL.into_iter().map(done).collect();
         assert_eq!(opening_stage(&stages), Stage::Publish);
-        stages[7] = StageStatus::locked(Stage::Publish, StageNote::After(Stage::Render));
+        stages[8] = StageStatus::locked(Stage::Publish, StageNote::After(Stage::Render));
         assert_eq!(opening_stage(&stages), Stage::Render);
-        stages[6] = StageStatus::locked(Stage::Render, StageNote::After(Stage::Edit));
+        stages[7] = StageStatus::locked(Stage::Render, StageNote::After(Stage::Edit));
         assert_eq!(opening_stage(&stages), Stage::Clips);
     }
 

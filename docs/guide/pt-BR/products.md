@@ -8,7 +8,7 @@ tour: products
 
 # Produtos
 
-Um produto é algo que você anuncia: um produto digital, como um app ou um curso, um produto físico, um serviço, ou uma ideia que ainda não existe. Você o descreve uma vez e o reaproveita em todo anúncio, em qualquer canal. Os produtos ficam em [Produtos](bardo:go/products). O briefing, as imagens e o logo não custam nada; só [preencher a ficha](#research) com o Claude é pago, e o custo aparece antes. [Mostre a tela para mim](bardo:tour/products), ou a [parte 2 do tour](bardo:tour/products-sheet), sobre a ficha e as afirmações.
+Um produto é algo que você anuncia: um produto digital, como um app ou um curso, um produto físico, um serviço, ou uma ideia que ainda não existe. Você o descreve uma vez e o reaproveita em todo anúncio, em qualquer canal. Os produtos ficam em [Produtos](bardo:go/products). O briefing, as imagens e o logo não custam nada; só [preencher a ficha](#research) com o Claude é pago, e o custo aparece antes. [Mostre a tela para mim](bardo:tour/products), ou a [parte 2 do tour](bardo:tour/products-sheet), sobre a ficha e as afirmações, e a [parte 3](bardo:tour/products-angles), sobre os ângulos de anúncio.
 
 <a id="library"></a>
 ## Seus produtos
@@ -53,7 +53,7 @@ As imagens e o logo ficam no banco de dados do Bardo, então todo backup, inclus
 <a id="sheet"></a>
 ## A ficha
 
-**Briefing** e **Ficha**, no topo de um produto salvo, alternam entre o que você escreveu e o que o Bardo sabe além disso. A ficha guarda:
+**Briefing**, **Ficha** e **Ângulos**, no topo de um produto salvo, alternam entre o que você escreveu, o que o Bardo sabe além disso e os [anúncios que podem sair dali](#angles). A ficha guarda:
 
 - **Afirmações**: o que um anúncio pode dizer sobre o produto, cada uma com a origem.
 - **Sobre o produto**: um resumo, a categoria e a aparência.
@@ -90,6 +90,28 @@ Um anúncio só afirma o que está **confirmado**. Uma afirmação é uma frase 
 - Uma afirmação rejeitada continua na lista, para a próxima pesquisa não trazê-la de volta como nova. **Trazer de volta** devolve às que aguardam uma afirmação escrita por um modelo, e às confirmadas uma que é sua.
 
 **Sensível** marca uma afirmação que pede cuidado: um número, um superlativo, uma promessa sobre saúde, dinheiro ou resultados, uma garantia, um prazo ou um concorrente citado pelo nome. Os modelos marcam enquanto escrevem, e você pode marcar ou desmarcar; um número que você escreve em uma afirmação que tinha desmarcado marca de novo. Uma afirmação sensível pode ser confirmada e usada; cada uma que um vídeo usa é listada de novo antes de o vídeo ser publicado.
+
+<a id="angles"></a>
+## Ângulos de anúncio
+
+**Ângulos**, a terceira aba de um produto salvo, é onde um anúncio dele começa. Um ângulo de anúncio é um jeito de um anúncio falar com o público de um canal: o que ele diz, o formato que segue, a parte do público com quem fala, um rascunho das primeiras palavras e as afirmações confirmadas que ele usa.
+
+Escolha o canal em **Para o canal**: um ângulo é escrito para o público de um canal, no idioma dele, e cada canal guarda os próprios ângulos do produto. **Propor ângulos de anúncio** começa então uma execução. O Claude propõe cinco ângulos com o modelo **Ângulos de anúncio** ([Modelos](templates.md#kinds)), só a partir do briefing do produto, da ficha e das afirmações confirmadas, e evita repetir os que já existem. Depois o motor de decisão ranqueia. A estimativa aparece antes de a execução começar, uma execução que levaria um provedor além do orçamento pergunta antes, e as duas chamadas aparecem em [Custos](costs.md), no canal. Você precisa de uma chave do Claude e da chave do motor de decisão ([Chaves de API](api-keys.md)); a execução também aparece em [Tarefas](jobs.md).
+
+Um produto recebe ângulos quando a ficha tem pelo menos uma afirmação confirmada, porque um anúncio não diz mais nada; a aba mostra o que falta. Um produto sem imagens pode ter ângulos; um arquivado não.
+
+Cada ângulo segue um de nove formatos: problema e solução, demonstração, antes e depois, como funciona, a história por trás, jeito antigo e jeito novo, três motivos, mito e fato, ou oferta. Não existe formato de depoimento: um anúncio nunca apresenta um cliente inventado.
+
+<a id="angle-review"></a>
+## Ranquear e revisar um ângulo
+
+O motor de decisão responde três perguntas sobre cada ângulo, cada uma com uma nota de 0 a 100 e o quanto ele tinha certeza: a força do **gancho**, o **encaixe com o público** que o ângulo indica e a **clareza**. A **Prioridade** pesa o gancho 40%, o encaixe com o público 35% e a clareza 25%, e a lista mostra o melhor primeiro; a **Confiança** é a da resposta de que o motor tinha menos certeza. **Usa uma afirmação sensível** é uma marca do próprio Bardo, não de um modelo: uma das afirmações do ângulo está marcada como sensível na ficha.
+
+- **Aprovar e começar o anúncio** começa um projeto de anúncio naquele canal, com o título do ângulo, e abre a etapa [Briefing](brief.md); **Abrir o projeto** leva você até lá. O ângulo continua na lista, marcado como aprovado.
+- **Editar** muda o título, o ângulo, o formato, com quem ele fala, as primeiras palavras e as afirmações que ele usa (até 8, só confirmadas). Um ângulo editado perde o ranqueamento; **Ranquear ângulos** ranqueia os que estão esperando.
+- **Descartar** tira o ângulo da lista. A aba conta quantos foram descartados.
+
+Os ângulos de anúncio aparecem aqui e não em [Temas](themes-ranking.md), e um projeto de anúncio não entra no desempenho passado de um canal: como um anúncio foi não diz nada sobre como vão as ideias do próprio canal.
 
 <a id="archive"></a>
 ## Duplicar, arquivar e excluir

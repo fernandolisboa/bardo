@@ -184,6 +184,7 @@ impl ProjectsScreen {
                         VersionBlock::NoNarration => Text::VersionNoNarration,
                         VersionBlock::NoPlan => Text::VersionNoPlan,
                         VersionBlock::NoChannel => Text::VersionNoChannel,
+                        VersionBlock::Ad => Text::VersionAdProject,
                     },
                 ),
             )

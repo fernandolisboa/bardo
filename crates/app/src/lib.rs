@@ -2,6 +2,9 @@
 //! crate, so behavior is tested here instead of through pixels (ADR-0001).
 
 mod about;
+mod ad_angles;
+mod ad_briefs;
+mod ads;
 mod agent;
 mod appearance;
 mod backup;
@@ -72,10 +75,10 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    AgentTask, BackupStore, CaptureRepository, ChannelRepository, ChapterRepository, ClipGenerator,
-    ConnectionSecrets, ConsentReceiver, CostRepository, CutSuggestionRepository, DecisionEngine,
-    ExportFiles, ExportRepository, ImageGenerator, InsightsReader, JobRepository, KeyChecker,
-    LayoutId, LocalizationRepository, MarketData, MediaAssetRepository, MusicGenerator,
+    AdRepository, AgentTask, BackupStore, CaptureRepository, ChannelRepository, ChapterRepository,
+    ClipGenerator, ConnectionSecrets, ConsentReceiver, CostRepository, CutSuggestionRepository,
+    DecisionEngine, ExportFiles, ExportRepository, ImageGenerator, InsightsReader, JobRepository,
+    KeyChecker, LayoutId, LocalizationRepository, MarketData, MediaAssetRepository, MusicGenerator,
     MusicPromptRepository, MusicTrackRepository, NarrationRepository, NetworkAccountRepository,
     NetworkConnectionRepository, NetworkSignIn, NicheResearchRepository, OwnerAnalytics, Persona,
     PersonaRepository, ProductRepository, ProfileRepository, ProjectFiles, PublicationRepository,
@@ -97,6 +100,11 @@ use bardo_storage::{
 };
 
 pub use about::{About, LGPL_URL};
+pub use ad_angles::{
+    AD_ANGLES_PER_RUN, AdAngleDraft, AdAngleError, AdAngleRow, AdAnglesMissing, AdAnglesView,
+    AngleClaim,
+};
+pub use ad_briefs::{BriefClaimRow, BriefError, BriefStanding, BriefView};
 pub use agent::{AgentError, AgentStatus, AgentWork};
 pub use appearance::{EditorPalette, Palette, Rgb, Rgba, TrackColors, UiFont, palette};
 pub use backup::{
@@ -274,6 +282,9 @@ pub struct Repositories {
     pub personas: Arc<dyn PersonaRepository>,
     /// The products to advertise, with their images and logos.
     pub products: Arc<dyn ProductRepository>,
+    /// Ad angles and the briefs of ad projects. Shared with the job
+    /// queue.
+    pub ads: Arc<dyn AdRepository>,
     /// Narrations and their word timings. Shared with the job queue.
     pub narrations: Arc<dyn NarrationRepository>,
     /// Each project's capture and its takes. Shared with the job queue.
@@ -393,6 +404,7 @@ impl Repositories {
             scripts: Arc::clone(&db) as _,
             personas: Arc::clone(&db) as _,
             products: Arc::clone(&db) as _,
+            ads: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
             captures: Arc::clone(&db) as _,
             staging: Arc::clone(&db) as _,
@@ -586,6 +598,7 @@ pub struct Bardo {
     scripts: Arc<dyn ScriptRepository>,
     personas: Arc<dyn PersonaRepository>,
     products: Arc<dyn ProductRepository>,
+    ads: Arc<dyn AdRepository>,
     narrations: Arc<dyn NarrationRepository>,
     captures: Arc<dyn CaptureRepository>,
     staging: Arc<dyn StagingRepository>,
@@ -707,6 +720,7 @@ impl Bardo {
             scripts,
             personas,
             products,
+            ads,
             narrations,
             captures,
             staging,
@@ -774,6 +788,14 @@ impl Bardo {
         let theme_handler = ThemeHandler {
             owner: profile.id,
             themes: Arc::clone(&themes),
+            text: Arc::clone(&providers.text),
+            engines: decision_engines.clone(),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
+        let ad_angle_handler = crate::ad_angles::AdAngleHandler {
+            owner: profile.id,
+            ads: Arc::clone(&ads),
             text: Arc::clone(&providers.text),
             engines: decision_engines.clone(),
             secrets: Arc::clone(&secrets),
@@ -1076,6 +1098,7 @@ impl Bardo {
                     thumbnails: thumbnail_handler,
                     looks: look_handler,
                     sheets: sheet_handler,
+                    ad_angles: ad_angle_handler,
                     chapters: chapters_handler,
                     renders: render_handler,
                     metadata: metadata_handler,
@@ -1104,6 +1127,7 @@ impl Bardo {
             scripts,
             personas,
             products,
+            ads,
             narrations,
             captures,
             staging,
@@ -3444,6 +3468,7 @@ mod tests {
             scripts: Arc::clone(&db) as _,
             personas: Arc::new(FakePersonas::default()),
             products: Arc::clone(&db) as _,
+            ads: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
             captures: Arc::clone(&db) as _,
             staging: Arc::clone(&db) as _,

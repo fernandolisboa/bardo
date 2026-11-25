@@ -27,9 +27,9 @@ use crate::{Bardo, Catalog, KeyState, TemplateError, Text};
 
 /// What a variable says when the channel left it blank, so the prompt
 /// never reads as cut off.
-const NOT_SET: &str = "not set";
+pub(crate) const NOT_SET: &str = "not set";
 /// The narrator when the channel has no default persona.
-const NO_PERSONA: &str = "no persona chosen yet; a clear, engaging documentary narrator";
+pub(crate) const NO_PERSONA: &str = "no persona chosen yet; a clear, engaging documentary narrator";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScriptError {
@@ -58,6 +58,9 @@ pub enum ScriptError {
     /// The typed spend cap is not an amount above zero.
     #[error("invalid spend cap")]
     CapInvalid,
+    /// An ad project's script is written once its brief is confirmed.
+    #[error("the brief is not confirmed yet")]
+    BriefNotConfirmed,
     #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
@@ -77,6 +80,7 @@ impl ScriptError {
             ScriptError::Busy => Text::ScriptBusy,
             ScriptError::OverBudget(_) => Text::BudgetReachedTitle,
             ScriptError::CapInvalid => Text::SpendCapInvalid,
+            ScriptError::BriefNotConfirmed => Text::ScriptBriefFirst,
             ScriptError::Template(error) => error.message(),
             ScriptError::Repository(_) => Text::ScriptNotSaved,
         }
@@ -104,6 +108,9 @@ pub struct ScriptView {
     pub estimate: SpendEstimate,
     /// What the video cost so far, every step included.
     pub spent: Money,
+    /// Where the brief stands, for an ad project: its script is written
+    /// once the brief is confirmed, and reads it.
+    pub brief: Option<crate::BriefStanding>,
 }
 
 /// The script job's payload: the rendered prompt and where it came from.
@@ -262,7 +269,7 @@ fn script_call(rendered: &bardo_domain::RenderedPrompt) -> PlannedCall {
 }
 
 /// `value`, or `NOT_SET` when blank.
-fn or_not_set(value: &str) -> String {
+pub(crate) fn or_not_set(value: &str) -> String {
     if value.trim().is_empty() {
         NOT_SET.to_owned()
     } else {
@@ -379,8 +386,10 @@ impl Bardo {
                 (template, estimate)
             }
         };
+        let script = self.scripts.script(project.id)?;
         Ok(ScriptView {
-            script: self.scripts.script(project.id)?,
+            brief: self.brief_standing(&project, script.as_ref())?,
+            script,
             job: self.latest_script_job(project.id),
             estimate,
             spent: self.project_spend(project.id)?,
@@ -421,6 +430,12 @@ impl Bardo {
         }
         if let Some(localization) = self.localizations.localization(project.id)? {
             return self.adapt_version_again(&project, &localization, consent);
+        }
+        if self
+            .brief_standing(&project, None)?
+            .is_some_and(|brief| !brief.confirmed)
+        {
+            return Err(ScriptError::BriefNotConfirmed);
         }
         let template = self.current_template(TemplateKind::Script)?;
         let rendered = self.render_script(&project, &template)?;

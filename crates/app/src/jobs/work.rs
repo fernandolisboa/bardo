@@ -8,9 +8,8 @@ use super::Kept;
 use crate::Bardo;
 
 /// What a text job works on: one text of a project, the ideas of a
-/// channel, the look of a persona, one take of a capture or the sheet of a
-/// product. Two jobs with
-/// the same `Work` would pay for the same thing and save over each other,
+/// channel, the look of a persona, one take of a capture, the sheet of a
+/// product or its ad angles for a channel. Two jobs with the same `Work` would pay for the same thing and save over each other,
 /// so one is not started, or queued again, while another is at work
 /// ([`Bardo::work_busy`]).
 ///
@@ -40,6 +39,11 @@ pub(crate) enum Work {
     /// The product's sheet: researched on the web, or written from the
     /// brief.
     Sheet(String),
+    /// The ad angles proposed and ranked for the product on the channel.
+    AdAngles {
+        product: String,
+        channel: String,
+    },
 }
 
 /// The fields the payloads of these jobs name what they work on with.
@@ -78,6 +82,8 @@ impl Work {
                 | JobKind::TakePrompt
                 | JobKind::PerformedTake
                 | JobKind::ProductResearch
+                | JobKind::AdAngleSuggestion
+                | JobKind::AdAngleRanking
         ) {
             return None;
         }
@@ -102,6 +108,10 @@ impl Work {
                 position: on.position?,
             },
             JobKind::ProductResearch => Self::Sheet(on.product?),
+            JobKind::AdAngleSuggestion | JobKind::AdAngleRanking => Self::AdAngles {
+                product: on.product?,
+                channel: on.channel?,
+            },
             _ => return None,
         })
     }
@@ -207,6 +217,15 @@ mod tests {
             ),
             Some(Work::Sheet("d".into()))
         );
+        for kind in [JobKind::AdAngleSuggestion, JobKind::AdAngleRanking] {
+            assert_eq!(
+                work(kind, serde_json::json!({"product": "d", "channel": "c"})),
+                Some(Work::AdAngles {
+                    product: "d".into(),
+                    channel: "c".into(),
+                })
+            );
+        }
     }
 
     #[test]

@@ -71,6 +71,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0067_scene_portraits.sql"),
     include_str!("../migrations/0068_spend_cap_kind.sql"),
     include_str!("../migrations/0069_product_sheet.sql"),
+    include_str!("../migrations/0070_ad_angle.sql"),
 ];
 
 /// The schema version this build migrates every database to (SQLite's
@@ -220,7 +221,8 @@ mod tests {
         conn.execute(
             "INSERT INTO template_version (id, profile_id, kind, number, instructions,
                  prompt, created_at)
-             VALUES ('tv2', 'p', 'image_prompt', 1, '', 'Plan.', 0)",
+             VALUES ('tv2', 'p', 'image_prompt', 1, '', 'Plan.', 0),
+                    ('tv3', 'p', 'ad_angles', 1, '', 'Angles.', 0)",
             [],
         )
         .unwrap();
@@ -724,6 +726,67 @@ mod tests {
             cap("none"),
             ("not_offered".to_owned(), None),
             "offered the default once, not given it"
+        );
+    }
+
+    #[test]
+    fn projects_from_before_ad_angles_advertise_no_product() {
+        let before = MIGRATIONS
+            .iter()
+            .position(|sql| sql.contains("CREATE TABLE ad_angle"))
+            .expect("the migration that adds ad angles");
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..before] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", before as i64)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO user_profile (id, ui_language) VALUES ('p', 'en-US');
+             INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language,
+                 country)
+             VALUES ('c', 'p', 'Space', '', '', 'en', 'US');
+             INSERT INTO theme (id, profile_id, channel_id, niche, title, angle, status,
+                 suggested_at, position)
+             VALUES ('t', 'p', 'c', 'space', 'One', '', 'approved', 0, 0);
+             INSERT INTO video_project (id, profile_id, channel_id, theme_id, niche, title,
+                 created_at)
+             VALUES ('v', 'p', 'c', 't', 'space', 'One', 1);
+             INSERT INTO product (id, profile_id, name, kind, description, audience, facts,
+                 offer, link, call_to_action, ownership, must_say, never_say)
+             VALUES ('lamp', 'p', 'Lamp', 'physical', 'A lamp.', '', '', '', '', '', 'mine',
+                 '', '');",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let product: Option<String> = conn
+            .query_row(
+                "SELECT product_id FROM video_project WHERE id = 'v'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(product, None);
+        // A project that names a product holds it in place.
+        conn.execute(
+            "UPDATE video_project SET product_id = 'lamp' WHERE id = 'v'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            conn.execute("DELETE FROM product WHERE id = 'lamp'", [])
+                .is_err(),
+            "the project still names its product"
+        );
+        assert!(
+            conn.execute(
+                "UPDATE video_project SET product_id = 'no-such' WHERE id = 'v'",
+                []
+            )
+            .is_err()
         );
     }
 

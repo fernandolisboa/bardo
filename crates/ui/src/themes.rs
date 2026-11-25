@@ -935,7 +935,7 @@ fn muted(cx: &App, text: SharedString) -> AnyElement {
 }
 
 /// One reason behind a ranking: its score and how sure the engine was.
-fn reason(bardo: &Bardo, cx: &App, label: Text, reason: Reason) -> impl IntoElement {
+pub(crate) fn reason(bardo: &Bardo, cx: &App, label: Text, reason: Reason) -> impl IntoElement {
     let theme = cx.theme();
     v_flex()
         .gap_0p5()

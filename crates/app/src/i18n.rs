@@ -5,10 +5,11 @@ use std::collections::BTreeMap;
 
 use std::time::Duration;
 
-use crate::{Destination, GuideGroup, Pillar, Stage, UploadBlock};
+use crate::{AdAnglesMissing, Destination, GuideGroup, Pillar, Stage, UploadBlock};
 
 use bardo_domain::ProductionMode;
 use bardo_domain::VideoLength;
+use bardo_domain::{AdAngleFieldError, AdFramework, BriefFieldError, BriefNotReady};
 use bardo_domain::{
     AnalysisPart, ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionHighlight,
     CaptionStyle, CaptureProblem, ChannelFieldError, ContentLanguage, Country, DateOrder, Decibels,
@@ -2700,6 +2701,109 @@ pub enum Text {
     RestrictedCategoryName(RestrictedCategory),
     SheetFieldError(SheetFieldError),
     SheetClaimError(SheetClaimError),
+    AdAngleNotSaved,
+    AdAngleNotFound,
+    AdAnglesBusy,
+    AdAnglesNothingToRank,
+    AdAnglesNotLoaded,
+    AdAngleFieldError(AdAngleFieldError),
+    /// What a product lacks before angles can be proposed for it.
+    AdAnglesMissing(AdAnglesMissing),
+    /// Only Claude and TypeSafe have a message.
+    AdAnglesMissingKey(Provider),
+    StageBriefToConfirm,
+    StageBriefClaimChanged,
+    /// Placeholder: `{n}`.
+    StageBriefClaimsChanged,
+    StageBriefIncomplete,
+    StageBriefClaim,
+    /// Placeholder: `{n}`.
+    StageBriefClaims,
+    StageScriptBriefChanged,
+    ScriptBriefFirst,
+    VersionAdProject,
+    BriefNotAnAd,
+    BriefClaimNotConfirmed,
+    BriefClaimNotUsed,
+    BriefNotSaved,
+    BriefNotLoaded,
+    /// What stands in the way of confirming a brief.
+    BriefNotReady(BriefNotReady),
+    BriefFieldError(BriefFieldError),
+    /// The tab of a product that lists its ad angles.
+    ProductTabAngles,
+    AdAnglesTitle,
+    AdAnglesInfo,
+    AdAnglesHint,
+    AdAnglesSaveFirst,
+    AdAnglesBriefUnsaved,
+    AdAnglesProposeTitle,
+    AdAnglesChannel,
+    AdAnglesChannelHint,
+    SuggestAdAngles,
+    SuggestAdAnglesHint,
+    RankAdAngles,
+    AdAnglesUnranked,
+    AdAnglesRankCost,
+    AdAnglesRunning,
+    AdAnglesStopped,
+    AdAnglesEmpty,
+    AdAnglesDiscarded,
+    AdAngleApproved,
+    AdAngleNotRanked,
+    /// Bardo's own mark on an angle, no model's.
+    AdAngleSensitive,
+    AdAngleFramework,
+    AdAngleSegment,
+    AdAngleHook,
+    AdAngleClaims,
+    AdAngleClaimsNone,
+    AdAngleClaimGone,
+    AdAngleHookScore,
+    AdAngleAudienceFit,
+    AdAngleClarity,
+    ApproveAdAngle,
+    ApproveAdAngleHint,
+    AdAngleEditHint,
+    AdAngleStarted,
+    AdAngleOpenProject,
+    /// Marks an ad project in the list of projects.
+    ProjectAd,
+    ProjectAdFor,
+    ScriptBriefChanged,
+    ScriptKeepAfterBrief,
+    BriefInfo,
+    BriefHint,
+    BriefAngleTitle,
+    BriefProduct,
+    BriefClaimsTitle,
+    BriefClaimsInfo,
+    BriefClaimsHint,
+    BriefClaimsNone,
+    BriefClaimsLeftOut,
+    BriefClaimInAngle,
+    BriefClaimLeaveOut,
+    BriefClaimUse,
+    BriefClaimEdited,
+    BriefClaimUnconfirmed,
+    BriefClaimKeep,
+    BriefClaimTake,
+    BriefWordsTitle,
+    BriefWordsInfo,
+    BriefLink,
+    BriefSave,
+    BriefSaved,
+    BriefLengthHint,
+    BriefConfirm,
+    BriefConfirmHint,
+    BriefConfirmed,
+    BriefConfirmedNotice,
+    BriefToScript,
+    BriefAfterConfirm,
+    /// An ad framework, as pickers and angle cards name it.
+    AdFrameworkName(AdFramework),
+    /// What a script in an ad framework goes through, in one line.
+    AdFrameworkSteps(AdFramework),
 }
 
 impl Text {
@@ -5305,6 +5409,7 @@ impl Text {
                 MetadataProblem::AngleBrackets => "metadata.problem.angle_brackets",
             },
             Text::StageName(stage) => match stage {
+                Stage::Brief => "stage.name.brief",
                 Stage::Script => "stage.name.script",
                 Stage::Narration => "stage.name.narration",
                 Stage::Capture => "stage.name.capture",
@@ -5315,6 +5420,7 @@ impl Text {
                 Stage::Publish => "stage.name.publish",
             },
             Text::StageAfter(stage) => match stage {
+                Stage::Brief => "stage.after.brief",
                 Stage::Script => "stage.after.script",
                 Stage::Narration => "stage.after.narration",
                 Stage::Capture => "stage.after.capture",
@@ -5581,6 +5687,141 @@ impl Text {
                 SheetClaimError::Known => "sheet.error.claim.known",
                 SheetClaimError::TooMany => "sheet.error.claim.too_many",
                 SheetClaimError::Gone => "sheet.error.claim.gone",
+            },
+            Text::AdAngleNotSaved => "ad_angle.error.not_saved",
+            Text::AdAngleNotFound => "ad_angle.error.not_found",
+            Text::AdAnglesBusy => "ad_angles.error.busy",
+            Text::AdAnglesNothingToRank => "ad_angles.error.nothing_to_rank",
+            Text::AdAnglesNotLoaded => "ad_angles.error.not_loaded",
+            Text::AdAngleFieldError(error) => match error {
+                AdAngleFieldError::TitleRequired => "ad_angle.error.title_required",
+                AdAngleFieldError::TitleTooLong => "ad_angle.error.title_too_long",
+                AdAngleFieldError::AngleTooLong => "ad_angle.error.angle_too_long",
+                AdAngleFieldError::SegmentTooLong => "ad_angle.error.segment_too_long",
+                AdAngleFieldError::HookRequired => "ad_angle.error.hook_required",
+                AdAngleFieldError::HookTooLong => "ad_angle.error.hook_too_long",
+            },
+            Text::AdAnglesMissing(missing) => match missing {
+                AdAnglesMissing::Sheet => "ad_angles.missing.sheet",
+                AdAnglesMissing::ConfirmedClaim => "ad_angles.missing.confirmed_claim",
+                AdAnglesMissing::Archived => "ad_angles.missing.archived",
+                AdAnglesMissing::Channel => "ad_angles.missing.channel",
+            },
+            Text::AdAnglesMissingKey(provider) => {
+                return format!("ad_angles.error.missing_key.{}", provider.code()).into();
+            }
+            Text::StageBriefToConfirm => "stage.note.brief_to_confirm",
+            Text::StageBriefClaimChanged => "stage.note.brief_claim_changed",
+            Text::StageBriefClaimsChanged => "stage.note.brief_claims_changed",
+            Text::StageBriefIncomplete => "stage.note.brief_incomplete",
+            Text::StageBriefClaim => "stage.note.brief_claim",
+            Text::StageBriefClaims => "stage.note.brief_claims",
+            Text::StageScriptBriefChanged => "stage.note.script_brief_changed",
+            Text::ScriptBriefFirst => "script.error.brief_first",
+            Text::VersionAdProject => "versions.error.ad_project",
+            Text::BriefNotAnAd => "brief.error.not_an_ad",
+            Text::BriefClaimNotConfirmed => "brief.error.claim_not_confirmed",
+            Text::BriefClaimNotUsed => "brief.error.claim_not_used",
+            Text::BriefNotSaved => "brief.error.not_saved",
+            Text::BriefNotLoaded => "brief.error.not_loaded",
+            Text::BriefNotReady(reason) => match reason {
+                BriefNotReady::NoClaim => "brief.not_ready.no_claim",
+                BriefNotReady::ClaimsToDecide => "brief.not_ready.claims_to_decide",
+                BriefNotReady::NoCallToAction => "brief.not_ready.no_call_to_action",
+            },
+            Text::BriefFieldError(error) => match error {
+                BriefFieldError::OfferTooLong => "brief.error.offer_too_long",
+                BriefFieldError::CallToActionTooLong => "brief.error.call_to_action_too_long",
+                BriefFieldError::LinkTooLong => "brief.error.link_too_long",
+            },
+            Text::ProductTabAngles => "product.tab.angles",
+            Text::AdAnglesTitle => "ad_angles.title",
+            Text::AdAnglesInfo => "ad_angles.info",
+            Text::AdAnglesHint => "ad_angles.hint",
+            Text::AdAnglesSaveFirst => "ad_angles.save_first",
+            Text::AdAnglesBriefUnsaved => "ad_angles.brief_unsaved",
+            Text::AdAnglesProposeTitle => "ad_angles.propose_title",
+            Text::AdAnglesChannel => "ad_angles.channel",
+            Text::AdAnglesChannelHint => "ad_angles.channel_hint",
+            Text::SuggestAdAngles => "ad_angles.suggest",
+            Text::SuggestAdAnglesHint => "ad_angles.suggest_hint",
+            Text::RankAdAngles => "ad_angles.rank",
+            Text::AdAnglesUnranked => "ad_angles.unranked",
+            Text::AdAnglesRankCost => "ad_angles.rank_cost",
+            Text::AdAnglesRunning => "ad_angles.running",
+            Text::AdAnglesStopped => "ad_angles.stopped",
+            Text::AdAnglesEmpty => "ad_angles.empty",
+            Text::AdAnglesDiscarded => "ad_angles.discarded",
+            Text::AdAngleApproved => "ad_angle.approved",
+            Text::AdAngleNotRanked => "ad_angle.not_ranked",
+            Text::AdAngleSensitive => "ad_angle.sensitive",
+            Text::AdAngleFramework => "ad_angle.framework",
+            Text::AdAngleSegment => "ad_angle.segment",
+            Text::AdAngleHook => "ad_angle.hook",
+            Text::AdAngleClaims => "ad_angle.claims",
+            Text::AdAngleClaimsNone => "ad_angle.claims_none",
+            Text::AdAngleClaimGone => "ad_angle.claim_gone",
+            Text::AdAngleHookScore => "ad_angle.score.hook",
+            Text::AdAngleAudienceFit => "ad_angle.score.audience_fit",
+            Text::AdAngleClarity => "ad_angle.score.clarity",
+            Text::ApproveAdAngle => "ad_angle.approve",
+            Text::ApproveAdAngleHint => "ad_angle.approve_hint",
+            Text::AdAngleEditHint => "ad_angle.edit_hint",
+            Text::AdAngleStarted => "ad_angle.started",
+            Text::AdAngleOpenProject => "ad_angle.open_project",
+            Text::ProjectAd => "projects.ad",
+            Text::ProjectAdFor => "projects.ad_for",
+            Text::ScriptBriefChanged => "script.brief_changed",
+            Text::ScriptKeepAfterBrief => "script.keep_after_brief",
+            Text::BriefInfo => "brief.info",
+            Text::BriefHint => "brief.hint",
+            Text::BriefAngleTitle => "brief.angle_title",
+            Text::BriefProduct => "brief.product",
+            Text::BriefClaimsTitle => "brief.claims.title",
+            Text::BriefClaimsInfo => "brief.claims.info",
+            Text::BriefClaimsHint => "brief.claims.hint",
+            Text::BriefClaimsNone => "brief.claims.none",
+            Text::BriefClaimsLeftOut => "brief.claims.left_out",
+            Text::BriefClaimInAngle => "brief.claim.in_angle",
+            Text::BriefClaimLeaveOut => "brief.claim.leave_out",
+            Text::BriefClaimUse => "brief.claim.use",
+            Text::BriefClaimEdited => "brief.claim.edited",
+            Text::BriefClaimUnconfirmed => "brief.claim.unconfirmed",
+            Text::BriefClaimKeep => "brief.claim.keep",
+            Text::BriefClaimTake => "brief.claim.take",
+            Text::BriefWordsTitle => "brief.words.title",
+            Text::BriefWordsInfo => "brief.words.info",
+            Text::BriefLink => "brief.link",
+            Text::BriefSave => "brief.save",
+            Text::BriefSaved => "brief.saved",
+            Text::BriefLengthHint => "brief.length_hint",
+            Text::BriefConfirm => "brief.confirm",
+            Text::BriefConfirmHint => "brief.confirm_hint",
+            Text::BriefConfirmed => "brief.confirmed",
+            Text::BriefConfirmedNotice => "brief.confirmed_notice",
+            Text::BriefToScript => "brief.to_script",
+            Text::BriefAfterConfirm => "brief.after_confirm",
+            Text::AdFrameworkName(framework) => match framework {
+                AdFramework::ProblemSolution => "ad_framework.name.problem_solution",
+                AdFramework::Demonstration => "ad_framework.name.demonstration",
+                AdFramework::BeforeAfter => "ad_framework.name.before_after",
+                AdFramework::HowItWorks => "ad_framework.name.how_it_works",
+                AdFramework::StoryBehind => "ad_framework.name.story_behind",
+                AdFramework::OldWayNewWay => "ad_framework.name.old_way_new_way",
+                AdFramework::ThreeReasons => "ad_framework.name.three_reasons",
+                AdFramework::MythFact => "ad_framework.name.myth_fact",
+                AdFramework::Offer => "ad_framework.name.offer",
+            },
+            Text::AdFrameworkSteps(framework) => match framework {
+                AdFramework::ProblemSolution => "ad_framework.steps.problem_solution",
+                AdFramework::Demonstration => "ad_framework.steps.demonstration",
+                AdFramework::BeforeAfter => "ad_framework.steps.before_after",
+                AdFramework::HowItWorks => "ad_framework.steps.how_it_works",
+                AdFramework::StoryBehind => "ad_framework.steps.story_behind",
+                AdFramework::OldWayNewWay => "ad_framework.steps.old_way_new_way",
+                AdFramework::ThreeReasons => "ad_framework.steps.three_reasons",
+                AdFramework::MythFact => "ad_framework.steps.myth_fact",
+                AdFramework::Offer => "ad_framework.steps.offer",
             },
         };
         Cow::Borrowed(key)
@@ -7624,6 +7865,100 @@ mod tests {
             ]
             .map(Text::SheetClaimError),
         );
+        texts.push(Text::AdAngleNotSaved);
+        texts.push(Text::AdAngleNotFound);
+        texts.push(Text::AdAnglesBusy);
+        texts.push(Text::AdAnglesNothingToRank);
+        texts.push(Text::AdAnglesNotLoaded);
+        texts.extend(AdAngleFieldError::ALL.map(Text::AdAngleFieldError));
+        texts.extend(AdAnglesMissing::ALL.map(Text::AdAnglesMissing));
+        texts.push(Text::AdAnglesMissingKey(Provider::Claude));
+        texts.push(Text::AdAnglesMissingKey(Provider::TypeSafe));
+        texts.push(Text::StageBriefToConfirm);
+        texts.push(Text::StageBriefClaimChanged);
+        texts.push(Text::StageBriefClaimsChanged);
+        texts.push(Text::StageBriefIncomplete);
+        texts.push(Text::StageBriefClaim);
+        texts.push(Text::StageBriefClaims);
+        texts.push(Text::StageScriptBriefChanged);
+        texts.push(Text::ScriptBriefFirst);
+        texts.push(Text::VersionAdProject);
+        texts.push(Text::BriefNotAnAd);
+        texts.push(Text::BriefClaimNotConfirmed);
+        texts.push(Text::BriefClaimNotUsed);
+        texts.push(Text::BriefNotSaved);
+        texts.push(Text::BriefNotLoaded);
+        texts.extend(BriefNotReady::ALL.map(Text::BriefNotReady));
+        texts.extend(BriefFieldError::ALL.map(Text::BriefFieldError));
+        texts.push(Text::ProductTabAngles);
+        texts.push(Text::AdAnglesTitle);
+        texts.push(Text::AdAnglesInfo);
+        texts.push(Text::AdAnglesHint);
+        texts.push(Text::AdAnglesSaveFirst);
+        texts.push(Text::AdAnglesBriefUnsaved);
+        texts.push(Text::AdAnglesProposeTitle);
+        texts.push(Text::AdAnglesChannel);
+        texts.push(Text::AdAnglesChannelHint);
+        texts.push(Text::SuggestAdAngles);
+        texts.push(Text::SuggestAdAnglesHint);
+        texts.push(Text::RankAdAngles);
+        texts.push(Text::AdAnglesUnranked);
+        texts.push(Text::AdAnglesRankCost);
+        texts.push(Text::AdAnglesRunning);
+        texts.push(Text::AdAnglesStopped);
+        texts.push(Text::AdAnglesEmpty);
+        texts.push(Text::AdAnglesDiscarded);
+        texts.push(Text::AdAngleApproved);
+        texts.push(Text::AdAngleNotRanked);
+        texts.push(Text::AdAngleSensitive);
+        texts.push(Text::AdAngleFramework);
+        texts.push(Text::AdAngleSegment);
+        texts.push(Text::AdAngleHook);
+        texts.push(Text::AdAngleClaims);
+        texts.push(Text::AdAngleClaimsNone);
+        texts.push(Text::AdAngleClaimGone);
+        texts.push(Text::AdAngleHookScore);
+        texts.push(Text::AdAngleAudienceFit);
+        texts.push(Text::AdAngleClarity);
+        texts.push(Text::ApproveAdAngle);
+        texts.push(Text::ApproveAdAngleHint);
+        texts.push(Text::AdAngleEditHint);
+        texts.push(Text::AdAngleStarted);
+        texts.push(Text::AdAngleOpenProject);
+        texts.push(Text::ProjectAd);
+        texts.push(Text::ProjectAdFor);
+        texts.push(Text::ScriptBriefChanged);
+        texts.push(Text::ScriptKeepAfterBrief);
+        texts.push(Text::BriefInfo);
+        texts.push(Text::BriefHint);
+        texts.push(Text::BriefAngleTitle);
+        texts.push(Text::BriefProduct);
+        texts.push(Text::BriefClaimsTitle);
+        texts.push(Text::BriefClaimsInfo);
+        texts.push(Text::BriefClaimsHint);
+        texts.push(Text::BriefClaimsNone);
+        texts.push(Text::BriefClaimsLeftOut);
+        texts.push(Text::BriefClaimInAngle);
+        texts.push(Text::BriefClaimLeaveOut);
+        texts.push(Text::BriefClaimUse);
+        texts.push(Text::BriefClaimEdited);
+        texts.push(Text::BriefClaimUnconfirmed);
+        texts.push(Text::BriefClaimKeep);
+        texts.push(Text::BriefClaimTake);
+        texts.push(Text::BriefWordsTitle);
+        texts.push(Text::BriefWordsInfo);
+        texts.push(Text::BriefLink);
+        texts.push(Text::BriefSave);
+        texts.push(Text::BriefSaved);
+        texts.push(Text::BriefLengthHint);
+        texts.push(Text::BriefConfirm);
+        texts.push(Text::BriefConfirmHint);
+        texts.push(Text::BriefConfirmed);
+        texts.push(Text::BriefConfirmedNotice);
+        texts.push(Text::BriefToScript);
+        texts.push(Text::BriefAfterConfirm);
+        texts.extend(AdFramework::ALL.map(Text::AdFrameworkName));
+        texts.extend(AdFramework::ALL.map(Text::AdFrameworkSteps));
         texts.extend(Stage::ALL.map(Text::StageName));
         texts.extend(Stage::ALL.map(Text::StageAfter));
         texts.push(Text::RenderNoCut);

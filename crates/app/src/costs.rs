@@ -401,6 +401,11 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         },
         // The brief and the notes in, the sheet as JSON out.
         CostPurpose::ProductSheet => tokens(9_000, 4_000),
+        // The sheet's claims, the channel and the frameworks in, five
+        // angles as JSON out.
+        CostPurpose::AdAngles => tokens(2_000, 2_000),
+        // Five angles, three questions each.
+        CostPurpose::AdAngleRanking => tokens(1_500, 0),
         CostPurpose::PersonaLook => match provider {
             Provider::Claude => tokens(700, 400),
             _ => Metered {

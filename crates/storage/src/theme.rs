@@ -1,8 +1,8 @@
 use bardo_domain::{
     ChannelId, Confidence, EvidenceScope, JobId, Money, Niche, PerformanceEvidence,
-    PerformanceReason, PersonaId, ProductionMode, ProfileId, Reason, RepositoryError, Score,
-    SpendCap, StyleChoice, Theme, ThemeId, ThemeIdea, ThemeRanking, ThemeRecord, ThemeRepository,
-    VideoFormat, VideoLength, VideoProject, VideoProjectId,
+    PerformanceReason, PersonaId, ProductId, ProductionMode, ProfileId, Reason, RepositoryError,
+    Score, SpendCap, StyleChoice, Theme, ThemeId, ThemeIdea, ThemeRanking, ThemeRecord,
+    ThemeRepository, VideoFormat, VideoLength, VideoProject, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -19,7 +19,7 @@ const SELECT_THEME: &str = "SELECT id, profile_id, channel_id, niche, title, ang
 
 pub(crate) const SELECT_PROJECT: &str = "SELECT id, profile_id, channel_id, niche, theme_id, title, created_at, persona_id, \
      video_format, production_mode, spend_cap_micros, video_length, visual_style, \
-     spend_cap_kind \
+     spend_cap_kind, product_id \
      FROM video_project";
 
 #[derive(Debug, thiserror::Error)]
@@ -169,7 +169,7 @@ impl ThemeRow {
     }
 }
 
-fn upsert_theme(tx: &Transaction<'_>, theme: &Theme) -> Result<(), RepositoryError> {
+pub(crate) fn upsert_theme(tx: &Transaction<'_>, theme: &Theme) -> Result<(), RepositoryError> {
     let ranking = theme.ranking();
     let reason = |pick: fn(&ThemeRanking) -> Reason| {
         ranking.map(|ranking| {
@@ -259,6 +259,7 @@ pub(crate) struct ProjectRow {
     length: Option<String>,
     style: Option<String>,
     spend_cap_kind: String,
+    product: Option<String>,
 }
 
 impl ProjectRow {
@@ -278,6 +279,7 @@ impl ProjectRow {
             length: row.get(11)?,
             style: row.get(12)?,
             spend_cap_kind: row.get(13)?,
+            product: row.get(14)?,
         })
     }
 
@@ -315,6 +317,10 @@ impl ProjectRow {
                 .transpose()?,
             // A style of a newer Bardo reads as the notes.
             style: self.style.as_deref().map(StyleChoice::from_code),
+            product: self
+                .product
+                .map(|id| uuid(&id).map(ProductId::from))
+                .transpose()?,
         })
     }
 }
@@ -330,8 +336,8 @@ pub(crate) fn insert_project(
         "INSERT INTO video_project (id, profile_id, channel_id, niche, theme_id, title,
                                     created_at, persona_id, video_format, production_mode,
                                     spend_cap_micros, video_length, visual_style,
-                                    spend_cap_kind)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                                    spend_cap_kind, product_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             project.id.to_string(),
             project.owner.to_string(),
@@ -347,18 +353,24 @@ pub(crate) fn insert_project(
             project.length.map(VideoLength::code),
             project.style.map(StyleChoice::code),
             project.spend_cap.code(),
+            project.product.map(|id| id.to_string()),
         ],
     )
     .map_err(boxed)?;
     Ok(())
 }
 
+/// The theme an approved ad angle became holds an ad project's title and
+/// angle; it is no idea of the channel's own.
+const NOT_AN_AD: &str = "NOT EXISTS (SELECT 1 FROM ad_angle WHERE ad_angle.theme_id = theme.id)";
+
 impl ThemeRepository for Database {
     fn themes(&self, channel: ChannelId) -> Result<Vec<Theme>, RepositoryError> {
         let rows = self
             .conn()
             .prepare_cached(&format!(
-                "{SELECT_THEME} WHERE channel_id = ?1 ORDER BY suggested_at, position"
+                "{SELECT_THEME} WHERE channel_id = ?1 AND {NOT_AN_AD}
+                 ORDER BY suggested_at, position"
             ))
             .and_then(|mut statement| {
                 statement

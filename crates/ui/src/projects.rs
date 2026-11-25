@@ -41,7 +41,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, ClickEvent, Entity, EventEmitter, FocusHandle, PathPromptOptions,
-    ScrollHandle, SharedString, Subscription, Task, Window, div, px,
+    ScrollHandle, SharedString, Subscription, Task, Window, div, point, px,
 };
 
 use crate::appearance::look;
@@ -51,6 +51,7 @@ use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 use crate::{guide, layout};
 
+mod brief;
 mod capture;
 mod export;
 mod music;
@@ -326,6 +327,18 @@ pub struct ProjectsScreen {
     schedule_task: Option<Task<()>>,
     /// How the last change ended.
     schedule_notice: Option<(Tone, Text)>,
+    /// An ad project's Brief stage; `None` for any other project.
+    brief: Option<bardo_app::BriefView>,
+    /// The offer, the call to action and the link of this video, as the
+    /// user types them.
+    brief_offer: Entity<InputState>,
+    brief_call_to_action: Entity<InputState>,
+    brief_link: Entity<InputState>,
+    /// The stored words the three fields were last filled with.
+    brief_loaded: Option<(String, String, String)>,
+    brief_errors: Vec<bardo_app::bardo_domain::BriefFieldError>,
+    brief_error: Option<Text>,
+    brief_notice: Option<Text>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -370,6 +383,9 @@ impl ProjectsScreen {
         let schedule_date = cx.new(|cx| InputState::new(window, cx));
         let schedule_time = cx.new(|cx| InputState::new(window, cx));
         let upload_cover = cx.new(|cx| InputState::new(window, cx));
+        let brief_offer = cx.new(|cx| InputState::new(window, cx));
+        let brief_call_to_action = cx.new(|cx| InputState::new(window, cx));
+        let brief_link = cx.new(|cx| InputState::new(window, cx));
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -496,6 +512,18 @@ impl ProjectsScreen {
                 },
             ),
         ];
+        let mut subscriptions = subscriptions;
+        // Typing in the brief shows Save, and clears what the last save
+        // said.
+        for input in [&brief_offer, &brief_call_to_action, &brief_link] {
+            subscriptions.push(cx.subscribe(input, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.brief_errors.clear();
+                    this.brief_notice = None;
+                    cx.notify();
+                }
+            }));
+        }
         let revision = bardo.read(cx).jobs_revision();
         let mut screen = Self {
             bardo,
@@ -609,6 +637,14 @@ impl ProjectsScreen {
             schedule_edit: None,
             schedule_task: None,
             schedule_notice: None,
+            brief: None,
+            brief_offer,
+            brief_call_to_action,
+            brief_link,
+            brief_loaded: None,
+            brief_errors: Vec::new(),
+            brief_error: None,
+            brief_notice: None,
             editor,
             loaded: None,
             field_error: None,
@@ -792,6 +828,10 @@ impl ProjectsScreen {
         self.export_choices.clear();
         self.selected_network = None;
         self.metadata_loaded = None;
+        self.brief_loaded = None;
+        self.brief_errors.clear();
+        self.brief_error = None;
+        self.brief_notice = None;
         self.reset_post(window, cx);
         self.selected_scene = None;
         self.pending_only = false;
@@ -824,6 +864,10 @@ impl ProjectsScreen {
                 cx.emit(OpenEditor(id));
             }
         } else if stage.is_page() {
+            if self.stage != stage {
+                // Another stage's page starts at its top.
+                self.page_scroll.set_offset(point(px(0.), px(0.)));
+            }
             self.stage = stage;
             self.ensure_render_checked(cx);
             cx.notify();
@@ -864,6 +908,8 @@ impl ProjectsScreen {
         let stage = self.shown_stage(&self.stages()?);
         let plan = self.scenes.as_ref().and_then(|scenes| scenes.plan.as_ref());
         let made = match stage {
+            // An ad project always has its brief to show.
+            Stage::Brief => self.brief.is_some(),
             Stage::Script => self.view.as_ref().is_some_and(|view| view.script.is_some()),
             Stage::Narration => self
                 .narration
@@ -1312,8 +1358,10 @@ impl ProjectsScreen {
             self.thumbnail = None;
             self.chapters = None;
             self.versions = None;
+            self.brief = None;
             return;
         };
+        self.load_brief(id, window, cx);
         self.load_narration(id, cx);
         self.load_versions(id, cx);
         self.load_scenes(id, cx);
@@ -1659,7 +1707,15 @@ impl ProjectsScreen {
         let projects: Vec<(VideoProjectId, SharedString)> = self
             .projects
             .iter()
-            .map(|project| (project.id, SharedString::from(project.title.clone())))
+            .map(|project| {
+                // An ad says so in the list.
+                let title = if project.is_ad() {
+                    format!("{} · {}", project.title, bardo.text(Text::ProjectAd))
+                } else {
+                    project.title.clone()
+                };
+                (project.id, SharedString::from(title))
+            })
             .collect();
         let switcher = Button::new("project-switcher")
             .ghost()
@@ -1714,6 +1770,16 @@ impl ProjectsScreen {
             project.niche.label(),
             bardo.time_ago(project.created_at)
         );
+        // An ad leads with the product it is for.
+        if let Some(brief) = self.brief.as_ref().filter(|_| project.is_ad()) {
+            meta = format!(
+                "{} · {meta}",
+                bardo.text_with(
+                    Text::ProjectAdFor,
+                    &[("product", brief.product.brief.name())]
+                )
+            );
+        }
         if let Some(view) = self.view.as_ref().filter(|view| !view.spent.is_zero()) {
             meta.push_str(" · ");
             meta.push_str(
@@ -2169,7 +2235,35 @@ impl ProjectsScreen {
             .into_any_element()
         });
 
+        // The brief changed after the script was written: the user reads
+        // the script against it and keeps it, or writes it again.
+        let brief_changed = view
+            .brief
+            .filter(|brief| brief.script_outdated && script.is_some())
+            .map(|_| {
+                h_flex()
+                    .flex_wrap()
+                    .gap_3()
+                    .items_center()
+                    .child(
+                        kit::notice(Tone::Warning, tr(bardo, Text::ScriptBriefChanged), cx)
+                            .flex_1()
+                            .min_w_0(),
+                    )
+                    .child(
+                        Button::new("keep-script-after-brief")
+                            .small()
+                            .outline()
+                            .label(tr(bardo, Text::ScriptKeepAfterBrief))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.keep_script_after_brief(window, cx)
+                            })),
+                    )
+                    .into_any_element()
+            });
+
         std::iter::once(title_row.into_any_element())
+            .chain(brief_changed)
             .chain(version_of)
             .chain(job)
             .chain(ask)
@@ -2934,6 +3028,10 @@ impl Render for ProjectsScreen {
         };
         let current = self.shown_stage(&stages);
         match current {
+            Stage::Brief => {
+                parts.content = self.brief_page(cx);
+                parts.scroll = Some(self.page_scroll.clone());
+            }
             Stage::Script => {
                 parts.content = self.script_page(cx);
                 parts.scroll = Some(self.page_scroll.clone());
