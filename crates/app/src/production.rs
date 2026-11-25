@@ -13,8 +13,8 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    ClipModel, CostPurpose, Money, ProductionMode, Provider, RepositoryError, VideoLength,
-    VideoProject, VideoProjectId, typical_length, typical_scenes,
+    ClipModel, CostPurpose, Money, ProductionMode, Provider, RepositoryError, ScenePlanSize,
+    VideoLength, VideoProject, VideoProjectId, typical_length, typical_scenes,
 };
 
 use crate::costs::{BudgetConsent, CapReached, PlannedCall, SpendEstimate};
@@ -232,11 +232,12 @@ impl Bardo {
                 (scenes, plan.missing_portraits(&missing).len())
             }
             None => {
-                calls.push(PlannedCall::new(
-                    Provider::Claude,
-                    CostPurpose::ScenePlan,
-                    1,
-                ));
+                // Sized as the Scenes stage sizes it, from the narration or
+                // from the length it will about have.
+                calls.push(crate::scenes::sized_plan_call(match &narration {
+                    Some(narration) => ScenePlanSize::of(narration),
+                    None => ScenePlanSize::about(length),
+                }));
                 let scenes = typical_scenes(length)
                     .into_iter()
                     .map(|(start, length)| PlannedScene {
@@ -377,13 +378,19 @@ mod tests {
 
     // Before anything is made, from the rate table and the first guesses:
     // Claude writes the script (1,300 tokens in, 8,000 out at US$ 4 and
-    // US$ 20 a million: US$ 0.1652) and plans the scenes (3,500 in, 12,000
-    // out: US$ 0.254); ElevenLabs reads 15 characters a second at US$ 0.10
-    // a thousand; Nano Banana draws a scene every 6 seconds and one
-    // portrait at US$ 0.10157 each (1,680 image tokens at US$ 60 a million,
-    // 40 in, 250 out).
-    const SCRIPT_AND_PLAN: u64 = 165_200 + 254_000;
+    // US$ 20 a million: US$ 0.1652) and plans the scenes (3,500 in, and
+    // out what a plan of the video's length writes); ElevenLabs reads 15
+    // characters a second at US$ 0.10 a thousand; Nano Banana draws a
+    // scene every 6 seconds and one portrait at US$ 0.10157 each (1,680
+    // image tokens at US$ 60 a million, 40 in, 250 out).
+    const SCRIPT: u64 = 165_200;
     const IMAGE: u64 = 101_570;
+
+    /// A plan of `scenes` scenes: 600 tokens once, 160 a scene and 10,000
+    /// of thought, at US$ 20 a million, after 3,500 tokens in.
+    const fn plan(scenes: u64) -> u64 {
+        14_000 + (600 + scenes * 160 + 10_000) * 20
+    }
 
     #[test]
     fn a_short_and_a_long_video_are_priced_from_the_rate_table_before_anything_is_made() {
@@ -399,7 +406,7 @@ mod tests {
         // (it makes 5 or 10) at US$ 0.042 a second; Kling 3.0 makes any
         // length, so premium pays the 60 seconds at US$ 0.112.
         let view = app.production(short.id).unwrap();
-        let economy = SCRIPT_AND_PLAN + 90_000 + 11 * IMAGE;
+        let economy = SCRIPT + plan(10) + 90_000 + 11 * IMAGE;
         assert_eq!(view.spent, Money::ZERO);
         assert_eq!(
             remaining(&view, ProductionMode::Economy),
@@ -425,7 +432,7 @@ mod tests {
 
         // Eight minutes: 7,200 characters, 80 scenes and a portrait.
         let view = app.production(long.id).unwrap();
-        let economy = SCRIPT_AND_PLAN + 720_000 + 81 * IMAGE;
+        let economy = SCRIPT + plan(80) + 720_000 + 81 * IMAGE;
         assert_eq!(
             remaining(&view, ProductionMode::Economy),
             Money::from_micros(economy)

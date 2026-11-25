@@ -1014,7 +1014,7 @@ reject = "Discard"
 [scenes.error]
 no_narration = "Generate or import the narration first; scenes are timed on it."
 no_plan = "Plan the scenes first."
-narration_too_long = "This narration is too long to plan in one go. A plan of more than about 330 scenes (20 to 30 minutes of narration) does not fit in one answer and would be paid for without arriving. Shorten the script or make it as more than one video."
+narration_too_long = "This narration is too long to plan at once: its plan may not fit in one answer, and an answer that is cut is paid for and lost. Use a shorter narration or split the video into more than one."
 scene_not_found = "That scene is gone; the scenes may have been planned again."
 missing_claude_key = "Save a Claude key under Settings to plan scenes."
 missing_gemini_key = "Save a Gemini key under Settings to generate images and Google clips."

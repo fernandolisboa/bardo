@@ -12,13 +12,16 @@ use crate::http::{BinaryResponse, HttpRequest, HttpResponse, StreamedResponse, T
 
 /// Reads `inner` and fails with `TimedOut` when no byte arrives for
 /// `idle`. The body is read on a thread of its own, which ends with the
-/// body or, once this reader is dropped, at its next read.
+/// body or, once this reader is dropped, at its next read: after a silence
+/// that thread and its connection stay until the transport's own bound on
+/// the body ends them, since nothing here can close the connection.
 pub struct IdleTimeout {
     chunks: Receiver<std::io::Result<Vec<u8>>>,
     idle: Duration,
     pending: Vec<u8>,
     at: usize,
     ended: bool,
+    timed_out: bool,
 }
 
 impl IdleTimeout {
@@ -49,7 +52,17 @@ impl IdleTimeout {
             pending: Vec::new(),
             at: 0,
             ended: false,
+            timed_out: false,
         }
+    }
+}
+
+impl IdleTimeout {
+    fn silence(&self) -> std::io::Error {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("no data for {} seconds", self.idle.as_secs()),
+        )
     }
 }
 
@@ -59,6 +72,11 @@ impl Read for IdleTimeout {
             return Ok(0);
         }
         if self.at == self.pending.len() {
+            // Silence stays an error however often it is asked about, so
+            // a reader in between cannot take it for the end of the body.
+            if self.timed_out {
+                return Err(self.silence());
+            }
             if self.ended {
                 return Ok(0);
             }
@@ -77,11 +95,8 @@ impl Read for IdleTimeout {
                     return Ok(0);
                 }
                 Err(RecvTimeoutError::Timeout) => {
-                    self.ended = true;
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        format!("no data for {} seconds", self.idle.as_secs()),
-                    ));
+                    self.timed_out = true;
+                    return Err(self.silence());
                 }
             }
         }
@@ -102,10 +117,6 @@ pub struct Watched<T> {
 impl<T> Watched<T> {
     pub fn new(transport: T, idle: Duration) -> Self {
         Self { transport, idle }
-    }
-
-    pub fn inner(&self) -> &T {
-        &self.transport
     }
 }
 
@@ -184,7 +195,7 @@ mod tests {
 
     #[test]
     fn silence_past_the_limit_is_a_timeout() {
-        let (feed, mut reader) = fed(Duration::from_millis(60));
+        let (feed, mut reader) = fed(Duration::from_millis(500));
         feed.send(Ok(b"start".to_vec())).unwrap();
         let mut buffer = [0u8; 16];
         assert_eq!(reader.read(&mut buffer).unwrap(), 5);
@@ -192,16 +203,19 @@ mod tests {
         let error = reader.read(&mut buffer).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
         assert!(error.to_string().contains("no data"));
+        // Asked again, it is still silence, not the end of the body.
+        let error = reader.read(&mut buffer).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
         drop(feed);
     }
 
     #[test]
     fn data_that_keeps_coming_is_never_a_timeout() {
         // Longer in all than the limit on silence, and no gap as long.
-        let (feed, mut reader) = fed(Duration::from_millis(400));
+        let (feed, mut reader) = fed(Duration::from_millis(1_500));
         let writer = std::thread::spawn(move || {
             for _ in 0..8 {
-                std::thread::sleep(Duration::from_millis(80));
+                std::thread::sleep(Duration::from_millis(250));
                 feed.send(Ok(b"tick".to_vec())).unwrap();
             }
         });
@@ -241,7 +255,7 @@ mod tests {
         });
         let transport = Watched::new(
             UreqTransport::without_proxy(Duration::from_secs(20)),
-            Duration::from_millis(200),
+            Duration::from_millis(500),
         );
         let mut response = transport
             .send_streamed(&HttpRequest::get(format!("http://{address}/stream")))

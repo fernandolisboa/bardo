@@ -19,6 +19,7 @@ pub struct Event {
 /// of is dropped, as it never finished.
 pub struct Events<R> {
     lines: std::io::Lines<BufReader<R>>,
+    begun: bool,
     failed: bool,
 }
 
@@ -26,6 +27,7 @@ impl<R: Read> Events<R> {
     pub fn new(body: R) -> Self {
         Self {
             lines: BufReader::new(body).lines(),
+            begun: false,
             failed: false,
         }
     }
@@ -43,6 +45,10 @@ impl<R: Read> Iterator for Events<R> {
         let mut any = false;
         loop {
             let line = match self.lines.next()? {
+                // A byte-order mark may open the stream.
+                Ok(line) if !std::mem::replace(&mut self.begun, true) => line
+                    .strip_prefix('\u{feff}')
+                    .map_or(line.clone(), str::to_owned),
                 Ok(line) => line,
                 Err(error) => {
                     self.failed = true;
@@ -125,6 +131,14 @@ mod tests {
     fn comments_unknown_fields_and_extra_blank_lines_are_skipped() {
         let stream = ": keep-alive\n\n\nid: 7\nretry: 1000\nevent: ping\ndata:{}\n\n\n";
         assert_eq!(events(stream), [event("ping", "{}")]);
+    }
+
+    #[test]
+    fn a_byte_order_mark_at_the_start_is_not_part_of_the_first_field() {
+        assert_eq!(
+            events("\u{feff}event: ping\ndata: {}\n\n"),
+            [event("ping", "{}")]
+        );
     }
 
     #[test]

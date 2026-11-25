@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use bardo_ai::ClaudeTextGenerator;
 use bardo_ai::claude::{FALLBACK_BETA, MESSAGES_URL, MODEL};
-use bardo_ai::http::Method;
+use bardo_ai::http::{HttpResponse, Method};
 use bardo_domain::{
     ApiKey, ImageFormat, Provider, ProviderFailureKind, TextEffort, TextFormat, TextGenerator,
     TextImage, TextRequest, TokenUsage,
@@ -119,32 +119,25 @@ fn limit_sent(effort: TextEffort, answer_tokens: u64) -> u64 {
 }
 
 #[test]
-fn an_answer_of_a_known_size_gets_room_for_itself_and_for_thought() {
-    // The plan of a ten-minute video: the answer and as much again.
-    assert_eq!(limit_sent(TextEffort::Careful, 39_000), 78_000);
-    assert_eq!(limit_sent(TextEffort::Everyday, 39_000), 78_000);
+fn an_answer_of_a_known_size_gets_four_times_its_room() {
+    // The plan of a three-minute video: its own size, the thought before
+    // it, and prompts that run longer than they were counted.
+    assert_eq!(limit_sent(TextEffort::Careful, 13_750), 55_000);
+    assert_eq!(limit_sent(TextEffort::Everyday, 13_750), 55_000);
     // A short answer keeps the usual room, never less.
-    assert_eq!(limit_sent(TextEffort::Careful, 2_000), 32_000);
-    assert_eq!(limit_sent(TextEffort::Everyday, 2_000), 16_000);
-    // Thought has a least room of its own beside a middling answer.
-    assert_eq!(limit_sent(TextEffort::Careful, 20_000), 40_000);
-    assert_eq!(limit_sent(TextEffort::Careful, 17_000), 34_000);
-    assert_eq!(limit_sent(TextEffort::Everyday, 14_000), 28_000);
-    // Never past what the model can write.
-    assert_eq!(limit_sent(TextEffort::Careful, 80_000), 128_000);
+    assert_eq!(limit_sent(TextEffort::Careful, 2_750), 32_000);
+    assert_eq!(limit_sent(TextEffort::Everyday, 2_750), 16_000);
+    // The plan of a ten-minute video gets all the model can write, and
+    // nothing gets more.
+    assert_eq!(limit_sent(TextEffort::Careful, 40_000), 128_000);
     assert_eq!(limit_sent(TextEffort::Careful, u64::MAX), 128_000);
 }
 
 #[test]
-fn the_longest_answer_leaves_half_as_much_room_again_for_thought() {
+fn the_longest_answer_leaves_as_much_room_again() {
     let longest = bardo_ai::claude::longest_answer();
-    let limit = limit_sent(TextEffort::Careful, longest);
-    assert_eq!(limit, 128_000);
-    assert!(limit - longest >= longest / 2);
-    assert!(
-        limit - (longest + 2) < (longest + 2) / 2,
-        "and no longer one does"
-    );
+    assert_eq!(longest, 64_000);
+    assert_eq!(limit_sent(TextEffort::Careful, longest), 128_000);
 }
 
 #[test]
@@ -231,13 +224,52 @@ fn reads_the_text_blocks_model_and_usage() {
 
 #[test]
 fn an_answer_handed_over_whole_is_still_read() {
-    // A proxy that buffers the stream answers with the whole message.
+    // A server that does not stream answers with the whole message.
     let generated = generator(&["messages-themes-not-streamed"])
         .generate(&key(), &json_request())
         .unwrap();
     assert!(generated.text.contains("The forgotten first spacewalk"));
     assert_eq!(generated.model, "claude-opus-5-5");
     assert_eq!(generated.usage.output_tokens, 893);
+}
+
+#[test]
+fn a_stream_is_read_as_one_whatever_its_headers_say() {
+    let mut relabeled = fixture("claude", "messages-themes");
+    relabeled
+        .headers
+        .retain(|(name, _)| !name.eq_ignore_ascii_case("content-type"));
+    let relabeled = relabeled.with_header("content-type", "application/json");
+    let (sleeper, _) = recording_sleeper();
+    let generated = ClaudeTextGenerator::with_transport(Scripted::new(vec![relabeled]))
+        .with_sleeper(sleeper)
+        .generate(&key(), &json_request())
+        .unwrap();
+    assert!(generated.text.contains("The forgotten first spacewalk"));
+    assert_eq!(generated.usage.output_tokens, 893);
+}
+
+#[test]
+fn a_stream_that_opens_and_brings_no_answer_is_not_an_outage() {
+    // Claude took the request, and a path that holds the answer back or
+    // loses it brought only this. The answer may be written and billed all
+    // the same: the queue must not take it for an outage and send it again.
+    let silent = HttpResponse::new(200, "event: ping\ndata: {\"type\": \"ping\"}\n\n")
+        .with_header("content-type", "text/event-stream; charset=utf-8");
+    let (sleeper, _) = recording_sleeper();
+    let claude = ClaudeTextGenerator::with_transport(Scripted::new(vec![
+        silent,
+        fixture("claude", "messages-themes"),
+    ]))
+    .with_sleeper(sleeper);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
+    assert!(
+        failure.detail.contains("may be billed"),
+        "{}",
+        failure.detail
+    );
+    assert_eq!(claude.transport().sent().len(), 1);
 }
 
 #[test]

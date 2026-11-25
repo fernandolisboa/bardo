@@ -61,10 +61,12 @@ pub struct TextRequest {
     pub images: Vec<TextImage>,
     pub format: TextFormat,
     pub effort: TextEffort,
-    /// How many tokens the answer may take at most, when the task can tell
-    /// (a scene plan grows with its narration). The writer then makes room
-    /// for it; without it, it gives its usual room, enough for every task
-    /// whose answer does not grow.
+    /// About how large the answer gets, in tokens as the provider counts
+    /// them, when the task can tell (a scene plan grows with its
+    /// narration). It is a size to make room for, not a limit: the writer
+    /// leaves room for it, for the thought before it and for an answer
+    /// that runs longer. Without it the writer gives its usual room,
+    /// enough for every task whose answer does not grow.
     pub answer_tokens: Option<u64>,
 }
 

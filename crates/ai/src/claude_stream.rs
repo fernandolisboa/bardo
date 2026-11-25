@@ -20,13 +20,14 @@ pub const MAX_STREAM_BYTES: u64 = 64 * 1024 * 1024;
 /// How a stream ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamEnd {
-    /// `message_stop` arrived: the answer is whole, whatever its stop
-    /// reason.
+    /// The answer is whole, whatever its stop reason: `message_stop`
+    /// arrived, or the stream ended after the message gave its stop reason,
+    /// which comes after all of its content.
     Complete,
     /// The API ended the stream with an `error` event, e.g.
     /// `overloaded_error`.
     Failed { kind: String, message: String },
-    /// The stream stopped before `message_stop`: the connection dropped,
+    /// The stream stopped before the answer did: the connection dropped,
     /// went silent, or sent something unreadable.
     Broken(String),
 }
@@ -42,8 +43,9 @@ pub struct StreamedAnswer {
     pub stop_reason: Option<String>,
     /// Why a request was declined, when the API says.
     pub stop_details: Value,
-    /// As the API counted them so far: the input from `message_start`, the
-    /// output from the last `message_delta` (0 until one arrives).
+    /// As the API counted them so far, from `message_start` and then from
+    /// each `message_delta`. When more than one model worked on the answer
+    /// (a fallback), the sum of what each is billed.
     pub usage: TokenUsage,
     pub end: StreamEnd,
 }
@@ -56,6 +58,20 @@ impl StreamedAnswer {
     }
 }
 
+/// The events that carry something to read. Keep-alives (`ping`) and event
+/// types added later do not.
+fn is_read(kind: &str) -> bool {
+    matches!(
+        kind,
+        "message_start"
+            | "content_block_start"
+            | "content_block_delta"
+            | "message_delta"
+            | "message_stop"
+            | "error"
+    )
+}
+
 /// Reads the events of `body` until the message stops, the API reports an
 /// error, or the stream breaks.
 pub fn read(body: impl Read) -> StreamedAnswer {
@@ -65,36 +81,44 @@ pub fn read(body: impl Read) -> StreamedAnswer {
         stop_reason: None,
         stop_details: Value::Null,
         usage: TokenUsage::default(),
-        end: StreamEnd::Broken("the stream ended before the answer did".to_owned()),
+        end: StreamEnd::Complete,
     };
+    answer.end = read_into(&mut answer, body);
+    // The stop reason is the last thing a message says, after all of its
+    // content: an answer that gave one is whole, whatever happened to the
+    // stream after it.
+    if answer.stop_reason.is_some() {
+        answer.end = StreamEnd::Complete;
+    }
+    answer
+}
+
+/// Reads events into `answer` and says how the stream ended.
+fn read_into(answer: &mut StreamedAnswer, body: impl Read) -> StreamEnd {
     for event in Events::new(body.take(MAX_STREAM_BYTES)) {
         let event = match event {
             Ok(event) => event,
-            Err(error) => {
-                answer.end = StreamEnd::Broken(error.to_string());
-                return answer;
-            }
+            Err(error) => return StreamEnd::Broken(error.to_string()),
         };
-        // Keep-alives and event types added later carry nothing to read.
-        if !matches!(
-            event.name.as_str(),
-            "message_start"
-                | "content_block_start"
-                | "content_block_delta"
-                | "message_delta"
-                | "message_stop"
-                | "error"
-        ) {
+        // Every event says its type twice, in its name and in its data. A
+        // stream that lost the names on its way is read by the data.
+        let named = !event.name.is_empty();
+        if named && !is_read(&event.name) {
             continue;
         }
         let data: Value = match serde_json::from_str(&event.data) {
             Ok(data) => data,
+            Err(_) if !named => continue,
             Err(error) => {
-                answer.end = StreamEnd::Broken(format!("unreadable {} event: {error}", event.name));
-                return answer;
+                return StreamEnd::Broken(format!("unreadable {} event: {error}", event.name));
             }
         };
-        match event.name.as_str() {
+        let kind = if named {
+            event.name.as_str()
+        } else {
+            data["type"].as_str().unwrap_or_default()
+        };
+        match kind {
             "message_start" => {
                 let message = &data["message"];
                 answer.model = Some(message["model"].as_str().unwrap_or_default().to_owned());
@@ -138,31 +162,43 @@ pub fn read(body: impl Read) -> StreamedAnswer {
                 }
                 read_usage(&data["usage"], &mut answer.usage);
             }
-            "message_stop" => {
-                answer.end = StreamEnd::Complete;
-                return answer;
-            }
-            _ => {
+            "message_stop" => return StreamEnd::Complete,
+            "error" => {
                 let error = &data["error"];
-                answer.end = StreamEnd::Failed {
+                return StreamEnd::Failed {
                     kind: error["type"].as_str().unwrap_or("error").to_owned(),
                     message: error["message"].as_str().unwrap_or_default().to_owned(),
                 };
-                return answer;
             }
+            _ => {}
         }
     }
-    answer
+    StreamEnd::Broken("the stream ended before the answer did".to_owned())
 }
 
 /// Counts are cumulative, and an event may leave one out: a count that is
-/// absent keeps what an earlier event said.
-fn read_usage(usage: &Value, into: &mut TokenUsage) {
+/// absent keeps what an earlier event said. When the answer took more than
+/// one attempt (a declined request that a fallback model answered),
+/// `iterations` lists what each attempt is billed and the counts beside it
+/// are only the last attempt's, so the bill is their sum.
+pub(crate) fn read_usage(usage: &Value, into: &mut TokenUsage) {
     if let Some(input) = usage["input_tokens"].as_u64() {
         into.input_tokens = input;
     }
     if let Some(output) = usage["output_tokens"].as_u64() {
         into.output_tokens = output;
+    }
+    if let Some(iterations) = usage["iterations"].as_array()
+        && !iterations.is_empty()
+    {
+        let sum = |count: &str| {
+            iterations
+                .iter()
+                .filter_map(|iteration| iteration[count].as_u64())
+                .fold(0u64, u64::saturating_add)
+        };
+        into.input_tokens = sum("input_tokens");
+        into.output_tokens = sum("output_tokens");
     }
 }
 
@@ -384,5 +420,74 @@ mod tests {
         let answer = read(&b""[..]);
         assert!(matches!(answer.end, StreamEnd::Broken(_)));
         assert!(!answer.started());
+    }
+
+    #[test]
+    fn an_answer_that_gave_its_stop_reason_is_whole_without_the_last_event() {
+        // The connection closed between the stop reason and `message_stop`.
+        let stopped = stop("end_turn", 12);
+        let cut = stopped.split("event: message_stop").next().unwrap();
+        let stream = [START, &text_block(0, &["All of it."]), cut].concat();
+        let answer = read(stream.as_bytes());
+        assert_eq!(answer.end, StreamEnd::Complete);
+        assert_eq!(answer.text, "All of it.");
+        assert_eq!(answer.usage.output_tokens, 12);
+
+        // An error after the stop reason does not take the answer back.
+        let stream = [
+            START,
+            &text_block(0, &["All of it."]),
+            cut,
+            "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\
+             \"message\":\"Internal server error\"}}\n\n",
+        ]
+        .concat();
+        assert_eq!(read(stream.as_bytes()).end, StreamEnd::Complete);
+    }
+
+    #[test]
+    fn events_without_a_name_are_read_by_their_type() {
+        let stream = [
+            START,
+            &text_block(0, &["Named or not."]),
+            &stop("end_turn", 9),
+        ]
+        .concat();
+        let unnamed: String = stream
+            .lines()
+            .filter(|line| !line.starts_with("event:"))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let answer = read(unnamed.as_bytes());
+        assert_eq!(answer.end, StreamEnd::Complete);
+        assert_eq!(answer.model.as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(answer.text, "Named or not.");
+        assert_eq!(answer.usage.input_tokens, 412);
+    }
+
+    #[test]
+    fn an_answer_that_took_two_attempts_is_billed_for_both() {
+        // The counts beside `iterations` are the last attempt's alone.
+        let stream = [
+            START,
+            &text_block(0, &["Once upon a time."]),
+            "event: message_delta\n\
+             data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\
+             \"usage\":{\"input_tokens\":480,\"output_tokens\":40,\"iterations\":[\
+             {\"type\":\"message\",\"model\":\"claude-opus-5-5\",\"input_tokens\":412,\
+             \"output_tokens\":3000},\
+             {\"type\":\"fallback_message\",\"model\":\"claude-opus-4-8\",\"input_tokens\":480,\
+             \"output_tokens\":40}]}}\n\n\
+             event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        ]
+        .concat();
+        let answer = read(stream.as_bytes());
+        assert_eq!(
+            answer.usage,
+            TokenUsage {
+                input_tokens: 892,
+                output_tokens: 3_040,
+            }
+        );
     }
 }

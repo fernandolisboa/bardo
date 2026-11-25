@@ -1,32 +1,37 @@
 //! How large a scene plan's answer gets, known before it is asked for.
 //!
 //! The plan is the one text whose size follows the video's length: a few
-//! lines once (the cast, the places, the visual story) and then an image
+//! lines once (the visual story, the cast, the places) and then an image
 //! prompt and a motion prompt per scene. A one-minute video has about ten
 //! scenes, a ten-minute one a hundred, so the room the answer needs and
 //! what it costs are sized from the narration instead of guessed once for
 //! every video.
 //!
-//! The figures come from counting a plan written under the default
-//! template (#267): a scene took 120 to 165 tokens, the largest 131 to 177,
-//! depending on the tokenizer.
+//! The figures come from counting, in tokens, a plan written under the
+//! default scene template (ADR-0031): a scene took 120 to 165 tokens. The
+//! sizes "at most" are padded well past that, but they are not a hard
+//! limit: a template the user edited, or long aesthetic notes repeated in
+//! every prompt, can make a scene larger. Whoever asks for the plan leaves
+//! room for that.
 
 use std::time::Duration;
 
-use crate::{Narration, sentences};
+use crate::{Narration, TYPICAL_SCENE, sentences};
 
-/// The fastest the template asks scenes to change.
+/// The fastest the default template asks scenes to change.
 const FASTEST_SCENE: Duration = Duration::from_secs(4);
-/// The pace in the middle of what it asks for (4 to 8 seconds).
-const USUAL_SCENE: Duration = Duration::from_secs(6);
 /// What a plan says once, whatever its length (its story, its cast and its
 /// places), at most and usually.
 const ONCE_AT_MOST: u64 = 2_500;
 const ONCE_USUALLY: u64 = 600;
-/// A scene's tokens: at most (well past the largest counted, for prompts
-/// longer than the default template's) and usually.
+/// A scene's tokens: at most (half as much again as the largest counted)
+/// and usually.
 const SCENE_AT_MOST: u64 = 250;
 const SCENE_USUALLY: u64 = 160;
+/// The thought before a plan, which is billed as output: about this much
+/// for a short plan, and half as much as the answer for a long one. An
+/// assumption until plans of every length have been paid for.
+const THOUGHT_USUALLY: u64 = 10_000;
 
 /// The size of the plan a narration asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +52,16 @@ impl ScenePlanSize {
         Self::new(sentences(narration).len(), narration.duration)
     }
 
+    /// The size for a narration that is not made yet and will last about
+    /// `duration`: its sentences are taken to be short enough not to bound
+    /// the scenes.
+    pub fn about(duration: Duration) -> Self {
+        Self {
+            sentences: u64::MAX,
+            duration,
+        }
+    }
+
     /// Scenes at `pace` each. A scene starts at a sentence, so there are
     /// never more scenes than sentences, and a plan has at least one.
     fn scenes(self, pace: Duration) -> u64 {
@@ -62,7 +77,7 @@ impl ScenePlanSize {
 
     /// The scenes a plan of this narration usually has.
     pub fn scenes_usually(self) -> u64 {
-        self.scenes(USUAL_SCENE)
+        self.scenes(TYPICAL_SCENE)
     }
 
     /// The room the answer needs, in tokens, before any thinking: what a
@@ -71,10 +86,16 @@ impl ScenePlanSize {
         ONCE_AT_MOST.saturating_add(self.scenes_at_most().saturating_mul(SCENE_AT_MOST))
     }
 
-    /// The tokens the answer usually takes, before any thinking: what an
-    /// estimate of its cost starts from.
+    /// The tokens the answer usually takes, before any thinking.
     pub fn answer_tokens_usually(self) -> u64 {
         ONCE_USUALLY.saturating_add(self.scenes_usually().saturating_mul(SCENE_USUALLY))
+    }
+
+    /// The output tokens the plan is usually billed: the answer and the
+    /// thought before it. What an estimate of its cost is made from.
+    pub fn output_tokens_usually(self) -> u64 {
+        let answer = self.answer_tokens_usually();
+        answer.saturating_add(THOUGHT_USUALLY.max(answer / 2))
     }
 }
 
@@ -120,11 +141,13 @@ mod tests {
 
     #[test]
     fn the_room_grows_with_the_scenes() {
-        // A Short fits the room every request gets; a long video does not.
+        // The plan of a long video is many times a Short's.
         assert_eq!(minutes(1, 15).answer_tokens_at_most(), 2_500 + 15 * 250);
         assert_eq!(minutes(10, 150).answer_tokens_at_most(), 2_500 + 150 * 250);
         assert_eq!(minutes(15, 225).answer_tokens_at_most(), 58_750);
-        assert!(minutes(10, 150).answer_tokens_at_most() > 16_000);
+        assert!(
+            minutes(10, 150).answer_tokens_at_most() > 6 * minutes(1, 15).answer_tokens_at_most()
+        );
     }
 
     #[test]
@@ -141,5 +164,22 @@ mod tests {
         let size = ScenePlanSize::new(usize::MAX, Duration::MAX);
         assert_eq!(size.answer_tokens_at_most(), u64::MAX);
         assert_eq!(size.answer_tokens_usually(), u64::MAX);
+        assert_eq!(size.output_tokens_usually(), u64::MAX);
+    }
+
+    #[test]
+    fn a_narration_not_made_yet_is_sized_by_its_length_alone() {
+        let size = ScenePlanSize::about(Duration::from_secs(600));
+        assert_eq!(size.scenes_usually(), 100);
+        assert_eq!(size.scenes_at_most(), 150);
+    }
+
+    #[test]
+    fn the_bill_counts_the_thought_before_the_answer() {
+        // A Short: 600 + 10 scenes of 160, and the thought a plan takes.
+        assert_eq!(minutes(1, 15).output_tokens_usually(), 2_200 + 10_000);
+        // Ten minutes: 16,600 of answer and half as much again.
+        assert_eq!(minutes(10, 150).output_tokens_usually(), 16_600 + 10_000);
+        assert_eq!(minutes(20, 300).output_tokens_usually(), 32_600 + 16_300);
     }
 }

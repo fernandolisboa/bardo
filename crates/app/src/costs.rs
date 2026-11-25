@@ -168,12 +168,8 @@ pub(crate) struct PlannedCall {
     /// Seconds of audio, when known before the job.
     pub(crate) audio_seconds: Option<u64>,
     /// Output tokens, when known before the job (a take model billed by
-    /// its video's tokens).
+    /// its video's tokens, a scene plan sized from its narration).
     pub(crate) output_tokens: Option<u64>,
-    /// Output tokens the call takes at least, when what is known before
-    /// the job is only how large its answer gets (a scene plan grows with
-    /// its narration); past calls that took more still count.
-    pub(crate) output_tokens_at_least: Option<u64>,
 }
 
 impl PlannedCall {
@@ -200,7 +196,6 @@ impl PlannedCall {
             video_seconds: None,
             audio_seconds: None,
             output_tokens: None,
-            output_tokens_at_least: None,
         }
     }
 
@@ -217,11 +212,6 @@ impl PlannedCall {
 
     pub(crate) fn with_output_tokens(mut self, tokens: u64) -> Self {
         self.output_tokens = Some(tokens);
-        self
-    }
-
-    pub(crate) fn with_output_tokens_at_least(mut self, tokens: u64) -> Self {
-        self.output_tokens_at_least = Some(tokens);
         self
     }
 
@@ -433,9 +423,6 @@ impl CostBook {
         }
         if let Some(tokens) = call.output_tokens {
             usage.output_tokens = tokens;
-        }
-        if let Some(tokens) = call.output_tokens_at_least {
-            usage.output_tokens = usage.output_tokens.max(tokens);
         }
         Ok(usage.times(call.calls))
     }

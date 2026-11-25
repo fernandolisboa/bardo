@@ -115,17 +115,18 @@ mod tests {
         assert_eq!(stored.length, Some(VideoLength::Minutes3));
         assert_eq!(app.video_format(&stored).unwrap(), VideoFormat::Short);
         // Three minutes: 2,700 characters, 30 scenes and a portrait; the
-        // narration and the 20 more images make the difference.
+        // narration, the 20 more images and their part of the plan (160
+        // tokens a scene at US$ 20 a million) make the difference.
         assert_eq!(
             economy(&app),
-            minute.saturating_add(Money::from_micros(180_000 + 20 * 101_570))
+            minute.saturating_add(Money::from_micros(180_000 + 20 * (101_570 + 3_200)))
         );
 
         app.set_project_length(project.id, Some(VideoLength::Seconds30))
             .unwrap();
         // Thirty seconds: 450 characters and five scenes.
         assert_eq!(
-            economy(&app).saturating_add(Money::from_micros(45_000 + 5 * 101_570)),
+            economy(&app).saturating_add(Money::from_micros(45_000 + 5 * (101_570 + 3_200))),
             minute
         );
         app.set_project_length(project.id, Some(VideoLength::Minutes3))

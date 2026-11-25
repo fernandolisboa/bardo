@@ -402,7 +402,7 @@ impl ProjectsScreen {
             .as_ref()
             .is_some_and(|version| version.can_place);
         let plans_first = plan.is_none() || (stale && !can_place);
-        let can_plan = !busy && !view.is_animating() && view.narration.is_some();
+        let can_plan = !busy && !view.is_animating() && view.narration.is_some() && !view.too_long;
         let plan_button = can_plan.then(|| {
             let button = Button::new("plan-scenes").small().label(tr(
                 bardo,
@@ -447,6 +447,7 @@ impl ProjectsScreen {
         });
         let hint = match (view.narration, plan) {
             (None, _) => tr(bardo, Text::ScenesNoNarration),
+            (Some(_), _) if view.too_long => tr(bardo, Text::ScenesNarrationTooLong),
             (Some(_), None) => SharedString::from(bardo.text_with(
                 Text::PlanScenesHint,
                 &[("n", &view.template.number.to_string())],
@@ -739,6 +740,10 @@ impl ProjectsScreen {
         let no_narration = view.narration.is_none().then(|| {
             kit::notice(Tone::Info, tr(bardo, Text::ScenesNoNarration), cx).into_any_element()
         });
+        let too_long = view.too_long.then(|| {
+            kit::notice(Tone::Warning, tr(bardo, Text::ScenesNarrationTooLong), cx)
+                .into_any_element()
+        });
         let place = self.render_place_scenes(view, cx);
         let bardo = self.bardo.read(cx);
         self.scenes_error
@@ -746,6 +751,7 @@ impl ProjectsScreen {
             .into_iter()
             .chain(job)
             .chain(no_narration)
+            .chain(too_long)
             .chain(place)
             .chain(confirm)
             .chain(ask)

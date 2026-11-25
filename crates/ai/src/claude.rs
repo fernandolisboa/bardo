@@ -12,7 +12,7 @@
 //! recommended fallback model in the same call
 //! (`fallbacks: "default"`).
 
-use std::io::Read as _;
+use std::io::{BufRead, BufReader, Read};
 use std::time::Duration;
 
 use bardo_domain::{
@@ -38,7 +38,7 @@ pub const EFFORT: &str = "medium";
 /// For the requests a whole video is built on (its script and its scene
 /// plan): more thought before answering.
 pub const CAREFUL_EFFORT: &str = "high";
-/// Room for that thought on top of a long plan.
+/// Room for that thought on top of the answer.
 pub const CAREFUL_MAX_TOKENS: u32 = 32_000;
 /// The most a model writes in one answer, thought included. Every model
 /// Bardo's requests may be answered by (the fallback's too) has this limit.
@@ -53,32 +53,26 @@ pub fn effort_settings(effort: TextEffort) -> (&'static str, u32) {
     }
 }
 
-/// The least room for thought beside an answer whose size is known.
-fn thought_at_least(effort: TextEffort) -> u64 {
-    match effort {
-        TextEffort::Everyday => 4_000,
-        TextEffort::Careful => 16_000,
-    }
-}
-
-/// The longest answer, in tokens, a request can ask for and still leave
-/// room for the thought before it: half as much room again as the answer.
-/// An answer cut at the limit is paid for and lost, so a longer one is not
-/// worth sending.
+/// The longest answer, in tokens, a request can say it needs: half of what
+/// the model can write. The other half is for the thought before the
+/// answer and for an answer that runs longer than it was sized. An answer
+/// cut at the limit is paid for and lost, so a longer one is not worth
+/// sending.
 pub fn longest_answer() -> u64 {
-    u64::from(MAX_OUTPUT_TOKENS) * 2 / 3
+    u64::from(MAX_OUTPUT_TOKENS) / 2
 }
 
 /// The token limit of a request: the usual one, or, for an answer of a
-/// known size, that size and as much again for thought, within what the
-/// model can write. Room that is not used is not billed.
+/// known size, four times that size (the thought before it, and an answer
+/// that runs longer than it was sized), never less than the usual limit
+/// nor more than the model can write. Room that is not used is not billed,
+/// and an answer cut at the limit is billed whole and lost.
 pub fn max_tokens(effort: TextEffort, answer_tokens: Option<u64>) -> u32 {
     let (_, usual) = effort_settings(effort);
     let Some(answer) = answer_tokens else {
         return usual;
     };
-    let wanted = answer.saturating_add(answer.max(thought_at_least(effort)));
-    u32::try_from(wanted)
+    u32::try_from(answer.saturating_mul(4))
         .unwrap_or(MAX_OUTPUT_TOKENS)
         .clamp(usual, MAX_OUTPUT_TOKENS)
 }
@@ -146,14 +140,8 @@ pub fn message_request(
     })
 }
 
-/// Reads a successful answer that came whole instead of streamed: the text
-/// blocks, the model and the usage. A refusal or an answer cut by the token
-/// limit is a failure.
-pub fn parse_message(response: &HttpResponse) -> Result<GeneratedText, ProviderFailure> {
-    read_answer(parse_whole(response)?)
-}
-
-/// A whole answer in the shape a streamed one is read into.
+/// A successful answer that came whole instead of streamed, in the shape
+/// a streamed one is read into.
 fn parse_whole(response: &HttpResponse) -> Result<StreamedAnswer, ProviderFailure> {
     let body: Value = serde_json::from_str(&response.body)
         .map_err(|error| unexpected(format!("unreadable response: {error}")))?;
@@ -164,16 +152,14 @@ fn parse_whole(response: &HttpResponse) -> Result<StreamedAnswer, ProviderFailur
         .filter(|block| block["type"] == "text")
         .filter_map(|block| block["text"].as_str())
         .collect();
-    let usage = &body["usage"];
+    let mut usage = TokenUsage::default();
+    claude_stream::read_usage(&body["usage"], &mut usage);
     Ok(StreamedAnswer {
         model: Some(body["model"].as_str().unwrap_or_default().to_owned()),
         text,
         stop_reason: body["stop_reason"].as_str().map(str::to_owned),
         stop_details: body["stop_details"].clone(),
-        usage: TokenUsage {
-            input_tokens: usage["input_tokens"].as_u64().unwrap_or(0),
-            output_tokens: usage["output_tokens"].as_u64().unwrap_or(0),
-        },
+        usage,
         end: StreamEnd::Complete,
     })
 }
@@ -194,11 +180,14 @@ pub fn read_answer(answer: StreamedAnswer) -> Result<GeneratedText, ProviderFail
         StreamEnd::Failed { kind, message } => {
             return Err(stopped_midway(format!("{kind}: {message}")));
         }
+        // Claude took the request (the stream opened) and then nothing
+        // readable came. A path that holds the answer back looks the same
+        // as one that lost it, and the answer may be written and billed all
+        // the same, so this is not an outage to send again after.
         StreamEnd::Broken(detail) if !answer.started() => {
-            return Err(ProviderFailure::new(
-                ProviderFailureKind::Unreachable,
-                detail.clone(),
-            ));
+            return Err(unexpected(format!(
+                "Claude took the request and no answer arrived; it may be billed ({detail})"
+            )));
         }
         StreamEnd::Broken(detail) => return Err(stopped_midway(detail.clone())),
     }
@@ -216,6 +205,11 @@ pub fn read_answer(answer: StreamedAnswer) -> Result<GeneratedText, ProviderFail
         }
         Some("max_tokens") => {
             return Err(unexpected("the answer was cut at the token limit"));
+        }
+        Some("model_context_window_exceeded") => {
+            return Err(unexpected(
+                "the answer was cut at the end of the model's context window",
+            ));
         }
         _ => {}
     }
@@ -244,7 +238,7 @@ fn stopped_midway(detail: String) -> ProviderFailure {
 fn stream_error_kind(kind: &str) -> ProviderFailureKind {
     match kind {
         "overloaded_error" | "api_error" | "timeout_error" => ProviderFailureKind::ProviderDown,
-        "rate_limit_error" => ProviderFailureKind::LimitReached,
+        "rate_limit_error" | "billing_error" => ProviderFailureKind::LimitReached,
         "authentication_error" => ProviderFailureKind::Rejected,
         "permission_error" => ProviderFailureKind::NotAllowed,
         _ => ProviderFailureKind::Unexpected,
@@ -281,32 +275,31 @@ enum Answered {
     Refused(HttpResponse),
 }
 
-/// An error answer read whole: it is short, and only its start matters.
-fn buffered(response: StreamedResponse) -> HttpResponse {
+/// An answer read whole: an error, which is short, or an answer that was
+/// not streamed.
+fn buffered(status: u16, headers: Vec<(String, String)>, body: impl Read) -> HttpResponse {
     let mut bytes = Vec::new();
     // What could not be read still tells the status.
-    let _ = response
-        .body
+    let _ = body
         .take(UreqTransport::MAX_BODY_BYTES)
         .read_to_end(&mut bytes);
     HttpResponse {
-        status: response.status,
-        headers: response.headers,
+        status,
+        headers,
         body: String::from_utf8_lossy(&bytes).into_owned(),
     }
 }
 
-fn is_event_stream(response: &StreamedResponse) -> bool {
-    response
-        .headers
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-        .is_some_and(|(_, value)| {
-            value
-                .trim_start()
-                .to_ascii_lowercase()
-                .starts_with("text/event-stream")
-        })
+/// Whether a successful answer is one JSON message instead of a stream of
+/// events, by how it begins. The headers are not asked: a path that
+/// rewrites them does not change what the body is.
+fn comes_whole(body: &mut impl BufRead) -> bool {
+    body.fill_buf().is_ok_and(|start| {
+        start
+            .iter()
+            .find(|byte| !byte.is_ascii_whitespace())
+            .is_some_and(|byte| *byte == b'{')
+    })
 }
 
 /// Generates text with Claude over HTTPS.
@@ -317,20 +310,27 @@ pub struct ClaudeTextGenerator<T = Watched<UreqTransport>> {
 }
 
 impl ClaudeTextGenerator {
-    /// How long Claude may take to start answering: to connect and to
-    /// send the first byte back.
-    pub const FIRST_ANSWER: Duration = Duration::from_secs(180);
+    /// How long connecting may take.
+    pub const CONNECT: Duration = Duration::from_secs(30);
+    /// How long a request may take to be sent, and Claude to start
+    /// answering it. Claude starts a stream at once, but a path that holds
+    /// the answer back until it is whole (a proxy that inspects it) makes
+    /// the wait as long as the answer.
+    pub const FIRST_ANSWER: Duration = Duration::from_secs(600);
     /// How long a started answer may say nothing. Claude sends keep-alives
-    /// while it thinks, so silence this long is a dead connection.
-    pub const SILENCE: Duration = Duration::from_secs(180);
+    /// while it thinks, but says nowhere how often, and the two mistakes
+    /// do not cost the same: waiting this long on a dead connection costs
+    /// minutes, and giving up on a live one costs the whole answer, which
+    /// is billed.
+    pub const SILENCE: Duration = Duration::from_secs(600);
     /// A bound on the whole answer that none reaches: the longest answer
-    /// the model can write takes about half of it. It only ends a
+    /// the model can write takes a fraction of it. It only ends a
     /// connection nothing else ended.
-    pub const WHOLE_ANSWER: Duration = Duration::from_secs(60 * 60);
+    pub const WHOLE_ANSWER: Duration = Duration::from_secs(2 * 60 * 60);
 
     pub fn new() -> Self {
         Self::with_transport(Watched::new(
-            UreqTransport::for_streams(Self::FIRST_ANSWER, Self::WHOLE_ANSWER),
+            UreqTransport::for_streams(Self::CONNECT, Self::FIRST_ANSWER, Self::WHOLE_ANSWER),
             Self::SILENCE,
         ))
     }
@@ -379,19 +379,25 @@ impl<T: Transport> ClaudeTextGenerator<T> {
                 .transport
                 .send_streamed(&http)
                 .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
-            let (answered, wait) = if !(200..=299).contains(&response.status) {
-                let response = buffered(response);
+            let StreamedResponse {
+                status,
+                headers,
+                body,
+            } = response;
+            let mut body = BufReader::new(body);
+            let (answered, wait) = if !(200..=299).contains(&status) {
+                let response = buffered(status, headers, body);
                 let wait =
                     Backoff::is_retryable(&response).then(|| self.backoff.delay(retry, &response));
                 (Answered::Refused(response), wait)
-            } else if is_event_stream(&response) {
-                let answer = claude_stream::read(response.body);
+            } else if comes_whole(&mut body) {
+                // A server that does not stream hands the answer over whole.
+                return parse_whole(&buffered(status, headers, body)).map(Answered::Answer);
+            } else {
+                let answer = claude_stream::read(body);
                 let wait = comes_back_shortly(&answer)
                     .then(|| self.backoff.delay(retry, &HttpResponse::new(529, "")));
                 (Answered::Answer(answer), wait)
-            } else {
-                // A proxy that buffers may hand the answer over whole.
-                return parse_whole(&buffered(response)).map(Answered::Answer);
             };
             match wait {
                 Some(wait) if retry < self.backoff.retries => {

@@ -25,7 +25,7 @@ misbehaves with a real key). An answer is a stream of server-sent events
 - `messages-dropped-midway.http`: a stream that ends inside an event,
   after part of the text arrived.
 - `messages-themes-not-streamed.http`: the same answer as one JSON
-  message, as a proxy that buffers the stream hands it over.
+  message, as a server that does not stream hands it over.
 
 Error statuses answer with a JSON body, streamed request or not:
 
