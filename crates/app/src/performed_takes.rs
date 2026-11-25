@@ -738,6 +738,7 @@ impl JobHandler for TakePromptHandler {
         }
         let request = TextRequest {
             effort: TextEffort::Everyday,
+            answer_tokens: None,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images,

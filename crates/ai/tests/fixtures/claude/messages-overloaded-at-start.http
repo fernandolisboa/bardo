@@ -1,0 +1,6 @@
+HTTP/2 200 
+content-type: text/event-stream; charset=utf-8
+
+event: error
+data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}
+

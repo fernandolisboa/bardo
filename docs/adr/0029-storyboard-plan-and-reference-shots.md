@@ -1,6 +1,6 @@
 # ADR-0029: A storyboard plan with places, and scene images drawn from earlier ones
 
-- Status: Accepted
+- Status: Accepted; decision 9's wait and the long plan's limits amended by [ADR-0031](0031-streamed-answers-and-a-plan-sized-from-its-narration.md)
 - Date: 2026-11-25
 - Issue: #258
 - Builds on: the scene plan of the MVP spec (`docs/spec/mvp.md`), the cast and motion prompts of #246, the template defaults that move on by themselves (#179)

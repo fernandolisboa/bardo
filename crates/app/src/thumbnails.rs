@@ -311,6 +311,7 @@ impl ThumbnailHandler {
         let key = self.key(Provider::Claude)?;
         let request = TextRequest {
             effort: TextEffort::Everyday,
+            answer_tokens: None,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),

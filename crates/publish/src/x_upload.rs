@@ -240,7 +240,6 @@ impl<T: Transport> XUploader<T> {
             url: self.media_url(&format!("/{}/finalize", session.media_id)),
             headers: Vec::new(),
             body: None,
-            timeout: None,
         };
         match self.api(request, token) {
             Ok(_) => Ok(true),
