@@ -137,9 +137,9 @@ pub enum JobActionError {
     #[error("the video's visual style changed since the job started")]
     Restyled,
     /// A scene plan job that is no longer its project's latest scene job:
-    /// run again, it would replace the plan made, and remove the images
-    /// drawn, since. The Scenes stage plans again and asks first.
-    #[error("the project's scenes were planned or drawn after this job")]
+    /// run again, it could replace a plan made since. The newer job is
+    /// the one to retry, or the Scenes stage plans again and asks first.
+    #[error("a newer scene job of the project came after this one")]
     ScenesMovedOn,
     /// A performed take that never reached its provider: it is made again
     /// from the capture, where its cap, test and checks are asked again.

@@ -6,12 +6,12 @@
 //! says how far it got. Claude bills what it writes, read or not, so a
 //! request that left is never sent again by itself (ADR-0030): one whose
 //! answer never arrives, stops midway or cannot be read is a lost answer,
-//! not an outage. A request whose job was cancelled, or whose app is
-//! closing, is given up as soon as the adapter is told: the stream is
-//! dropped, which closes its connection, and what Claude wrote until then
-//! is a lost answer too. JSON output uses structured outputs
-//! (`output_config.format`), so the answer always matches the schema, and
-//! its fields come in the schema's order: the schema is sent as written
+//! not an outage. A request whose job was cancelled is given up as soon as
+//! the adapter is told: the stream is dropped, which closes its
+//! connection, and what Claude wrote until then is a lost answer too. JSON
+//! output uses structured outputs (`output_config.format`), so the answer
+//! always matches the schema, and its fields come in the schema's order:
+//! the schema is sent as written
 //! (`serde_json` keeps the order of keys, see the workspace manifest), so a
 //! schema can make Claude write one field before another. If Claude's
 //! safety rules decline a request, the API re-runs it on Anthropic's

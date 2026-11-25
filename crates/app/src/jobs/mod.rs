@@ -621,7 +621,7 @@ mod tests {
         let closing = enqueue(&q, owner);
         wait_for(|| q.jobs(), closing, |j| j.state() == JobState::Running);
         drop(q);
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + PATIENCE;
         while seen.lock().unwrap().len() < 2 {
             assert!(Instant::now() < deadline, "the handler never stopped");
             std::thread::sleep(Duration::from_millis(2));
@@ -631,6 +631,51 @@ mod tests {
             [(true, true), (false, false)],
             "told to stop, with nothing to give up and not by the user"
         );
+    }
+
+    #[test]
+    fn a_run_that_lost_its_job_gives_up_what_it_waits_for() {
+        // Another runner took the job: this run's paid answer on its way
+        // is given up, as on a cancel, though the user cancelled nothing.
+        let (db, owner) = memory_db();
+        // Leases run out between ticks, as when the computer sleeps.
+        let settings = JobSettings {
+            lease: Duration::from_millis(120),
+            tick: Duration::from_millis(400),
+            ..settings()
+        };
+        let seen: Arc<Mutex<Vec<(bool, bool)>>> = Arc::default();
+        let note = Arc::clone(&seen);
+        let app = queue(
+            &db,
+            owner,
+            handlers(move |_, cx| {
+                let stop = cx.stop();
+                assert!(!stop.asked());
+                until_stopped(cx);
+                note.lock().unwrap().push((stop.asked(), cx.cancelled()));
+                Ok(())
+            }),
+            settings,
+        );
+        let id = enqueue(&app, owner);
+        wait_for(|| app.jobs(), id, |j| j.state() == JobState::Running);
+
+        let other = second_runner(&db);
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let now = SystemTime::now();
+            if JobRepository::lease(&*other, id, now, now + Duration::from_secs(60)).unwrap() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the lease never ran out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        while seen.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "the run never stopped");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(*seen.lock().unwrap(), [(true, false)]);
     }
 
     #[test]

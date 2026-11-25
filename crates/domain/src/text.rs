@@ -88,9 +88,9 @@ pub struct GeneratedText {
 }
 
 /// Asked while an answer is awaited: whether whoever wanted it no longer
-/// does (the job was cancelled, the app is closing). A writer that sees it
-/// gives the answer up there, so a provider that bills what it writes is
-/// not left writing an answer nobody reads.
+/// does (its job was cancelled, or another runner took it). A writer that
+/// sees it gives the answer up there, so a provider that bills what it
+/// writes is not left writing an answer nobody reads.
 #[derive(Clone, Default)]
 pub struct Stop(Option<Arc<dyn Fn() -> bool + Send + Sync>>);
 

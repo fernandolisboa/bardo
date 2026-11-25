@@ -38,7 +38,7 @@ A clip request the provider took and that then ended without a clip (failed, can
 
 **Retry**, on a failed or cancelled job, queues it again. It goes on from the last point it saved rather than from the start. Fix what the failure names first: see [Troubleshooting](troubleshooting.md).
 
-A scene plan or image job is not queued again while another scene job of its project is queued, running or still stopping: the two would pay for the same work. And an older scene plan job is not queued again once the project's scenes were planned or drawn after it, since it would replace that plan and its images: plan again from the [Scenes](scenes.md) stage, which asks first.
+A scene plan or image job is not queued again while another scene job of its project is queued, running or still stopping: the two would pay for the same work. And an older scene plan job is not queued again once a newer scene job of the project came after it, since it could replace the plan made since: retry the newer job, or plan again from the [Scenes](scenes.md) stage, which asks first.
 
 <a id="restart"></a>
 ## Closing Bardo mid-job

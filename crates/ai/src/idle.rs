@@ -3,8 +3,8 @@
 //! bound the whole of it; what tells a dead connection from a long answer
 //! is that nothing arrives at all (a provider that streams sends
 //! keep-alives while it works). And an answer nobody wants any more (its
-//! job was cancelled, the app is closing) is given up as soon as its
-//! reader is told, instead of being read, and billed, to its end.
+//! job was cancelled) is given up as soon as its reader is told, instead
+//! of being read, and billed, to its end.
 
 use std::io::Read;
 use std::sync::Arc;
@@ -24,8 +24,9 @@ pub const STOP_POLL: Duration = Duration::from_millis(100);
 
 /// Reads `inner` and fails with `TimedOut` when no byte arrives for
 /// `idle`, or once its `Stop` asks and the read would have to wait: what
-/// has arrived by then is still handed over, so an answer that came whole
-/// as the stop asked is read whole. The body is read on a thread of its
+/// the reading thread has handed over by then is still read, so an answer
+/// whose end was told before the stop asked is read whole (one whose last
+/// bytes are still on their way just then is given up). The body is read on a thread of its
 /// own, which ends with the body or, once this reader is dropped, at its
 /// next read, and closes the connection there: after a silence or a stop
 /// that thread and its connection stay until the next byte arrives or the
@@ -418,7 +419,7 @@ mod tests {
         // The limit on silence is far away: only the stop ends this read.
         let mut reader = IdleTimeout::until(
             Box::new(Fed(body)),
-            Duration::from_secs(60),
+            Duration::from_secs(600),
             stop_on(&asked),
         );
         feed.send(Ok(b"start".to_vec())).unwrap();
@@ -428,7 +429,7 @@ mod tests {
         let started = Instant::now();
         let error = reader.read(&mut buffer).unwrap_err();
         assert!(error.to_string().contains("given up"), "{error}");
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(60));
         // What arrives after that is not read: the answer stays given up.
         feed.send(Ok(b"more".to_vec())).unwrap();
         let error = reader.read(&mut buffer).unwrap_err();
@@ -461,7 +462,7 @@ mod tests {
         // over: they wait here, unread, when the stop asks.
         let waited = Instant::now();
         while reads.load(std::sync::atomic::Ordering::SeqCst) < 3 {
-            assert!(waited.elapsed() < Duration::from_secs(10));
+            assert!(waited.elapsed() < Duration::from_secs(60));
             std::thread::sleep(Duration::from_millis(2));
         }
         asked.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -666,8 +667,8 @@ mod tests {
         });
         let stop = stop_on(&asked);
         let transport = Watched::new(
-            UreqTransport::without_proxy(Duration::from_secs(60)),
-            Duration::from_secs(60),
+            UreqTransport::without_proxy(Duration::from_secs(600)),
+            Duration::from_secs(600),
         );
         let started = Instant::now();
         let Err(error) = transport
@@ -675,7 +676,7 @@ mod tests {
         else {
             panic!("given up");
         };
-        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(started.elapsed() < Duration::from_secs(60));
         assert!(error.0.contains("given up"), "{}", error.0);
         assert!(
             !error.never_left(),

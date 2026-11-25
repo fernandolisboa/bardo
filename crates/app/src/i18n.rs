@@ -2098,8 +2098,7 @@ pub enum Text {
     JobRunsElsewhere,
     JobSuperseded,
     JobRestyled,
-    /// A scene plan job retried after its project's scenes were planned
-    /// or drawn again.
+    /// A scene plan job retried after a newer scene job of its project.
     JobScenesMovedOn,
     /// A performed take that never reached its provider, retried from the
     /// jobs panel.

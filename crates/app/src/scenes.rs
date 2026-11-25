@@ -1328,14 +1328,13 @@ impl Bardo {
     }
 
     /// A plan already paid for that `payload` asks for again: the
-    /// project's latest scene job, cancelled as its answer arrived, with
-    /// the same request and the answer kept (`PlanStep::Answered`).
+    /// project's latest scene job, with the same request and the answer
+    /// kept (`PlanStep::Answered`). It was cancelled as its answer
+    /// arrived, or failed because the plan could not be saved.
     fn kept_plan(&self, project: VideoProjectId, payload: &str) -> Option<JobId> {
         self.latest_scene_job(project)
             .filter(|job| {
-                job.kind() == JobKind::ScenePlan
-                    && job.state() == bardo_domain::JobState::Cancelled
-                    && job.payload() == payload
+                job.kind() == JobKind::ScenePlan && job.can_retry() && job.payload() == payload
             })
             .filter(|job| {
                 matches!(
@@ -1613,9 +1612,10 @@ impl Bardo {
             instructions: rendered.instructions,
             prompt: rendered.prompt,
         });
-        // The same plan was asked for, cancelled, and answered all the
-        // same: that answer is paid for, so its job goes on from it and
-        // nothing is asked of Claude, or of the budget.
+        // The same plan was asked for and answered, and is not the
+        // project's plan (its job was cancelled as the answer arrived, or
+        // could not save it): that answer is paid for, so its job goes on
+        // from it and nothing is asked of Claude, or of the budget.
         if let Some(kept) = self.kept_plan(project.id, &payload)
             && self.jobs.retry(kept).is_ok()
         {
@@ -4050,8 +4050,13 @@ pub(crate) mod tests {
                 .collect()
         }
 
+        /// How long a wait may take before the test fails. Generous: a
+        /// loaded CI runner can stall the worker threads for over ten
+        /// seconds, and a passing test never waits this long.
+        const STALLED: Duration = Duration::from_secs(60);
+
         fn wait_until(what: &str, done: impl Fn() -> bool) {
-            let deadline = Instant::now() + PATIENCE;
+            let deadline = Instant::now() + STALLED;
             while !done() {
                 assert!(Instant::now() < deadline, "never: {what}");
                 std::thread::sleep(Duration::from_millis(2));
@@ -4221,6 +4226,131 @@ pub(crate) mod tests {
             assert!(app.scenes(project.id).unwrap().plan.is_some());
             assert_eq!(h.text.requests().len(), asked);
             assert_eq!(plan_costs(&h, project.id).len(), 1);
+        }
+
+        #[test]
+        fn a_kept_answer_is_not_used_for_another_plan() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = h.narrated_project(&app);
+            let id = plan_arriving(&h, &app, project.id, plan_answer());
+            app.cancel_job(id).unwrap();
+            h.text.let_go();
+            wait_until("the handler let go", || !app.job_runs_here(id));
+            assert_eq!(wait_done(&app, id).state(), JobState::Cancelled);
+            answers_at_once(&h);
+            let asked = h.text.requests().len();
+
+            // The prompt changed since: the answer kept is to another
+            // question, so Claude is asked this one.
+            let template = app.current_template(TemplateKind::ImagePrompt).unwrap();
+            app.save_template(
+                TemplateKind::ImagePrompt,
+                &format!("{} Prefer wide shots.", template.body.instructions()),
+                template.body.prompt(),
+            )
+            .unwrap();
+            h.answer(plan_answer());
+            let other = app
+                .plan_scenes(project.id, false, BudgetConsent::Confirmed)
+                .unwrap();
+            assert_ne!(other, id);
+            done(&app, other);
+            assert_eq!(h.text.requests().len(), asked + 1);
+            assert_eq!(plan_costs(&h, project.id).len(), 2);
+            let plan = app.scenes(project.id).unwrap().plan.expect("planned");
+            assert_eq!(plan.generation.job, Some(other));
+        }
+
+        /// The scene plans of `inner`, which cannot be saved while `down`.
+        struct PlansDown {
+            inner: Arc<Database>,
+            down: std::sync::atomic::AtomicBool,
+        }
+
+        impl ScenePlanRepository for PlansDown {
+            fn scene_plan(
+                &self,
+                project: VideoProjectId,
+            ) -> Result<Option<ScenePlan>, RepositoryError> {
+                self.inner.scene_plan(project)
+            }
+
+            fn save_scene_plan(&self, plan: &ScenePlan) -> Result<(), RepositoryError> {
+                if self.down.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Err(RepositoryError(Box::new(std::io::Error::other(
+                        "the disk is full",
+                    ))));
+                }
+                self.inner.save_scene_plan(plan)
+            }
+
+            fn save_fitted_plan(&self, plan: &ScenePlan) -> Result<(), RepositoryError> {
+                self.inner.save_fitted_plan(plan)
+            }
+
+            fn save_scene(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
+                self.inner.save_scene(plan, index)
+            }
+
+            fn save_cast_member(
+                &self,
+                plan: &ScenePlan,
+                index: usize,
+            ) -> Result<(), RepositoryError> {
+                self.inner.save_cast_member(plan, index)
+            }
+
+            fn save_place(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
+                self.inner.save_place(plan, index)
+            }
+        }
+
+        #[test]
+        fn a_plan_that_could_not_be_saved_is_made_from_its_answer_when_asked_again() {
+            use std::sync::atomic::Ordering;
+            let h = Harness::new();
+            let plans = Arc::new(PlansDown {
+                inner: h.process_db(),
+                down: false.into(),
+            });
+            let app = h.start_from(Repositories {
+                scene_plans: Arc::clone(&plans) as _,
+                ..Repositories::shared_with_files(
+                    h.process_db(),
+                    Arc::clone(&h.secrets) as _,
+                    Arc::clone(&h.files) as _,
+                )
+            });
+            let project = h.narrated_project(&app);
+            let asked = h.text.requests().len();
+
+            // Claude answers, and the plan cannot be saved.
+            plans.down.store(true, Ordering::SeqCst);
+            h.answer(plan_answer());
+            let id = app
+                .plan_scenes(project.id, false, BudgetConsent::Confirmed)
+                .unwrap();
+            assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+            assert_eq!(app.scenes(project.id).unwrap().plan, None);
+            assert_eq!(h.text.requests().len(), asked + 1);
+            assert_eq!(plan_costs(&h, project.id).len(), 1);
+
+            // Asked for again on the stage, where a failed plan has no
+            // Retry: the answer is paid for, and its job plans from it.
+            plans.down.store(false, Ordering::SeqCst);
+            let again = app
+                .plan_scenes(project.id, false, BudgetConsent::Confirmed)
+                .unwrap();
+            assert_eq!(again, id);
+            done(&app, id);
+            assert!(app.scenes(project.id).unwrap().plan.is_some());
+            assert_eq!(
+                h.text.requests().len(),
+                asked + 1,
+                "Claude is not asked again"
+            );
+            assert_eq!(plan_costs(&h, project.id).len(), 1, "nor paid again");
         }
 
         #[test]

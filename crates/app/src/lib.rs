@@ -1548,6 +1548,18 @@ pub(crate) mod testing {
                 self.hanging
                     .store(true, std::sync::atomic::Ordering::SeqCst);
                 while !self.release.load(std::sync::atomic::Ordering::SeqCst) {
+                    // A call that hangs is given up like any other once
+                    // its stop asks.
+                    if !deaf && stop.asked() {
+                        self.hanging
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
+                        self.given_up
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        return Err(ProviderFailure::new(
+                            bardo_domain::ProviderFailureKind::AnswerLost,
+                            "the answer stopped midway, and Claude bills what it wrote of it (given up while Claude was writing it)",
+                        ));
+                    }
                     std::thread::sleep(Duration::from_millis(2));
                 }
                 self.hanging
