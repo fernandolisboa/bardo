@@ -587,7 +587,7 @@ impl CostBook {
 
     /// `record` under an id the caller keeps: recording it again (after a
     /// crash between the call and the caller's own save) changes nothing.
-    fn record_as(
+    pub(crate) fn record_as(
         &self,
         id: CostRecordId,
         call: PaidCall<'_>,
@@ -757,6 +757,14 @@ impl CostBook {
     pub(crate) fn take_back(&self, id: CostRecordId) {
         if let Err(error) = self.costs.remove_cost(id) {
             tracing::warn!("could not take back the cost record {id}: {error}");
+        }
+    }
+
+    /// Counts a record made before its project existed on `project` from
+    /// now on. Logged when it cannot be: the job goes on.
+    pub(crate) fn move_to_project(&self, id: CostRecordId, project: VideoProjectId) {
+        if let Err(error) = self.costs.move_cost(id, project) {
+            tracing::warn!("could not move the cost record {id} to project {project}: {error}");
         }
     }
 

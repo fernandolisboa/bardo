@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 use crate::costs::{
     BudgetConsent, CHARS_PER_TOKEN, CostBook, PaidCall, PlannedCall, SpendEstimate,
 };
-use crate::jobs::{JobContext, JobHandler};
+use crate::jobs::{JobContext, JobHandler, Work};
 use crate::scenes::{id, to_json, unexpected};
 use crate::{Bardo, KeyState, Text};
 
@@ -132,14 +132,20 @@ pub struct SheetView {
     /// How many claims the latest run wrote and left out because the
     /// sheet was full.
     pub left_out: usize,
+    /// A run that was cancelled is still stopping: it may be giving up a
+    /// request already sent.
+    pub stopping: bool,
 }
 
 impl SheetView {
-    /// Whether a job is filling the sheet: it cannot be edited meanwhile.
+    /// Whether a job is filling the sheet, or one that was cancelled is
+    /// still stopping: it cannot be edited meanwhile.
     pub fn is_busy(&self) -> bool {
-        self.job
-            .as_ref()
-            .is_some_and(|(job, _)| job.state().is_active())
+        self.stopping
+            || self
+                .job
+                .as_ref()
+                .is_some_and(|(job, _)| job.state().is_active())
     }
 
     /// Whether the job that fills the sheet is still reading the web: a
@@ -840,21 +846,21 @@ impl Bardo {
         active.or(jobs.last()).cloned()
     }
 
+    /// Whether a job is at work on the product's sheet: queued or running,
+    /// or cancelled and still stopping. Two would each pay and write the
+    /// same sheet, so no run starts, no failed one is queued again
+    /// (`Work::Sheet`) and nothing edits the sheet meanwhile.
     pub(crate) fn sheet_is_busy(&self, product: ProductId) -> bool {
-        self.product_sheet_job(product)
-            .is_some_and(|(job, _)| job.state().is_active())
+        self.work_busy(&Work::Sheet(product.to_string()))
     }
 
-    /// Whether running `job` again has to wait: it is a product's sheet
-    /// job, and another one is filling that sheet. Two would each pay and
-    /// write the same sheet.
-    pub(crate) fn sheet_retry_waits(&self, job: JobId) -> bool {
-        self.jobs()
-            .into_iter()
-            .find(|candidate| candidate.id() == job)
-            .filter(|job| job.kind() == JobKind::ProductResearch)
-            .and_then(|job| job_of(&job))
-            .is_some_and(|(product, _)| self.sheet_is_busy(product))
+    /// Whether a run of the product's sheet that no longer reads as
+    /// running is still stopping in this process.
+    pub fn product_sheet_stopping(&self, product: ProductId) -> bool {
+        let sheet = Work::Sheet(product.to_string());
+        self.jobs().iter().any(|job| {
+            !job.state().is_active() && self.at_work(job) && Work::of(job).as_ref() == Some(&sheet)
+        })
     }
 
     /// The paid calls a retry of the sheet job `job` would still make: the
@@ -951,6 +957,7 @@ impl Bardo {
             from_brief: self.estimate(&self.brief_calls(&product, pictures))?,
             has_link: !product.brief.link().is_empty(),
             left_out,
+            stopping: self.product_sheet_stopping(id),
         })
     }
 
@@ -1899,8 +1906,8 @@ mod tests {
             .write_sheet_from_brief(product.id, BudgetConsent::Ask)
             .unwrap();
         let held = app.retry_job(first).unwrap_err();
-        assert!(matches!(held, crate::JobActionError::SheetBusy));
-        assert_eq!(held.message(), Text::SheetBusy);
+        assert!(matches!(held, crate::JobActionError::SameWork));
+        assert_eq!(held.message(), Text::JobSameWork);
         // Nor is the product deleted from under the run.
         let error = app.delete_product(product.id).unwrap_err();
         assert!(matches!(error, crate::ProductError::SheetBusy));
@@ -2110,6 +2117,63 @@ mod tests {
             app.write_sheet_from_brief(product.id, BudgetConsent::Ask),
             Err(SheetError::MissingKey(Provider::Claude))
         ));
+    }
+
+    #[test]
+    fn a_cancelled_run_keeps_the_sheet_busy_until_it_has_stopped() {
+        fn wait_until(what: &str, done: impl Fn() -> bool) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            while !done() {
+                assert!(std::time::Instant::now() < deadline, "never: {what}");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+        let h = Harness::new();
+        let app = h.start();
+        let product = product(&app);
+        // An answer that goes on after the cancel, as one whose connection
+        // is slow to close.
+        *h.text.deaf.lock().unwrap() = true;
+        h.text.hold();
+        h.answer(sheet_answer(usual_claims()));
+        let job = app
+            .write_sheet_from_brief(product.id, BudgetConsent::Ask)
+            .unwrap();
+        wait_until("the request left", || h.text.requests().len() == 1);
+
+        app.cancel_job(job).unwrap();
+        assert_eq!(wait_done(&app, job).state(), JobState::Cancelled);
+        assert!(app.job_runs_here(job), "the handler has not returned yet");
+
+        // The job reads cancelled, and its request is still out: a second
+        // one beside it would be paid for as well.
+        let view = app.product_sheet(product.id).unwrap();
+        assert!(view.stopping && view.is_busy());
+        assert!(matches!(
+            app.write_sheet_from_brief(product.id, BudgetConsent::Ask),
+            Err(SheetError::Busy)
+        ));
+        assert!(matches!(
+            app.retry_job(job),
+            Err(crate::JobActionError::SameWork)
+        ));
+        assert!(matches!(
+            app.add_claim(product.id, "Ships in two days", ClaimKind::Offer),
+            Err(SheetError::Busy)
+        ));
+        assert_eq!(h.text.requests().len(), 1, "nothing was sent");
+
+        h.text.let_go();
+        wait_until("the handler let go", || !app.job_runs_here(job));
+        let view = app.product_sheet(product.id).unwrap();
+        assert!(!view.stopping && !view.is_busy());
+        assert!(view.sheet.is_none(), "a cancelled run writes no sheet");
+
+        // The answer was paid for: run again, the job takes it in.
+        app.retry_job(job).unwrap();
+        done(&app, job);
+        assert_eq!(h.text.requests().len(), 1, "the answer was kept");
+        assert!(sheet(&app, product.id).waiting() > 0);
     }
 
     #[test]

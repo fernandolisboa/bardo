@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-25
 - Issue: #274
-- Builds on: the products library (#273), paid calls sent once (ADR-0030), streamed answers (ADR-0031), a cancelled job giving up its request to Claude (ADR-0034), the rate table and budgets of Costs
+- Builds on: the products library (#273), paid calls sent once (ADR-0030), streamed answers (ADR-0031), a cancelled job giving up its request to Claude (ADR-0034), text jobs waiting for each other (ADR-0036), the rate table and budgets of Costs
 
 ## Context
 
@@ -26,7 +26,7 @@ Three questions had to be settled together: who fetches the pages, how far a run
    - A claim that contains a digit is sensitive whatever the model said.
    - Addresses are shown as text and opened only on the user's click, and only when they are `http` or `https`.
 8. **A run adds and never overwrites.** Taking a written sheet in fills only the parts that are empty, adds rows and claims the sheet does not hold, and leaves every claim it knows as it is: confirmed, rejected or waiting. A rejected claim stays on the sheet, which is what keeps a later research from bringing it back as new, and it takes none of the 80 places a sheet has for claims; a run that finds the sheet full says how many claims it left out. A restricted category the user chose, *None* included, stays whatever a later run finds. A fact the user types in the brief after a model's claim said the same makes that claim theirs: typed and confirmed. Rows and pages are matched by name and address only: one the user removed is not remembered, and a later run that writes it again adds it again. So *Research again* is safe for everything the user reviewed, and taking the same answer in twice changes nothing.
-9. **The sheet is not edited while a job fills it.** Edits of the sheet's text and claims are refused while the product's job is queued or running, so the job's last write cannot undo them. Edits waiting in the form are saved before a run starts. A brief saved meanwhile leaves the sheet to the job, which reads the brief again before it writes the sheet and when it takes the brief's facts. A product is not deleted while its job runs, and a failed job is not run again from Jobs while another one fills the same sheet.
+9. **The sheet is not edited while a job fills it.** Edits of the sheet's text and claims are refused while the product's job is queued or running, or cancelled and still stopping, so the job's last write cannot undo them. The sheet is a `Work` of ADR-0036 (`Work::Sheet`): no run starts and no failed one is queued again beside a job at work on it. Edits waiting in the form are saved before a run starts. A brief saved meanwhile leaves the sheet to the job, which reads the brief again before it writes the sheet and when it takes the brief's facts. A product is not deleted while its job runs. A failed or cancelled job run again from Jobs is checked against Claude's budget for what it still has to pay: the research at its ceiling unless the job holds its notes, the sheet unless it holds the answer.
 10. **Costs.** Two cost purposes, *Product research* and *Product sheet*, recorded under no channel and no video: a research is paid per run and reused by every video of the product.
 
 ## Consequences

@@ -799,6 +799,12 @@ pub trait CostRepository: Send + Sync {
     /// failed without billing. Nothing happens when it is not there.
     fn remove_cost(&self, id: CostRecordId) -> Result<(), RepositoryError>;
 
+    /// Counts the record on `project` from now on: a call paid before its
+    /// project existed (recorded on its channel alone when its answer
+    /// arrived). Its time and amount stay as they are. Nothing happens
+    /// when it is not there.
+    fn move_cost(&self, id: CostRecordId, project: VideoProjectId) -> Result<(), RepositoryError>;
+
     /// The profile's records from `from` (inclusive) to `to` (exclusive),
     /// oldest first.
     fn costs_between(
@@ -849,6 +855,10 @@ impl<T: CostRepository + ?Sized> CostRepository for Arc<T> {
 
     fn remove_cost(&self, id: CostRecordId) -> Result<(), RepositoryError> {
         (**self).remove_cost(id)
+    }
+
+    fn move_cost(&self, id: CostRecordId, project: VideoProjectId) -> Result<(), RepositoryError> {
+        (**self).move_cost(id, project)
     }
 
     fn costs_between(

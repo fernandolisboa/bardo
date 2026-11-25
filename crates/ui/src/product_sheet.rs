@@ -139,7 +139,7 @@ pub struct SheetSection {
     load_failed: bool,
     /// The run last seen, by id, state and how far it is: the tab
     /// reloads when it moves, from the research to the writing too.
-    seen_job: Option<(JobId, JobState, u16)>,
+    seen_job: Option<(JobId, JobState, u16, bool)>,
     summary: Entity<TextareaState>,
     category: Entity<InputState>,
     restricted: Option<RestrictedCategory>,
@@ -165,9 +165,11 @@ pub struct SheetSection {
     _subscriptions: Vec<Subscription>,
 }
 
-/// A run as the tab compares it from one look to the next.
-fn seen(job: &bardo_app::bardo_domain::Job) -> (JobId, JobState, u16) {
-    (job.id(), job.state(), job.progress().permille())
+/// A run as the tab compares it from one look to the next. `stopping`
+/// tells a cancelled run that still gives up its request from one that
+/// has returned: both read cancelled.
+fn seen(job: &bardo_app::bardo_domain::Job, stopping: bool) -> (JobId, JobState, u16, bool) {
+    (job.id(), job.state(), job.progress().permille(), stopping)
 }
 
 impl SheetSection {
@@ -311,7 +313,7 @@ impl SheetSection {
         };
         match self.bardo.read(cx).product_sheet(product) {
             Ok(view) => {
-                self.seen_job = view.job.as_ref().map(|(job, _)| seen(job));
+                self.seen_job = view.job.as_ref().map(|(job, _)| seen(job, view.stopping));
                 self.view = Some(view);
                 self.load_failed = false;
             }
@@ -452,11 +454,11 @@ impl SheetSection {
             return;
         }
         self.revision = revision;
-        let job = self
-            .bardo
-            .read(cx)
+        let bardo = self.bardo.read(cx);
+        let stopping = bardo.product_sheet_stopping(product);
+        let job = bardo
             .product_sheet_job(product)
-            .map(|(job, _)| seen(&job));
+            .map(|(job, _)| seen(&job, stopping));
         if job != self.seen_job {
             let was_busy = self.busy();
             self.load(cx);
@@ -653,6 +655,23 @@ impl SheetSection {
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let (job, _) = view.job.as_ref()?;
+        if view.stopping {
+            // The run reads stopped, and the request it sent is being
+            // given up: the sheet stays as it is until that ends.
+            return Some(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(Spinner::new().small())
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child(tr(bardo, Text::SheetJobStopping)),
+                    )
+                    .into_any_element(),
+            );
+        }
         let line = match job.state() {
             JobState::Queued | JobState::Running => {
                 // A research is done once its notes are kept: the rest of

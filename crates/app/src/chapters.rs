@@ -27,7 +27,7 @@ use bardo_domain::{
 use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
-use crate::jobs::{JobContext, JobHandler};
+use crate::jobs::{JobContext, JobHandler, Work};
 use crate::{Bardo, KeyState, ScriptError, TemplateError, Text};
 
 #[derive(Debug, thiserror::Error)]
@@ -579,10 +579,7 @@ impl Bardo {
         consent: BudgetConsent,
     ) -> Result<JobId, ChaptersError> {
         let project = self.chapters_project(project)?;
-        if self
-            .latest_job_of(JobKind::Chapters, project.id)
-            .is_some_and(|job| job.state().is_active())
-        {
+        if self.work_busy(&Work::Chapters(project.id.to_string())) {
             return Err(ChaptersError::Busy);
         }
         let narration = self
@@ -1121,5 +1118,36 @@ mod tests {
             Err(ChaptersError::Busy)
         ));
         done(&app, id);
+    }
+
+    #[test]
+    fn a_cancelled_chapters_job_that_still_stops_keeps_them_busy_and_its_answer_is_saved() {
+        use crate::testing::arriving;
+
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let asked = h.text.requests().len();
+        h.answer(answer(&[(0, "Launch"), (2, "The signal")]));
+        let id = arriving::cancelled(&app, &h.text, || {
+            app.write_chapters(project.id, BudgetConsent::Ask).unwrap()
+        });
+
+        // No second request beside the one still out, from the stage or
+        // from Jobs.
+        assert!(matches!(
+            app.write_chapters(project.id, BudgetConsent::Ask),
+            Err(ChaptersError::Busy)
+        ));
+        arriving::retry_refused(&app, id);
+
+        // The answer arrives whole: it is paid for, and these are the
+        // chapters the job was started to write.
+        arriving::lands(&app, &h.text, id);
+        assert_eq!(app.chapters(project.id).unwrap().rows.len(), 2);
+
+        // Run again, the job finds its chapters: Claude is not asked twice.
+        assert_eq!(arriving::retried(&app, id).state(), JobState::Done);
+        assert_eq!(h.text.requests().len(), asked + 1);
     }
 }

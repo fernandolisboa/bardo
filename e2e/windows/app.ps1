@@ -317,7 +317,7 @@ function Invoke-App {
     Stop-BardoAll
     $logs = (Get-ChildItem $paths.Logs, "$devLocal\logs" -Filter *.log | ForEach-Object { Get-Content -Raw $_.FullName }) -join "`n"
     Test-Check 'S3.06' 'bardo.log and agent.log hold no key or secret' { Test-NoneIn $logs ($secretValues + $devSecrets) }
-    $db = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($paths.Database))
+    $db = [System.Text.Encoding]::UTF8.GetString((Read-FileWhenFree $paths.Database))
     Test-Check 'S5.34' 'bardo.db holds no key or secret' { Test-NoneIn $db ($secretValues + $devSecrets) }
 }
 

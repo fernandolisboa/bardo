@@ -21,7 +21,7 @@ use bardo_domain::{
 use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
-use crate::jobs::{JobContext, JobHandler};
+use crate::jobs::{JobContext, JobHandler, Work};
 use crate::{Bardo, KeyState, ScriptError, TemplateError, Text};
 
 /// The video length before there is a narration to measure.
@@ -315,10 +315,7 @@ impl Bardo {
         consent: BudgetConsent,
     ) -> Result<JobId, MusicPromptError> {
         let project = self.own_music_project(project)?;
-        if self
-            .latest_music_prompt_job(project.id)
-            .is_some_and(|job| job.state().is_active())
-        {
+        if self.work_busy(&Work::MusicPrompt(project.id.to_string())) {
             return Err(MusicPromptError::Busy);
         }
         if self.provider_key(Provider::Claude).state == KeyState::NotSet {
@@ -774,5 +771,37 @@ mod tests {
             .unwrap();
         assert_eq!(h.text.requests().len(), 1, "Claude is asked once");
         assert_eq!(app.music_prompt(project.id).unwrap().prompt, saved);
+    }
+
+    #[test]
+    fn a_cancelled_prompt_job_that_still_stops_keeps_it_busy_and_its_answer_is_saved() {
+        use crate::testing::arriving;
+
+        let h = Harness::new();
+        h.answer(&["Slow ambient synth pads, 70 BPM, no vocals."]);
+        let app = h.start_with_key();
+        let project = project(&app);
+        let id = arriving::cancelled(&app, &h.text, || {
+            app.generate_music_prompt(project.id, BudgetConsent::Ask)
+                .unwrap()
+        });
+
+        // No second request beside the one still out, from the stage or
+        // from Jobs.
+        assert!(matches!(
+            app.generate_music_prompt(project.id, BudgetConsent::Ask),
+            Err(MusicPromptError::Busy)
+        ));
+        arriving::retry_refused(&app, id);
+
+        // The answer arrives whole: it is paid for, and this is the
+        // prompt the job was started to write.
+        arriving::lands(&app, &h.text, id);
+        let prompt = app.music_prompt(project.id).unwrap().prompt.unwrap();
+        assert_eq!(prompt.text(), "Slow ambient synth pads, 70 BPM, no vocals.");
+
+        // Run again, the job finds its prompt: Claude is not asked twice.
+        assert_eq!(arriving::retried(&app, id).state(), JobState::Done);
+        assert_eq!(h.text.requests().len(), 1);
     }
 }

@@ -160,13 +160,16 @@ pub enum JobActionError {
     /// save over each other.
     #[error("scenes of the project are being made")]
     ScenesBusy,
+    /// A job that asks Claude for text (or draws what such a text
+    /// describes) beside another job at work on the same thing: queued,
+    /// running or, once cancelled, still stopping, itself included. The
+    /// two would pay for the same work and save over each other.
+    #[error("another job is at work on the same thing")]
+    SameWork,
     /// Running it again would put paid images or clips out of date, or
     /// discard them, which its stage asks about first: it starts there.
     #[error("the job starts from its stage, which asks first")]
     AsksFirst,
-    /// A product's sheet job while another one fills the same sheet.
-    #[error("the product's sheet is being written")]
-    SheetBusy,
     /// An image or clip job whose scenes still to pay for would reach a
     /// budget or pass the video's cap, or have no price, or a product's
     /// sheet job whose calls left would: the estimate to ask about before
@@ -294,6 +297,13 @@ impl JobContext {
     /// True once the job is cancelled or the app is closing.
     pub fn should_stop(&self) -> bool {
         self.stop.is_stopped()
+    }
+
+    /// What [`Self::should_stop`] asks, for code that works while something
+    /// else holds the context.
+    pub(crate) fn stopping(&self) -> impl Fn() -> bool + Send + Sync + use<> {
+        let stop = Arc::clone(&self.stop);
+        move || stop.is_stopped()
     }
 
     /// True once the user cancelled the job. A run stopped for another

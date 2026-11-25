@@ -56,7 +56,7 @@ use bardo_domain::{
     RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError, SceneImage, ScenePlan,
     ScenePlanId, ScenePlanRepository, ScenePlanSize, ScenePrompt, SceneSetting, SecretStore,
     StyleChoice, TemplateKind, TemplateUsed, TemplateVariable, TemplateVersion, TemplateVersionId,
-    TextEffort, TextFormat, TextGenerator, TextRequest, TokenUsage, VideoProject, VideoProjectId,
+    TextEffort, TextFormat, TextGenerator, TextRequest, VideoProject, VideoProjectId,
     scene_image_prompt, sentences,
 };
 use bardo_media::MediaEngine;
@@ -64,7 +64,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::clips::{ClipsView, SceneClipView};
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
-use crate::jobs::{JobActionError, JobContext, JobHandler};
+use crate::jobs::{JobActionError, JobContext, JobHandler, Kept};
 use crate::{Bardo, KeyState, ScriptError, TemplateError, Text};
 
 #[derive(Debug, thiserror::Error)]
@@ -644,73 +644,6 @@ fn drawn_since(scene: &bardo_domain::Scene, job: JobId, had: &[String]) -> bool 
         })
 }
 
-/// What a scene plan job keeps in its checkpoint: Claude's answer, from
-/// when it arrives until it is the project's plan. It is paid for, so it
-/// is not asked for twice: a job cancelled as the answer arrived plans
-/// from it when the user asks again, and one that could not save the plan
-/// does on its next run. (The request itself is noted on the job while it
-/// is out, `CostBook::paying`: a run cut short on it by a close is not
-/// sent again by itself, ADR-0030.)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum PlanStep {
-    /// Nothing is kept: the answer was applied, or let go.
-    Settled,
-    /// Claude's answer, paid for and recorded.
-    Answered(KeptAnswer),
-}
-
-/// An answer kept in a job's checkpoint.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct KeptAnswer {
-    text: String,
-    model: String,
-    input_tokens: u64,
-    output_tokens: u64,
-}
-
-impl From<GeneratedText> for KeptAnswer {
-    fn from(generated: GeneratedText) -> Self {
-        Self {
-            text: generated.text,
-            model: generated.model,
-            input_tokens: generated.usage.input_tokens,
-            output_tokens: generated.usage.output_tokens,
-        }
-    }
-}
-
-impl From<KeptAnswer> for GeneratedText {
-    fn from(kept: KeptAnswer) -> Self {
-        Self {
-            text: kept.text,
-            model: kept.model,
-            usage: TokenUsage {
-                input_tokens: kept.input_tokens,
-                output_tokens: kept.output_tokens,
-            },
-        }
-    }
-}
-
-impl PlanStep {
-    /// The answer an earlier run of the job kept, if one did.
-    fn kept(cx: &JobContext) -> Option<KeptAnswer> {
-        match serde_json::from_str(cx.checkpoint()?).ok()? {
-            Self::Answered(answer) => Some(answer),
-            Self::Settled => None,
-        }
-    }
-
-    /// Saved for a run that was told to stop, too (`save_checkpoint`). A
-    /// save that fails costs at worst the answer it would have kept.
-    fn save(&self, cx: &mut JobContext) {
-        if let Err(error) = cx.save_checkpoint(to_json(self), Progress::ZERO) {
-            tracing::warn!(job = %cx.id(), "could not save what a scene plan job keeps: {error}");
-        }
-    }
-}
-
 /// Whether `job` plans or draws the scenes of `project`.
 fn is_scene_job_of(job: &Job, project: &str) -> bool {
     matches!(job.kind(), JobKind::ScenePlan | JobKind::SceneImages)
@@ -766,7 +699,7 @@ impl SceneHandler {
 
     /// Plans the scenes the job asked for and makes them the project's
     /// plan, from the answer an earlier run kept when there is one
-    /// ([`PlanStep`]).
+    /// ([`Kept`]).
     fn plan(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
         let job = cx.id();
         let payload: PlanPayload = parse(payload)?;
@@ -797,9 +730,9 @@ impl SceneHandler {
                 "the narration is too long to plan its scenes in one answer",
             ));
         }
-        let generated = match PlanStep::kept(cx) {
+        let generated = match Kept::answer(cx) {
             // Paid for and recorded when it arrived.
-            Some(answer) => answer.into(),
+            Some(answer) => answer,
             None => match self.ask_for_plan(&payload, &narration, project, cx)? {
                 Some(generated) => generated,
                 // Stopped: nothing to plan from now.
@@ -816,7 +749,7 @@ impl SceneHandler {
             Err(failure) => failure.kind == JobFailureKind::UnexpectedAnswer,
         };
         if done_with_it {
-            PlanStep::Settled.save(cx);
+            Kept::settle(cx);
         }
         saved
     }
@@ -910,7 +843,7 @@ impl SceneHandler {
     /// is given up as soon as the job is cancelled. `None` when the job
     /// was stopped and has no answer to plan from now: nothing was sent,
     /// or the answer arrived as the job was cancelled and is kept for the
-    /// user to ask for again (`PlanStep::Answered`).
+    /// user to ask for again (`Kept::Answered`).
     fn ask_for_plan(
         &self,
         payload: &PlanPayload,
@@ -962,7 +895,7 @@ impl SceneHandler {
         );
         // Paid for: kept until it is the project's plan, whatever stops
         // this run before that.
-        PlanStep::Answered(generated.clone().into()).save(cx);
+        Kept::keep(cx, &generated);
         // The user cancelled as the answer arrived whole: the job was
         // cancelled, so it does not replace the project's plan behind
         // their back. Asked for again, by retrying the job or planning
@@ -1510,19 +1443,14 @@ impl Bardo {
 
     /// A plan already paid for that `payload` asks for again: the
     /// project's latest scene job, with the same request and the answer
-    /// kept (`PlanStep::Answered`). It was cancelled as its answer
+    /// kept (`Kept::Answered`). It was cancelled as its answer
     /// arrived, or failed because the plan could not be saved.
     fn kept_plan(&self, project: VideoProjectId, payload: &str) -> Option<JobId> {
         self.latest_scene_job(project)
             .filter(|job| {
                 job.kind() == JobKind::ScenePlan && job.can_retry() && job.payload() == payload
             })
-            .filter(|job| {
-                matches!(
-                    job.checkpoint().map(serde_json::from_str::<PlanStep>),
-                    Some(Ok(PlanStep::Answered(_)))
-                )
-            })
+            .filter(Kept::held_by)
             .map(|job| job.id())
     }
 

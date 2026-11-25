@@ -2145,6 +2145,9 @@ pub enum Text {
     /// A narration or scene job retried while scenes of its project are
     /// being made, or a cancelled scene job is still stopping.
     JobScenesBusy,
+    /// A text job retried while another job is at work on the same thing,
+    /// or while its own cancelled run is still stopping.
+    JobSameWork,
     JobAsksFirst,
     /// An image or clip job retried where the question about its cost
     /// cannot be asked.
@@ -2621,6 +2624,7 @@ pub enum Text {
     SheetResearching,
     SheetWriting,
     SheetJobStopped,
+    SheetJobStopping,
     SheetJobFailed,
     SheetJobLost,
     /// Placeholders: `{reason}`.
@@ -5032,6 +5036,7 @@ impl Text {
             Text::JobTakeFromItsPage => "job.error.take_from_page",
             Text::JobNarrationBusy => "job.error.narration_busy",
             Text::JobScenesBusy => "job.error.scenes_busy",
+            Text::JobSameWork => "job.error.same_work",
             Text::JobAsksFirst => "job.error.asks_first",
             Text::JobOverBudget => "job.error.over_budget",
             Text::SettingsPublishingTab => "settings.publishing_tab",
@@ -5471,6 +5476,7 @@ impl Text {
             Text::SheetResearching => "sheet.job.researching",
             Text::SheetWriting => "sheet.job.writing",
             Text::SheetJobStopped => "sheet.job.stopped",
+            Text::SheetJobStopping => "sheet.job.stopping",
             Text::SheetJobFailed => "sheet.job.failed",
             Text::SheetJobLost => "sheet.job.lost",
             Text::SheetJobDeclined => "sheet.job.declined",
@@ -7538,6 +7544,7 @@ mod tests {
             Text::SheetResearching,
             Text::SheetWriting,
             Text::SheetJobStopped,
+            Text::SheetJobStopping,
             Text::SheetJobFailed,
             Text::SheetJobLost,
             Text::SheetJobDeclined,
@@ -8138,6 +8145,7 @@ mod tests {
             Text::JobTakeFromItsPage,
             Text::JobNarrationBusy,
             Text::JobScenesBusy,
+            Text::JobSameWork,
             Text::JobAsksFirst,
             Text::JobOverBudget,
             Text::SettingsPublishingTab,

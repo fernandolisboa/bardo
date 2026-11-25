@@ -34,7 +34,7 @@ use bardo_domain::{
 use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
-use crate::jobs::{JobContext, JobHandler};
+use crate::jobs::{JobContext, JobHandler, Work};
 use crate::render::RenderError;
 use crate::scenes::{id, parse, to_json};
 use crate::{
@@ -1049,10 +1049,7 @@ impl Bardo {
         consent: BudgetConsent,
     ) -> Result<JobId, ExportError> {
         let project = self.export_project(project)?;
-        if self
-            .latest_job_of(JobKind::Metadata, project.id)
-            .is_some_and(|job| job.state().is_active())
-        {
+        if self.work_busy(&Work::Metadata(project.id.to_string())) {
             return Err(ExportError::Busy);
         }
         let accounts = self.network_accounts.list(project.channel)?;
@@ -2094,5 +2091,44 @@ pub(crate) mod tests {
         );
         let view = s.app.export_view(s.project.id).unwrap();
         assert!(view.targets.iter().all(|t| t.metadata.is_none()));
+    }
+
+    #[test]
+    fn a_cancelled_metadata_job_that_still_stops_keeps_it_busy_and_its_answer_is_saved() {
+        use crate::testing::arriving;
+
+        let s = rendered();
+        let asked = s.h.text.requests().len();
+        s.h.text.answers.lock().unwrap().push(youtube_and_tiktok());
+        let id = arriving::cancelled(&s.app, &s.h.text, || {
+            s.app
+                .generate_metadata(s.project.id, BudgetConsent::Ask)
+                .unwrap()
+        });
+
+        // No second request beside the one still out, from the stage or
+        // from Jobs.
+        assert!(matches!(
+            s.app.generate_metadata(s.project.id, BudgetConsent::Ask),
+            Err(ExportError::Busy)
+        ));
+        arriving::retry_refused(&s.app, id);
+
+        // The answer arrives whole: it is paid for, and this is the
+        // metadata the job was started to write.
+        arriving::lands(&s.app, &s.h.text, id);
+        let view = s.app.export_view(s.project.id).unwrap();
+        assert_eq!(
+            target(&view, Network::YouTube)
+                .metadata
+                .as_ref()
+                .unwrap()
+                .title(),
+            "The probe nobody found"
+        );
+
+        // Run again, the job finds its metadata: Claude is not asked twice.
+        assert_eq!(arriving::retried(&s.app, id).state(), JobState::Done);
+        assert_eq!(s.h.text.requests().len(), asked + 1);
     }
 }
