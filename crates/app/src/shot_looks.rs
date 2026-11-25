@@ -233,12 +233,27 @@ impl Bardo {
         if !found {
             return Err(SceneError::NoSuchBackdrop);
         }
+        // Shown behind a scene, it is kept only once that scene may take
+        // it: a refusal keeps nothing.
+        let look = match index {
+            Some(index) => {
+                self.scenes_idle(project.id)?;
+                if self.clips_running(project.id) {
+                    return Err(SceneError::Busy);
+                }
+                let plan = self.own_plan(project.id)?;
+                let scene = plan.scene(index)?;
+                if !scene.is_composed() {
+                    return Err(SceneError::Kind(bardo_domain::SceneKindError::NotComposed));
+                }
+                Some(scene.look())
+            }
+            None => None,
+        };
         self.scene_plans.keep_shot_backdrop(backdrop)?;
-        let Some(index) = index else {
+        let (Some(index), Some(look)) = (index, look) else {
             return Ok(None);
         };
-        let plan = self.own_plan(project.id)?;
-        let look = plan.scene(index)?.look();
         self.set_shot_look(
             project.id,
             index,
@@ -250,7 +265,8 @@ impl Bardo {
     }
 
     /// Discards a drawn backdrop the user does not want. A kept backdrop
-    /// that a scene still shows stays.
+    /// that a product shot still shows stays; a scene drawn again keeps
+    /// its look, and composed later it says its backdrop is gone.
     pub fn discard_shot_backdrop(
         &self,
         project: VideoProjectId,
@@ -269,9 +285,9 @@ impl Bardo {
             .scene_plans
             .scene_plan(project.id)?
             .is_some_and(|plan| {
-                plan.scenes()
-                    .iter()
-                    .any(|scene| scene.look().drawn_backdrop() == Some(backdrop))
+                plan.scenes().iter().any(|scene| {
+                    scene.is_composed() && scene.look().drawn_backdrop() == Some(backdrop)
+                })
             });
         if shown {
             return Err(SceneError::BackdropInUse);

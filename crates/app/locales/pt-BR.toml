@@ -3108,7 +3108,7 @@ body = "Cada cena em ordem, com o tempo, a imagem e como está: para desenhar, p
 
 [tour.scenes.scene]
 title = "Uma cena"
-body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato de cada pessoa dela, a não ser de quem você escolheu desenhar sem retrato, e uma desenhada com um retrato mais antigo fica marcada. Edite o prompt para mudar o que o próximo desenho mostra. Num anúncio, Tipo de cena diz o que a cena é: desenhada, ou uma foto do produto que o Bardo compõe de graça a partir de uma das imagens do próprio produto."
+body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato de cada pessoa dela, a não ser de quem você escolheu desenhar sem retrato, e uma desenhada com um retrato mais antigo fica marcada. Edite o prompt para mudar o que o próximo desenho mostra. Num anúncio, Tipo de cena diz o que a cena é: desenhada, ou uma foto do produto que o Bardo compõe de graça a partir de uma das imagens do próprio produto. O layout, a posição e o fundo de uma foto do produto também mudam de graça; só desenhar um fundo é pago, depois da estimativa, e um fundo novo espera você manter ou descartar."
 
 [tour.scenes.redraw]
 title = "Desenhe de novo"
@@ -4643,9 +4643,9 @@ from = "Cor"
 to = "Degradê até"
 drawn = "Fundos desenhados"
 draw = "Desenhar um fundo"
-draw_hint = "O gerador de imagens desenha uma superfície ou um cenário vazio no estilo do vídeo, sem produto, texto ou logo, e não vê nenhuma imagem do produto. Custa uma imagem de cena e espera a sua revisão. Um fundo mantido sai de graça para toda foto do produto deste projeto."
+draw_hint = "O gerador de imagens desenha uma superfície ou um cenário vazio no estilo do vídeo, sem produto, texto ou logo, e não vê nenhuma imagem do produto. Custa uma imagem de cena e espera a sua revisão; enquanto espera, nenhum outro é desenhado. Um fundo mantido sai de graça para toda foto do produto deste projeto."
 drawing = "Desenhando um fundo…"
-to_review = "Fundo novo: mantenha para usar, ou descarte."
+to_review = "Novo fundo para revisar"
 keep = "Manter e usar"
 discard = "Descartar"
 
@@ -4664,6 +4664,3 @@ down = "De cima para baixo"
 across = "Da esquerda para a direita"
 diagonal = "Diagonal"
 
-[tour.scenes.shot_look]
-title = "A aparência da foto do produto"
-body = "Na foto do produto de um anúncio: o layout (um cartão, uma foto recortada em pé sobre o fundo ou uma tela num contorno simples de celular ou navegador), onde ela fica e o fundo: um tom da imagem, uma cor ou degradê, ou um fundo desenhado para o projeto. Toda mudança é composta de novo de graça; só desenhar um fundo é pago, depois da estimativa, e um fundo novo espera você manter ou descartar."

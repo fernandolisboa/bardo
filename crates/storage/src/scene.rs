@@ -569,6 +569,31 @@ fn insert_scene(
 }
 
 /// Makes `plan` its project's plan with all its scenes, inside `tx`.
+/// Adds a drawn backdrop's row.
+pub(crate) fn insert_backdrop(
+    conn: &Connection,
+    backdrop: &ShotBackdropDrawing,
+) -> Result<(), RepositoryError> {
+    conn.execute(
+        "INSERT INTO shot_backdrop (id, project_id, file, prompt, provider, model, job_id,
+                                    drawn_at, kept)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            backdrop.id.to_string(),
+            backdrop.project.to_string(),
+            backdrop.file,
+            backdrop.prompt,
+            backdrop.provider.code(),
+            backdrop.model,
+            backdrop.job.map(|job| job.to_string()),
+            to_unix_millis(backdrop.drawn_at),
+            i64::from(backdrop.kept),
+        ],
+    )
+    .map_err(boxed)?;
+    Ok(())
+}
+
 pub(crate) fn write_scene_plan(
     tx: &Transaction<'_>,
     plan: &ScenePlan,
@@ -819,25 +844,7 @@ impl ScenePlanRepository for Database {
     }
 
     fn add_shot_backdrop(&self, backdrop: &ShotBackdropDrawing) -> Result<(), RepositoryError> {
-        self.conn()
-            .execute(
-                "INSERT INTO shot_backdrop (id, project_id, file, prompt, provider, model, job_id,
-                                            drawn_at, kept)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![
-                    backdrop.id.to_string(),
-                    backdrop.project.to_string(),
-                    backdrop.file,
-                    backdrop.prompt,
-                    backdrop.provider.code(),
-                    backdrop.model,
-                    backdrop.job.map(|job| job.to_string()),
-                    to_unix_millis(backdrop.drawn_at),
-                    i64::from(backdrop.kept),
-                ],
-            )
-            .map_err(boxed)?;
-        Ok(())
+        insert_backdrop(&self.conn(), backdrop)
     }
 
     fn keep_shot_backdrop(&self, backdrop: BackdropId) -> Result<(), RepositoryError> {

@@ -54,7 +54,7 @@ The video's [estimate](projects.md#mode) counts composed scenes as free. Before 
 <a id="shot-look"></a>
 ## How a product shot looks
 
-A product shot (and an end card composed from a product image) has its own controls under **Scene kind**. Every one of them composes the picture again, on your computer, for free.
+A product shot (and an end card composed from a product image) has its own controls under **Scene kind**. Choosing a layout, a position or a backdrop composes the picture again, on your computer, for free; only drawing a new backdrop is paid.
 
 - **Layout**, when the image offers more than one:
   - **Card**: the image with rounded corners. Every image may be a card.
@@ -63,8 +63,8 @@ A product shot (and an end card composed from a product image) has its own contr
 - **Position**: **Left**, **Center** or **Right** within the room the frame leaves. The margins and the caption band stay clear, and the product stays on screen under the strongest zoom.
 - **Backdrop**:
   - **From the image**: a deep or pale tone of the image's own color, as at first.
-  - **Color**: one of the image's tones, white or black. Pick a second one under **Gradient to** for a gradient between the two, and its direction: top to bottom, left to right or diagonal.
-  - **Drawn backdrops**: **Draw a backdrop** has the image generator draw an empty surface or set in the video's [style](#style) and shape, with no product, text or logo. It sees none of the product's images, and is told only what kind of product it is. It costs one scene image: the estimate is beside the button, it counts toward the video's [cap](projects.md#mode), and it shows in Costs as **Product shot backdrop**. The new backdrop waits for you: **Keep and use** puts it behind this scene, **Discard** deletes it. A kept backdrop is listed for every product shot of the project and costs nothing more; one that a scene shows cannot be discarded.
+  - **Color**: one of the image's tones, white or black. Pick a second one under **Gradient to** for a gradient between the two, and its direction: top to bottom, left to right or diagonal. Picking the first color again under **Gradient to** makes it one color.
+  - **Draw a backdrop** has the image generator draw an empty surface or set in the video's [style](#style) and shape, with no product, text or logo. It sees none of the product's images, and is told only what kind of product it is. It costs one scene image: the estimate is beside the button, it counts toward the video's [cap](projects.md#mode), and it shows in Costs as **Product shot backdrop**. The new backdrop waits for you under **New backdrop to review**: **Keep and use** puts it behind this scene, **Discard** deletes it. While one waits, **Draw a backdrop** waits too. Kept backdrops are listed under **Drawn backdrops** for every product shot of the project and cost nothing more; pick one to show it. **Discard** under a kept backdrop deletes it, unless a product shot still shows it.
 
 Whatever the look, the product's image is only scaled: never stretched, cut or redrawn. A picture composed before looks existed reads **To compose** and is made again, for free, with **Compose product shots**.
 

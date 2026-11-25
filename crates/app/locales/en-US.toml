@@ -3108,7 +3108,7 @@ body = "Each scene in order, with its time, its image and where it stands: to dr
 
 [tour.scenes.scene]
 title = "A scene"
-body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images."
+body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images. A product shot's layout, position and backdrop change for free too; only drawing a backdrop is paid, after its estimate, and a new one waits for you to keep or discard it."
 
 [tour.scenes.redraw]
 title = "Draw again"
@@ -4643,9 +4643,9 @@ from = "Color"
 to = "Gradient to"
 drawn = "Drawn backdrops"
 draw = "Draw a backdrop"
-draw_hint = "The image generator draws an empty surface or set in the video's style, with no product, text or logo, and sees none of the product's images. It costs one scene image and waits for your review. A kept backdrop is free for every product shot of this project."
+draw_hint = "The image generator draws an empty surface or set in the video's style, with no product, text or logo, and sees none of the product's images. It costs one scene image and waits for your review; while it waits, no other is drawn. A kept backdrop is free for every product shot of this project."
 drawing = "Drawing a backdrop…"
-to_review = "New backdrop: keep it to use it, or discard it."
+to_review = "New backdrop to review"
 keep = "Keep and use"
 discard = "Discard"
 
@@ -4664,6 +4664,3 @@ down = "Top to bottom"
 across = "Left to right"
 diagonal = "Diagonal"
 
-[tour.scenes.shot_look]
-title = "How a product shot looks"
-body = "On an ad's product shot: its layout (a card, a cut-out photo standing on the backdrop, or a screen in a plain phone or browser outline), where it sits, and its backdrop: a tone of the image, a color or gradient, or a backdrop drawn for the project. Every change is composed again for free; only drawing a backdrop is paid, after its estimate, and a new one waits for you to keep or discard it."

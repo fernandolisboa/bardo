@@ -158,7 +158,7 @@ impl ShotColor {
 
     pub fn from_hex(hex: &str) -> Option<Self> {
         let hex = hex.trim().trim_start_matches('#');
-        if hex.len() != 6 || !hex.is_ascii() {
+        if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return None;
         }
         let channel = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).ok();

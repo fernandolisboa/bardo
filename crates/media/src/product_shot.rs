@@ -321,8 +321,29 @@ fn covering(bytes: &[u8], width: u32, height: u32) -> Result<RgbImage, ShotError
         ShotError::Unreadable(why) => ShotError::Unreadable(format!("the backdrop: {why}")),
         other => other,
     })?;
+    // Cut to the frame's shape first, then scaled: scaling a backdrop of
+    // an odd shape to cover the frame first could take far more memory
+    // than the frame.
+    let (source_w, source_h) = (u64::from(backdrop.width()), u64::from(backdrop.height()));
+    let (frame_w, frame_h) = (u64::from(width.max(1)), u64::from(height.max(1)));
+    let (crop_w, crop_h) = if source_w * frame_h > source_h * frame_w {
+        ((source_h * frame_w / frame_h).max(1), source_h)
+    } else {
+        (source_w, (source_w * frame_h / frame_w).max(1))
+    };
+    let (crop_w, crop_h) = (
+        u32::try_from(crop_w)
+            .unwrap_or(u32::MAX)
+            .min(backdrop.width()),
+        u32::try_from(crop_h)
+            .unwrap_or(u32::MAX)
+            .min(backdrop.height()),
+    );
+    let x = (backdrop.width() - crop_w) / 2;
+    let y = (backdrop.height() - crop_h) / 2;
     Ok(DynamicImage::ImageRgba8(backdrop)
-        .resize_to_fill(width, height, FilterType::Triangle)
+        .crop_imm(x, y, crop_w, crop_h)
+        .resize_exact(width, height, FilterType::Triangle)
         .into_rgb8())
 }
 
@@ -870,6 +891,17 @@ mod tests {
             for (x, y) in [(0, 0), (w - 1, h - 1), (w / 2, h - 1)] {
                 assert_eq!(shot.get_pixel(x, y).0, [90, 140, 60], "{aspect}");
             }
+        }
+        // A strip of one pixel is cut before it is scaled, so it costs no
+        // more than the frame.
+        for size in [(8192, 1), (1, 8192)] {
+            let strip = png(&RgbImage::from_pixel(size.0, size.1, Rgb([200, 40, 40])));
+            let recipe = ShotRecipe {
+                backdrop: BackdropPaint::Picture(&strip),
+                ..recipe(AspectRatio::Vertical, ProductLayout::Card)
+            };
+            let shot = composed_as(&png_rgba(&source), &recipe);
+            assert_eq!(shot.get_pixel(0, 0).0, [200, 40, 40], "{size:?}");
         }
         let recipe = ShotRecipe {
             backdrop: BackdropPaint::Picture(b"nothing"),

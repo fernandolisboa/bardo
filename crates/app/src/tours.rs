@@ -781,7 +781,8 @@ pub const CAPTURE: Tour = {
     }
 };
 
-/// Scenes: planning them, the scene list, a scene's image and prompt,
+/// Scenes: planning them, the scene list, a scene's image and prompt (and
+/// an ad's product shot and its look),
 /// drawing it again (one scene, or all those in another style), the
 /// filter, fitting them to a new narration or planning again, and placing a
 /// version's scenes on its narration.
@@ -805,10 +806,6 @@ pub const SCENES: Tour = {
             at_stage(AT, "redraw", control(Control::SceneRedraw))
                 .missing(WhenMissing::LightPart(TourAnchor::Inspector))
                 .learn(PAGE, "redraw"),
-            // Only on an ad's product shot.
-            at_stage(AT, "shot_look", control(Control::ShotLook))
-                .missing(WhenMissing::Skip)
-                .learn(PAGE, "shot-look"),
             at_stage(AT, "filter", control(Control::ScenesFilter))
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "filter"),

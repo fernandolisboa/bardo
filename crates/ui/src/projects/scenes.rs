@@ -9,9 +9,9 @@
 //! video player until the editor has its own.
 
 use bardo_app::bardo_domain::{
-    AnimatedScenes, BackdropDirection, CastMember, ClipModel, ClipModelRef, Job, JobState,
-    ProductImageId, Scene, SceneClip, SceneImage, SceneKind, ShotBackdrop, ShotColor, ShotLook,
-    ShotPlacement, TemplateKind, VideoProjectId,
+    AnimatedScenes, AspectRatio, BackdropDirection, CastMember, ClipModel, ClipModelRef, Job,
+    JobState, ProductImageId, Scene, SceneClip, SceneImage, SceneKind, ShotBackdrop, ShotColor,
+    ShotLook, ShotPlacement, TemplateKind, VideoProjectId,
 };
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -1786,13 +1786,16 @@ impl ProjectsScreen {
                                 layout: Some(*layout),
                                 ..look
                             };
+                            // The layout shown is not picked again: it
+                            // would compose the same picture once more.
+                            let shown = *layout == shown_layout;
                             Button::new(("shot-layout", index * 10 + *layout as usize))
                                 .xsmall()
                                 .outline()
                                 .label(tr(bardo, Text::ProductLayoutName(*layout)))
-                                .selected(*layout == shown_layout)
-                                .disabled(locked && *layout != shown_layout)
-                                .on_click(cx.listener(set(next)))
+                                .selected(shown)
+                                .disabled(locked && !shown)
+                                .when(!shown, |button| button.on_click(cx.listener(set(next))))
                         })),
                 )
         });
@@ -1871,7 +1874,8 @@ impl ProjectsScreen {
             ..look
         });
         let second = from.map(|from| {
-            swatches(1, to.filter(|to| *to != from), &|color| ShotLook {
+            // Picking the first color again here makes it one color.
+            swatches(1, to, &|color| ShotLook {
                 backdrop: ShotBackdrop::Plain {
                     from,
                     to: color,
@@ -1912,11 +1916,16 @@ impl ProjectsScreen {
                 backdrop: ShotBackdrop::Auto,
                 ..look
             })));
+        // A backdrop is drawn in the video's frame, so it is shown whole.
+        let wide = scene
+            .shot()
+            .is_some_and(|shot| shot.aspect == AspectRatio::Landscape);
+        let (thumb_w, thumb_h) = if wide { (96., 54.) } else { (54., 96.) };
         let thumb = |id: (&'static str, usize), path: PathBuf, picked: bool| {
             div()
                 .id(id)
-                .w(px(54.))
-                .h(px(96.))
+                .w(px(thumb_w))
+                .h(px(thumb_h))
                 .rounded_sm()
                 .overflow_hidden()
                 .border_2()
@@ -1927,20 +1936,39 @@ impl ProjectsScreen {
             .kept_backdrops()
             .enumerate()
             .map(|(n, backdrop)| {
-                let picked = look.drawn_backdrop() == Some(backdrop.id);
+                let id = backdrop.id;
+                let picked = look.drawn_backdrop() == Some(id);
                 let next = ShotLook {
-                    backdrop: ShotBackdrop::Drawn(backdrop.id),
+                    backdrop: ShotBackdrop::Drawn(id),
                     ..look
                 };
-                thumb(
-                    ("shot-backdrop-kept", index * 100 + n),
-                    bardo.shot_backdrop_path(project, backdrop),
-                    picked,
-                )
-                .when(!locked, |thumb| {
-                    thumb.cursor_pointer().on_click(cx.listener(set(next)))
-                })
-                .into_any_element()
+                v_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        thumb(
+                            ("shot-backdrop-kept", index * 100 + n),
+                            bardo.shot_backdrop_path(project, backdrop),
+                            picked,
+                        )
+                        .when(!locked, |thumb| {
+                            thumb.cursor_pointer().on_click(cx.listener(set(next)))
+                        }),
+                    )
+                    // Refused, with its reason, while a scene shows it.
+                    .child(
+                        Button::new(("discard-kept-backdrop", index * 100 + n))
+                            .xsmall()
+                            .ghost()
+                            .label(tr(bardo, Text::DiscardShotBackdrop))
+                            .disabled(locked)
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.scene_action(window, cx, |bardo, project| {
+                                    bardo.discard_shot_backdrop(project, id)
+                                });
+                            })),
+                    )
+                    .into_any_element()
             })
             .collect();
         let drawn = (!kept.is_empty()).then(|| {
@@ -1949,45 +1977,55 @@ impl ProjectsScreen {
                 .child(muted(cx, tr(bardo, Text::ShotBackdropDrawn)))
                 .child(h_flex().flex_wrap().gap_1().children(kept))
         });
-        let review = kinds.backdrops_to_review().next().map(|backdrop| {
-            let id = backdrop.id;
-            v_flex()
-                .gap_1()
-                .child(muted(cx, tr(bardo, Text::ShotBackdropToReview)))
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .items_end()
-                        .child(thumb(
-                            ("shot-backdrop-review", index),
-                            bardo.shot_backdrop_path(project, backdrop),
-                            false,
-                        ))
-                        .child(
-                            Button::new(("keep-shot-backdrop", index))
-                                .xsmall()
-                                .outline()
-                                .label(tr(bardo, Text::KeepShotBackdrop))
-                                .disabled(locked)
-                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                    this.scene_action(window, cx, |bardo, project| {
-                                        bardo.keep_shot_backdrop(project, id, Some(index))
-                                    });
-                                })),
-                        )
-                        .child(
-                            Button::new(("discard-shot-backdrop", index))
-                                .xsmall()
-                                .ghost()
-                                .label(tr(bardo, Text::DiscardShotBackdrop))
-                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                    this.scene_action(window, cx, |bardo, project| {
-                                        bardo.discard_shot_backdrop(project, id)
-                                    });
-                                })),
-                        ),
-                )
-        });
+        let waiting = kinds.backdrops_to_review().next().is_some();
+        let review: Vec<_> = kinds
+            .backdrops_to_review()
+            .enumerate()
+            .map(|(n, backdrop)| {
+                let id = backdrop.id;
+                v_flex()
+                    .gap_1()
+                    .child(muted(cx, tr(bardo, Text::ShotBackdropToReview)))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_end()
+                            .child(thumb(
+                                ("shot-backdrop-review", index * 100 + n),
+                                bardo.shot_backdrop_path(project, backdrop),
+                                false,
+                            ))
+                            .child(
+                                Button::new(("keep-shot-backdrop", index * 100 + n))
+                                    .xsmall()
+                                    .outline()
+                                    .label(tr(bardo, Text::KeepShotBackdrop))
+                                    .disabled(locked)
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.scene_action(window, cx, |bardo, project| {
+                                                bardo.keep_shot_backdrop(project, id, Some(index))
+                                            });
+                                        },
+                                    )),
+                            )
+                            .child(
+                                Button::new(("discard-shot-backdrop", index * 100 + n))
+                                    .xsmall()
+                                    .ghost()
+                                    .label(tr(bardo, Text::DiscardShotBackdrop))
+                                    .disabled(locked)
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.scene_action(window, cx, |bardo, project| {
+                                                bardo.discard_shot_backdrop(project, id)
+                                            });
+                                        },
+                                    )),
+                            ),
+                    )
+            })
+            .collect();
         let draw: AnyElement = if kinds.drawing_backdrop {
             h_flex()
                 .gap_2()
@@ -2001,10 +2039,14 @@ impl ProjectsScreen {
                 .items_center()
                 .flex_wrap()
                 .child(
-                    self.paid(Button::new(("draw-shot-backdrop", index)), cx)
+                    // One backdrop waits for its review before another
+                    // is paid for. Drawing one does not follow the
+                    // narration, so a stale plan does not hold it.
+                    Button::new(("draw-shot-backdrop", index))
                         .outline()
                         .xsmall()
                         .label(tr(bardo, Text::DrawShotBackdrop))
+                        .disabled(waiting)
                         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                             this.run_scene(
                                 SceneAction::DrawBackdrop,

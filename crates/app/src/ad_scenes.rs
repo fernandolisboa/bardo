@@ -2002,6 +2002,140 @@ mod ad_tests {
     }
 
     #[test]
+    fn a_backdrop_is_kept_for_a_scene_only_when_that_scene_may_show_it() {
+        use bardo_domain::ShotBackdrop;
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        plan_with(&h, &app, &project, usual());
+        done(
+            &app,
+            app.draw_shot_backdrop(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let drawn = app
+            .scene_kinds(project.id)
+            .unwrap()
+            .backdrops_to_review()
+            .next()
+            .unwrap()
+            .clone();
+        let drawn_scene = (0..plan(&app, &project).scenes().len())
+            .find(|index| !plan_of(&app, &project, *index).is_composed())
+            .unwrap();
+        // Asked for a drawn scene, nothing is kept.
+        assert!(matches!(
+            app.keep_shot_backdrop(project.id, drawn.id, Some(drawn_scene)),
+            Err(SceneError::Kind(bardo_domain::SceneKindError::NotComposed))
+        ));
+        let kinds = app.scene_kinds(project.id).unwrap();
+        assert_eq!(kinds.kept_backdrops().count(), 0);
+        assert_eq!(kinds.backdrops_to_review().count(), 1);
+
+        // Shown behind scene 1, then that scene drawn again: no product
+        // shot shows it, so it may go.
+        done(
+            &app,
+            app.keep_shot_backdrop(project.id, drawn.id, Some(1))
+                .unwrap()
+                .unwrap(),
+        );
+        assert_eq!(
+            plan_of(&app, &project, 1).look().backdrop,
+            ShotBackdrop::Drawn(drawn.id)
+        );
+        app.set_scene_kind(project.id, 1, SceneKind::Drawn, None)
+            .unwrap();
+        app.discard_shot_backdrop(project.id, drawn.id).unwrap();
+        assert!(app.scene_kinds(project.id).unwrap().backdrops.is_empty());
+    }
+
+    #[test]
+    fn a_backdrop_job_tried_again_pays_only_for_what_it_has_not_drawn() {
+        use bardo_domain::{JobState, ProviderFailure, ProviderFailureKind};
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        plan_with(&h, &app, &project, usual());
+        *h.images.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid credentials",
+        ));
+        let job = app
+            .draw_shot_backdrop(project.id, BudgetConsent::Ask)
+            .unwrap();
+        let failed = crate::scenes::tests::wait_done(&app, job);
+        assert_eq!(failed.state(), JobState::Failed);
+        let (of, left) = app.backdrop_left(&failed).unwrap();
+        assert_eq!(of, project.id);
+        assert_eq!(left.len(), 1, "a backdrop not drawn is still to pay for");
+        assert!(app.scene_kinds(project.id).unwrap().backdrops.is_empty());
+
+        *h.images.failure.lock().unwrap() = None;
+        app.retry_job(job).unwrap();
+        let ran = crate::scenes::tests::wait_done(&app, job);
+        assert_eq!(ran.state(), JobState::Done);
+        assert_eq!(app.scene_kinds(project.id).unwrap().backdrops.len(), 1);
+        assert_eq!(backdrop_costs(&h, &project), 1);
+        // Once it drew, running it again has nothing left to pay for.
+        assert!(app.backdrop_left(&ran).unwrap().1.is_empty());
+    }
+
+    #[test]
+    fn a_version_keeps_each_shots_look_on_a_copy_of_its_backdrop() {
+        use std::collections::HashMap;
+
+        use bardo_domain::{BackdropId, ProductLayout, ShotBackdrop, ShotLook, ShotPlacement};
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        plan_with(&h, &app, &project, usual());
+        done(
+            &app,
+            app.draw_shot_backdrop(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let drawn = app.scene_kinds(project.id).unwrap().backdrops[0].id;
+        done(
+            &app,
+            app.keep_shot_backdrop(project.id, drawn, Some(1))
+                .unwrap()
+                .unwrap(),
+        );
+        let look = ShotLook {
+            layout: Some(ProductLayout::Card),
+            placement: ShotPlacement::Left,
+            backdrop: ShotBackdrop::Drawn(drawn),
+        };
+        if let Some(job) = app.set_shot_look(project.id, 1, look).unwrap() {
+            done(&app, job);
+        }
+        let copy = BackdropId::new();
+        let version = crate::localization::copy_plan(
+            &plan(&app, &project),
+            bardo_domain::VideoProjectId::new(),
+            &HashMap::from([(drawn, copy)]),
+            std::time::SystemTime::now(),
+        );
+        let copied = version.scene(1).unwrap();
+        let expected = ShotLook {
+            backdrop: ShotBackdrop::Drawn(copy),
+            ..look
+        };
+        assert_eq!(copied.look(), expected);
+        // Its picture was composed in that look: nothing to compose again.
+        assert_eq!(copied.shot().unwrap().look, Some(expected));
+        // A backdrop that did not come along is shown as the automatic one.
+        let bare = crate::localization::copy_plan(
+            &plan(&app, &project),
+            bardo_domain::VideoProjectId::new(),
+            &HashMap::new(),
+            std::time::SystemTime::now(),
+        );
+        assert_eq!(bare.scene(1).unwrap().look().backdrop, ShotBackdrop::Auto);
+    }
+
+    #[test]
     fn a_backdrop_past_the_videos_cap_is_asked_for_first_and_needs_an_ad() {
         let h = Harness::new();
         let app = start(&h);

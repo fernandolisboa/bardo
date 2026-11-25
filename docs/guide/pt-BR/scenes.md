@@ -54,7 +54,7 @@ A [estimativa](projects.md#mode) do vídeo conta as cenas compostas como gratuit
 <a id="shot-look"></a>
 ## A aparência de uma foto do produto
 
-Uma foto do produto (e um cartão final composto de uma imagem do produto) tem controles próprios abaixo de **Tipo de cena**. Cada um deles compõe a imagem de novo, no seu computador, de graça.
+Uma foto do produto (e um cartão final composto de uma imagem do produto) tem controles próprios abaixo de **Tipo de cena**. Escolher um layout, uma posição ou um fundo compõe a imagem de novo, no seu computador, de graça; só desenhar um fundo novo é pago.
 
 - **Layout**, quando a imagem oferece mais de um:
   - **Cartão**: a imagem com cantos arredondados. Toda imagem pode ser um cartão.
@@ -63,8 +63,8 @@ Uma foto do produto (e um cartão final composto de uma imagem do produto) tem c
 - **Posição**: **Esquerda**, **Centro** ou **Direita** dentro do espaço que o quadro deixa. As margens e a faixa da legenda ficam livres, e o produto continua na tela no zoom mais forte.
 - **Fundo**:
   - **Da imagem**: um tom escuro ou claro da própria cor da imagem, como no início.
-  - **Cor**: um dos tons da imagem, branco ou preto. Escolha uma segunda cor em **Degradê até** para um degradê entre as duas, e a direção: de cima para baixo, da esquerda para a direita ou diagonal.
-  - **Fundos desenhados**: **Desenhar um fundo** pede ao gerador de imagens uma superfície ou um cenário vazio no [estilo](#style) e no formato do vídeo, sem produto, texto ou logo. Ele não vê nenhuma imagem do produto e só fica sabendo que tipo de produto é. Custa uma imagem de cena: a estimativa fica ao lado do botão, conta para o [teto](projects.md#mode) do vídeo e aparece em Custos como **Fundo de foto do produto**. O fundo novo espera por você: **Manter e usar** põe esse fundo atrás desta cena, **Descartar** apaga. Um fundo mantido aparece para toda foto do produto do projeto e não custa mais nada; um fundo que alguma cena mostra não pode ser descartado.
+  - **Cor**: um dos tons da imagem, branco ou preto. Escolha uma segunda cor em **Degradê até** para um degradê entre as duas, e a direção: de cima para baixo, da esquerda para a direita ou diagonal. Escolher de novo a primeira cor em **Degradê até** deixa uma cor só.
+  - **Desenhar um fundo** pede ao gerador de imagens uma superfície ou um cenário vazio no [estilo](#style) e no formato do vídeo, sem produto, texto ou logo. Ele não vê nenhuma imagem do produto e só fica sabendo que tipo de produto é. Custa uma imagem de cena: a estimativa fica ao lado do botão, conta para o [teto](projects.md#mode) do vídeo e aparece em Custos como **Fundo de foto do produto**. O fundo novo espera por você em **Novo fundo para revisar**: **Manter e usar** põe esse fundo atrás desta cena, **Descartar** apaga. Enquanto um espera, **Desenhar um fundo** espera também. Os fundos mantidos aparecem em **Fundos desenhados** para toda foto do produto do projeto e não custam mais nada; escolha um para mostrá-lo. **Descartar** abaixo de um fundo mantido o apaga, a não ser que uma foto do produto ainda o mostre.
 
 Seja qual for a aparência, a imagem do produto só é redimensionada: nunca esticada, cortada ou redesenhada. Uma imagem composta antes de existir aparência aparece como **A compor** e é feita de novo, de graça, em **Compor fotos do produto**.
 
