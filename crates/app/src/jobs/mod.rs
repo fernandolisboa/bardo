@@ -2,7 +2,9 @@
 //! panel. The queue itself lives in `queue`.
 
 mod countdown;
+mod kept;
 mod queue;
+mod work;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,8 +12,10 @@ use std::sync::Arc;
 use bardo_domain::{Job, JobId, JobKind, JobState};
 
 pub use countdown::TestJob;
+pub(crate) use kept::Kept;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 pub(crate) use queue::{JobQueue, PaidCallLog, Runner};
+pub(crate) use work::Work;
 
 use crate::backup::{BackupHandler, RestoreHandler};
 use crate::chapters::ChaptersHandler;
@@ -159,6 +163,7 @@ impl JobActionError {
             JobActionError::TakeFromItsPage => Text::JobTakeFromItsPage,
             JobActionError::NarrationBusy => Text::JobNarrationBusy,
             JobActionError::ScenesBusy => Text::JobScenesBusy,
+            JobActionError::SameWork => Text::JobSameWork,
             JobActionError::AsksFirst => Text::JobAsksFirst,
             _ => Text::JobNotUpdated,
         }
@@ -277,6 +282,18 @@ impl Bardo {
         }
         if let Some(held) = self.retry_held(id) {
             return Err(held);
+        }
+        // A text job is not queued again beside another job at work on the
+        // same thing, or while its own cancelled run has yet to return:
+        // the two would pay for the same work. One that cannot be retried
+        // at all says so itself, below.
+        if self
+            .jobs()
+            .iter()
+            .find(|job| job.id() == id)
+            .is_some_and(|job| job.can_retry() && self.retry_beside_its_work(job))
+        {
+            return Err(JobActionError::SameWork);
         }
         self.jobs.retry(id)
     }

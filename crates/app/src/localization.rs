@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::editor::project_cut;
-use crate::jobs::{JobContext, JobHandler};
+use crate::jobs::{JobContext, JobHandler, Kept, Work};
 use crate::proxies::{ProxyKind, proxy_name};
 use crate::scenes::clock;
 use crate::{Bardo, Catalog, KeyState, ScriptError, TemplateError, Text};
@@ -434,7 +434,24 @@ impl JobHandler for LocalizationHandler {
                 let channel = parse_id::<ChannelId>(channel)?;
                 let id = cx.id();
                 let stop = cx.stop();
-                self.make(&payload, channel, id, &stop, &|| cx.should_stop())
+                // The adaptation an earlier run paid for and could not
+                // apply, and the one this run leaves unapplied.
+                let mut answer = Kept::answer(cx);
+                let kept = answer.is_some();
+                let made = self.make(
+                    &payload,
+                    channel,
+                    id,
+                    &stop,
+                    &|| cx.should_stop(),
+                    &mut answer,
+                );
+                match (&answer, kept) {
+                    (Some(answer), false) => Kept::keep(cx, answer),
+                    (None, true) => Kept::settle(cx),
+                    _ => {}
+                }
+                made
             }
             None => self.adapt_again(&payload, cx.id(), &cx.stop()),
         }
@@ -516,6 +533,16 @@ impl LocalizationHandler {
     }
 
     /// Makes the version `payload` asked for, for `channel`.
+    ///
+    /// `answer` comes in as the adaptation an earlier run of the job paid
+    /// for and kept, when one did: Claude is not asked again. It goes out
+    /// as the adaptation that is paid for, recorded in Costs and still to
+    /// apply, for the job to keep: the run was told to stop before the
+    /// version was started (the user cancelled, so no project appears in
+    /// the other channel behind their back; or the app is closing), or
+    /// the version could not be saved. It goes out empty once the version
+    /// is made, and when the adaptation turned out not to be usable, so
+    /// that the next run asks Claude again.
     fn make(
         &self,
         payload: &LocalizationPayload,
@@ -523,6 +550,7 @@ impl LocalizationHandler {
         job: JobId,
         stop: &Stop,
         should_stop: &dyn Fn() -> bool,
+        answer: &mut Option<bardo_domain::GeneratedText>,
     ) -> Result<(), JobFailure> {
         let source_id = parse_id::<VideoProjectId>(&payload.project)?;
         let version = parse_id::<VideoProjectId>(
@@ -607,8 +635,12 @@ impl LocalizationHandler {
         let gaps = source_gaps(&narration, &spoken);
 
         // The adaptation is billed on the version once it exists; an
-        // unusable, stopped or failed one only on the channel.
-        let generated = self.ask(payload, job, Some(target.id), None, stop)?;
+        // unusable, stopped or failed one only on the channel, where it
+        // stays when a later run makes the version from it.
+        let (generated, billed) = match answer.take() {
+            Some(kept) => (kept, true),
+            None => (self.ask(payload, job, Some(target.id), None, stop)?, false),
+        };
         let saved = (|| -> Result<bool, JobFailure> {
             let adapted: Adapted =
                 serde_json::from_str(&generated.text).map_err(|e| not_usable(&e.to_string()))?;
@@ -796,12 +828,21 @@ impl LocalizationHandler {
             }
             Ok(true)
         })();
-        self.bill(
-            &generated,
-            job,
-            Some(target.id),
-            matches!(saved, Ok(true)).then_some(version),
-        );
+        if !billed {
+            self.bill(
+                &generated,
+                job,
+                Some(target.id),
+                matches!(saved, Ok(true)).then_some(version),
+            );
+        }
+        let done_with_it = match &saved {
+            Ok(made) => *made,
+            Err(failure) => failure.kind == JobFailureKind::UnexpectedAnswer,
+        };
+        if !done_with_it {
+            *answer = Some(generated);
+        }
         saved.map(|_| ())
     }
 
@@ -1115,11 +1156,7 @@ impl Bardo {
         consent: BudgetConsent,
     ) -> Result<JobId, LocalizationError> {
         let project = self.version_project(project)?;
-        if self
-            .version_jobs(project.id)
-            .iter()
-            .any(|(job, _)| job.state().is_active())
-        {
+        if self.work_busy(&Work::Versions(project.id.to_string())) {
             return Err(LocalizationError::Busy);
         }
         let target = self
@@ -1663,7 +1700,14 @@ mod tests {
 
         let payload = LocalizationPayload::of(&job).unwrap();
         handler(&h, &app)
-            .make(&payload, channel.id, job.id(), &Stop::never(), &|| false)
+            .make(
+                &payload,
+                channel.id,
+                job.id(),
+                &Stop::never(),
+                &|| false,
+                &mut None,
+            )
             .unwrap();
         assert_eq!(h.text.requests().len(), asked, "Claude is asked once");
         assert_eq!(app.video_projects(channel.id).unwrap(), [version]);
@@ -1685,13 +1729,22 @@ mod tests {
         let version = parse_id::<VideoProjectId>(payload.version.as_deref().unwrap()).unwrap();
         answer(&h, &ADAPTED);
         let calls = std::cell::Cell::new(0);
+        let mut kept = None;
         handler(&h, &app)
-            .make(&payload, channel.id, id, &Stop::never(), &|| {
-                calls.set(calls.get() + 1);
-                calls.get() > 1
-            })
+            .make(
+                &payload,
+                channel.id,
+                id,
+                &Stop::never(),
+                &|| {
+                    calls.set(calls.get() + 1);
+                    calls.get() > 1
+                },
+                &mut kept,
+            )
             .unwrap();
         assert_eq!(calls.get(), 2, "stopped after copying");
+        assert!(kept.is_some(), "the paid adaptation is for the job to keep");
         assert!(app.video_projects(channel.id).unwrap().is_empty());
         let plan = app.scenes(source.id).unwrap().plan.unwrap();
         for scene in plan.scenes() {
@@ -1910,5 +1963,179 @@ mod tests {
             app.place_scenes(version.id),
             Err(LocalizationError::NothingToPlace)
         ));
+    }
+
+    /// The costs recorded for `job`'s adaptation.
+    fn adaptation_costs(h: &Harness, app: &Bardo, job: JobId) -> Vec<bardo_domain::CostRecord> {
+        h.db.recent_costs(app.profile().id, CostPurpose::Script, 10)
+            .unwrap()
+            .into_iter()
+            .filter(|cost| cost.job == Some(job))
+            .collect()
+    }
+
+    #[test]
+    fn a_cancelled_version_job_that_still_stops_keeps_versions_busy_and_its_answer_is_kept() {
+        use crate::testing::arriving;
+
+        let h = Harness::new();
+        let app = h.start();
+        let (source, _) = h.drawn_project(&app);
+        let channel = english_channel(&app);
+        let asked = h.text.requests().len();
+        answer(&h, &ADAPTED);
+        let id = arriving::cancelled(&app, &h.text, || {
+            app.make_version(source.id, channel.id, BudgetConsent::Ask)
+                .unwrap()
+        });
+
+        // No second request beside the one still out, from the stage or
+        // from Jobs.
+        assert!(matches!(
+            app.make_version(source.id, channel.id, BudgetConsent::Ask),
+            Err(LocalizationError::Busy)
+        ));
+        arriving::retry_refused(&app, id);
+
+        // The answer arrives whole: the user said stop, so no project is
+        // started in the other channel behind their back. The adaptation
+        // is paid for, in Costs, and kept on the job.
+        arriving::lands(&app, &h.text, id);
+        assert!(app.video_projects(channel.id).unwrap().is_empty());
+        assert!(app.versions(source.id).unwrap().made.is_empty());
+        let costs = adaptation_costs(&h, &app, id);
+        assert_eq!(costs.len(), 1);
+        assert_eq!(
+            (costs[0].channel, costs[0].project),
+            (Some(channel.id), None)
+        );
+
+        // Run again, the job makes the version from the adaptation it
+        // kept: Claude is not asked, or paid, twice.
+        assert_eq!(arriving::retried(&app, id).state(), JobState::Done);
+        assert_eq!(h.text.requests().len(), asked + 1);
+        assert_eq!(adaptation_costs(&h, &app, id).len(), 1);
+        let version = app.versions(source.id).unwrap().made[0].project.clone();
+        assert_eq!(
+            app.script(version.id)
+                .unwrap()
+                .script
+                .unwrap()
+                .text()
+                .as_str(),
+            ADAPTED.join(" ")
+        );
+    }
+
+    #[test]
+    fn a_kept_adaptation_that_is_not_usable_is_let_go() {
+        use crate::testing::arriving;
+
+        let h = Harness::new();
+        let app = h.start();
+        let (source, _) = h.drawn_project(&app);
+        let channel = english_channel(&app);
+        let asked = h.text.requests().len();
+        // One sentence short: not an adaptation of this narration.
+        answer(&h, &ADAPTED[..3]);
+        let id = arriving::cancelled(&app, &h.text, || {
+            app.make_version(source.id, channel.id, BudgetConsent::Ask)
+                .unwrap()
+        });
+        arriving::lands(&app, &h.text, id);
+
+        // The cancelled run saw it was not usable and kept nothing of it:
+        // run again, the job asks Claude again.
+        answer(&h, &ADAPTED);
+        assert_eq!(arriving::retried(&app, id).state(), JobState::Done);
+        assert_eq!(h.text.requests().len(), asked + 2);
+        assert_eq!(app.versions(source.id).unwrap().made.len(), 1);
+    }
+
+    #[test]
+    fn a_cancelled_adaptation_that_still_stops_keeps_the_script_busy_and_its_answer_waits_for_review()
+     {
+        use crate::testing::arriving;
+
+        let h = Harness::new();
+        let app = h.start();
+        let (_, _, version) = made(&h, &app);
+        let first = app.script(version.id).unwrap().script.unwrap();
+        let asked = h.text.requests().len();
+        answer(
+            &h,
+            &[
+                "In 1969, a probe set off.",
+                "It went far.",
+                "In March, the signal died.",
+                "No one knows why.",
+            ],
+        );
+        let id = arriving::cancelled(&app, &h.text, || {
+            app.generate_script(version.id, BudgetConsent::Ask).unwrap()
+        });
+
+        // No second request beside the one still out, from the stage or
+        // from Jobs.
+        assert!(matches!(
+            app.generate_script(version.id, BudgetConsent::Ask),
+            Err(ScriptError::Busy)
+        ));
+        arriving::retry_refused(&app, id);
+
+        // The answer arrives whole: it is paid for, replaces nothing, and
+        // waits for review beside the script.
+        arriving::lands(&app, &h.text, id);
+        let script = app.script(version.id).unwrap().script.unwrap();
+        assert_eq!(script.text(), first.text());
+        assert!(script.pending().is_some());
+
+        // Run again, the job finds its adaptation: Claude is not asked
+        // twice.
+        assert_eq!(arriving::retried(&app, id).state(), JobState::Done);
+        assert_eq!(h.text.requests().len(), asked + 1);
+    }
+
+    #[test]
+    fn a_version_answered_while_the_app_closes_is_made_from_that_answer_on_the_next_start() {
+        use crate::testing::arriving;
+
+        let mut h = Harness::new();
+        // The app waits for the answer, which comes in time.
+        h.closing_wait = Some(Duration::from_secs(60));
+        let app = h.start();
+        let (source, _) = h.drawn_project(&app);
+        let channel = english_channel(&app);
+        let asked = h.text.requests().len();
+        answer(&h, &ADAPTED);
+        *h.text.deaf.lock().unwrap() = true;
+        h.text.hold();
+        let id = app
+            .make_version(source.id, channel.id, BudgetConsent::Ask)
+            .unwrap();
+        arriving::wait_until("the request left", || h.text.requests().len() > asked);
+        let probe = app.jobs.probe();
+
+        // The answer arrives once the app has begun to close: the run is
+        // told to stop, and starts no version.
+        let text = Arc::clone(&h.text);
+        let closing = app.jobs.probe();
+        let answer = std::thread::spawn(move || {
+            arriving::wait_until("the app is closing", || closing.closing());
+            assert!(closing.runs(id), "the answer is still on its way");
+            text.let_go();
+        });
+        drop(app);
+        answer.join().unwrap();
+        assert!(!probe.runs(id), "the app waited for the handler");
+        *h.text.deaf.lock().unwrap() = false;
+
+        // The next start takes the job up by itself and makes the version
+        // from the adaptation it kept: Claude is not asked, or paid, twice.
+        let app = h.start();
+        assert_eq!(done(&app, id).state(), JobState::Done);
+        assert_eq!(h.text.requests().len(), asked + 1);
+        assert_eq!(adaptation_costs(&h, &app, id).len(), 1);
+        assert_eq!(app.versions(source.id).unwrap().made.len(), 1);
     }
 }

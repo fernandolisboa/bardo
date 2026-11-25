@@ -1595,6 +1595,86 @@ pub(crate) mod testing {
         }
     }
 
+    /// For the tests of a text job that is cancelled as its answer
+    /// arrives: the job reads cancelled at once, while its handler is
+    /// still in the request.
+    pub(crate) mod arriving {
+        use std::time::{Duration, Instant};
+
+        use bardo_domain::{Job, JobId, JobState};
+
+        use super::FakeTextGenerator;
+        use crate::jobs::JobActionError;
+        use crate::{Bardo, Text};
+
+        /// How long a wait may take before the test fails. Generous: a
+        /// loaded CI runner can stall the worker threads for over ten
+        /// seconds, and a passing test never waits this long.
+        const STALLED: Duration = Duration::from_secs(60);
+
+        pub(crate) fn wait_until(what: &str, done: impl Fn() -> bool) {
+            let deadline = Instant::now() + STALLED;
+            while !done() {
+                assert!(Instant::now() < deadline, "never: {what}");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+
+        fn job(app: &Bardo, id: JobId) -> Job {
+            app.jobs()
+                .into_iter()
+                .find(|job| job.id() == id)
+                .expect("the job is there")
+        }
+
+        /// Starts a job with `start` and cancels it once its request to
+        /// Claude left. The answer queued for it is on its way whole, and
+        /// arrives when the test lets it ([`lands`]), whatever the cancel
+        /// said meanwhile: until then the job reads cancelled while its
+        /// handler is still at work.
+        pub(crate) fn cancelled(
+            app: &Bardo,
+            text: &FakeTextGenerator,
+            start: impl FnOnce() -> JobId,
+        ) -> JobId {
+            *text.deaf.lock().unwrap() = true;
+            text.hold();
+            let asked = text.requests().len();
+            let id = start();
+            wait_until("the request left", || text.requests().len() > asked);
+            app.cancel_job(id).unwrap();
+            assert_eq!(job(app, id).state(), JobState::Cancelled);
+            assert!(app.job_runs_here(id), "the handler has not returned yet");
+            id
+        }
+
+        /// Lets the answer of a job [`cancelled`] arrive, and waits until
+        /// its handler returned. From here on Claude answers at once.
+        pub(crate) fn lands(app: &Bardo, text: &FakeTextGenerator, id: JobId) {
+            text.let_go();
+            wait_until("the handler returned", || !app.job_runs_here(id));
+            *text.deaf.lock().unwrap() = false;
+            assert_eq!(job(app, id).state(), JobState::Cancelled);
+        }
+
+        /// Jobs refuses to run the job again: another job is at work on
+        /// the same thing, or its own cancelled run has yet to return.
+        pub(crate) fn retry_refused(app: &Bardo, id: JobId) {
+            let held = app.retry_job(id).unwrap_err();
+            assert!(matches!(held, JobActionError::SameWork), "{held:?}");
+            assert_eq!(held.message(), Text::JobSameWork);
+        }
+
+        /// Runs the job again from Jobs and waits until it is over.
+        pub(crate) fn retried(app: &Bardo, id: JobId) -> Job {
+            app.retry_job(id).unwrap();
+            wait_until("the retried job ended", || {
+                !job(app, id).state().is_active() && !app.job_runs_here(id)
+            });
+            job(app, id)
+        }
+    }
+
     /// Answers every score question from what its instructions mention:
     /// the level set in `levels` for the first matching needle, the middle
     /// level otherwise, always with `confidence`.

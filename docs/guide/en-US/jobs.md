@@ -25,7 +25,7 @@ A running job shows a bar and its percent. Screens show their own jobs too: a st
 
 **Cancel** stops a running or queued job. What it already made is kept for a retry, and a call a provider already answered is paid and counted in [Costs](costs.md#spent). A cancelled render or export keeps the networks it finished, and a retry does the ones left.
 
-A text Claude is still writing (a script, a scene plan, a title) is given up when its job is cancelled: Bardo stops reading and closes the connection instead of waiting for the end. Claude may charge for what it wrote until then, so [Costs](costs.md#spent) counts an estimate of the whole text, which may be more than a text cancelled early cost. A scene plan whose answer arrives just as you cancel is not applied to the project; it is paid, and **Retry** on that job, or **Plan scenes** on the Scenes stage, makes the plan from it without asking Claude again.
+A text Claude is still writing (a script, a scene plan, a title) is given up when its job is cancelled: Bardo stops reading and closes the connection instead of waiting for the end. Claude may charge for what it wrote until then, so [Costs](costs.md#spent) counts an estimate of the whole text, which may be more than a text cancelled early cost. A scene plan whose answer arrives just as you cancel is not applied to the project; it is paid, and **Retry** on that job, or **Plan scenes** on the Scenes stage, makes the plan from it without asking Claude again. A version for another channel or a take prompt whose answer arrives just then is not applied either, and **Retry** on that job uses it. Any other text that arrives just then (a script, chapters, a title) is saved as usual.
 
 <a id="retry"></a>
 ## Retrying
@@ -39,6 +39,8 @@ A clip request the provider took and that then ended without a clip (failed, can
 **Retry**, on a failed or cancelled job, queues it again. It goes on from the last point it saved rather than from the start, and an image or clip job does only the scenes it has not delivered: what you did with a delivered image or clip since (rejected it, replaced it) does not bring it back. An image or clip job is not retried while another job works on the same scenes: wait for that one to end, so that no scene is paid for twice. Fix what the failure names first: see [Troubleshooting](troubleshooting.md).
 
 A scene plan or image job is not queued again while another scene job of its project is queued, running or still stopping: the two would pay for the same work. And an older scene plan job is not queued again once a newer scene job of the project came after it, since it could replace the plan made since: retry the newer job, or plan again from the [Scenes](scenes.md) stage, which asks first.
+
+The same holds for the other jobs in which Claude writes a text (a script, chapters, a thumbnail, a music prompt, metadata, ideas, a version, a persona's look, a take prompt): one is not queued again while another job works on the same thing, or while its own cancelled run is still stopping. Its stage does not start a new one in those moments either. Wait for it to end, then try again.
 
 <a id="restart"></a>
 ## Closing Bardo mid-job

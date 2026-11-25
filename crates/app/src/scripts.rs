@@ -22,7 +22,7 @@ use bardo_domain::{
 use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
-use crate::jobs::{JobContext, JobHandler};
+use crate::jobs::{JobContext, JobHandler, Work};
 use crate::{Bardo, Catalog, KeyState, TemplateError, Text};
 
 /// What a variable says when the channel left it blank, so the prompt
@@ -413,10 +413,7 @@ impl Bardo {
         consent: BudgetConsent,
     ) -> Result<JobId, ScriptError> {
         let project = self.own_project(project)?;
-        if self
-            .latest_script_job(project.id)
-            .is_some_and(|job| job.state().is_active())
-        {
+        if self.work_busy(&Work::Script(project.id.to_string())) {
             return Err(ScriptError::Busy);
         }
         if self.provider_key(Provider::Claude).state == KeyState::NotSet {
@@ -1241,5 +1238,70 @@ mod tests {
             .unwrap();
         assert_eq!(row(&app).rate.price, dollars("4"));
         assert!(!row(&app).changed);
+    }
+
+    #[test]
+    fn a_cancelled_script_job_that_still_stops_keeps_the_script_busy_and_its_answer_is_saved() {
+        use crate::testing::arriving;
+
+        let h = Harness::new();
+        h.answer(&["Era uma vez uma sonda."]);
+        let app = h.start_with_key();
+        let project = project(&app);
+        let id = arriving::cancelled(&app, &h.text, || {
+            app.generate_script(project.id, BudgetConsent::Ask).unwrap()
+        });
+
+        // No second request beside the one still out, from the stage or
+        // from Jobs.
+        assert!(matches!(
+            app.generate_script(project.id, BudgetConsent::Ask),
+            Err(ScriptError::Busy)
+        ));
+        arriving::retry_refused(&app, id);
+
+        // The answer arrives whole: it is paid for, replaces nothing, and
+        // is the project's script.
+        arriving::lands(&app, &h.text, id);
+        assert_eq!(
+            script(&app, &project).text().as_str(),
+            "Era uma vez uma sonda."
+        );
+
+        // Run again, the job finds its script: Claude is not asked twice.
+        assert_eq!(arriving::retried(&app, id).state(), JobState::Done);
+        assert_eq!(h.text.requests().len(), 1);
+    }
+
+    #[test]
+    fn an_older_script_job_is_not_run_again_beside_a_newer_one_at_work() {
+        use crate::testing::arriving;
+
+        let h = Harness::new();
+        let app = h.start_with_key();
+        let project = project(&app);
+        *h.text.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "not this time",
+        ));
+        let older = generate(&app, &project);
+        assert_eq!(older.state(), JobState::Failed);
+        *h.text.failure.lock().unwrap() = None;
+
+        // A newer job is out, with its request.
+        h.answer(&["Era uma vez uma sonda."]);
+        h.text.hold();
+        let asked = h.text.requests().len();
+        let newer = app.generate_script(project.id, BudgetConsent::Ask).unwrap();
+        arriving::wait_until("the request left", || h.text.requests().len() > asked);
+
+        arriving::retry_refused(&app, older.id());
+
+        // Once it ended, the older one runs again as before.
+        h.text.let_go();
+        assert_eq!(wait_done(&app, newer).state(), JobState::Done);
+        arriving::wait_until("the handler returned", || !app.job_runs_here(newer));
+        h.answer(&["Outra sonda."]);
+        assert_eq!(arriving::retried(&app, older.id()).state(), JobState::Done);
     }
 }

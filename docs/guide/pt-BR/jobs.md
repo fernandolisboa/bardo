@@ -25,7 +25,7 @@ Uma tarefa em execução mostra uma barra e o percentual. As telas também mostr
 
 **Cancelar** para uma tarefa em execução ou na fila. O que ela já fez fica guardado para uma nova tentativa, e uma chamada que o provedor já respondeu está paga e conta em [Custos](costs.md#spent). Um render ou uma exportação cancelada guarda as redes que já terminou, e uma nova tentativa faz as que faltam.
 
-Um texto que o Claude ainda está escrevendo (um roteiro, um plano de cenas, um título) é abandonado quando a tarefa é cancelada: o Bardo para de ler e fecha a conexão em vez de esperar o fim. O Claude pode cobrar pelo que escreveu até ali, então [Custos](costs.md#spent) conta uma estimativa do texto inteiro, que pode ser mais do que custou um texto cancelado cedo. Um plano de cenas cuja resposta chega bem na hora em que você cancela não é aplicado ao projeto; ele está pago, e **Tentar de novo** nessa tarefa, ou **Planejar cenas** na etapa Cenas, faz o plano a partir dessa resposta sem pedir de novo ao Claude.
+Um texto que o Claude ainda está escrevendo (um roteiro, um plano de cenas, um título) é abandonado quando a tarefa é cancelada: o Bardo para de ler e fecha a conexão em vez de esperar o fim. O Claude pode cobrar pelo que escreveu até ali, então [Custos](costs.md#spent) conta uma estimativa do texto inteiro, que pode ser mais do que custou um texto cancelado cedo. Um plano de cenas cuja resposta chega bem na hora em que você cancela não é aplicado ao projeto; ele está pago, e **Tentar de novo** nessa tarefa, ou **Planejar cenas** na etapa Cenas, faz o plano a partir dessa resposta sem pedir de novo ao Claude. Uma versão para outro canal ou um prompt de tomada cuja resposta chega nessa hora também não é aplicado, e **Tentar de novo** nessa tarefa usa essa resposta. Qualquer outro texto que chega nessa hora (um roteiro, capítulos, um título) é salvo normalmente.
 
 <a id="retry"></a>
 ## Tentar de novo
@@ -39,6 +39,8 @@ Um pedido de clipe que o provedor aceitou e que depois terminou sem clipe (falho
 **Tentar de novo**, numa tarefa com falha ou cancelada, coloca ela na fila de novo. Ela continua do último ponto que salvou, não do começo, e uma tarefa de imagens ou de clipes faz só as cenas que ainda não entregou: o que você fez depois com uma imagem ou um clipe já entregue (rejeitou, substituiu) não o traz de volta. Uma tarefa de imagens ou de clipes não é tentada de novo enquanto outra trabalha nas mesmas cenas: espere essa terminar, para nenhuma cena ser paga duas vezes. Resolva antes o que a falha aponta: veja [Solução de problemas](troubleshooting.md).
 
 Uma tarefa de plano de cenas ou de imagens não volta para a fila enquanto outra tarefa de cenas do mesmo projeto está na fila, em execução ou ainda parando: as duas pagariam pelo mesmo trabalho. E uma tarefa de plano de cenas mais antiga não volta para a fila depois que uma tarefa de cenas mais nova do projeto veio depois dela, porque poderia substituir o plano feito depois: tente de novo a tarefa mais nova, ou planeje de novo pela etapa [Cenas](scenes.md), que pergunta antes.
+
+O mesmo vale para as outras tarefas em que o Claude escreve um texto (um roteiro, capítulos, uma miniatura, um prompt de música, metadados, ideias, uma versão, a aparência de uma persona, um prompt de tomada): uma delas não volta para a fila enquanto outra tarefa trabalha na mesma coisa, ou enquanto a própria execução cancelada ainda está parando. A etapa também não inicia uma nova nesses instantes. Espere terminar e tente de novo.
 
 <a id="restart"></a>
 ## Fechar o Bardo no meio de uma tarefa
