@@ -216,15 +216,20 @@ impl Bardo {
         }
         let (scenes, portraits) = match &plan {
             Some(plan) => {
+                let being_made = self.clips_being_made(plan);
                 let scenes: Vec<PlannedScene> = plan
                     .scenes()
                     .iter()
-                    .map(|scene| PlannedScene {
+                    .enumerate()
+                    .map(|(index, scene)| PlannedScene {
                         start: scene.start,
                         length: scene.duration(),
                         needs_image: scene.image().is_none(),
-                        // A clip waiting for review is already paid for.
-                        needs_clip: scene.clip().is_none() && scene.pending_clip().is_none(),
+                        // A clip waiting for review is already paid for,
+                        // and so is one a provider is making.
+                        needs_clip: scene.clip().is_none()
+                            && scene.pending_clip().is_none()
+                            && !being_made.contains(&index),
                         own_model: scene.clip_model().cloned(),
                     })
                     .collect();
@@ -338,7 +343,8 @@ impl Bardo {
         {
             let spent = self.project_spend(project.id)?;
             // A call with no rate could pass the cap unseen, so it asks too.
-            // Jobs still running count once they record what they spent.
+            // A clip counts from when its provider accepts it; other jobs
+            // still running count once they record what they spent.
             if spent.saturating_add(estimate.total()) > cap || estimate.is_partial() {
                 estimate.cap = Some(CapReached {
                     cap,

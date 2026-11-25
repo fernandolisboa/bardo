@@ -661,7 +661,9 @@ impl FromStr for CostPurpose {
 }
 
 /// One paid provider call. Never changes once saved, and outlives the
-/// channel or video it was for: the money was spent.
+/// channel or video it was for: the money was spent. The one record that
+/// goes is of a request written down when its provider accepted it and
+/// which that provider then failed without billing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CostRecord {
     pub id: CostRecordId,
@@ -747,7 +749,14 @@ impl Spend {
 /// Persistence port for cost records, the user's rate changes and
 /// budgets. Shared with job worker threads.
 pub trait CostRepository: Send + Sync {
+    /// Saves the record. A record with an id already saved changes
+    /// nothing, so a caller that keeps the id can record again after a
+    /// crash without counting the call twice.
     fn record_cost(&self, record: &CostRecord) -> Result<(), RepositoryError>;
+
+    /// Takes back the record of a request its provider accepted and then
+    /// failed without billing. Nothing happens when it is not there.
+    fn remove_cost(&self, id: CostRecordId) -> Result<(), RepositoryError>;
 
     /// The profile's records from `from` (inclusive) to `to` (exclusive),
     /// oldest first.
@@ -795,6 +804,10 @@ pub trait CostRepository: Send + Sync {
 impl<T: CostRepository + ?Sized> CostRepository for Arc<T> {
     fn record_cost(&self, record: &CostRecord) -> Result<(), RepositoryError> {
         (**self).record_cost(record)
+    }
+
+    fn remove_cost(&self, id: CostRecordId) -> Result<(), RepositoryError> {
+        (**self).remove_cost(id)
     }
 
     fn costs_between(

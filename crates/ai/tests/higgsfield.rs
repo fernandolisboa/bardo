@@ -313,9 +313,13 @@ fn requests_that_end_without_a_clip_are_failures_of_their_kind() {
     ];
     for (name, kind, detail) in cases {
         let status = clips(&[name]).status(&key(), &handle()).unwrap();
-        let ClipStatus::Failed(failure) = status else {
-            panic!("{name}: {status:?}");
+        let (failure, lost) = match status {
+            ClipStatus::Failed(failure) => (failure, false),
+            ClipStatus::Lost(failure) => (failure, true),
+            other => panic!("{name}: {other:?}"),
         };
+        // Only work the provider cannot account for may have been charged.
+        assert_eq!(lost, matches!(name, "status-not-found"), "{name}");
         assert_eq!(failure.kind, kind, "{name}");
         assert!(
             failure.detail.contains(detail),

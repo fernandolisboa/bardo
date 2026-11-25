@@ -386,9 +386,17 @@ fn work_that_ends_without_a_clip_is_a_failure_of_its_kind() {
         let status = clips(&[name])
             .status(&key(), &ClipHandle(handle.into()))
             .unwrap();
-        let ClipStatus::Failed(failure) = status else {
-            panic!("{name}: {status:?}");
+        let (failure, lost) = match status {
+            ClipStatus::Failed(failure) => (failure, false),
+            ClipStatus::Lost(failure) => (failure, true),
+            other => panic!("{name}: {other:?}"),
         };
+        // Only work the provider cannot account for may have been charged.
+        assert_eq!(
+            lost,
+            matches!(name, "omni-cancelled" | "not-found"),
+            "{name}"
+        );
         assert_eq!(failure.kind, kind, "{name}");
         assert!(
             failure.detail.contains(detail),

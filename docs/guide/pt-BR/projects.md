@@ -49,7 +49,7 @@ A duração define só quanto dura o próximo roteiro e a [estimativa do vídeo 
 
 Um modo cujos clipes precisam de uma chave que você não salvou avisa no menu: os modos do Kling precisam de uma chave Kling em [Configurações › Chaves de API](bardo:go/settings/keys). Trocar o modo vale para o que for animado depois: na etapa Clipes, **Animar cenas sem clipe** (ou **Animar o gancho**) anima só as cenas que o modo anima, clipes já feitos ficam, e qualquer cena ainda pode ser animada à mão com qualquer modelo.
 
-**Teto** é quanto este vídeo pode custar antes de o Bardo perguntar. Um passo pago do vídeo (roteiro, narração, imagens, clipes, takes) que levaria o gasto além do teto pergunta antes, com quanto o passo custa e quanto o resto do vídeo custaria no modo dele; **Gerar mesmo assim** segue. Um passo de preço desconhecido também pergunta. Um job ainda rodando conta para o teto quando termina, então iniciar vários ao mesmo tempo pode passar dele. Deixe vazio para não ter teto.
+**Teto** é quanto este vídeo pode custar antes de o Bardo perguntar. Um passo pago do vídeo (roteiro, narração, imagens, clipes, takes) que levaria o gasto além do teto pergunta antes, com quanto o passo custa e quanto o resto do vídeo custaria no modo dele; **Gerar mesmo assim** segue. Um passo de preço desconhecido também pergunta. Um clipe conta para o teto assim que o provedor o aceita; o resto do que um job em andamento faz conta quando ele termina, então iniciar vários jobs ao mesmo tempo pode passar dele. Deixe vazio para não ter teto.
 
 <a id="stages"></a>
 ## As etapas
