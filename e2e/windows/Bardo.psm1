@@ -97,11 +97,32 @@ function Stop-BardoWindow {
 }
 
 function Stop-BardoAll {
-    $running = @(Get-Process bardo -ErrorAction SilentlyContinue)
-    $running | Stop-Process -Force -ErrorAction SilentlyContinue
-    # Stopping returns before the processes are gone: wait, so that their
-    # files (bardo.db) are free to read.
-    $running | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
+    # Until none is left: one may start (a window opening, the agent's
+    # task) after the others were listed.
+    $deadline = (Get-Date).AddSeconds(60)
+    do {
+        $running = @(Get-Process bardo -ErrorAction SilentlyContinue)
+        if ($running.Count -eq 0) { break }
+        $running | Stop-Process -Force -ErrorAction SilentlyContinue
+        # Stopping returns before the processes are gone: wait, so that
+        # their files (bardo.db) are free to read.
+        $running | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
+    } while ((Get-Date) -lt $deadline)
+}
+
+# The bytes of a file another process may hold for a moment longer (a
+# database its process has just left): tried again for up to `$Seconds`.
+function Read-FileWhenFree {
+    param([Parameter(Mandatory)][string]$Path, [int]$Seconds = 30)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ($true) {
+        try {
+            return , [System.IO.File]::ReadAllBytes($Path)
+        } catch {
+            if ((Get-Date) -ge $deadline) { throw }
+            Start-Sleep -Milliseconds 500
+        }
+    }
 }
 
 # The agent's task as Task Scheduler holds it, or $null.
@@ -168,4 +189,4 @@ function Get-Credentials {
 
 Export-ModuleMember -Function Invoke-Harness, Get-Credentials, Get-BardoPaths, Invoke-Setup, Install-Bardo, Uninstall-Bardo,
     Get-BardoProcesses, Start-BardoWindow, Stop-BardoWindow, Stop-BardoAll, Get-AgentTask,
-    Get-FileSha256, Save-Screen
+    Get-FileSha256, Read-FileWhenFree, Save-Screen
