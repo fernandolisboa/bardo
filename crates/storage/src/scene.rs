@@ -2,8 +2,9 @@ use std::time::Duration;
 
 use bardo_domain::{
     CastMember, CastRecord, GenerationId, JobFailureKind, NarrationId, Place, PlaceRecord,
-    ProfileId, RepositoryError, Scene, SceneClip, SceneImage, ScenePlan, ScenePlanId,
-    ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, StretchLimit, VideoProjectId,
+    PortraitsUsed, ProfileId, RepositoryError, Scene, SceneClip, SceneImage, ScenePlan,
+    ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, StretchLimit,
+    VideoProjectId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
@@ -54,6 +55,8 @@ struct SceneRow {
     cast_members: String,
     planned_motion: Option<String>,
     place: Option<i64>,
+    image_portraits: Option<String>,
+    pending_portraits: Option<String>,
 }
 
 /// A scene's cast members as stored: positions separated by commas.
@@ -72,6 +75,38 @@ fn parse_cast_members(text: &str) -> Result<Vec<usize>, RepositoryError> {
         .map(|part| {
             part.parse::<usize>()
                 .map_err(|_| invalid(format!("cast member {part}")))
+        })
+        .collect()
+}
+
+/// The portraits an image was drawn with, as the `scene` table keeps them.
+fn portraits_used(portraits: Option<&PortraitsUsed>) -> Option<String> {
+    portraits.map(|portraits| {
+        portraits
+            .iter()
+            .map(|(member, portrait)| match portrait {
+                Some(id) => format!("{member}:{id}"),
+                None => format!("{member}:-"),
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    })
+}
+
+/// Reads what [`portraits_used`] wrote. A value that does not read is
+/// taken as not recorded, like an image from before the record: the plan
+/// still loads, and the image is told by the portraits there are now.
+fn parse_portraits_used(text: Option<&str>) -> Option<PortraitsUsed> {
+    text?
+        .split(',')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let (member, portrait) = part.split_once(':')?;
+            let portrait = match portrait {
+                "-" => None,
+                id => Some(GenerationId::from(uuid(id).ok()?)),
+            };
+            Some((member.parse::<usize>().ok()?, portrait))
         })
         .collect()
 }
@@ -161,7 +196,11 @@ impl SceneRow {
         })
         .with_cast(parse_cast_members(&self.cast_members)?)
         .with_planned_motion(self.planned_motion.as_deref().map(prompt).transpose()?)
-        .with_place(self.place.map(usize::try_from).transpose().map_err(boxed)?))
+        .with_place(self.place.map(usize::try_from).transpose().map_err(boxed)?)
+        .with_portraits(
+            parse_portraits_used(self.image_portraits.as_deref()),
+            parse_portraits_used(self.pending_portraits.as_deref()),
+        ))
     }
 }
 
@@ -171,7 +210,8 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
             "SELECT start_ms, end_ms, text, generated_prompt, prompt, image_file,
                  image_generation_id, pending_file, pending_generation_id, failure,
                  motion_prompt, clip_provider, clip_model, clip_failure, position,
-                 cast_members, planned_motion_prompt, place
+                 cast_members, planned_motion_prompt, place, image_portraits,
+                 pending_portraits
              FROM scene WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -193,6 +233,8 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                     cast_members: row.get(15)?,
                     planned_motion: row.get(16)?,
                     place: row.get(17)?,
+                    image_portraits: row.get(18)?,
+                    pending_portraits: row.get(19)?,
                 },
                 row.get::<_, i64>(14)?,
             ))
@@ -210,7 +252,7 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
     let mut statement = conn
         .prepare(
             "SELECT name, generated_description, description, portrait_file,
-                 portrait_generation_id, failure
+                 portrait_generation_id, failure, described_only
              FROM scene_cast WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -222,6 +264,7 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
         Option<String>,
         Option<String>,
         Option<String>,
+        bool,
     )> = statement
         .query_map([plan], |row| {
             Ok((
@@ -231,6 +274,7 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
                 row.get(3)?,
                 row.get(4)?,
                 row.get(5)?,
+                row.get(6)?,
             ))
         })
         .map_err(boxed)?
@@ -238,14 +282,15 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
         .map_err(boxed)?;
     rows.into_iter()
         .map(
-            |(name, generated, description, file, generation_id, failure)| {
+            |(name, generated, description, file, generation_id, failure, described_only)| {
                 Ok(CastMember::restore(CastRecord {
                     name,
                     generated_description: prompt(&generated)?,
                     description: prompt(&description)?,
                     portrait: image(conn, (file, generation_id))?,
                     failure: failure_kind(failure)?,
-                }))
+                })
+                .with_described_only(described_only))
             },
         )
         .collect()
@@ -264,13 +309,14 @@ fn write_cast_member(
     }
     tx.execute(
         "INSERT INTO scene_cast (plan_id, position, name, generated_description, description,
-             portrait_file, portrait_generation_id, failure)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             portrait_file, portrait_generation_id, failure, described_only)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT (plan_id, position) DO UPDATE SET
              description = excluded.description,
              portrait_file = excluded.portrait_file,
              portrait_generation_id = excluded.portrait_generation_id,
-             failure = excluded.failure",
+             failure = excluded.failure,
+             described_only = excluded.described_only",
         params![
             plan,
             position(index)?,
@@ -282,6 +328,7 @@ fn write_cast_member(
                 .portrait()
                 .map(|portrait| portrait.generation.id.to_string()),
             member.failure().map(|kind| kind.code()),
+            member.is_described_only(),
         ],
     )
     .map_err(boxed)?;
@@ -399,9 +446,9 @@ fn insert_scene(
         "INSERT INTO scene (plan_id, position, start_ms, end_ms, text, generated_prompt,
              prompt, image_file, image_generation_id, pending_file, pending_generation_id,
              failure, motion_prompt, clip_provider, clip_model, clip_failure, cast_members,
-             planned_motion_prompt, place)
+             planned_motion_prompt, place, image_portraits, pending_portraits)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-             ?18, ?19)",
+             ?18, ?19, ?20, ?21)",
         params![
             plan,
             position(index)?,
@@ -422,6 +469,8 @@ fn insert_scene(
             cast_members(scene),
             scene.planned_motion().map(ScenePrompt::as_str),
             scene.place().map(position).transpose()?,
+            portraits_used(scene.image_portraits()),
+            portraits_used(scene.pending_portraits()),
         ],
     )
     .map_err(boxed)?;
@@ -555,7 +604,7 @@ impl ScenePlanRepository for Database {
                 "UPDATE scene SET prompt = ?3, image_file = ?4, image_generation_id = ?5,
                      pending_file = ?6, pending_generation_id = ?7, failure = ?8,
                      motion_prompt = ?9, clip_provider = ?10, clip_model = ?11,
-                     clip_failure = ?12
+                     clip_failure = ?12, image_portraits = ?13, pending_portraits = ?14
                  WHERE plan_id = ?1 AND position = ?2",
                 params![
                     id,
@@ -570,6 +619,8 @@ impl ScenePlanRepository for Database {
                     scene.clip_model().map(|model| model.provider().code()),
                     scene.clip_model().map(|model| model.model()),
                     scene.clip_failure().map(|kind| kind.code()),
+                    portraits_used(scene.image_portraits()),
+                    portraits_used(scene.pending_portraits()),
                 ],
             )
             .map_err(boxed)?;
@@ -864,7 +915,10 @@ mod tests {
             // then migrated.
             let mut conn = s.db.conn();
             conn.execute_batch(
-                "DROP TABLE product_logo; DROP TABLE product_image; DROP TABLE product;
+                "ALTER TABLE scene_cast DROP COLUMN described_only;
+                 ALTER TABLE scene DROP COLUMN pending_portraits;
+                 ALTER TABLE scene DROP COLUMN image_portraits;
+                 DROP TABLE product_logo; DROP TABLE product_image; DROP TABLE product;
                  ALTER TABLE job DROP COLUMN paid_call;
                  ALTER TABLE scene_clip DROP COLUMN stretch_percent;
                  ALTER TABLE channel DROP COLUMN clip_stretch_percent;
@@ -905,12 +959,72 @@ mod tests {
         assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));
         assert!(s.db.save_cast_member(&plan, 4).is_err());
 
+        // The choice to draw them from the description alone is kept, by
+        // itself and with the whole plan.
+        let engineer = plan.cast_mut(0, time(1_800_000_042)).unwrap();
+        engineer.set_described_only(true);
+        s.db.save_cast_member(&plan, 0).unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert!(stored.cast()[0].is_described_only());
+        assert_eq!(stored, plan);
+        s.db.save_scene_plan(&plan).unwrap();
+        assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));
+
         let other = self::plan(&s);
         s.db.save_scene_plan(&other).unwrap();
         assert!(
             s.db.save_cast_member(&plan, 0).is_err(),
             "the replaced plan is gone"
         );
+    }
+
+    #[test]
+    fn the_portraits_an_image_was_drawn_with_round_trip() {
+        let s = setup();
+        let mut plan = plan(&s);
+        s.db.save_scene_plan(&plan).unwrap();
+        let portrait = image(&s, "cast-1.png");
+        let used = Some(vec![(0, Some(portrait.generation.id)), (2, None)]);
+
+        // An image from before portraits were recorded has none, and one
+        // drawn showing nobody has an empty list: the two stay apart.
+        let scene = plan.scene_mut(0, time(1_800_000_050)).unwrap();
+        scene.add_image(image(&s, "one.png"));
+        scene.add_image_drawn_with(image(&s, "two.png"), used.clone());
+        let scene = plan.scene_mut(1, time(1_800_000_050)).unwrap();
+        scene.add_image_drawn_with(image(&s, "three.png"), Some(Vec::new()));
+        s.db.save_scene(&plan, 0).unwrap();
+        s.db.save_scene(&plan, 1).unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored.scenes()[0].image_portraits(), None);
+        assert_eq!(stored.scenes()[0].pending_portraits(), used.as_ref());
+        assert_eq!(stored.scenes()[1].image_portraits(), Some(&Vec::new()));
+        assert_eq!(stored, plan);
+
+        // Accepted, the new image's portraits become the scene's, with the
+        // whole plan saved too.
+        plan.scene_mut(0, time(1_800_000_051))
+            .unwrap()
+            .accept_image()
+            .unwrap();
+        s.db.save_scene_plan(&plan).unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored.scenes()[0].image_portraits(), used.as_ref());
+        assert_eq!(stored, plan);
+    }
+
+    #[test]
+    fn a_portrait_record_that_does_not_read_counts_as_not_recorded() {
+        let id = GenerationId::new();
+        assert_eq!(parse_portraits_used(None), None);
+        assert_eq!(parse_portraits_used(Some("")), Some(Vec::new()));
+        assert_eq!(
+            parse_portraits_used(Some(&format!("0:{id},2:-"))),
+            Some(vec![(0, Some(id)), (2, None)])
+        );
+        for broken in ["0", "x:-", "0:not-an-id", &format!("0:{id},1")] {
+            assert_eq!(parse_portraits_used(Some(broken)), None, "{broken}");
+        }
     }
 
     #[test]

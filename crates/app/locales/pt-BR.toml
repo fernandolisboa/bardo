@@ -384,6 +384,7 @@ checksum = "O instalador não confere com o checksum publicado na versão, entã
 off_script = "A gravação não segue o roteiro de perto o bastante. Grave de novo lendo o roteiro atual e importe."
 vision_models = "Os modelos de rosto, profundidade e máscara estão faltando, danificados ou não rodaram. Reinstale o Bardo para recolocá-los e tente de novo."
 out_of_date = "A narração foi feita de novo depois que estas cenas foram planejadas, então nada mais foi feito para elas. Na etapa Cenas, ajuste as cenas à narração ou planeje de novo (numa versão, posicione as cenas), e comece de novo."
+portrait_missing = "O retrato de uma pessoa da cena está faltando ou não pôde ser enviado, e uma cena não é desenhada sem ele. Desenhe o retrato de novo em Pessoas nesta cena, ou escolha Desenhar sem retrato ali, e depois desenhe a cena."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -1911,6 +1912,17 @@ edit = "Editar aparência"
 redraw = "Desenhar retrato de novo"
 failed = "O retrato não foi desenhado:"
 edited = "Editado"
+described_only = "Sem retrato"
+described_only_hint = "Desenhada só pela descrição, como você escolheu: nenhum retrato é desenhado nem enviado para esta pessoa, então o rosto dela pode mudar de uma cena para outra."
+draw_without = "Desenhar sem retrato"
+use_portrait = "Usar um retrato"
+
+[scenes.old_portraits]
+title = "Cenas com um rosto antigo: {n}"
+hint = "Estas imagens não batem com o retrato de alguém que elas mostram: foram desenhadas com um retrato mais antigo dessa pessoa, ou sem retrato. Elas ficam como estão até serem desenhadas de novo, e cada imagem nova espera a revisão ao lado da atual. Um retrato que falta é desenhado antes."
+redraw = "Desenhar todas de novo"
+scene = "Esta imagem não bate com o retrato de alguém que aparece nela: foi desenhada com um retrato mais antigo, ou sem retrato. Desenhe de novo para igualar."
+card = "Rosto antigo"
 
 [scenes.restyled]
 title = "Cenas em outro estilo: {n}"
@@ -3038,7 +3050,7 @@ body = "Cada cena em ordem, com o tempo, a imagem e como está: para desenhar, p
 
 [tour.scenes.scene]
 title = "Uma cena"
-body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Edite o prompt para mudar o que o próximo desenho mostra."
+body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato de cada pessoa dela, a não ser de quem você escolheu desenhar sem retrato, e uma desenhada com um retrato mais antigo fica marcada. Edite o prompt para mudar o que o próximo desenho mostra."
 
 [tour.scenes.redraw]
 title = "Desenhe de novo"

@@ -145,6 +145,11 @@ pub struct SceneImage {
 #[error("no new image of this scene is waiting for review")]
 pub struct NoPendingImage;
 
+/// Who an image of a scene was drawn showing (#269): each cast member, by
+/// their index in the plan's cast, with the generation of the portrait
+/// sent for them, or `None` for one drawn from the description alone.
+pub type PortraitsUsed = Vec<(usize, Option<GenerationId>)>;
+
 /// The most recurring characters a plan keeps, and so the most reference
 /// portraits sent with one scene's image.
 pub const MAX_CAST: usize = 3;
@@ -175,6 +180,10 @@ pub struct CastMember {
     /// Why the last attempt to draw the portrait failed, until one
     /// succeeds.
     failure: Option<JobFailureKind>,
+    /// The user chose to draw this person from the description alone
+    /// (#269): no portrait is drawn or sent for them, and their face may
+    /// change from scene to scene.
+    described_only: bool,
 }
 
 /// Every stored field of a cast member, for adapters that rebuild one.
@@ -195,7 +204,15 @@ impl CastMember {
             description: record.description,
             portrait: record.portrait,
             failure: record.failure,
+            described_only: false,
         }
+    }
+
+    /// The member drawn from the description alone or not, as an adapter
+    /// rebuilds it.
+    pub fn with_described_only(mut self, described_only: bool) -> Self {
+        self.described_only = described_only;
+        self
     }
 
     /// A planned member, or `None` when the name or the description is not
@@ -214,6 +231,7 @@ impl CastMember {
             description,
             portrait: None,
             failure: None,
+            described_only: false,
         })
     }
 
@@ -268,6 +286,32 @@ impl CastMember {
     /// Records that drawing the portrait failed. The portrait it has stays.
     pub fn fail(&mut self, kind: JobFailureKind) {
         self.failure = Some(kind);
+    }
+
+    /// Whether the user chose to draw this person from the description
+    /// alone, without a portrait.
+    pub fn is_described_only(&self) -> bool {
+        self.described_only
+    }
+
+    /// Chooses to draw this person from the description alone, or with a
+    /// portrait again. Returns whether the choice changed.
+    pub fn set_described_only(&mut self, described_only: bool) -> bool {
+        let changed = self.described_only != described_only;
+        self.described_only = described_only;
+        if described_only {
+            // A portrait that failed is no longer asked for.
+            self.failure = None;
+        }
+        changed
+    }
+
+    /// Lets go of a portrait whose file is gone or will not read, noting
+    /// why: the person has none again, so the next image drawn with them
+    /// draws one first. Returns the portrait, whose file can go.
+    pub fn drop_portrait(&mut self, kind: JobFailureKind) -> Option<SceneImage> {
+        self.failure = Some(kind);
+        self.portrait.take()
     }
 
     /// The portrait, when it was drawn in `style`: a portrait in another
@@ -637,6 +681,11 @@ pub struct Scene {
     /// The recurring place it happens in, as an index into the plan's
     /// places; `None` for a place seen once or a plan made before #258.
     place: Option<usize>,
+    /// The portraits `image` was drawn with; `None` for an image from
+    /// before they were recorded (#269).
+    image_portraits: Option<PortraitsUsed>,
+    /// The portraits `pending` was drawn with.
+    pending_portraits: Option<PortraitsUsed>,
 }
 
 /// Every stored field of a scene, for adapters that rebuild one.
@@ -676,6 +725,8 @@ impl Scene {
             cast: Vec::new(),
             planned_motion: None,
             place: None,
+            image_portraits: None,
+            pending_portraits: None,
         }
     }
 
@@ -699,6 +750,19 @@ impl Scene {
         self
     }
 
+    /// The scene with the portraits its image and the image waiting for
+    /// review were drawn with, as an adapter rebuilds it. One without its
+    /// image is dropped.
+    pub fn with_portraits(
+        mut self,
+        image: Option<PortraitsUsed>,
+        pending: Option<PortraitsUsed>,
+    ) -> Self {
+        self.image_portraits = image.filter(|_| self.image.is_some());
+        self.pending_portraits = pending.filter(|_| self.pending.is_some());
+        self
+    }
+
     /// A scene of a new plan: no image or clip yet.
     fn planned(start: Duration, end: Duration, text: String, prompt: ScenePrompt) -> Self {
         Self {
@@ -718,6 +782,8 @@ impl Scene {
             cast: Vec::new(),
             planned_motion: None,
             place: None,
+            image_portraits: None,
+            pending_portraits: None,
         }
     }
 
@@ -770,15 +836,37 @@ impl Scene {
         true
     }
 
+    /// The portraits the scene's image was drawn with; `None` when that
+    /// was not recorded.
+    pub fn image_portraits(&self) -> Option<&PortraitsUsed> {
+        self.image_portraits.as_ref()
+    }
+
+    /// The portraits the image waiting for review was drawn with.
+    pub fn pending_portraits(&self) -> Option<&PortraitsUsed> {
+        self.pending_portraits.as_ref()
+    }
+
     /// Takes a newly drawn image: it becomes the scene's image when there
     /// is none, else it waits for review beside the current one. Returns
     /// the image it pushed out (an earlier one waiting), whose file can go.
     pub fn add_image(&mut self, image: SceneImage) -> Option<SceneImage> {
+        self.add_image_drawn_with(image, None)
+    }
+
+    /// `add_image`, recording the `portraits` the image was drawn with.
+    pub fn add_image_drawn_with(
+        &mut self,
+        image: SceneImage,
+        portraits: Option<PortraitsUsed>,
+    ) -> Option<SceneImage> {
         self.failure = None;
         if self.image.is_none() {
             self.image = Some(image);
+            self.image_portraits = portraits;
             None
         } else {
+            self.pending_portraits = portraits;
             self.pending.replace(image)
         }
     }
@@ -792,13 +880,16 @@ impl Scene {
     /// replaced one, whose file can go.
     pub fn accept_image(&mut self) -> Result<Option<SceneImage>, NoPendingImage> {
         let pending = self.pending.take().ok_or(NoPendingImage)?;
+        self.image_portraits = self.pending_portraits.take();
         Ok(self.image.replace(pending))
     }
 
     /// Drops the image waiting for review and keeps the current one.
     /// Returns the dropped one, whose file can go.
     pub fn reject_image(&mut self) -> Result<SceneImage, NoPendingImage> {
-        self.pending.take().ok_or(NoPendingImage)
+        let pending = self.pending.take().ok_or(NoPendingImage)?;
+        self.pending_portraits = None;
+        Ok(pending)
     }
 
     /// What moves the clip: the user's motion prompt, else the planned
@@ -1288,15 +1379,25 @@ impl ScenePlan {
     /// waits for review when that was. A video drawn again in a new style
     /// has every new image waiting beside one of the old look, and those
     /// new images are what hold it together from scene to scene until the
-    /// user accepts them.
+    /// user accepts them. The same goes for an image that shows a person
+    /// as an older portrait did, or without one (#269): beside the portrait
+    /// it would pull the next image back to the face being replaced.
     pub fn shot_in(&self, index: usize, style: StyleChoice) -> Option<&SceneImage> {
         let scene = self.scenes.get(index)?;
-        let drew = |image: &&SceneImage| style.drew(&image.generation.prompt);
+        let fits = |image: &SceneImage, portraits: Option<&PortraitsUsed>| {
+            style.drew(&image.generation.prompt)
+                && !self.shows_old_portrait(index, image, portraits)
+        };
         scene
             .image
             .as_ref()
-            .filter(drew)
-            .or_else(|| scene.pending.as_ref().filter(drew))
+            .filter(|image| fits(image, scene.image_portraits.as_ref()))
+            .or_else(|| {
+                scene
+                    .pending
+                    .as_ref()
+                    .filter(|image| fits(image, scene.pending_portraits.as_ref()))
+            })
     }
 
     /// The recurring characters the scenes show.
@@ -1342,17 +1443,101 @@ impl ScenePlan {
 
     /// Cast members without a portrait in the video's `style` that drawing
     /// `scenes` would draw first, each once: the ones with none, and the
-    /// ones whose portrait was drawn in another style.
+    /// ones whose portrait was drawn in another style. One the user chose
+    /// to draw from the description alone gets none.
     pub fn missing_portraits(&self, scenes: &[usize], style: StyleChoice) -> Vec<usize> {
         let mut missing: Vec<usize> = Vec::new();
         for &scene in scenes {
             for member in self.scene_cast(scene) {
-                if self.cast[member].portrait_in(style).is_none() && !missing.contains(&member) {
+                let cast = &self.cast[member];
+                if !cast.described_only
+                    && cast.portrait_in(style).is_none()
+                    && !missing.contains(&member)
+                {
                     missing.push(member);
                 }
             }
         }
         missing
+    }
+
+    /// Takes the "no portrait" failure off the scenes that no longer wait
+    /// for one in `style`: everyone they show has a portrait now, or is
+    /// drawn from the description by the user's choice. Returns the scenes
+    /// it changed, to save. A scene that has an image goes back to it, and
+    /// one without is to draw.
+    pub fn settle_portrait_waits(&mut self, style: StyleChoice) -> Vec<usize> {
+        let settled: Vec<usize> = (0..self.scenes.len())
+            .filter(|&index| {
+                self.scenes[index].failure == Some(JobFailureKind::PortraitMissing)
+                    && self.missing_portraits(&[index], style).is_empty()
+            })
+            .collect();
+        for &index in &settled {
+            self.scenes[index].failure = None;
+        }
+        settled
+    }
+
+    /// Whether `image` of scene `index`, drawn with `portraits`, shows
+    /// someone other than as their portrait shows them now: it was drawn
+    /// with an older portrait of theirs, or without one. A person drawn
+    /// from the description alone by the user's choice has no portrait to
+    /// match. A person the record does not list was not in the image when
+    /// it was drawn (the prompt had them written out), so it does not show
+    /// their portrait either. For an image from before portraits were
+    /// recorded, a portrait drawn after it tells, and so does having none
+    /// now: the image cannot show the one that will be drawn.
+    fn shows_old_portrait(
+        &self,
+        index: usize,
+        image: &SceneImage,
+        portraits: Option<&PortraitsUsed>,
+    ) -> bool {
+        self.scene_cast(index).into_iter().any(|member| {
+            let cast = &self.cast[member];
+            if cast.described_only {
+                return false;
+            }
+            let current = cast.portrait.as_ref();
+            match portraits {
+                Some(portraits) => portraits
+                    .iter()
+                    .find(|(drawn, _)| *drawn == member)
+                    .is_none_or(|(_, used)| {
+                        used.is_none() || *used != current.map(|portrait| portrait.generation.id)
+                    }),
+                None => current.is_none_or(|portrait| {
+                    portrait.generation.generated_at > image.generation.generated_at
+                }),
+            }
+        })
+    }
+
+    /// The scenes whose image shows a person as an older portrait of
+    /// theirs did, or was drawn without their portrait (#269): they stay
+    /// as they are until the user draws them again. One with a new image
+    /// waiting for review that matches the portraits is not counted: it
+    /// was drawn again already.
+    pub fn with_old_portraits(&self) -> Vec<usize> {
+        self.scenes
+            .iter()
+            .enumerate()
+            .filter(|(index, scene)| {
+                let old = |image: &SceneImage, portraits: Option<&PortraitsUsed>| {
+                    self.shows_old_portrait(*index, image, portraits)
+                };
+                scene
+                    .image
+                    .as_ref()
+                    .is_some_and(|image| old(image, scene.image_portraits.as_ref()))
+                    && !scene
+                        .pending
+                        .as_ref()
+                        .is_some_and(|image| !old(image, scene.pending_portraits.as_ref()))
+            })
+            .map(|(index, _)| index)
+            .collect()
     }
 
     /// The scenes whose image was drawn in another style than `style`,
@@ -2083,6 +2268,247 @@ mod tests {
             "drawn again next time"
         );
         assert_eq!(plan.cast_member(3), Err(NoSuchCastMember(3)));
+    }
+
+    /// A plan of two scenes with the chef and one without.
+    fn chef_plan(n: &Narration) -> ScenePlan {
+        ScenePlan::from_drafts(
+            generation(n, Provider::Claude, "{}"),
+            n,
+            vec![member("the chef", "A man, brown skin.")],
+            vec![
+                cast_draft(0, "The chef cooks.", vec![0]),
+                cast_draft(2, "The chef plates.", vec![0]),
+                cast_draft(3, "An empty kitchen.", Vec::new()),
+            ],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap()
+    }
+
+    /// The generation of the chef's portrait.
+    fn chef_portrait(plan: &ScenePlan) -> Option<GenerationId> {
+        plan.cast()[0].portrait().map(|p| p.generation.id)
+    }
+
+    #[test]
+    fn an_image_drawn_with_an_older_portrait_or_none_is_out_of_date() {
+        let n = narration(STORY, 0);
+        let mut plan = chef_plan(&n);
+        let at = SystemTime::UNIX_EPOCH;
+        plan.cast_mut(0, at)
+            .unwrap()
+            .set_portrait(image(&n, "chef-1.png"));
+        let first = chef_portrait(&plan);
+        plan.scene_mut(0, at)
+            .unwrap()
+            .add_image_drawn_with(image(&n, "scene-0.png"), Some(vec![(0, first)]));
+        // Drawn without the chef's portrait, and with nobody to match.
+        plan.scene_mut(1, at)
+            .unwrap()
+            .add_image_drawn_with(image(&n, "scene-1.png"), Some(vec![(0, None)]));
+        plan.scene_mut(2, at)
+            .unwrap()
+            .add_image_drawn_with(image(&n, "scene-2.png"), Some(Vec::new()));
+        assert_eq!(plan.with_old_portraits(), [1], "only the one drawn without");
+
+        // A new portrait: the scene drawn with the first one shows the old
+        // face.
+        plan.cast_mut(0, at)
+            .unwrap()
+            .set_portrait(image(&n, "chef-2.png"));
+        assert_eq!(plan.with_old_portraits(), [0, 1]);
+
+        // Drawn again with the new portrait: the new image waits, and the
+        // scene is no longer counted; rejected, it is again.
+        let second = chef_portrait(&plan);
+        let scene = plan.scene_mut(0, at).unwrap();
+        scene.add_image_drawn_with(image(&n, "scene-0b.png"), Some(vec![(0, second)]));
+        assert_eq!(plan.with_old_portraits(), [1]);
+        plan.scene_mut(0, at).unwrap().reject_image().unwrap();
+        assert_eq!(plan.with_old_portraits(), [0, 1]);
+        let scene = plan.scene_mut(0, at).unwrap();
+        scene.add_image_drawn_with(image(&n, "scene-0c.png"), Some(vec![(0, second)]));
+        scene.accept_image().unwrap();
+        assert_eq!(scene.image_portraits(), Some(&vec![(0, second)]));
+        assert_eq!(scene.pending_portraits(), None);
+        assert_eq!(plan.with_old_portraits(), [1]);
+
+        // A new look drops the portrait: every image of the chef shows the
+        // old one.
+        plan.cast_mut(0, at)
+            .unwrap()
+            .edit_description(ScenePrompt::new("A man, brown skin, mustache.").unwrap());
+        assert_eq!(plan.with_old_portraits(), [0, 1]);
+    }
+
+    #[test]
+    fn a_person_drawn_from_the_description_by_choice_has_no_portrait_to_match() {
+        let n = narration(STORY, 0);
+        let mut plan = chef_plan(&n);
+        let at = SystemTime::UNIX_EPOCH;
+        plan.scene_mut(0, at)
+            .unwrap()
+            .add_image_drawn_with(image(&n, "scene-0.png"), Some(vec![(0, None)]));
+        assert_eq!(plan.with_old_portraits(), [0]);
+        assert_eq!(plan.missing_portraits(&[0, 1], StyleChoice::FromNotes), [0]);
+
+        let chef = plan.cast_mut(0, at).unwrap();
+        assert!(chef.set_described_only(true));
+        assert!(!chef.set_described_only(true), "already chosen");
+        assert!(plan.cast()[0].is_described_only());
+        assert!(plan.with_old_portraits().is_empty());
+        assert!(
+            plan.missing_portraits(&[0, 1], StyleChoice::FromNotes)
+                .is_empty(),
+            "no portrait is drawn for them"
+        );
+
+        plan.cast_mut(0, at).unwrap().set_described_only(false);
+        assert_eq!(plan.with_old_portraits(), [0]);
+    }
+
+    #[test]
+    fn an_image_from_before_portraits_were_recorded_is_told_by_the_portrait_there_is_now() {
+        let n = narration(STORY, 0);
+        let mut plan = chef_plan(&n);
+        let at = SystemTime::UNIX_EPOCH;
+        let later = |file: &str, seconds: u64| {
+            let mut image = image(&n, file);
+            image.generation.generated_at = at + Duration::from_secs(seconds);
+            image
+        };
+        // No portrait (it was declined, and the scene drawn anyway as
+        // Bardo once did): the image cannot show the one to come.
+        plan.scene_mut(0, at)
+            .unwrap()
+            .add_image(later("scene-0.png", 20));
+        plan.scene_mut(2, at)
+            .unwrap()
+            .add_image(later("scene-2.png", 20));
+        assert_eq!(
+            plan.with_old_portraits(),
+            [0],
+            "the empty kitchen shows nobody"
+        );
+
+        let mut plan = chef_plan(&n);
+        plan.cast_mut(0, at)
+            .unwrap()
+            .set_portrait(later("chef-1.png", 10));
+        plan.scene_mut(0, at)
+            .unwrap()
+            .add_image(later("scene-0.png", 20));
+        assert!(plan.with_old_portraits().is_empty(), "nothing tells");
+
+        plan.cast_mut(0, at)
+            .unwrap()
+            .set_portrait(later("chef-2.png", 30));
+        assert_eq!(plan.with_old_portraits(), [0], "it cannot show that one");
+
+        // A new look drops the portrait: the same.
+        plan.cast_mut(0, at)
+            .unwrap()
+            .edit_description(ScenePrompt::new("A man, brown skin, mustache.").unwrap());
+        assert_eq!(plan.with_old_portraits(), [0]);
+    }
+
+    #[test]
+    fn an_image_drawn_while_a_person_was_written_out_does_not_show_their_portrait() {
+        let n = narration(STORY, 0);
+        let mut plan = chef_plan(&n);
+        let at = SystemTime::UNIX_EPOCH;
+        plan.cast_mut(0, at)
+            .unwrap()
+            .set_portrait(image(&n, "chef-1.png"));
+        let planned = plan.scenes()[0].prompt().clone();
+        let scene = plan.scene_mut(0, at).unwrap();
+        scene.edit_prompt(ScenePrompt::new("An empty stove.").unwrap());
+        scene.add_image_drawn_with(image(&n, "scene-0.png"), Some(Vec::new()));
+        assert!(plan.with_old_portraits().is_empty(), "nobody is in it");
+
+        // Written back in: the image was drawn without them.
+        plan.scene_mut(0, at).unwrap().edit_prompt(planned);
+        assert_eq!(plan.scene_cast(0), [0]);
+        assert_eq!(plan.with_old_portraits(), [0]);
+    }
+
+    #[test]
+    fn an_image_showing_an_older_face_is_no_reference_for_the_next_ones() {
+        let n = narration(STORY, 0);
+        let mut plan = chef_plan(&n);
+        let at = SystemTime::UNIX_EPOCH;
+        let style = StyleChoice::FromNotes;
+        plan.cast_mut(0, at)
+            .unwrap()
+            .set_portrait(image(&n, "chef-1.png"));
+        let first = chef_portrait(&plan);
+        plan.scene_mut(0, at)
+            .unwrap()
+            .add_image_drawn_with(image(&n, "scene-0.png"), Some(vec![(0, first)]));
+        assert_eq!(
+            plan.shot_in(0, style).map(|image| image.file.as_str()),
+            Some("scene-0.png")
+        );
+        assert_eq!(plan.reference_shots(1, style), [(0, OtherShot::Look)]);
+
+        // A new portrait: the image of the old face would pull the next
+        // one back to it.
+        plan.cast_mut(0, at)
+            .unwrap()
+            .set_portrait(image(&n, "chef-2.png"));
+        assert_eq!(plan.shot_in(0, style), None);
+        assert!(plan.reference_shots(1, style).is_empty());
+
+        // Drawn again, the image that waits is the one the others follow.
+        let second = chef_portrait(&plan);
+        plan.scene_mut(0, at)
+            .unwrap()
+            .add_image_drawn_with(image(&n, "scene-0b.png"), Some(vec![(0, second)]));
+        assert_eq!(
+            plan.shot_in(0, style).map(|image| image.file.as_str()),
+            Some("scene-0b.png")
+        );
+        assert_eq!(plan.reference_shots(1, style), [(0, OtherShot::Look)]);
+    }
+
+    #[test]
+    fn a_scene_stops_waiting_for_a_portrait_once_nobody_in_it_lacks_one() {
+        let n = narration(STORY, 0);
+        let mut plan = chef_plan(&n);
+        let at = SystemTime::UNIX_EPOCH;
+        let style = StyleChoice::FromNotes;
+        for index in [0, 1] {
+            plan.scene_mut(index, at)
+                .unwrap()
+                .fail(JobFailureKind::PortraitMissing);
+        }
+        // Another failure is not about the portrait.
+        plan.scene_mut(2, at)
+            .unwrap()
+            .fail(JobFailureKind::Declined);
+        assert!(plan.settle_portrait_waits(style).is_empty(), "still none");
+
+        let chef = plan.cast_mut(0, at).unwrap();
+        chef.fail(JobFailureKind::Declined);
+        chef.set_described_only(true);
+        assert_eq!(chef.failure(), None, "the portrait is no longer asked for");
+        assert_eq!(plan.settle_portrait_waits(style), [0, 1]);
+        assert_eq!(plan.scenes()[0].failure(), None);
+        assert_eq!(plan.scenes()[2].failure(), Some(JobFailureKind::Declined));
+        assert!(plan.settle_portrait_waits(style).is_empty());
+
+        // A portrait that will not read is let go, and noted.
+        let chef = plan.cast_mut(0, at).unwrap();
+        chef.set_described_only(false);
+        chef.set_portrait(image(&n, "chef-1.png"));
+        let dropped = chef.drop_portrait(JobFailureKind::Files);
+        assert_eq!(
+            dropped.map(|portrait| portrait.file),
+            Some("chef-1.png".into())
+        );
+        assert_eq!(chef.portrait(), None);
+        assert_eq!(chef.failure(), Some(JobFailureKind::Files));
     }
 
     #[test]

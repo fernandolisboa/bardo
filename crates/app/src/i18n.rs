@@ -299,6 +299,15 @@ pub enum Text {
     /// Placeholder: `{style}`.
     ScenesRestyledHint,
     RedrawRestyled,
+    /// How many scenes show a person as an older portrait did, or were
+    /// drawn without one (#269). Placeholder: `{n}`.
+    ScenesOldPortraits,
+    ScenesOldPortraitsHint,
+    RedrawOldPortraits,
+    /// On such a scene.
+    SceneOldPortrait,
+    /// On such a scene's card.
+    SceneCardOldPortrait,
     ChannelProduction,
     ChannelProductionHint,
     /// How clips are asked of a model of fixed lengths (#260).
@@ -1589,6 +1598,11 @@ pub enum Text {
     RedrawCastPortrait,
     CastPortraitFailed,
     CastEdited,
+    /// A person the user chose to draw from the description alone.
+    CastDescribedOnly,
+    CastDescribedOnlyHint,
+    CastDrawWithoutPortrait,
+    CastUsePortrait,
     ScenePlace,
     ScenePlaceHint,
     EditPlaceDescription,
@@ -2938,6 +2952,11 @@ impl Text {
             Text::ScenesRestyled => "scenes.restyled.title",
             Text::ScenesRestyledHint => "scenes.restyled.hint",
             Text::RedrawRestyled => "scenes.restyled.redraw",
+            Text::ScenesOldPortraits => "scenes.old_portraits.title",
+            Text::ScenesOldPortraitsHint => "scenes.old_portraits.hint",
+            Text::RedrawOldPortraits => "scenes.old_portraits.redraw",
+            Text::SceneOldPortrait => "scenes.old_portraits.scene",
+            Text::SceneCardOldPortrait => "scenes.old_portraits.card",
             Text::VisualStyleName(style) => match style {
                 StyleChoice::FromNotes => "visual_style.notes",
                 StyleChoice::Catalog(VisualStyle::Photorealistic) => "visual_style.photo",
@@ -4340,6 +4359,10 @@ impl Text {
             Text::RedrawCastPortrait => "scenes.cast.redraw",
             Text::CastPortraitFailed => "scenes.cast.failed",
             Text::CastEdited => "scenes.cast.edited",
+            Text::CastDescribedOnly => "scenes.cast.described_only",
+            Text::CastDescribedOnlyHint => "scenes.cast.described_only_hint",
+            Text::CastDrawWithoutPortrait => "scenes.cast.draw_without",
+            Text::CastUsePortrait => "scenes.cast.use_portrait",
             Text::ScenePlace => "scenes.same_place.title",
             Text::ScenePlaceHint => "scenes.same_place.hint",
             Text::EditPlaceDescription => "scenes.same_place.edit",
@@ -6728,6 +6751,11 @@ mod tests {
             Text::ScenesRestyled,
             Text::ScenesRestyledHint,
             Text::RedrawRestyled,
+            Text::ScenesOldPortraits,
+            Text::ScenesOldPortraitsHint,
+            Text::RedrawOldPortraits,
+            Text::SceneOldPortrait,
+            Text::SceneCardOldPortrait,
         ]);
         texts.extend(TakeMode::ALL.map(Text::TakeModeName));
         texts.extend(AnalysisPart::ALL.map(Text::AnalysisPartName));
@@ -7073,6 +7101,10 @@ mod tests {
         texts.push(Text::RedrawCastPortrait);
         texts.push(Text::CastPortraitFailed);
         texts.push(Text::CastEdited);
+        texts.push(Text::CastDescribedOnly);
+        texts.push(Text::CastDescribedOnlyHint);
+        texts.push(Text::CastDrawWithoutPortrait);
+        texts.push(Text::CastUsePortrait);
         texts.push(Text::ScenePlace);
         texts.push(Text::ScenePlaceHint);
         texts.push(Text::EditPlaceDescription);
