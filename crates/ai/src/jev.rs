@@ -164,7 +164,7 @@ pub fn parse_decisions(
         }
         answers.insert(
             id.to_owned(),
-            parse_answer(id, question, answer).map_err(&failed)?,
+            parse_answer(id, question, answer).map_err(failed)?,
         );
     }
     Ok(Decisions {
