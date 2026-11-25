@@ -74,6 +74,7 @@ fn sends_a_messages_request_with_the_schema_and_the_fallback() {
         json!(["themes"])
     );
     assert!(sent.body["max_tokens"].as_u64().unwrap() >= 4_000);
+    assert_eq!(sent.body["stream"], true, "read as it is written");
     assert!(sent.body.get("thinking").is_none(), "the model decides");
 }
 
@@ -137,6 +138,76 @@ fn reads_the_text_blocks_model_and_usage() {
             output_tokens: 893
         }
     );
+}
+
+#[test]
+fn an_answer_handed_over_whole_is_still_read() {
+    // A proxy that buffers the stream answers with the whole message.
+    let generated = generator(&["messages-themes-not-streamed"])
+        .generate(&key(), &json_request())
+        .unwrap();
+    assert!(generated.text.contains("The forgotten first spacewalk"));
+    assert_eq!(generated.model, "claude-opus-5-5");
+    assert_eq!(generated.usage.output_tokens, 893);
+}
+
+#[test]
+fn a_connection_that_drops_after_claude_began_is_not_an_outage() {
+    let claude = generator(&["messages-dropped-midway"]);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    // What was generated is billed: not a call to make again unasked.
+    assert_ne!(failure.kind, ProviderFailureKind::Unreachable);
+    assert!(
+        failure.detail.contains("stopped midway"),
+        "{}",
+        failure.detail
+    );
+    assert_eq!(claude.transport().sent().len(), 1);
+}
+
+#[test]
+fn an_overload_after_the_answer_began_is_not_sent_again() {
+    let claude = generator(&["messages-overloaded-midway", "messages-themes"]);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert!(
+        failure.detail.contains("overloaded_error"),
+        "{}",
+        failure.detail
+    );
+    assert!(
+        failure.detail.contains("stopped midway"),
+        "{}",
+        failure.detail
+    );
+    assert_eq!(
+        claude.transport().sent().len(),
+        1,
+        "the backoff is for answers that generated nothing"
+    );
+}
+
+#[test]
+fn an_overload_that_opens_the_stream_is_retried_like_its_status() {
+    let (sleeper, waits) = recording_sleeper();
+    let answers = ["messages-overloaded-at-start", "messages-themes"]
+        .iter()
+        .map(|name| fixture("claude", name))
+        .collect();
+    let claude = ClaudeTextGenerator::with_transport(Scripted::new(answers)).with_sleeper(sleeper);
+
+    claude.generate(&key(), &json_request()).unwrap();
+
+    assert_eq!(claude.transport().sent().len(), 2);
+    assert_eq!(*waits.lock().unwrap(), [Duration::from_secs(1)]);
+}
+
+#[test]
+fn a_lasting_overload_at_the_start_of_the_stream_is_provider_down() {
+    let claude = generator(&["messages-overloaded-at-start"; 4]);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::ProviderDown);
+    assert_eq!(failure.detail, "Overloaded");
+    assert_eq!(claude.transport().sent().len(), 4);
 }
 
 #[test]

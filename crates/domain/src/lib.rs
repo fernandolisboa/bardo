@@ -94,6 +94,7 @@ mod repository;
 mod research;
 mod runner;
 mod scene;
+mod scene_plan_size;
 mod schedule;
 mod script;
 mod speech;
@@ -317,6 +318,7 @@ pub use scene::{
     SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord,
     ScenePlanRepository, ScenePrompt, SceneRecord, Sentence, scene_image_prompt, sentences,
 };
+pub use scene_plan_size::ScenePlanSize;
 pub use schedule::{
     DateOrder, LocalTime, Rfc3339, SCHEDULE_GRACE, ScheduleProblem, Zone, check_publish_time,
     date_text, default_publish_time, local_time, parse_rfc3339, publish_time,

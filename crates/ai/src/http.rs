@@ -415,6 +415,34 @@ impl UreqTransport {
         }
     }
 
+    /// For answers read as they are written (a streamed generation). The
+    /// answer may take many minutes, so no timeout bounds the request as
+    /// a whole: connecting, sending the request's head and the first byte
+    /// of the answer each have `wait`, and the body has `whole`, a bound
+    /// far past any real answer. What bounds silence inside the body is
+    /// the caller's (`idle::Watched`). HTTPS only.
+    pub fn for_streams(wait: Duration, whole: Duration) -> Self {
+        let tls = ureq::tls::TlsConfig::builder()
+            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+            .build();
+        let agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_connect(Some(wait))
+            .timeout_send_request(Some(wait))
+            .timeout_send_body(Some(whole))
+            .timeout_recv_response(Some(wait))
+            .timeout_recv_body(Some(whole))
+            .tls_config(tls)
+            .https_only(true)
+            .user_agent(concat!("Bardo/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .new_agent();
+        Self {
+            agent,
+            max_body_bytes: Self::MAX_BODY_BYTES,
+        }
+    }
+
     /// `for_uploads` against a local server: plain HTTP, no proxy.
     #[doc(hidden)]
     pub fn for_uploads_without_proxy(timeout: Duration) -> Self {
