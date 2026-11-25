@@ -245,9 +245,12 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         // Ten themes, three questions each (four, with up to 40 past
         // videos in the state, once the channel has history).
         CostPurpose::ThemeRanking => tokens(2_000, 0),
-        CostPurpose::Script => tokens(1_000, 4_000),
+        // Written with more thought (#258): the thinking is billed as
+        // output.
+        CostPurpose::Script => tokens(1_300, 8_000),
         CostPurpose::Narration => Metered::characters(5_000),
-        CostPurpose::ScenePlan => tokens(2_000, 4_000),
+        // The story, the cast, the places and every scene, thought through.
+        CostPurpose::ScenePlan => tokens(3_500, 12_000),
         // A 2K image.
         CostPurpose::SceneImage => Metered {
             input_tokens: 40,

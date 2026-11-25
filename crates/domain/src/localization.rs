@@ -542,6 +542,7 @@ pub fn place_scenes(
         updated_at: now,
     })
     .with_cast(plan.cast().to_vec())
+    .with_places(plan.places().to_vec())
 }
 
 /// A version's cut: the rough cut of `plan` (placed with [`place_scenes`])

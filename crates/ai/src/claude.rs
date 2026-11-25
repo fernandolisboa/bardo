@@ -3,14 +3,17 @@
 //! One request per generation, not streamed: the outputs Bardo asks for
 //! (ideas, titles, short scripts) fit well within the timeout. JSON output
 //! uses structured outputs (`output_config.format`), so the answer always
-//! matches the schema. If Claude's safety rules decline a request, the API
+//! matches the schema, and its fields come in the schema's order: the
+//! schema is sent as written (`serde_json` keeps the order of keys, see
+//! the workspace manifest), so a schema can make Claude write one field
+//! before another. If Claude's safety rules decline a request, the API
 //! re-runs it on Anthropic's recommended fallback model in the same call
 //! (`fallbacks: "default"`).
 
 use std::time::Duration;
 
 use bardo_domain::{
-    ApiKey, GeneratedText, Provider, ProviderFailure, ProviderFailureKind, TextFormat,
+    ApiKey, GeneratedText, Provider, ProviderFailure, ProviderFailureKind, TextEffort, TextFormat,
     TextGenerator, TextRequest, TokenUsage,
 };
 use base64::Engine as _;
@@ -27,6 +30,24 @@ pub const MAX_TOKENS: u32 = 16_000;
 /// The model's default made explicit: enough thought for creative work
 /// without paying for deep reasoning.
 pub const EFFORT: &str = "medium";
+/// For the requests a whole video is built on (its script and its scene
+/// plan): more thought before answering.
+pub const CAREFUL_EFFORT: &str = "high";
+/// Room for that thought on top of a long plan.
+pub const CAREFUL_MAX_TOKENS: u32 = 32_000;
+/// How long a careful request waits for its answer: thought and a long
+/// plan take minutes when the answer is not streamed, and an answer given
+/// up on is still billed. Past ten minutes the API expects a streamed
+/// request, so the wait stops there.
+pub const CAREFUL_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// The effort and the token limit a request of `effort` is sent with.
+pub fn effort_settings(effort: TextEffort) -> (&'static str, u32) {
+    match effort {
+        TextEffort::Everyday => (EFFORT, MAX_TOKENS),
+        TextEffort::Careful => (CAREFUL_EFFORT, CAREFUL_MAX_TOKENS),
+    }
+}
 /// Gates `fallbacks: "default"`.
 pub const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 
@@ -37,7 +58,8 @@ pub fn message_request(
     request: &TextRequest,
     with_fallback: bool,
 ) -> Result<HttpRequest, ProviderFailure> {
-    let mut output_config = json!({ "effort": EFFORT });
+    let (effort, max_tokens) = effort_settings(request.effort);
+    let mut output_config = json!({ "effort": effort });
     if let TextFormat::Json { schema } = &request.format {
         let schema: Value = serde_json::from_str(schema).map_err(|error| {
             ProviderFailure::new(
@@ -70,7 +92,7 @@ pub fn message_request(
     };
     let mut body = json!({
         "model": MODEL,
-        "max_tokens": MAX_TOKENS,
+        "max_tokens": max_tokens,
         "system": request.instructions,
         "messages": [{ "role": "user", "content": content }],
         "output_config": output_config,
@@ -78,9 +100,12 @@ pub fn message_request(
     if with_fallback {
         body["fallbacks"] = json!("default");
     }
-    let http = HttpRequest::post_json(MESSAGES_URL, body.to_string())
+    let mut http = HttpRequest::post_json(MESSAGES_URL, body.to_string())
         .header("x-api-key", key.expose())
         .header("anthropic-version", "2023-06-01");
+    if request.effort == TextEffort::Careful {
+        http = http.timeout(CAREFUL_TIMEOUT);
+    }
     Ok(if with_fallback {
         http.header("anthropic-beta", FALLBACK_BETA)
     } else {
@@ -150,7 +175,8 @@ pub struct ClaudeTextGenerator<T = UreqTransport> {
 }
 
 impl ClaudeTextGenerator {
-    /// A non-streamed answer with thinking can take a minute or two.
+    /// A non-streamed answer with thinking can take a minute or two. A
+    /// careful request asks for its own, longer wait ([`CAREFUL_TIMEOUT`]).
     pub const TIMEOUT: Duration = Duration::from_secs(180);
 
     pub fn new() -> Self {

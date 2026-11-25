@@ -19,9 +19,9 @@ use bardo_domain::{
     ImageGenerator, ImageRequest, Job, JobFailure, JobFailureKind, JobId, JobKind, JobState,
     MAX_THUMBNAIL_TEXT, Network, ProfileId, ProjectFiles, Provider, RenderedPrompt,
     RepositoryError, SecretStore, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
-    TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextPlacement, TextRequest,
-    Thumbnail, ThumbnailBackground, ThumbnailDesign, ThumbnailFieldError, ThumbnailLook,
-    ThumbnailRepository, VideoFormat, VideoProject, VideoProjectId, thumbnail_text,
+    TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextPlacement,
+    TextRequest, Thumbnail, ThumbnailBackground, ThumbnailDesign, ThumbnailFieldError,
+    ThumbnailLook, ThumbnailRepository, VideoFormat, VideoProject, VideoProjectId, thumbnail_text,
 };
 use bardo_media::MediaEngine;
 use bardo_media::ffmpeg::{MediaError, ThumbnailSpec};
@@ -310,6 +310,7 @@ impl ThumbnailHandler {
         }
         let key = self.key(Provider::Claude)?;
         let request = TextRequest {
+            effort: TextEffort::Everyday,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),

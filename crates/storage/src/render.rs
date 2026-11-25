@@ -470,7 +470,8 @@ mod tests {
             // As the database was before migration 49 (and the ones after).
             let mut conn = db.conn();
             conn.execute_batch(
-                "ALTER TABLE video_project DROP COLUMN video_length;
+                "DROP TABLE scene_place; ALTER TABLE scene DROP COLUMN place;
+                 ALTER TABLE video_project DROP COLUMN video_length;
                  ALTER TABLE video_project DROP COLUMN spend_cap_micros;
                  ALTER TABLE video_project DROP COLUMN production_mode;
                  ALTER TABLE channel DROP COLUMN production_mode;

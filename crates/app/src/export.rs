@@ -27,9 +27,9 @@ use bardo_domain::{
     NarrationSource, Network, NetworkAccount, NetworkAccountId, Post, ProfileId, Progress,
     ProjectFiles, Provider, Render, RenderId, RenderRepository, RenderedPrompt, RepositoryError,
     SecretStore, TagPlacement, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
-    TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest, UiLanguage,
-    VideoMetadata, VideoMetadataDraft, VideoProject, VideoProjectId, Visibility, package_folder,
-    problems_with, video_file_name,
+    TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest,
+    UiLanguage, VideoMetadata, VideoMetadataDraft, VideoProject, VideoProjectId, Visibility,
+    package_folder, problems_with, video_file_name,
 };
 use serde::{Deserialize, Serialize};
 
@@ -525,6 +525,7 @@ impl MetadataHandler {
 
         let key = self.key()?;
         let request = TextRequest {
+            effort: TextEffort::Everyday,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),

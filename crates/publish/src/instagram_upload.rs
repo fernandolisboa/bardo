@@ -207,6 +207,7 @@ impl<T: Transport> InstagramUploader<T> {
             url: format!("{}/{id}", self.endpoints.rupload),
             headers: Vec::new(),
             body: Some(bytes),
+            timeout: None,
         }
         .header("authorization", format!("OAuth {}", token.expose()))
         .header("offset", offset.to_string())

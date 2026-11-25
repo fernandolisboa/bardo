@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    CastMember, CastRecord, GenerationId, JobFailureKind, NarrationId, ProfileId, RepositoryError,
-    Scene, SceneClip, SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository,
-    ScenePrompt, SceneRecord, VideoProjectId,
+    CastMember, CastRecord, GenerationId, JobFailureKind, NarrationId, Place, PlaceRecord,
+    ProfileId, RepositoryError, Scene, SceneClip, SceneImage, ScenePlan, ScenePlanId,
+    ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, VideoProjectId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
@@ -53,6 +53,7 @@ struct SceneRow {
     clip_failure: Option<String>,
     cast_members: String,
     planned_motion: Option<String>,
+    place: Option<i64>,
 }
 
 /// A scene's cast members as stored: positions separated by commas.
@@ -156,7 +157,8 @@ impl SceneRow {
             clip_failure: failure_kind(self.clip_failure)?,
         })
         .with_cast(parse_cast_members(&self.cast_members)?)
-        .with_planned_motion(self.planned_motion.as_deref().map(prompt).transpose()?))
+        .with_planned_motion(self.planned_motion.as_deref().map(prompt).transpose()?)
+        .with_place(self.place.map(usize::try_from).transpose().map_err(boxed)?))
     }
 }
 
@@ -166,7 +168,7 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
             "SELECT start_ms, end_ms, text, generated_prompt, prompt, image_file,
                  image_generation_id, pending_file, pending_generation_id, failure,
                  motion_prompt, clip_provider, clip_model, clip_failure, position,
-                 cast_members, planned_motion_prompt
+                 cast_members, planned_motion_prompt, place
              FROM scene WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -187,6 +189,7 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                     clip_failure: row.get(13)?,
                     cast_members: row.get(15)?,
                     planned_motion: row.get(16)?,
+                    place: row.get(17)?,
                 },
                 row.get::<_, i64>(14)?,
             ))
@@ -282,6 +285,54 @@ fn write_cast_member(
     Ok(())
 }
 
+/// The plan's places, in order.
+fn places(conn: &Connection, plan: &str) -> Result<Vec<Place>, RepositoryError> {
+    let mut statement = conn
+        .prepare(
+            "SELECT name, generated_description, description
+             FROM scene_place WHERE plan_id = ?1 ORDER BY position",
+        )
+        .map_err(boxed)?;
+    let rows: Vec<(String, String, String)> = statement
+        .query_map([plan], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .map_err(boxed)?
+        .collect::<Result<_, _>>()
+        .map_err(boxed)?;
+    rows.into_iter()
+        .map(|(name, generated, description)| {
+            Ok(Place::restore(PlaceRecord {
+                name,
+                generated_description: prompt(&generated)?,
+                description: prompt(&description)?,
+            }))
+        })
+        .collect()
+}
+
+/// Writes place `index` in place of the saved one: only its description
+/// changes after the plan is made.
+fn write_place(
+    tx: &Transaction<'_>,
+    plan: &str,
+    index: usize,
+    place: &Place,
+) -> Result<(), RepositoryError> {
+    tx.execute(
+        "INSERT INTO scene_place (plan_id, position, name, generated_description, description)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (plan_id, position) DO UPDATE SET description = excluded.description",
+        params![
+            plan,
+            position(index)?,
+            place.name,
+            place.generated_description().as_str(),
+            place.description().as_str(),
+        ],
+    )
+    .map_err(boxed)?;
+    Ok(())
+}
+
 fn position(index: usize) -> Result<i64, RepositoryError> {
     i64::try_from(index).map_err(boxed)
 }
@@ -344,9 +395,9 @@ fn insert_scene(
         "INSERT INTO scene (plan_id, position, start_ms, end_ms, text, generated_prompt,
              prompt, image_file, image_generation_id, pending_file, pending_generation_id,
              failure, motion_prompt, clip_provider, clip_model, clip_failure, cast_members,
-             planned_motion_prompt)
+             planned_motion_prompt, place)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-             ?18)",
+             ?18, ?19)",
         params![
             plan,
             position(index)?,
@@ -366,6 +417,7 @@ fn insert_scene(
             scene.clip_failure().map(|kind| kind.code()),
             cast_members(scene),
             scene.planned_motion().map(ScenePrompt::as_str),
+            scene.place().map(position).transpose()?,
         ],
     )
     .map_err(boxed)?;
@@ -410,6 +462,11 @@ pub(crate) fn write_scene_plan(
     for (index, member) in plan.cast().iter().enumerate() {
         write_cast_member(tx, &id, index, member)?;
     }
+    tx.execute("DELETE FROM scene_place WHERE plan_id = ?1", [&id])
+        .map_err(boxed)?;
+    for (index, place) in plan.places().iter().enumerate() {
+        write_place(tx, &id, index, place)?;
+    }
     for (index, scene) in plan.scenes().iter().enumerate() {
         insert_scene(tx, &id, index, scene)?;
     }
@@ -449,7 +506,8 @@ impl ScenePlanRepository for Database {
                 scenes: scenes(&conn, &id)?,
                 updated_at: from_unix_millis(updated_at),
             })
-            .with_cast(cast(&conn, &id)?),
+            .with_cast(cast(&conn, &id)?)
+            .with_places(places(&conn, &id)?),
         ))
     }
 
@@ -524,6 +582,26 @@ impl ScenePlanRepository for Database {
         write_cast_member(&tx, &id, index, member)?;
         tx.commit().map_err(boxed)
     }
+
+    fn save_place(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
+        let place = plan
+            .place(index)
+            .map_err(|error| invalid(error.to_string()))?;
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        let id = plan.id.to_string();
+        let saved = tx
+            .execute(
+                "UPDATE scene_plan SET updated_at = ?2 WHERE id = ?1",
+                params![id, to_unix_millis(plan.updated_at)],
+            )
+            .map_err(boxed)?;
+        if saved == 0 {
+            return Err(invalid(format!("plan {id} is not saved")));
+        }
+        write_place(&tx, &id, index, place)?;
+        tx.commit().map_err(boxed)
+    }
 }
 
 #[cfg(test)]
@@ -532,10 +610,10 @@ mod tests {
 
     use bardo_domain::{
         Alignment, CastDraft, Channel, ChannelDetails, ChannelDraft, ChannelRepository, CharTiming,
-        Generation, GenerationId, GenerationPresets, JobId, Narration, Niche, ProfileRepository,
-        Provider, SceneDraft, ScriptText, TemplateBody, TemplateKind, TemplateRepository,
-        TemplateUsed, TemplateVersion, Theme, ThemeIdea, ThemeRepository, TokenUsage, UiLanguage,
-        UserProfile, VideoProject, VoiceRef, WordTimings,
+        Generation, GenerationId, GenerationPresets, JobId, Narration, Niche, PlaceDraft,
+        PlanDraft, ProfileRepository, Provider, SceneDraft, ScriptText, TemplateBody, TemplateKind,
+        TemplateRepository, TemplateUsed, TemplateVersion, Theme, ThemeIdea, ThemeRepository,
+        TokenUsage, UiLanguage, UserProfile, VideoProject, VoiceRef, WordTimings,
     };
 
     use super::*;
@@ -661,6 +739,7 @@ mod tests {
                     prompt: "The engineer watches a probe leave Earth.".into(),
                     cast: vec![0],
                     motion: "Slow push in on the engineer.".into(),
+                    place: None,
                 },
                 SceneDraft {
                     first_sentence: 1,
@@ -775,6 +854,72 @@ mod tests {
         s.db.save_scene_plan(&other).unwrap();
         assert!(
             s.db.save_cast_member(&plan, 0).is_err(),
+            "the replaced plan is gone"
+        );
+    }
+
+    #[test]
+    fn places_round_trip_and_one_saves_alone() {
+        let s = setup();
+        let mut plan = ScenePlan::from_draft(
+            generation(&s, Provider::Claude, "{\"scenes\": []}"),
+            &s.narration,
+            PlanDraft {
+                cast: Vec::new(),
+                places: vec![PlaceDraft {
+                    name: "the control room".into(),
+                    description: "A dim 1970s control room, green screens, night.".into(),
+                }],
+                scenes: vec![
+                    SceneDraft {
+                        first_sentence: 0,
+                        prompt: "In the control room, a probe leaves on a screen.".into(),
+                        place: Some(0),
+                        ..SceneDraft::default()
+                    },
+                    SceneDraft {
+                        first_sentence: 1,
+                        prompt: "Empty space.".into(),
+                        ..SceneDraft::default()
+                    },
+                ],
+            },
+            time(1_800_000_011),
+        )
+        .unwrap();
+        assert_eq!(plan.places().len(), 1);
+        assert_eq!(plan.scenes()[0].place(), Some(0));
+        assert_eq!(plan.scenes()[1].place(), None);
+        s.db.save_scene_plan(&plan).unwrap();
+        assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));
+
+        let room = plan.place_mut(0, time(1_800_000_050)).unwrap();
+        assert!(room.edit_description(ScenePrompt::new("A bright modern control room.").unwrap()));
+        s.db.save_place(&plan, 0).unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored, plan);
+        assert!(stored.places()[0].is_edited());
+        assert_eq!(
+            stored.places()[0].generated_description().as_str(),
+            "A dim 1970s control room, green screens, night."
+        );
+        assert!(s.db.save_place(&plan, 3).is_err());
+
+        // Saving the whole plan again keeps the places, and a plan without
+        // any leaves none behind.
+        s.db.save_scene_plan(&plan).unwrap();
+        assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));
+        let other = self::plan(&s);
+        s.db.save_scene_plan(&other).unwrap();
+        assert!(
+            s.db.scene_plan(s.project.id)
+                .unwrap()
+                .unwrap()
+                .places()
+                .is_empty()
+        );
+        assert!(
+            s.db.save_place(&plan, 0).is_err(),
             "the replaced plan is gone"
         );
     }
