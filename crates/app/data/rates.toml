@@ -52,29 +52,22 @@ input_tokens = "0.50"
 output_tokens = "3.00"
 image_tokens = "60.00"
 
-# Google bills Veo clips per second of video, by model and resolution; the
-# soundtrack Veo always makes is included. Gemini Omni Flash bills output
-# tokens, 5,792 per second of 720p video at $17.50 per million; Google
-# publishes no figure for its upscaled 1080p, so that has no rate. Google
-# quotes nothing before a clip, so these prices are what gets recorded.
-[gemini."veo-3.1-generate-preview/720p"]
-video_seconds = "0.40"
+# Gemini Omni 1.2 Flash bills its clips as output tokens at $12.00 per
+# million (checked on 2026-11-25): 5,792 tokens per second of 720p video,
+# and 8,688 per second at 1080p, which is the 720p render upscaled. The
+# soundtrack it always makes is included; the image and prompt going in and
+# the model's reasoning ($1.50 and $9.00 per million tokens) are not
+# counted here. Google quotes nothing before a clip, so these prices are
+# what gets recorded.
+[gemini."gemini-omni-1.2-flash/720p"]
+video_seconds = "0.069504"
 
-[gemini."veo-3.1-generate-preview/1080p"]
-video_seconds = "0.40"
+[gemini."gemini-omni-1.2-flash/1080p"]
+video_seconds = "0.104256"
 
-[gemini."veo-3.1-fast-generate-preview/720p"]
-video_seconds = "0.10"
-
-[gemini."veo-3.1-fast-generate-preview/1080p"]
-video_seconds = "0.12"
-
-[gemini."veo-3.1-lite-generate-preview/720p"]
-video_seconds = "0.05"
-
-[gemini."veo-3.1-lite-generate-preview/1080p"]
-video_seconds = "0.08"
-
+# Omni 1.1 Flash, no longer offered: a clip it was already making when
+# Bardo moved to 1.2 is billed at $17.50 per million (until 2026-12-03,
+# when Google bills 1.1 as 1.2).
 [gemini."gemini-omni-1.1-flash/720p"]
 video_seconds = "0.10136"
 

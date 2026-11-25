@@ -1043,7 +1043,9 @@ impl Bardo {
             let problem = match entry.draft(None) {
                 None => Some(ItemProblem::NotReadable),
                 Some(draft) => match (draft.clip_model, draft.take_model) {
-                    (Some(model), _) if !self.offers_clip_model(&model) => {
+                    // A model retired since the file was made imports as
+                    // the one that took its place.
+                    (Some(model), _) if !self.offers_clip_model(&self.clip_model_now(&model)) => {
                         Some(ItemProblem::ModelNotOffered)
                     }
                     (_, Some(model)) if !self.offers_take_model(&model) => {
@@ -1884,6 +1886,41 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|channel| channel.details.same_name("Do Futuro"))
+        );
+    }
+
+    #[test]
+    fn a_channel_from_a_file_made_before_its_model_was_retired_brings_the_replacement() {
+        let mut h = Harness::new();
+        h.more_clips
+            .push(std::sync::Arc::new(bardo_ai::GoogleClips::new()));
+        let json = serde_json::json!({
+            "channels": [{
+                "name": "Arquivos do Espaço",
+                "language": "pt",
+                "country": "BR",
+                "clip_model": {"provider": "gemini", "model": "veo-3.1-fast-generate-preview/1080p"},
+            }],
+        });
+        let bytes = seal_cheaply(json.to_string().as_bytes(), &password());
+        let mut app = h.start();
+        let file = open_bytes(&bytes, &password(), PathBuf::from("x")).unwrap();
+        let choices = app.settings_to_import(&file);
+        let channel = choices
+            .iter()
+            .find(|choice| choice.item == SettingsItem::Channel(0))
+            .unwrap();
+        assert_eq!(channel.problem, None, "the retired model is not a problem");
+        app.import_settings(&file, &items(&choices));
+        let saved = app
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.details.same_name("Arquivos do Espaço"))
+            .unwrap();
+        assert_eq!(
+            saved.details.clip_model().map(ClipModelRef::model),
+            Some("gemini-omni-1.2-flash/1080p")
         );
     }
 

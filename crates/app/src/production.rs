@@ -271,6 +271,7 @@ impl Bardo {
         channel_model: Option<&ClipModel>,
     ) -> Result<ModeEstimate, RepositoryError> {
         let default = Self::mode_clip_model(mode, models, channel_model);
+        let retired = self.retired_clip_models();
         let mut calls = work.calls.clone();
         let mut clips = 0;
         let mut missing_key = None;
@@ -280,7 +281,8 @@ impl Bardo {
             .filter(|scene| scene.needs_clip && mode.animates(scene.start))
         {
             let model = match &scene.own_model {
-                Some(own) => models.iter().find(|model| model.id == *own),
+                Some(own) => bardo_domain::current_clip_model(models, &retired, own)
+                    .map(|current| current.model),
                 None => default,
             };
             let Some(model) = model else { continue };

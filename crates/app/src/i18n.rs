@@ -879,6 +879,10 @@ pub enum Text {
     /// Placeholder: `{model}`.
     SceneClipModelChannel,
     SceneClipModelGone,
+    /// Placeholders: `{old}`, `{new}`.
+    SceneClipModelReplaced,
+    /// Placeholders: `{old}`, `{new}`.
+    ClipsChannelModelReplaced,
     /// Placeholders: `{seconds}`, `{price}`.
     SceneClipPlan,
     /// Placeholder: `{seconds}`.
@@ -3525,6 +3529,8 @@ impl Text {
             Text::SceneClipModel => "scenes.clip.model",
             Text::SceneClipModelChannel => "scenes.clip.model_channel",
             Text::SceneClipModelGone => "scenes.clip.model_gone",
+            Text::SceneClipModelReplaced => "scenes.clip.model_replaced",
+            Text::ClipsChannelModelReplaced => "scenes.clip.channel_model_replaced",
             Text::SceneClipPlan => "scenes.clip.plan",
             Text::SceneClipPlanUnpriced => "scenes.clip.plan_unpriced",
             Text::SceneMotionPrompt => "scenes.clip.motion_prompt",
@@ -5889,6 +5895,8 @@ mod tests {
             Text::SceneClipModel,
             Text::SceneClipModelChannel,
             Text::SceneClipModelGone,
+            Text::SceneClipModelReplaced,
+            Text::ClipsChannelModelReplaced,
             Text::SceneClipPlan,
             Text::SceneClipPlanUnpriced,
             Text::SceneMotionPrompt,

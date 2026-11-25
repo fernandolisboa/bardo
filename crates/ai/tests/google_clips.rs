@@ -1,10 +1,10 @@
-//! Google clips (Veo, Gemini Omni Flash) against recorded responses (see
+//! Google clips (Gemini Omni Flash) against recorded responses (see
 //! `fixtures/google-clips/README.md`). No test calls Google.
 
 mod common;
 
 use bardo_ai::GoogleClips;
-use bardo_ai::google_clips::{API_URL, DEFAULT_MODEL};
+use bardo_ai::google_clips::{API_URL, DEFAULT_MODEL, omni_body};
 use bardo_ai::http::Method;
 use bardo_domain::{
     ApiKey, AspectRatio, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest,
@@ -14,11 +14,12 @@ use base64::Engine as _;
 use common::{Scripted, fixture, recording_sleeper};
 
 const KEY: &str = "AIzaSyBardoTestKey00000000000000000000";
+/// A Veo operation, as a job started before Google shut Veo down saved it.
 const OPERATION: &str = "models/veo-3.1-fast-generate-preview/operations/8x3kq2v9zt1m";
 const INTERACTION: &str = "interactions/v1_ChdHb29nbGVPbW5pQmFyZG9UZXN0MDAx";
 const VIDEO_URL: &str =
     "https://generativelanguage.googleapis.com/v1beta/files/7k2m9q4x1t8v:download?alt=media";
-const OMNI_720P: &str = "gemini-omni-1.1-flash/720p";
+const OMNI_1080P: &str = "gemini-omni-1.2-flash/1080p";
 const FRAME: &[u8] = &[0x89, b'P', b'N', b'G', 1, 2, 3];
 
 fn key() -> ApiKey {
@@ -53,39 +54,89 @@ fn frame_base64() -> String {
 }
 
 #[test]
-fn google_offers_veo_and_omni_at_each_resolution_with_their_lengths() {
+fn google_offers_omni_flash_at_each_resolution_from_3_to_15_seconds() {
     let adapter = clips(&[]);
     assert_eq!(adapter.provider(), Provider::Gemini);
     let models = adapter.models();
-    assert_eq!(models[0].id.model(), DEFAULT_MODEL);
-    assert_eq!(models[0].name, "Veo 3.1 Fast 720p");
-    let durations = |id: &str| {
-        models
-            .iter()
-            .find(|model| model.id.model() == id)
-            .unwrap_or_else(|| panic!("{id} is offered"))
-            .durations
-            .clone()
-    };
-    for veo in ["veo-3.1", "veo-3.1-fast", "veo-3.1-lite"] {
-        assert_eq!(
-            durations(&format!("{veo}-generate-preview/720p")),
-            ClipDurations::Choices(vec![4, 6, 8])
-        );
-        assert_eq!(
-            durations(&format!("{veo}-generate-preview/1080p")),
-            ClipDurations::Choices(vec![8]),
-            "1080p is 8 seconds only"
-        );
-    }
-    for omni in [OMNI_720P, "gemini-omni-1.1-flash/1080p"] {
-        assert_eq!(durations(omni), ClipDurations::Range { min: 3, max: 10 });
-    }
-    assert!(
-        models
-            .iter()
-            .all(|model| model.id.provider() == Provider::Gemini)
+    let offered: Vec<_> = models
+        .iter()
+        .map(|model| (model.id.model(), model.name.as_str()))
+        .collect();
+    assert_eq!(
+        offered,
+        [
+            ("gemini-omni-1.2-flash/720p", "Gemini Omni 1.2 Flash 720p"),
+            ("gemini-omni-1.2-flash/1080p", "Gemini Omni 1.2 Flash 1080p"),
+        ],
+        "no model Google has shut down"
     );
+    assert_eq!(models[0].id.model(), DEFAULT_MODEL);
+    for model in &models {
+        assert_eq!(model.id.provider(), Provider::Gemini);
+        assert_eq!(model.durations, ClipDurations::Range { min: 3, max: 15 });
+    }
+}
+
+#[test]
+fn every_model_google_shut_down_names_the_omni_flash_of_its_resolution() {
+    let adapter = clips(&[]);
+    let models = adapter.models();
+    let retired = adapter.retired();
+    let replaced: Vec<_> = retired
+        .iter()
+        .map(|gone| {
+            assert_eq!(gone.id.provider(), Provider::Gemini);
+            (
+                gone.id.model(),
+                gone.name.as_str(),
+                gone.replacement.model(),
+            )
+        })
+        .collect();
+    let (hd, full_hd) = (DEFAULT_MODEL, OMNI_1080P);
+    assert_eq!(
+        replaced,
+        [
+            (
+                "veo-3.1-fast-generate-preview/720p",
+                "Veo 3.1 Fast 720p",
+                hd
+            ),
+            (
+                "veo-3.1-fast-generate-preview/1080p",
+                "Veo 3.1 Fast 1080p",
+                full_hd
+            ),
+            ("veo-3.1-generate-preview/720p", "Veo 3.1 720p", hd),
+            ("veo-3.1-generate-preview/1080p", "Veo 3.1 1080p", full_hd),
+            (
+                "veo-3.1-lite-generate-preview/720p",
+                "Veo 3.1 Lite 720p",
+                hd
+            ),
+            (
+                "veo-3.1-lite-generate-preview/1080p",
+                "Veo 3.1 Lite 1080p",
+                full_hd
+            ),
+            (
+                "gemini-omni-1.1-flash/720p",
+                "Gemini Omni 1.1 Flash 720p",
+                hd
+            ),
+            (
+                "gemini-omni-1.1-flash/1080p",
+                "Gemini Omni 1.1 Flash 1080p",
+                full_hd
+            ),
+        ]
+    );
+    for gone in &retired {
+        let current = bardo_domain::current_clip_model(&models, &retired, &gone.id)
+            .unwrap_or_else(|| panic!("{} has a replacement on offer", gone.id));
+        assert_eq!(current.model.id, gone.replacement);
+        assert_eq!(current.replaces, Some(gone));
+    }
 }
 
 #[test]
@@ -105,92 +156,54 @@ fn nothing_is_staged_ahead_of_the_submission() {
 }
 
 #[test]
-fn a_veo_submission_carries_the_image_inline_and_returns_the_operation() {
-    let adapter = clips(&["veo-submit"]);
-    let submission = adapter
-        .submit(&key(), &request(DEFAULT_MODEL, 6), "job-0-1")
-        .unwrap();
-    assert_eq!(submission.handle, ClipHandle(OPERATION.into()));
-    assert_eq!(submission.quote, None, "the rate table prices it");
-
-    let sent = adapter.transport().sent();
-    assert_eq!(sent.len(), 1);
-    let submit = &sent[0];
-    assert_eq!(submit.method, Method::Post);
-    assert_eq!(
-        submit.url,
-        format!("{API_URL}/models/veo-3.1-fast-generate-preview:predictLongRunning")
-    );
-    assert_eq!(submit.header("x-goog-api-key"), Some(KEY));
-    assert!(!submit.url.contains(KEY), "the key stays out of the URL");
-    let instance = &submit.body["instances"][0];
-    assert_eq!(
-        instance["prompt"],
-        "Slow push in on the launch pad, steam rising."
-    );
-    assert_eq!(instance["image"]["inlineData"]["mimeType"], "image/png");
-    assert_eq!(instance["image"]["inlineData"]["data"], frame_base64());
-    let parameters = &submit.body["parameters"];
-    assert_eq!(parameters["aspectRatio"], "16:9");
-    assert_eq!(parameters["resolution"], "720p");
-    assert_eq!(parameters["durationSeconds"], 6);
-}
-
-#[test]
-fn a_vertical_first_frame_asks_both_models_for_a_vertical_clip() {
+fn a_vertical_first_frame_asks_for_a_vertical_clip() {
     let vertical = ClipRequest {
         aspect: AspectRatio::Vertical,
         ..request(DEFAULT_MODEL, 6)
     };
     assert_eq!(
-        bardo_ai::google_clips::veo_body(&vertical, "720p")["parameters"]["aspectRatio"],
-        "9:16"
-    );
-    assert_eq!(
-        bardo_ai::google_clips::omni_body(&vertical, "gemini-omni-1.1-flash", "720p")["response_format"]
-            ["aspect_ratio"],
+        omni_body(&vertical, "gemini-omni-1.2-flash", "720p")["response_format"]["aspect_ratio"],
         "9:16"
     );
 }
 
 #[test]
-fn each_veo_model_and_resolution_goes_to_its_own_endpoint() {
-    let adapter = clips(&["veo-submit", "veo-submit"]);
+fn each_resolution_is_asked_of_the_same_model() {
+    let adapter = clips(&["omni-submit", "omni-submit"]);
     adapter
-        .submit(&key(), &request("veo-3.1-generate-preview/1080p", 8), "s")
+        .submit(&key(), &request(DEFAULT_MODEL, 3), "s")
         .unwrap();
     adapter
-        .submit(
-            &key(),
-            &request("veo-3.1-lite-generate-preview/720p", 4),
-            "s",
-        )
+        .submit(&key(), &request(OMNI_1080P, 15), "s")
         .unwrap();
     let sent = adapter.transport().sent();
-    assert_eq!(
-        sent[0].url,
-        format!("{API_URL}/models/veo-3.1-generate-preview:predictLongRunning")
-    );
-    assert_eq!(sent[0].body["parameters"]["resolution"], "1080p");
-    assert_eq!(
-        sent[1].url,
-        format!("{API_URL}/models/veo-3.1-lite-generate-preview:predictLongRunning")
-    );
-    assert_eq!(sent[1].body["parameters"]["durationSeconds"], 4);
+    for submit in &sent {
+        assert_eq!(submit.url, format!("{API_URL}/interactions"));
+        assert_eq!(submit.body["model"], "gemini-omni-1.2-flash");
+    }
+    assert_eq!(sent[0].body["response_format"]["resolution"], "720p");
+    assert_eq!(sent[0].body["response_format"]["duration"], "3s");
+    assert_eq!(sent[1].body["response_format"]["resolution"], "1080p");
+    assert_eq!(sent[1].body["response_format"]["duration"], "15s");
 }
 
 #[test]
 fn an_omni_submission_runs_in_the_background_as_one_shot_from_the_image() {
     let adapter = clips(&["omni-submit"]);
     let submission = adapter
-        .submit(&key(), &request(OMNI_720P, 7), "job-0-1")
+        .submit(&key(), &request(DEFAULT_MODEL, 7), "job-0-1")
         .unwrap();
     assert_eq!(submission.handle, ClipHandle(INTERACTION.into()));
+    assert_eq!(submission.quote, None, "the rate table prices it");
 
-    let submit = &adapter.transport().sent()[0];
+    let sent = adapter.transport().sent();
+    assert_eq!(sent.len(), 1);
+    let submit = &sent[0];
+    assert_eq!(submit.method, Method::Post);
     assert_eq!(submit.url, format!("{API_URL}/interactions"));
     assert_eq!(submit.header("x-goog-api-key"), Some(KEY));
-    assert_eq!(submit.body["model"], "gemini-omni-1.1-flash");
+    assert!(!submit.url.contains(KEY), "the key stays out of the URL");
+    assert_eq!(submit.body["model"], "gemini-omni-1.2-flash");
     assert_eq!(submit.body["background"], true);
     let input = submit.body["input"].as_array().unwrap();
     assert_eq!(input[0]["type"], "image");
@@ -207,30 +220,30 @@ fn an_omni_submission_runs_in_the_background_as_one_shot_from_the_image() {
 }
 
 #[test]
-fn a_long_prompt_is_cut_where_veo_stops_reading() {
-    let adapter = clips(&["veo-submit"]);
+fn a_long_prompt_is_cut() {
+    let adapter = clips(&["omni-submit"]);
     let mut long = request(DEFAULT_MODEL, 8);
     long.prompt = "é".repeat(3_000);
     adapter.submit(&key(), &long, "s").unwrap();
-    let prompt = adapter.transport().sent()[0].body["instances"][0]["prompt"]
+    let text = adapter.transport().sent()[0].body["input"][1]["text"]
         .as_str()
         .unwrap()
-        .chars()
-        .count();
-    assert_eq!(prompt, 2_500);
+        .to_owned();
+    assert_eq!(text.chars().filter(|c| *c == 'é').count(), 2_500);
 }
 
 #[test]
-fn a_model_google_does_not_offer_is_not_sent() {
+fn a_model_google_no_longer_serves_or_never_offered_is_not_sent() {
     let adapter = clips(&[]);
-    let failure = adapter
-        .submit(
-            &key(),
-            &request("kling-video/v3.0/std/image-to-video", 5),
-            "s",
-        )
-        .unwrap_err();
-    assert_eq!(failure.kind, ProviderFailureKind::NotAllowed);
+    for model in [
+        "veo-3.1-fast-generate-preview/720p",
+        "gemini-omni-1.1-flash/720p",
+        "gemini-omni-1.2-flash/4k",
+        "kling-video/v3.0/std/image-to-video",
+    ] {
+        let failure = adapter.submit(&key(), &request(model, 5), "s").unwrap_err();
+        assert_eq!(failure.kind, ProviderFailureKind::NotAllowed, "{model}");
+    }
     assert!(adapter.transport().sent().is_empty());
 }
 
@@ -238,33 +251,29 @@ fn a_model_google_does_not_offer_is_not_sent() {
 fn refused_submissions_say_why() {
     let cases = [
         (
-            "veo-submit-rejected",
-            DEFAULT_MODEL,
-            ProviderFailureKind::Rejected,
-            "API key not valid",
-        ),
-        (
             "omni-submit-rejected",
-            OMNI_720P,
             ProviderFailureKind::Rejected,
             "API key not valid",
         ),
         (
-            "veo-submit-model-not-found",
-            DEFAULT_MODEL,
+            "omni-submit-model-not-found",
             ProviderFailureKind::NotAllowed,
-            "is not found",
+            "was not found",
         ),
         (
-            "veo-submit-invalid",
-            DEFAULT_MODEL,
+            "omni-submit-invalid",
             ProviderFailureKind::Unexpected,
-            "must be 8 seconds",
+            "'3s' to '15s'",
+        ),
+        (
+            "omni-submit-no-credits",
+            ProviderFailureKind::LimitReached,
+            "credit balance",
         ),
     ];
-    for (name, model, kind, detail) in cases {
+    for (name, kind, detail) in cases {
         let failure = clips(&[name])
-            .submit(&key(), &request(model, 8), "s")
+            .submit(&key(), &request(DEFAULT_MODEL, 8), "s")
             .unwrap_err();
         assert_eq!(failure.kind, kind, "{name}");
         assert!(
@@ -278,40 +287,20 @@ fn refused_submissions_say_why() {
 #[test]
 fn a_busy_or_throttled_api_is_retried_before_failing() {
     let adapter = clips(&[
-        "veo-submit-overloaded",
-        "veo-submit-rate-limited",
-        "veo-submit",
+        "omni-submit-overloaded",
+        "omni-submit-rate-limited",
+        "omni-submit",
     ]);
     let submission = adapter
         .submit(&key(), &request(DEFAULT_MODEL, 8), "s")
         .unwrap();
-    assert_eq!(submission.handle, ClipHandle(OPERATION.into()));
+    assert_eq!(submission.handle, ClipHandle(INTERACTION.into()));
     assert_eq!(adapter.transport().sent().len(), 3);
 
-    let throttled = clips(&["veo-submit-rate-limited"; 4])
+    let throttled = clips(&["omni-submit-rate-limited"; 4])
         .submit(&key(), &request(DEFAULT_MODEL, 8), "s")
         .unwrap_err();
     assert_eq!(throttled.kind, ProviderFailureKind::LimitReached);
-}
-
-#[test]
-fn a_veo_operation_is_followed_to_its_clip() {
-    let adapter = clips(&["veo-running", "veo-done"]);
-    let handle = ClipHandle(OPERATION.into());
-    assert_eq!(
-        adapter.status(&key(), &handle).unwrap(),
-        ClipStatus::Running
-    );
-    assert_eq!(
-        adapter.status(&key(), &handle).unwrap(),
-        ClipStatus::Done {
-            video: VIDEO_URL.into()
-        }
-    );
-    let sent = adapter.transport().sent();
-    assert_eq!(sent[0].method, Method::Get);
-    assert_eq!(sent[0].url, format!("{API_URL}/{OPERATION}"));
-    assert_eq!(sent[0].header("x-goog-api-key"), Some(KEY));
 }
 
 #[test]
@@ -330,33 +319,42 @@ fn an_omni_interaction_is_followed_to_its_clip() {
         },
         "the clip is inline: the download reads the interaction again"
     );
+    let sent = adapter.transport().sent();
+    assert_eq!(sent[0].method, Method::Get);
+    assert_eq!(sent[0].url, format!("{API_URL}/{INTERACTION}"));
+    assert_eq!(sent[0].header("x-goog-api-key"), Some(KEY));
+}
+
+#[test]
+fn a_clip_google_serves_as_a_file_is_followed_to_its_address() {
+    let adapter = clips(&["omni-completed-uri"]);
     assert_eq!(
-        adapter.transport().sent()[0].url,
-        format!("{API_URL}/{INTERACTION}")
+        adapter
+            .status(&key(), &ClipHandle(INTERACTION.into()))
+            .unwrap(),
+        ClipStatus::Done {
+            video: VIDEO_URL.into()
+        }
     );
+}
+
+#[test]
+fn a_veo_operation_left_from_before_the_shutdown_ends_without_a_call() {
+    let adapter = clips(&[]);
+    let status = adapter
+        .status(&key(), &ClipHandle(OPERATION.into()))
+        .unwrap();
+    let ClipStatus::Failed(failure) = status else {
+        panic!("{status:?}");
+    };
+    assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
+    assert!(failure.detail.contains("no longer serves"), "{failure:?}");
+    assert!(adapter.transport().sent().is_empty());
 }
 
 #[test]
 fn work_that_ends_without_a_clip_is_a_failure_of_its_kind() {
     let cases = [
-        (
-            "veo-filtered",
-            OPERATION,
-            ProviderFailureKind::Declined,
-            "issue with the audio",
-        ),
-        (
-            "veo-error",
-            OPERATION,
-            ProviderFailureKind::ProviderDown,
-            "internal error",
-        ),
-        (
-            "veo-done-empty",
-            OPERATION,
-            ProviderFailureKind::Unexpected,
-            "without a clip",
-        ),
         (
             "omni-completed-text",
             INTERACTION,
@@ -369,6 +367,13 @@ fn work_that_ends_without_a_clip_is_a_failure_of_its_kind() {
             ProviderFailureKind::ProviderDown,
             "Please try again",
         ),
+        // Blocked by its code alone: not sent, and paid for, again.
+        (
+            "omni-failed-blocked",
+            INTERACTION,
+            ProviderFailureKind::Declined,
+            "could not be generated",
+        ),
         (
             "omni-cancelled",
             INTERACTION,
@@ -377,7 +382,7 @@ fn work_that_ends_without_a_clip_is_a_failure_of_its_kind() {
         ),
         (
             "not-found",
-            OPERATION,
+            INTERACTION,
             ProviderFailureKind::Unexpected,
             "does not know",
         ),
@@ -416,7 +421,7 @@ fn a_handle_that_could_leave_the_api_is_never_requested() {
 }
 
 #[test]
-fn a_veo_clip_downloads_with_the_key_from_google_only() {
+fn a_clip_file_downloads_with_the_key_from_google_only() {
     let adapter = clips(&["download-clip", "download-clip"]);
     let clip = adapter.download(&key(), VIDEO_URL).unwrap();
     assert_eq!(&clip.bytes[4..8], b"ftyp");
@@ -446,7 +451,7 @@ fn a_download_that_is_gone_or_not_a_clip_fails() {
         .unwrap_err();
     assert_eq!(gone.kind, ProviderFailureKind::Unexpected);
     assert!(gone.detail.contains("no longer available"));
-    let json = clips(&["veo-done"])
+    let json = clips(&["omni-completed-uri"])
         .download(&key(), VIDEO_URL)
         .unwrap_err();
     assert!(json.detail.contains("not an MP4"));
@@ -463,7 +468,7 @@ fn offline_is_unreachable() {
     let (sleeper, _) = recording_sleeper();
     let adapter = GoogleClips::with_transport(Scripted::offline()).with_sleeper(sleeper);
     let failure = adapter
-        .status(&key(), &ClipHandle(OPERATION.into()))
+        .status(&key(), &ClipHandle(INTERACTION.into()))
         .unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unreachable);
 }

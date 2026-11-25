@@ -378,11 +378,25 @@ impl ProjectsScreen {
             })
             .child(div().flex_1())
             .child(actions);
+        // The channel's model was retired by its provider: say which one
+        // makes the clips now.
+        let replaced = (stage == Stage::Clips)
+            .then(|| {
+                let old = view.clips.default_replaces.as_ref()?;
+                let new = view.clips.default_model.as_ref()?;
+                let text = bardo.text_with(
+                    Text::ClipsChannelModelReplaced,
+                    &[("old", old), ("new", &new.name)],
+                );
+                Some(kit::notice(Tone::Info, SharedString::from(text), cx).text_xs())
+            })
+            .flatten();
         // The leading action's estimate, under it.
         v_flex()
             .gap_1()
             .child(row)
             .children(estimate.map(|estimate| h_flex().justify_end().child(estimate)))
+            .children(replaced)
             .into_any_element()
     }
 
@@ -1688,7 +1702,8 @@ impl ProjectsScreen {
             (Some(_), Some(model)) => SharedString::from(model.name.clone()),
             (Some(own), None) => SharedString::from(own.model().to_owned()),
         };
-        let own = scene.clip_model().cloned();
+        // A model its provider retired checks the one that took its place.
+        let own = scene.clip_model().map(|model| bardo.clip_model_now(model));
         let channel_title = SharedString::from(
             bardo.text_with(
                 Text::SceneClipModelChannel,
@@ -1771,6 +1786,18 @@ impl ProjectsScreen {
             .model
             .is_none()
             .then(|| kit::notice(Tone::Warning, tr(bardo, Text::SceneClipModelGone), cx).text_xs());
+        // Its provider retired the scene's model: say which one runs.
+        let model_replaced = view
+            .replaces
+            .as_ref()
+            .zip(view.model.as_ref())
+            .map(|(old, new)| {
+                let text = bardo.text_with(
+                    Text::SceneClipModelReplaced,
+                    &[("old", old), ("new", &new.name)],
+                );
+                kit::notice(Tone::Info, SharedString::from(text), cx).text_xs()
+            });
 
         let state: Option<AnyElement> = if view.is_busy() {
             Some(
@@ -1994,6 +2021,7 @@ impl ProjectsScreen {
                     })),
             )
             .children(model_gone)
+            .children(model_replaced)
             .children(state)
             .children(actions)
             .children(review)

@@ -25,7 +25,7 @@ O **prompt de movimento** diz como a imagem se move: um movimento de câmera e n
 <a id="model"></a>
 ## Modelo de vídeo
 
-Cada cena usa o modelo padrão do vídeo, a menos que você escolha outro para ela em **Modelo de vídeo**: o do [modo de produção](projects.md#mode) (Kling 2.6 ou 3.0) ou, no **Tudo animado, modelo do canal**, o do canal, definido em [Canais](bardo:go/channels). Os modelos mudam no visual, nas durações que aceitam e no preço. Se o modelo de uma cena deixou de ser oferecido, a cena avisa; escolha outro.
+Cada cena usa o modelo padrão do vídeo, a menos que você escolha outro para ela em **Modelo de vídeo**: o do [modo de produção](projects.md#mode) (Kling 2.6 ou 3.0) ou, no **Tudo animado, modelo do canal**, o do canal, definido em [Canais](bardo:go/channels). Os modelos mudam no visual, nas durações que aceitam e no preço. Quando um provedor descontinua um modelo, como o Google fez com o Veo 3.1, os canais e as cenas salvos com ele passam a usar o modelo que o provedor oferece no lugar, aqui o Gemini Omni Flash na mesma resolução; a etapa ou a cena diz o nome dos dois modelos, e o preço embaixo da cena é o do modelo novo. Se o modelo de uma cena deixou de ser oferecido e nada ficou no lugar, a cena avisa; escolha outro.
 
 <a id="review"></a>
 ## Revisar um clipe

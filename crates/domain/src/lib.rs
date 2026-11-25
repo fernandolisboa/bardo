@@ -150,7 +150,8 @@ pub use chapters::{
 };
 pub use clip::{
     ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelError, ClipModelRef,
-    ClipRequest, ClipStatus, ClipSubmission, GeneratedClip, StagedImage,
+    ClipRequest, ClipStatus, ClipSubmission, CurrentClipModel, GeneratedClip, RetiredClipModel,
+    StagedImage, current_clip_model,
 };
 pub use connection::{
     AppCredentials, AppCredentialsFieldError, BrowserSignIn, ConnectedIdentity, ConnectionSecrets,
