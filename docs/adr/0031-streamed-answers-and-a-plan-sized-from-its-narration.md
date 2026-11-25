@@ -1,4 +1,4 @@
-# ADR-0030: Claude's answers are streamed, and a scene plan's room follows its narration
+# ADR-0031: Claude's answers are streamed, and a scene plan's room follows its narration
 
 - Status: Accepted
 - Date: 2026-11-25
