@@ -332,13 +332,46 @@ fn other_audience(channel: &Channel, language: ContentLanguage, country: Country
 
 /// A copy of `plan` for `project`: the current images and clips with new
 /// generation records, prompts and model picks, the cast with its
-/// portraits and the places; nothing waiting for review, no failures and no clip of an
-/// image the scene no longer shows.
+/// portraits and the places, and which portraits each image was drawn
+/// with; nothing waiting for review, no failures and no clip of an image
+/// the scene no longer shows.
 fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> ScenePlan {
     let copied = |generation: &Generation| Generation {
         id: GenerationId::new(),
         project,
         ..generation.clone()
+    };
+    let cast: Vec<CastMember> = plan
+        .cast()
+        .iter()
+        .map(|member| {
+            CastMember::restore(CastRecord {
+                name: member.name.clone(),
+                generated_description: member.generated_description().clone(),
+                description: member.description().clone(),
+                portrait: member.portrait().map(|portrait| SceneImage {
+                    file: portrait.file.clone(),
+                    generation: copied(&portrait.generation),
+                }),
+                failure: None,
+            })
+            .with_described_only(member.is_described_only())
+        })
+        .collect();
+    // The copied portraits have records of their own: an image drawn with
+    // a member's current portrait is one drawn with its copy.
+    let copied_portrait = |member: usize, used: Option<GenerationId>| {
+        let current = plan.cast().get(member).and_then(CastMember::portrait);
+        match (
+            used,
+            current,
+            cast.get(member).and_then(CastMember::portrait),
+        ) {
+            (Some(used), Some(current), Some(copy)) if used == current.generation.id => {
+                Some(copy.generation.id)
+            }
+            _ => used,
+        }
     };
     let scenes = plan
         .scenes()
@@ -377,22 +410,15 @@ fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> Scen
             .with_cast(scene.cast().to_vec())
             .with_planned_motion(scene.planned_motion().cloned())
             .with_place(scene.place())
-        })
-        .collect();
-    let cast = plan
-        .cast()
-        .iter()
-        .map(|member| {
-            CastMember::restore(CastRecord {
-                name: member.name.clone(),
-                generated_description: member.generated_description().clone(),
-                description: member.description().clone(),
-                portrait: member.portrait().map(|portrait| SceneImage {
-                    file: portrait.file.clone(),
-                    generation: copied(&portrait.generation),
+            .with_portraits(
+                scene.image_portraits().map(|portraits| {
+                    portraits
+                        .iter()
+                        .map(|&(member, used)| (member, copied_portrait(member, used)))
+                        .collect()
                 }),
-                failure: None,
-            })
+                None,
+            )
         })
         .collect();
     ScenePlan::restore(ScenePlanRecord {
@@ -1795,6 +1821,51 @@ mod tests {
                 (0, bardo_domain::OtherShot::SamePlace),
                 (1, bardo_domain::OtherShot::Before)
             ]
+        );
+    }
+
+    #[test]
+    fn a_version_carries_which_portraits_its_images_were_drawn_with() {
+        let h = Harness::new();
+        let app = h.start();
+        let source = crate::scenes::tests::cast_project(&h, &app);
+        done(
+            &app,
+            app.generate_scene_images(source.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        // The chef's portrait is drawn again: his scenes show the old one.
+        done(
+            &app,
+            app.redraw_cast_portrait(source.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        done(
+            &app,
+            app.regenerate_scene_image(source.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        app.accept_scene_image(source.id, 0).unwrap();
+        assert_eq!(app.scenes(source.id).unwrap().old_portraits, [2]);
+
+        let channel = english_channel(&app);
+        answer(&h, &ADAPTED);
+        done(
+            &app,
+            app.make_version(source.id, channel.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let version = app.versions(source.id).unwrap().made[0].project.clone();
+
+        // The copy's images go by the copy's portrait: the one drawn with
+        // the current portrait matches it, the other is still out of date.
+        let view = app.scenes(version.id).unwrap();
+        assert_eq!(view.old_portraits, [2]);
+        let carried = view.plan.unwrap();
+        let portrait = carried.cast()[0].portrait().unwrap().generation.id;
+        assert_eq!(
+            carried.scenes()[0].image_portraits(),
+            Some(&vec![(0, Some(portrait))])
         );
     }
 

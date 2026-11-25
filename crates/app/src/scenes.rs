@@ -18,7 +18,13 @@
 //! portrait, and every scene showing them is drawn with it, so a person
 //! keeps one face from scene to scene. The user can edit a member's
 //! description or draw the portrait again; scenes already drawn keep
-//! theirs until drawn again.
+//! theirs until drawn again, and are marked meanwhile: each image
+//! records the portraits it was drawn with (#269, ADR-0035). A scene is never drawn
+//! without the portrait of everyone it shows, since it would be paid for
+//! and show another face: when a portrait fails or will not read, the
+//! scenes with that person are left undrawn and point at the portrait.
+//! Drawing someone from the description alone is the user's choice, per
+//! person.
 //!
 //! The plan is a storyboard (#258): it names the recurring places once,
 //! each with one fixed description, and says which place each scene
@@ -46,11 +52,11 @@ use bardo_domain::{
     GenerationId, ImageFormat, ImageGenerator, ImageRequest, ImageShape, Job, JobFailure,
     JobFailureKind, JobId, JobKind, Narration, NarrationId, NarrationRepository, NoPendingClip,
     NoPendingImage, NoSuchCastMember, NoSuchPlace, NoSuchScene, OtherShot, OtherText, PlaceDraft,
-    PlanDraft, ProfileId, Progress, ProjectFiles, Provider, ReferenceImage, RenderedPrompt,
-    RepositoryError, SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId,
-    ScenePlanRepository, ScenePlanSize, ScenePrompt, SceneSetting, SecretStore, StyleChoice,
-    TemplateKind, TemplateUsed, TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort,
-    TextFormat, TextGenerator, TextRequest, TokenUsage, VideoProject, VideoProjectId,
+    PlanDraft, PortraitsUsed, ProfileId, Progress, ProjectFiles, Provider, ReferenceImage,
+    RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError, SceneImage, ScenePlan,
+    ScenePlanId, ScenePlanRepository, ScenePlanSize, ScenePrompt, SceneSetting, SecretStore,
+    StyleChoice, TemplateKind, TemplateUsed, TemplateVariable, TemplateVersion, TemplateVersionId,
+    TextEffort, TextFormat, TextGenerator, TextRequest, TokenUsage, VideoProject, VideoProjectId,
     scene_image_prompt, sentences,
 };
 use bardo_media::MediaEngine;
@@ -226,6 +232,13 @@ pub struct ScenesView {
     /// What drawing those again would cost, their people's portraits
     /// included; `None` when there is none.
     pub restyle_estimate: Option<SpendEstimate>,
+    /// The scenes whose image shows a person as an older portrait of
+    /// theirs did, or was drawn without their portrait (#269). They stay
+    /// until the user draws them again.
+    pub old_portraits: Vec<usize>,
+    /// What drawing those again would cost, missing portraits included;
+    /// `None` when there is none.
+    pub old_portraits_estimate: Option<SpendEstimate>,
 }
 
 /// Claude's call that plans the scenes of a narration of `size`. What the
@@ -559,8 +572,9 @@ impl Default for References {
 impl References {
     /// Adds the project's image `file`, as a small copy when it is large;
     /// `false` when it is not an image Bardo saved, will not read, or
-    /// would take the request past [`MAX_REFERENCE_BYTES`], and the
-    /// request then goes without it.
+    /// would take the request past [`MAX_REFERENCE_BYTES`]. A request goes
+    /// without another scene's image that was not added; it does not go
+    /// without a portrait (#269).
     fn add(
         &mut self,
         files: &dyn ProjectFiles,
@@ -568,22 +582,35 @@ impl References {
         project: VideoProjectId,
         file: &str,
     ) -> bool {
-        let Some(format) = saved_format(file) else {
-            return false;
-        };
-        let small = small_copy(files, media, project, file).map(|bytes| (bytes, ImageFormat::Jpeg));
-        let Some((bytes, format)) =
-            small.or_else(|| Some((files.read(project, file).ok()?, format)))
-        else {
-            return false;
-        };
-        let Some(room) = self.room.checked_sub(bytes.len()) else {
-            return false;
-        };
-        self.room = room;
-        self.images.push(ReferenceImage { bytes, format });
-        true
+        self.try_add(files, media, project, file).is_ok()
     }
+
+    /// [`References::add`], saying why the image was not added.
+    fn try_add(
+        &mut self,
+        files: &dyn ProjectFiles,
+        media: &dyn MediaEngine,
+        project: VideoProjectId,
+        file: &str,
+    ) -> Result<(), NotAdded> {
+        let format = saved_format(file).ok_or(NotAdded::Unreadable)?;
+        let small = small_copy(files, media, project, file).map(|bytes| (bytes, ImageFormat::Jpeg));
+        let (bytes, format) = small
+            .or_else(|| Some((files.read(project, file).ok()?, format)))
+            .ok_or(NotAdded::Unreadable)?;
+        self.room = self.room.checked_sub(bytes.len()).ok_or(NotAdded::NoRoom)?;
+        self.images.push(ReferenceImage { bytes, format });
+        Ok(())
+    }
+}
+
+/// Why an image is not among a request's references.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NotAdded {
+    /// Not an image Bardo saved, or its file is gone or will not read.
+    Unreadable,
+    /// It would take the request past [`MAX_REFERENCE_BYTES`].
+    NoRoom,
 }
 
 /// Drawing failures that are about one scene (its prompt, the answer to
@@ -970,6 +997,9 @@ impl SceneHandler {
         // Portraits drawn on the way to a scene are counted as they come.
         let mut total = payload.portraits.len() + payload.scenes.len();
         let mut failed: Vec<JobFailure> = Vec::new();
+        // The scenes left undrawn for lack of a portrait, by scene number,
+        // under the people whose portrait is missing.
+        let mut waiting: Vec<(String, Vec<usize>)> = Vec::new();
         let mut key = None;
         // Portraits this run drew or tried: one that fails is not tried
         // again for every scene its member is in.
@@ -1010,9 +1040,12 @@ impl SceneHandler {
                 continue;
             };
             tried.push(member);
-            let drawn = cast
-                .portrait()
-                .is_some_and(|portrait| portrait.generation.job == Some(job));
+            // The user chose since to draw this person without a portrait
+            // (a retry of an older job): one drawn now would never be sent.
+            let drawn = cast.is_described_only()
+                || cast
+                    .portrait()
+                    .is_some_and(|portrait| portrait.generation.job == Some(job));
             if !drawn {
                 if cx.as_ref().is_some_and(|cx| cx.should_stop()) {
                     return Ok(());
@@ -1078,12 +1111,22 @@ impl SceneHandler {
                 None => key.insert(self.key(Provider::Gemini)?),
             };
             // The people it shows get their portrait first, in the video's
-            // style.
-            for member in plan.missing_portraits(&[index], style) {
-                if !tried.contains(&member) {
+            // style. Once one of them is left without (it failed now, or
+            // earlier in this run), the scene will not be drawn, so the
+            // portraits of the others are not bought for it.
+            let missing = plan.missing_portraits(&[index], style);
+            if !missing.iter().any(|member| tried.contains(member)) {
+                for member in missing {
                     tried.push(member);
                     total += 1;
                     self.draw_portrait(key, project, plan_id, (member, style), job, &mut failed)?;
+                    let drawn = self.saved_plan(project, plan_id)?.is_some_and(|plan| {
+                        plan.cast_member(member)
+                            .is_ok_and(|cast| cast.portrait_in(style).is_some())
+                    });
+                    if !drawn {
+                        break;
+                    }
                 }
             }
             let Some(plan) = self.saved_plan(project, plan_id)? else {
@@ -1092,27 +1135,83 @@ impl SceneHandler {
             let Ok(scene) = plan.scene(index) else {
                 continue;
             };
-            let shown: Vec<&CastMember> = plan
+            let members: Vec<(usize, &CastMember)> = plan
                 .scene_cast(index)
                 .into_iter()
-                .filter_map(|member| plan.cast_member(member).ok())
+                .filter_map(|member| Some((member, plan.cast_member(member).ok()?)))
                 .collect();
+            let shown: Vec<&CastMember> = members.iter().map(|(_, cast)| *cast).collect();
             let mut references = References::default();
-            // A portrait that will not read, or one in another style that
-            // could not be drawn again, is described instead.
-            let referenced: Vec<bool> = shown
-                .iter()
-                .map(|member| {
-                    member.portrait_in(style).is_some_and(|portrait| {
-                        references.add(
+            // Each person goes with their portrait, or from the description
+            // alone when the user chose so. Without the portrait (it failed,
+            // will not read, or is in another style and could not be drawn
+            // again) the scene is not drawn: it would be paid for and show
+            // another face (#269).
+            let mut used: PortraitsUsed = Vec::new();
+            let mut without: Vec<&str> = Vec::new();
+            // The people whose portrait is there and will not read.
+            let mut unreadable: Vec<usize> = Vec::new();
+            for (member, cast) in &members {
+                if cast.is_described_only() {
+                    used.push((*member, None));
+                    continue;
+                }
+                let added = cast.portrait_in(style).map(|portrait| {
+                    references
+                        .try_add(
                             self.files.as_ref(),
                             self.media.as_ref(),
                             project,
                             &portrait.file,
                         )
-                    })
-                })
-                .collect();
+                        .map(|()| portrait.generation.id)
+                });
+                match added {
+                    Some(Ok(portrait)) => used.push((*member, Some(portrait))),
+                    Some(Err(NotAdded::Unreadable)) => {
+                        unreadable.push(*member);
+                        without.push(&cast.name);
+                    }
+                    Some(Err(NotAdded::NoRoom)) | None => without.push(&cast.name),
+                }
+            }
+            if !without.is_empty() {
+                let people = without.join(" and ");
+                match waiting.iter_mut().find(|(names, _)| *names == people) {
+                    Some((_, scenes)) => scenes.push(index + 1),
+                    None => waiting.push((people, vec![index + 1])),
+                }
+                if let Some(mut plan) = self.saved_plan(project, plan_id)? {
+                    plan.scene_mut(index, SystemTime::now())
+                        .map_err(unexpected)?
+                        .fail(JobFailureKind::PortraitMissing);
+                    self.plans.save_scene(&plan, index).map_err(unexpected)?;
+                    // A portrait that will not read is let go, so the person
+                    // shows as having none and the next run draws it again
+                    // instead of failing the same way. Not this run: what it
+                    // was started for did not count that portrait.
+                    for member in unreadable {
+                        if !tried.contains(&member) {
+                            tried.push(member);
+                        }
+                        let now = SystemTime::now();
+                        let gone = plan
+                            .cast_mut(member, now)
+                            .ok()
+                            .filter(|cast| cast.portrait_in(style).is_some())
+                            .and_then(|cast| cast.drop_portrait(JobFailureKind::Files));
+                        if let Some(gone) = gone {
+                            self.plans
+                                .save_cast_member(&plan, member)
+                                .map_err(unexpected)?;
+                            crate::proxies::remove_media(self.files.as_ref(), project, &gone.file);
+                        }
+                    }
+                }
+                step(&mut cx, &mut done, total)?;
+                continue;
+            }
+            let referenced: Vec<bool> = used.iter().map(|(_, used)| used.is_some()).collect();
             // Then the other scenes it belongs with; one whose image will
             // not read is left out.
             let shots: Vec<OtherShot> = plan
@@ -1194,7 +1293,7 @@ impl SceneHandler {
                     let pushed = plan
                         .scene_mut(index, SystemTime::now())
                         .map_err(unexpected)?
-                        .add_image(image);
+                        .add_image_drawn_with(image, Some(used));
                     self.plans.save_scene(&plan, index).map_err(unexpected)?;
                     if let Some(pushed) = pushed {
                         crate::proxies::remove_media(self.files.as_ref(), project, &pushed.file);
@@ -1228,28 +1327,39 @@ impl SceneHandler {
             }
             step(&mut cx, &mut done, total)?;
         }
-        match failed.first() {
-            None => Ok(()),
-            Some(first) => Err(JobFailure::new(
-                first.kind,
-                format!(
-                    "{} of {} images were not drawn. {}",
-                    failed.len(),
-                    total,
-                    failed
-                        .iter()
-                        .map(|failure| failure.detail.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" | ")
-                ),
-            )),
+        if failed.is_empty() && waiting.is_empty() {
+            return Ok(());
         }
+        let undrawn = failed.len()
+            + waiting
+                .iter()
+                .map(|(_, scenes)| scenes.len())
+                .sum::<usize>();
+        let details = failed
+            .iter()
+            .map(|failure| failure.detail.clone())
+            .chain(waiting.iter().map(|(people, scenes)| {
+                let numbers: Vec<String> = scenes.iter().map(ToString::to_string).collect();
+                format!(
+                    "{} {} not drawn, for lack of the portrait of {people}",
+                    if scenes.len() == 1 { "scene" } else { "scenes" },
+                    numbers.join(", ") + if scenes.len() == 1 { " was" } else { " were" },
+                )
+            }))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        Err(JobFailure::new(
+            failed
+                .first()
+                .map_or(JobFailureKind::PortraitMissing, |first| first.kind),
+            format!("{undrawn} of {total} images were not drawn. {details}"),
+        ))
     }
 
     /// Draws cast member `member`'s portrait in `style` and puts it in
     /// place of the current one. A failure about the portrait is recorded
-    /// on the member and in `failed`, and the scenes are drawn without it;
-    /// any other failure stops the job.
+    /// on the member and in `failed`, and the scenes that show the member
+    /// are then left undrawn; any other failure stops the job.
     fn draw_portrait(
         &self,
         key: &ApiKey,
@@ -1334,6 +1444,10 @@ impl SceneHandler {
                 self.plans
                     .save_cast_member(&plan, member)
                     .map_err(unexpected)?;
+                // The scenes left undrawn for lack of it no longer wait.
+                for index in plan.settle_portrait_waits(style) {
+                    self.plans.save_scene(&plan, index).map_err(unexpected)?;
+                }
                 if let Some(replaced) = replaced {
                     crate::proxies::remove_media(self.files.as_ref(), project, &replaced.file);
                 }
@@ -1558,6 +1672,16 @@ impl Bardo {
             }
             _ => None,
         };
+        let old_portraits = plan
+            .as_ref()
+            .map_or_else(Vec::new, ScenePlan::with_old_portraits);
+        let old_portraits_estimate = match (&plan, old_portraits.len()) {
+            (Some(plan), scenes @ 1..) => {
+                let portraits = plan.missing_portraits(&old_portraits, style).len();
+                Some(self.estimate(&[images_call(scenes + portraits)])?)
+            }
+            _ => None,
+        };
         let clips = self.clips_view(&project, plan.as_ref())?;
         let version = self.version_scenes(project.id, plan.as_ref(), narration.as_ref())?;
         let stale = plan
@@ -1598,6 +1722,8 @@ impl Bardo {
             style,
             restyled,
             restyle_estimate,
+            old_portraits,
+            old_portraits_estimate,
         })
     }
 
@@ -1883,6 +2009,23 @@ impl Bardo {
         self.draw_scenes(&plan, restyled, Vec::new(), consent)
     }
 
+    /// Starts a job that draws again every scene whose image shows a
+    /// person as an older portrait of theirs did, or was drawn without
+    /// their portrait (#269). Each current image stays until the user
+    /// accepts the new one. Past Gemini's budget it needs `consent`.
+    pub fn redraw_scenes_with_old_portraits(
+        &self,
+        project: VideoProjectId,
+        consent: BudgetConsent,
+    ) -> Result<JobId, SceneError> {
+        let plan = self.own_plan(project)?;
+        let old = plan.with_old_portraits();
+        if old.is_empty() {
+            return Err(SceneError::NothingToGenerate);
+        }
+        self.draw_scenes(&plan, old, Vec::new(), consent)
+    }
+
     /// Starts a job that draws scene `index` again. Its current image stays
     /// until the user accepts the new one; the other scenes are untouched.
     pub fn regenerate_scene_image(
@@ -1906,7 +2049,11 @@ impl Bardo {
         consent: BudgetConsent,
     ) -> Result<JobId, SceneError> {
         let plan = self.own_plan(project)?;
-        plan.cast_member(member)?;
+        // A portrait of a person drawn from the description alone would be
+        // paid for and never sent.
+        if plan.cast_member(member)?.is_described_only() {
+            return Err(SceneError::NothingToGenerate);
+        }
         self.draw_scenes(&plan, Vec::new(), vec![member], consent)
     }
 
@@ -1931,6 +2078,38 @@ impl Bardo {
         }
         if let Some(dropped) = dropped {
             crate::proxies::remove_media(self.files.as_ref(), plan.project, &dropped.file);
+        }
+        Ok(plan)
+    }
+
+    /// Chooses to draw cast member `member` from the description alone,
+    /// with no portrait (#269), or with a portrait again. Without one the
+    /// person's face may change from scene to scene, which is why it is
+    /// the user's choice and never what a failed portrait leads to.
+    pub fn set_cast_described_only(
+        &self,
+        project: VideoProjectId,
+        member: usize,
+        described_only: bool,
+    ) -> Result<ScenePlan, SceneError> {
+        let mut plan = self.own_plan(project)?;
+        // A job drawing the scenes would draw some each way.
+        self.scenes_idle(plan.project)?;
+        if plan
+            .cast_mut(member, SystemTime::now())?
+            .set_described_only(described_only)
+        {
+            self.scene_plans.save_cast_member(&plan, member)?;
+            // The scenes left undrawn for lack of this portrait no longer
+            // wait for it.
+            let project = self
+                .themes
+                .project(plan.project)?
+                .ok_or(SceneError::ProjectNotFound)?;
+            let style = self.video_style(&project)?;
+            for index in plan.settle_portrait_waits(style) {
+                self.scene_plans.save_scene(&plan, index)?;
+            }
         }
         Ok(plan)
     }
@@ -2750,49 +2929,324 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_declined_portrait_is_tried_once_and_its_scenes_describe_the_person() {
+    fn a_declined_portrait_leaves_its_scenes_undrawn_until_it_is_drawn() {
         let h = Harness::new();
         let app = h.start();
         let project = cast_project(&h, &app);
         h.images.decline("reference portrait");
 
+        let id = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+        assert_eq!(job.state(), JobState::Failed);
+        let failure = job.failure().unwrap();
+        assert_eq!(failure.kind, JobFailureKind::Declined);
+        assert!(
+            failure.detail.starts_with("3 of 4 images were not drawn.")
+                && failure.detail.contains("portrait of the chef: ")
+                && failure
+                    .detail
+                    .contains("scenes 1, 3 were not drawn, for lack of the portrait of the chef"),
+            "{}",
+            failure.detail
+        );
+
+        // Nothing is paid for a scene that would show another face: only
+        // the scene without the chef is drawn.
+        let requests = h.images.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 2, "one portrait try and scene 2");
+        assert!(requests[1].prompt.starts_with("The probe drifting away"));
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        assert_eq!(plan.cast()[0].failure(), Some(JobFailureKind::Declined));
+        assert_eq!(plan.missing_images(), [0, 2]);
+        for scene in [0, 2] {
+            assert_eq!(
+                plan.scenes()[scene].failure(),
+                Some(JobFailureKind::PortraitMissing),
+                "scene {scene} points at the portrait"
+            );
+        }
+        assert_eq!(plan.scenes()[1].failure(), None);
+
+        // Once the provider takes the portrait, a retry draws it and the
+        // scenes that waited for it, with it.
+        h.images.accept_all();
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        let requests = h.images.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 5, "the portrait and the two scenes");
+        assert_eq!(requests[2].shape, ImageShape::Portrait);
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        let portrait = plan.cast()[0].portrait().unwrap().generation.id;
+        assert_eq!(plan.cast()[0].failure(), None);
+        for scene in [0, 2] {
+            let scene = &plan.scenes()[scene];
+            assert_eq!(scene.failure(), None);
+            assert_eq!(scene.image_portraits(), Some(&vec![(0, Some(portrait))]));
+        }
+        assert_eq!(plan.scenes()[1].image_portraits(), Some(&Vec::new()));
+        assert!(app.scenes(project.id).unwrap().old_portraits.is_empty());
+    }
+
+    #[test]
+    fn a_person_is_drawn_from_the_description_alone_only_when_the_user_says_so() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = cast_project(&h, &app);
+        h.images.decline("reference portrait");
         let job = wait_done(
             &app,
             app.generate_scene_images(project.id, BudgetConsent::Ask)
                 .unwrap(),
         );
         assert_eq!(job.state(), JobState::Failed);
-        let failure = job.failure().unwrap();
-        assert_eq!(failure.kind, JobFailureKind::Declined);
-        assert!(
-            failure.detail.contains("portrait of the chef"),
-            "{}",
-            failure.detail
-        );
 
-        let requests = h.images.requests.lock().unwrap().clone();
-        assert_eq!(requests.len(), 4, "one portrait try, three scenes");
-        assert!(requests[1].references.is_empty());
+        // The user gives up on the chef's portrait: his scenes are drawn
+        // from his description, and no portrait is tried or counted.
+        let plan = app.set_cast_described_only(project.id, 0, true).unwrap();
+        assert!(plan.cast()[0].is_described_only());
+        assert_eq!(plan.cast()[0].failure(), None, "no portrait is asked for");
+        for scene in [0, 2] {
+            assert_eq!(plan.scenes()[scene].failure(), None, "no longer waiting");
+        }
+        assert!(matches!(
+            app.redraw_cast_portrait(project.id, 0, BudgetConsent::Ask),
+            Err(SceneError::NothingToGenerate)
+        ));
+        let view = app.scenes(project.id).unwrap();
+        assert_eq!(view.missing_images(), 2, "two scenes, no portrait");
+        let asked = h.images.requests.lock().unwrap().len();
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let requests = h.images.requests.lock().unwrap()[asked..].to_vec();
+        assert_eq!(requests.len(), 2);
         assert!(
-            requests[1]
+            requests
+                .iter()
+                .all(|request| request.shape != ImageShape::Portrait)
+        );
+        assert!(
+            requests[0]
                 .prompt
                 .contains("the chef: A man in his fifties, brown skin")
         );
-        let plan = app.scenes(project.id).unwrap().plan.unwrap();
-        assert_eq!(plan.cast()[0].failure(), Some(JobFailureKind::Declined));
-        assert_eq!(plan.missing_images().len(), 0, "the scenes were drawn");
+        let view = app.scenes(project.id).unwrap();
+        let plan = view.plan.as_ref().unwrap();
+        assert_eq!(plan.scenes()[0].image_portraits(), Some(&vec![(0, None)]));
+        assert!(view.old_portraits.is_empty(), "as the user chose");
+        assert_eq!(view.old_portraits_estimate, None);
 
-        // Drawing the portrait again works once the provider accepts it.
+        // Back to a portrait: the images drawn without one are out of date,
+        // and are counted only for the button that draws them again.
         h.images.accept_all();
+        app.set_cast_described_only(project.id, 0, false).unwrap();
+        let view = app.scenes(project.id).unwrap();
+        assert_eq!(view.old_portraits, [0, 2]);
+        assert_eq!(view.missing_images(), 0);
+        assert_eq!(
+            view.old_portraits_estimate,
+            Some(app.estimate(&[images_call(3)]).unwrap()),
+            "two scenes and the portrait"
+        );
+        let asked = h.images.requests.lock().unwrap().len();
+        done(
+            &app,
+            app.redraw_scenes_with_old_portraits(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let requests = h.images.requests.lock().unwrap()[asked..].to_vec();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0].shape, ImageShape::Portrait);
+        let view = app.scenes(project.id).unwrap();
+        assert!(view.old_portraits.is_empty(), "the new images wait");
+        assert!(view.plan.unwrap().scenes()[0].pending().is_some());
+        assert!(matches!(
+            app.redraw_scenes_with_old_portraits(project.id, BudgetConsent::Ask),
+            Err(SceneError::NothingToGenerate)
+        ));
+    }
+
+    #[test]
+    fn a_portrait_that_will_not_read_is_let_go_and_the_next_run_draws_it_again() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = cast_project(&h, &app);
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        let portrait = plan.cast()[0].portrait().unwrap().file.clone();
+        h.files.remove(project.id, &portrait).unwrap();
+
+        let asked = h.images.requests.lock().unwrap().len();
+        let job = wait_done(
+            &app,
+            app.regenerate_scene_image(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(job.state(), JobState::Failed);
+        let failure = job.failure().unwrap();
+        assert_eq!(failure.kind, JobFailureKind::PortraitMissing);
+        assert!(
+            failure
+                .detail
+                .contains("scene 1 was not drawn, for lack of the portrait of the chef"),
+            "{}",
+            failure.detail
+        );
+        assert_eq!(h.images.requests.lock().unwrap().len(), asked, "unpaid");
+        let view = app.scenes(project.id).unwrap();
+        let plan = view.plan.as_ref().unwrap();
+        assert_eq!(
+            plan.scenes()[0].failure(),
+            Some(JobFailureKind::PortraitMissing)
+        );
+        assert_eq!(plan.scenes()[0].pending(), None);
+        // The person shows as having no portrait, with why, and what
+        // drawing the scene costs now counts a new one.
+        assert_eq!(plan.cast()[0].portrait(), None);
+        assert_eq!(plan.cast()[0].failure(), Some(JobFailureKind::Files));
+        assert_eq!(
+            view.image_estimates[0],
+            app.estimate(&[images_call(2)]).unwrap()
+        );
+
+        // A retry draws the portrait again, then the scene with it.
+        app.retry_job(job.id()).unwrap();
+        done(&app, job.id());
+        let requests = h.images.requests.lock().unwrap()[asked..].to_vec();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].shape, ImageShape::Portrait);
+        assert_eq!(
+            requests[1].references.len(),
+            2,
+            "the new portrait, and the scene without him for the look"
+        );
+        let view = app.scenes(project.id).unwrap();
+        let plan = view.plan.as_ref().unwrap();
+        let portrait = plan.cast()[0].portrait().unwrap().generation.id;
+        assert_eq!(plan.cast()[0].failure(), None);
+        assert_eq!(plan.scenes()[0].failure(), None);
+        assert_eq!(
+            plan.scenes()[0].pending_portraits(),
+            Some(&vec![(0, Some(portrait))])
+        );
+        assert_eq!(
+            view.old_portraits,
+            [2],
+            "the other scene shows the lost one"
+        );
+    }
+
+    #[test]
+    fn no_portrait_is_bought_for_a_scene_another_missing_portrait_already_stops() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = h.narrated_project(&app);
+        h.answer(
+            serde_json::json!({
+                "cast": [
+                    {"name": "the chef", "description": "A man in his fifties, grey beard, white apron"},
+                    {"name": "Ana", "description": "A woman in her twenties, black hair in a low bun"},
+                ],
+                "scenes": [
+                    {"first_sentence": 0, "prompt": "The chef and Ana at the launch pad",
+                     "cast": [0, 1], "motion": "Slow push in"},
+                    {"first_sentence": 1, "prompt": "The probe drifting away from Earth",
+                     "cast": [], "motion": "The probe drifts left"},
+                ],
+            })
+            .to_string(),
+        );
+        done(
+            &app,
+            app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        h.images.decline("grey beard");
+
+        let id = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+        assert_eq!(job.state(), JobState::Failed);
+        let detail = job.failure().unwrap().detail.clone();
+        assert!(
+            detail.contains("scene 1 was not drawn, for lack of the portrait of the chef"),
+            "{detail}"
+        );
+        // The chef's portrait is declined, so the scene will not be drawn
+        // in this run: Ana's portrait is not bought for it.
+        let requests = h.images.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 2, "the chef's portrait and scene 2");
+        assert!(requests[1].prompt.starts_with("The probe drifting away"));
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        assert_eq!(plan.cast()[1].portrait(), None);
+        assert_eq!(plan.cast()[1].failure(), None);
+
+        // The retry tries the chef's again, then draws Ana's and the scene
+        // with both.
+        h.images.accept_all();
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        let requests = h.images.requests.lock().unwrap()[2..].to_vec();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(
+            requests[2].references.len(),
+            3,
+            "both portraits and the look"
+        );
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        let ids: Vec<_> = plan
+            .cast()
+            .iter()
+            .map(|cast| cast.portrait().map(|portrait| portrait.generation.id))
+            .collect();
+        assert_eq!(
+            plan.scenes()[0].image_portraits(),
+            Some(&vec![(0, ids[0]), (1, ids[1])])
+        );
+    }
+
+    #[test]
+    fn a_scene_drawn_with_an_older_portrait_is_marked_until_it_is_drawn_again() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = cast_project(&h, &app);
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert!(app.scenes(project.id).unwrap().old_portraits.is_empty());
+
         done(
             &app,
             app.redraw_cast_portrait(project.id, 0, BudgetConsent::Ask)
                 .unwrap(),
         );
-        let plan = app.scenes(project.id).unwrap().plan.unwrap();
-        assert!(plan.cast()[0].portrait().is_some());
-        assert_eq!(plan.cast()[0].failure(), None);
-        assert_eq!(h.images.requests.lock().unwrap().len(), 5);
+        let view = app.scenes(project.id).unwrap();
+        assert_eq!(view.old_portraits, [0, 2], "they show the old face");
+        assert_eq!(
+            view.old_portraits_estimate,
+            Some(app.estimate(&[images_call(2)]).unwrap())
+        );
+        assert_eq!(view.missing_images(), 0, "not counted as missing");
+
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(app.scenes(project.id).unwrap().old_portraits, [2]);
+        app.reject_scene_image(project.id, 0).unwrap();
+        assert_eq!(app.scenes(project.id).unwrap().old_portraits, [0, 2]);
     }
 
     #[test]
