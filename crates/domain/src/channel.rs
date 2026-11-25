@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use crate::{
     CaptionHighlight, CaptionStyle, ClipModelRef, ContentLanguage, Country, Market, MotionDefault,
-    PersonaId, ProductionMode, ProfileId, RepositoryError, ThumbnailLook, Transition, VideoFormat,
+    PersonaId, ProductionMode, ProfileId, RepositoryError, StyleChoice, ThumbnailLook, Transition,
+    VideoFormat,
 };
 
 /// Identifies a channel.
@@ -75,6 +76,9 @@ pub struct ChannelDraft {
     /// How the channel's videos are produced unless a video picks another
     /// mode (#248).
     pub production: ProductionMode,
+    /// The visual style of the channel's videos unless a video picks
+    /// another (#259).
+    pub style: StyleChoice,
 }
 
 /// Why a draft is not a valid channel. One entry per offending field, so a
@@ -120,6 +124,7 @@ pub struct ChannelDetails {
     transition: Transition,
     motion: MotionDefault,
     production: ProductionMode,
+    style: StyleChoice,
 }
 
 impl ChannelDetails {
@@ -184,6 +189,7 @@ impl ChannelDetails {
             transition: draft.transition,
             motion: draft.motion,
             production: draft.production,
+            style: draft.style,
         })
     }
 
@@ -264,6 +270,12 @@ impl ChannelDetails {
         self.production
     }
 
+    /// The visual style of the channel's videos unless a video picks
+    /// another.
+    pub fn style(&self) -> StyleChoice {
+        self.style
+    }
+
     /// The audience the channel aims at, for market research.
     pub fn market(&self) -> Market {
         Market::new(self.country, self.language)
@@ -294,6 +306,7 @@ impl From<&ChannelDetails> for ChannelDraft {
             transition: details.transition,
             motion: details.motion,
             production: details.production,
+            style: details.style,
         }
     }
 }
@@ -498,8 +511,13 @@ mod tests {
                 crate::MotionStrength::Strong,
             ),
             production: ProductionMode::Economy,
+            style: StyleChoice::Catalog(crate::VisualStyle::Manga),
         })
         .unwrap();
+        assert_eq!(
+            details.style(),
+            StyleChoice::Catalog(crate::VisualStyle::Manga)
+        );
         assert_eq!(
             ChannelDetails::validate(ChannelDraft::from(&details)),
             Ok(details)

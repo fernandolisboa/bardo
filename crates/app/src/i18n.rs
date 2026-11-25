@@ -25,6 +25,7 @@ use bardo_domain::{
     BytePlusField, BytePlusFieldError, ChapterFieldError, ChapterProblem, LookAssetError,
     LookAssetKind, TextPlacement, ThumbnailFieldError, ThumbnailLook,
 };
+use bardo_domain::{StyleChoice, VisualStyle};
 
 /// Every string the UI shows. Adding a variant without adding its key to all
 /// resource files fails the catalog tests.
@@ -280,6 +281,21 @@ pub enum Text {
     ProductionModeName(ProductionMode),
     /// One sentence on what the mode makes.
     ProductionModeAbout(ProductionMode),
+    /// A visual style of the catalog, or the channel's notes (#259).
+    VisualStyleName(StyleChoice),
+    ChannelStyle,
+    ChannelStyleHint,
+    ProjectStyle,
+    /// Placeholder: `{style}`.
+    ProjectStyleChannel,
+    /// The channel's choice when it is its notes.
+    ProjectStyleChannelNotes,
+    ProjectStyleHint,
+    /// Placeholder: `{n}`.
+    ScenesRestyled,
+    /// Placeholder: `{style}`.
+    ScenesRestyledHint,
+    RedrawRestyled,
     ChannelProduction,
     ChannelProductionHint,
     ProjectMode,
@@ -2032,6 +2048,7 @@ pub enum Text {
     UploadMissedHintAgent,
     JobRunsElsewhere,
     JobSuperseded,
+    JobRestyled,
     /// A performed take that never reached its provider, retried from the
     /// jobs panel.
     JobTakeFromItsPage,
@@ -2737,6 +2754,44 @@ impl Text {
                 ProductionMode::AllAnimated => "production_mode.animated",
                 ProductionMode::Premium => "production_mode.premium",
                 ProductionMode::ChannelModel => "production_mode.channel_model",
+            },
+            Text::ChannelStyle => "channel.style",
+            Text::ChannelStyleHint => "channel.style_hint",
+            Text::ProjectStyle => "projects.style",
+            Text::ProjectStyleChannel => "projects.style_channel",
+            Text::ProjectStyleChannelNotes => "projects.style_channel_notes",
+            Text::ProjectStyleHint => "projects.style_hint",
+            Text::ScenesRestyled => "scenes.restyled.title",
+            Text::ScenesRestyledHint => "scenes.restyled.hint",
+            Text::RedrawRestyled => "scenes.restyled.redraw",
+            Text::VisualStyleName(style) => match style {
+                StyleChoice::FromNotes => "visual_style.notes",
+                StyleChoice::Catalog(VisualStyle::Photorealistic) => "visual_style.photo",
+                StyleChoice::Catalog(VisualStyle::CinematicFilm) => "visual_style.cinematic",
+                StyleChoice::Catalog(VisualStyle::DocumentaryPhoto) => "visual_style.documentary",
+                StyleChoice::Catalog(VisualStyle::VintageFilm) => "visual_style.vintage_film",
+                StyleChoice::Catalog(VisualStyle::FilmNoir) => "visual_style.noir",
+                StyleChoice::Catalog(VisualStyle::Animation3d) => "visual_style.animation_3d",
+                StyleChoice::Catalog(VisualStyle::Cartoon2d) => "visual_style.cartoon",
+                StyleChoice::Catalog(VisualStyle::Anime) => "visual_style.anime",
+                StyleChoice::Catalog(VisualStyle::Manga) => "visual_style.manga",
+                StyleChoice::Catalog(VisualStyle::ComicBook) => "visual_style.comic",
+                StyleChoice::Catalog(VisualStyle::Storybook) => "visual_style.storybook",
+                StyleChoice::Catalog(VisualStyle::Watercolor) => "visual_style.watercolor",
+                StyleChoice::Catalog(VisualStyle::OilPainting) => "visual_style.oil",
+                StyleChoice::Catalog(VisualStyle::PencilSketch) => "visual_style.pencil",
+                StyleChoice::Catalog(VisualStyle::InkDrawing) => "visual_style.ink",
+                StyleChoice::Catalog(VisualStyle::FlatVector) => "visual_style.flat_vector",
+                StyleChoice::Catalog(VisualStyle::PaperCutout) => "visual_style.paper_cutout",
+                StyleChoice::Catalog(VisualStyle::ClayStopMotion) => "visual_style.clay",
+                StyleChoice::Catalog(VisualStyle::PixelArt) => "visual_style.pixel_art",
+                StyleChoice::Catalog(VisualStyle::LowPoly) => "visual_style.low_poly",
+                StyleChoice::Catalog(VisualStyle::Isometric) => "visual_style.isometric",
+                StyleChoice::Catalog(VisualStyle::NeonCyberpunk) => "visual_style.cyberpunk",
+                StyleChoice::Catalog(VisualStyle::Synthwave) => "visual_style.synthwave",
+                StyleChoice::Catalog(VisualStyle::DarkFantasy) => "visual_style.dark_fantasy",
+                StyleChoice::Catalog(VisualStyle::WoodblockPrint) => "visual_style.woodblock",
+                StyleChoice::Catalog(VisualStyle::Chalkboard) => "visual_style.chalkboard",
             },
             Text::ProductionModeAbout(mode) => match mode {
                 ProductionMode::Economy => "production_mode.about.economy",
@@ -4611,6 +4666,7 @@ impl Text {
             Text::UploadMissedHintAgent => "upload.missed_hint_agent",
             Text::JobRunsElsewhere => "job.error.runs_elsewhere",
             Text::JobSuperseded => "job.error.superseded",
+            Text::JobRestyled => "job.error.restyled",
             Text::JobTakeFromItsPage => "job.error.take_from_page",
             Text::SettingsPublishingTab => "settings.publishing_tab",
             Text::AgentTitle => "agent.title",
@@ -6289,6 +6345,18 @@ mod tests {
         texts.extend(VideoLength::ALL.map(Text::VideoLengthName));
         texts.extend(ProductionMode::ALL.map(Text::ProductionModeName));
         texts.extend(ProductionMode::ALL.map(Text::ProductionModeAbout));
+        texts.extend(StyleChoice::all().map(Text::VisualStyleName));
+        texts.extend([
+            Text::ChannelStyle,
+            Text::ChannelStyleHint,
+            Text::ProjectStyle,
+            Text::ProjectStyleChannel,
+            Text::ProjectStyleChannelNotes,
+            Text::ProjectStyleHint,
+            Text::ScenesRestyled,
+            Text::ScenesRestyledHint,
+            Text::RedrawRestyled,
+        ]);
         texts.extend(TakeMode::ALL.map(Text::TakeModeName));
         texts.extend(AnalysisPart::ALL.map(Text::AnalysisPartName));
         texts.extend(Outbound::ALL.map(Text::ControlOutbound));
@@ -7173,6 +7241,7 @@ mod tests {
             Text::UploadMissedHintAgent,
             Text::JobRunsElsewhere,
             Text::JobSuperseded,
+            Text::JobRestyled,
             Text::JobTakeFromItsPage,
             Text::SettingsPublishingTab,
             Text::AgentTitle,

@@ -24,7 +24,18 @@ The list shows each channel with its niche and country. Pick one to edit it besi
 <a id="look"></a>
 ## Aesthetic notes
 
-How the channel's videos should look and feel: the visual style, the palette, the mood, what to avoid. Ideas and scripts take these notes along, and so do the scene prompts written from the script, so every video keeps the channel's look.
+How the channel's videos should look and feel: the palette, the mood, the period, what to avoid. Ideas and scripts take these notes along, and so do the scene prompts written from the script, so every video keeps the channel's look. With no [visual style](#style) chosen, the notes also say how the pictures are drawn.
+
+<a id="style"></a>
+## Visual style
+
+How the channel's pictures are drawn. Pick one of 26 styles: Photorealistic, Cinematic film, Documentary photo, Vintage film, Film noir, 3D animation, 2D cartoon, Anime, Manga, Comic book, Storybook illustration, Watercolor, Oil painting, Pencil sketch, Ink drawing, Flat vector, Paper cut-out, Clay stop motion, Pixel art, Low poly, Isometric, Neon cyberpunk, Synthwave, Dark fantasy, Woodblock print and Chalkboard. The menu filters as you type.
+
+Bardo adds the style's own wording to every scene image, every cast portrait and the thumbnail's background, and tells Claude which style it is, so the scene prompts describe what is seen and leave the drawing to the style. Every image is asked for the same look in the same words, without any prompt having to repeat it. With a style chosen, keep the aesthetic notes to what the style does not decide: the mood, the period, what to avoid.
+
+**From the channel's notes** adds nothing: the look comes from the aesthetic notes as Claude reads them and repeats them in each prompt, as every channel worked before styles. Channels made before styles keep it until you pick one.
+
+Each project follows its channel's style unless it picks its own ([Projects](projects.md#style)). Changing the style draws nothing and changes nothing already drawn; the [Scenes](scenes.md#style) stage says how many scenes are in another style and offers to draw them again. That holds for every video that follows the channel, finished ones included: a video you want to keep as it is needs nothing, and one still being drawn continues in the new style unless you pick the earlier one on the project.
 
 <a id="market"></a>
 ## Language and country

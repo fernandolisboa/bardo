@@ -346,6 +346,10 @@ impl Bardo {
                 TemplateVariable::FrameShape,
                 format.frame_shape().to_owned(),
             ),
+            (
+                TemplateVariable::VisualStyle,
+                crate::styles::style_for_planner(project.style(details.style())),
+            ),
         ]))
     }
 

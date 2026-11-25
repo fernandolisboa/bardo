@@ -153,6 +153,7 @@ impl JobActionError {
             JobActionError::Elsewhere => Text::JobRunsElsewhere,
             JobActionError::Busy => Text::RestoreWaitsForJobs,
             JobActionError::Superseded => Text::JobSuperseded,
+            JobActionError::Restyled => Text::JobRestyled,
             JobActionError::TakeFromItsPage => Text::JobTakeFromItsPage,
             _ => Text::JobNotUpdated,
         }
@@ -259,6 +260,9 @@ impl Bardo {
         }
         if self.superseded_capture(id) {
             return Err(JobActionError::Superseded);
+        }
+        if self.restyled_images(id) {
+            return Err(JobActionError::Restyled);
         }
         if self.unsent_take_needs_asking(id) {
             return Err(JobActionError::TakeFromItsPage);

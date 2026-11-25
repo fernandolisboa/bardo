@@ -34,6 +34,13 @@ The format applies to what is made next: the next script's length, the shape of 
 
 The length sets only how long the next script runs and the [whole-video estimate](#mode) before a script exists; the format still sets the shape of the pictures, the cut and the [render preset](render.md#targets). A script already written keeps its length: write it again after switching. The narration runs as long as the script reads, so check its length on the Narration stage before moving on.
 
+<a id="style"></a>
+## How it is drawn
+
+**Visual style**, beside the length, says how this video's pictures are drawn. **Channel's** follows the channel's [visual style](channels.md#style); pick any of the 26 styles, or **From the channel's notes**, for this video alone. The menu filters as you type.
+
+The style applies to what is drawn next: the next scene plan, scene images, cast portraits and thumbnail background. Nothing already drawn changes and nothing is paid for by switching. When the video has images in another style, the [Scenes](scenes.md#style) stage says how many and offers to draw them again. A [version](script.md#versions) in another language starts in the style of the video it was made from, whatever its channel's is, so the images it carries still belong together.
+
 <a id="mode"></a>
 ## How it is produced, and what it will cost
 

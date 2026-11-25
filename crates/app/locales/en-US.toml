@@ -84,6 +84,8 @@ format = "Video format"
 format_hint = "Short: a vertical video of under a minute, for every network. Long: a 16:9 video of 8 to 10 minutes, for YouTube. It sets the script's length, the shape of the pictures and the cut, and YouTube's preset. Each project can pick the other."
 production = "Production mode"
 production_hint = "How this channel's videos are made: which scenes become AI clips and with which model; the rest stay stills with motion. Each project can pick another and shows what the whole video costs in each mode before anything is generated."
+style = "Visual style"
+style_hint = "How this channel's videos are drawn: a photograph, a cartoon, manga, clay and so on. Bardo adds the style to every scene image, every cast portrait and the thumbnail's background, so every image is asked for the same look. \"From the channel's notes\" takes the look from the aesthetic notes instead, as Claude reads them. Each project can pick another; the ones that do not follow this choice when it changes."
 transition = "Default transition"
 transition_hint = "What the editor puts on a cut when you press T or pick a transition. Any cut can use another."
 transition_length = "Length"
@@ -212,6 +214,35 @@ long_length = "8 to 10 min"
 seconds_30 = "30 seconds"
 minute_1 = "1 minute"
 minutes_3 = "3 minutes"
+
+[visual_style]
+notes = "From the channel's notes"
+photo = "Photorealistic"
+cinematic = "Cinematic film"
+documentary = "Documentary photo"
+vintage_film = "Vintage film"
+noir = "Film noir"
+animation_3d = "3D animation"
+cartoon = "2D cartoon"
+anime = "Anime"
+manga = "Manga"
+comic = "Comic book"
+storybook = "Storybook illustration"
+watercolor = "Watercolor"
+oil = "Oil painting"
+pencil = "Pencil sketch"
+ink = "Ink drawing"
+flat_vector = "Flat vector"
+paper_cutout = "Paper cut-out"
+clay = "Clay stop motion"
+pixel_art = "Pixel art"
+low_poly = "Low poly"
+isometric = "Isometric"
+cyberpunk = "Neon cyberpunk"
+synthwave = "Synthwave"
+dark_fantasy = "Dark fantasy"
+woodblock = "Woodblock print"
+chalkboard = "Chalkboard"
 
 [production_mode]
 economy = "Economy"
@@ -348,6 +379,7 @@ not_updated = "Could not update the job. Try again."
 not_started = "Could not start the job. Try again."
 runs_elsewhere = "The background agent is running this job right now. Try again when it finishes."
 superseded = "A newer narration of this project replaced this import, so it cannot run again."
+restyled = "The video's visual style changed after this job started, so it cannot run again. Draw the scenes from the Scenes stage, which shows what they cost in the current style."
 take_from_page = "Nothing of this take reached its provider yet. Make it again on the Capture step, which checks the video's cap, the test take and the preflight checks first."
 
 [setup]
@@ -586,6 +618,10 @@ format_hint = "Short or long video. It sets the length of the next script (unles
 length = "Length"
 length_format = "Format's: {length}"
 length_hint = "How long the next script runs: the format's length, or 30 seconds, 1 minute or 3 minutes, under the 3:00 Shorts and Reels take (X takes 2:20). The format keeps the shape and the preset. The whole-video estimate follows it until a script exists."
+style = "Visual style"
+style_channel = "Channel's: {style}"
+style_channel_notes = "Channel's: its aesthetic notes"
+style_hint = "How this video's pictures are drawn: the channel's visual style, or one of its own. It applies to the next scene plan, images, portraits and thumbnail background. Changing it costs nothing and what was already drawn stays as it is; the Scenes stage says how many scenes are in another style and offers to draw them again, billed per image. Prompts already planned may still name the earlier look: plan the scenes again for a clean change."
 mode = "Mode"
 mode_channel = "Channel's: {mode}"
 mode_option = "{mode} · about {amount}"
@@ -1101,6 +1137,7 @@ look = "The persona's look: a drawn look's description, or the person in the ref
 set = "Where the take happens: described from a frame of the control video for the room, else the set image already in it."
 words = "What the persona says in the take."
 instruction = "What the video model does with the control video and the look, fixed for the take's mode."
+visual_style = "The video's visual style: that one was chosen and the text Bardo adds to every image for it, or that none was chosen and the look comes from the aesthetic notes."
 
 [templates.error]
 not_saved = "Could not save the template. Try again."
@@ -1832,6 +1869,11 @@ edit = "Edit look"
 redraw = "Draw portrait again"
 failed = "The portrait was not drawn:"
 edited = "Edited"
+
+[scenes.restyled]
+title = "Scenes in another style: {n}"
+hint = "These images were not drawn in the video's current visual style ({style}). They stay as they are until drawn again, and they are not sent as references for new images, so they do not pull the next ones back to the old look. Each new image waits for review beside the current one. If the scene prompts were planned under another look, they may still name it: plan the scenes again first."
+redraw = "Draw them again"
 
 [scenes.same_place]
 title = "Place"
@@ -2836,7 +2878,7 @@ body = "The narrator reads this video's narration and shapes its script. It is t
 
 [tour.projects.format]
 title = "Short or long, and how long"
-body = "A Short is a vertical video of 45 to 60 seconds; a long video is 16:9 and runs 8 to 10 minutes. The project follows its channel unless you pick the other here. It sets the shape of the next pictures and new cuts, and YouTube's preset. Length beside it makes this video's script 30 seconds, 1 minute or 3 minutes instead of the format's length."
+body = "A Short is a vertical video of 45 to 60 seconds; a long video is 16:9 and runs 8 to 10 minutes. The project follows its channel unless you pick the other here. It sets the shape of the next pictures and new cuts, and YouTube's preset. Length beside it makes this video's script 30 seconds, 1 minute or 3 minutes instead of the format's length, and Style picks how this video's pictures are drawn instead of the channel's visual style."
 
 [tour.projects.mode]
 title = "How it is produced, and what it costs"
@@ -2956,7 +2998,7 @@ body = "The scene you picked: the narration it covers, its image and its image p
 
 [tour.scenes.redraw]
 title = "Draw again"
-body = "Draw again makes a new image from the prompt. It waits beside the current one until you use it or keep the current one."
+body = "Draw again makes a new image from the prompt, in the video's visual style. It waits beside the current one until you use it or keep the current one. After the style changes, the stage says how many scenes are in another style and offers to draw them again in one run, after showing the cost."
 
 [tour.scenes.filter]
 title = "All or pending"
@@ -3141,7 +3183,7 @@ body = "Each channel is one niche for one market. Pick a channel to edit it, or 
 
 [tour.channels.niche]
 title = "Niche, themes and look"
-body = "The niche says what the channel is about, the themes list the subjects it comes back to, one per line, and the aesthetic notes say how its videos should look and feel. Research and ideas start from the niche and themes; ideas, scripts and scene prompts take the notes along."
+body = "The niche says what the channel is about, the themes list the subjects it comes back to, one per line, and the aesthetic notes say how its videos should look and feel. Research and ideas start from the niche and themes; ideas, scripts and scene prompts take the notes along. Visual style picks how the pictures are drawn, from photorealistic to manga or clay: Bardo adds it to every image, so the whole video keeps one look."
 
 [tour.channels.market]
 title = "Language and country"

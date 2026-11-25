@@ -111,6 +111,7 @@ mod tour;
 mod transition;
 mod update;
 mod upload;
+mod visual_style;
 mod voice;
 mod voice_sample;
 mod youtube_policy;
@@ -391,6 +392,7 @@ pub use upload::{
     UPLOAD_CHUNK, UPLOAD_CHUNK_UNIT, Upload, UploadError, UploadErrorKind, UploadFailure,
     UploadOutcome, UploadRun, UploadStatus, UploadedVideo, VideoState, VideoUpload, VideoUploader,
 };
+pub use visual_style::{StyleChoice, VisualStyle};
 pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoicePreviews, VoiceRef};
 pub use voice_sample::{
     InvalidSampleText, SampleSource, SampleText, VoiceSampleStore, VoiceSampleStoreError,

@@ -34,6 +34,13 @@ O formato vale para o que for feito depois: o tamanho do próximo roteiro, o for
 
 A duração define só quanto dura o próximo roteiro e a [estimativa do vídeo inteiro](#mode) enquanto não existe roteiro; o formato continua definindo a forma das imagens, o corte e o [preset de render](render.md#targets). Um roteiro já escrito mantém a duração dele: escreva de novo depois de trocar. A narração dura o que o roteiro leva para ser lido, então confira a duração dela na etapa Narração antes de seguir.
 
+<a id="style"></a>
+## Como é desenhado
+
+**Estilo visual**, ao lado da duração, diz como as imagens deste vídeo são desenhadas. **Do canal** segue o [estilo visual](channels.md#style) do canal; escolha qualquer um dos 26 estilos, ou **Pelas notas do canal**, só para este vídeo. O menu filtra enquanto você digita.
+
+O estilo vale para o que for desenhado a seguir: o próximo plano de cenas, as próximas imagens de cena, retratos do elenco e fundo de miniatura. Nada do que já foi desenhado muda, e trocar não custa nada. Quando o vídeo tem imagens em outro estilo, a etapa [Cenas](scenes.md#style) diz quantas são e oferece desenhá-las de novo. Uma [versão](script.md#versions) em outro idioma começa no estilo do vídeo de onde veio, seja qual for o do canal dela, para as imagens que ela traz continuarem combinando.
+
 <a id="mode"></a>
 ## Como é produzido, e quanto vai custar
 

@@ -136,6 +136,7 @@ pub mod refs {
     pub const PROJECTS_NARRATOR: GuideRef = at("projects", "narrator");
     pub const PROJECTS_FORMAT: GuideRef = at("projects", "format");
     pub const PROJECTS_LENGTH: GuideRef = at("projects", "length");
+    pub const PROJECTS_STYLE: GuideRef = at("projects", "style");
     pub const PROJECTS_MODE: GuideRef = at("projects", "mode");
     pub const SCRIPT_WRITE: GuideRef = at("script", "write");
     pub const SCRIPT_REVIEW: GuideRef = at("script", "review");
@@ -166,6 +167,7 @@ pub mod refs {
     pub const SCENES_REDRAW: GuideRef = at("scenes", "redraw");
     pub const SCENES_CAST: GuideRef = at("scenes", "cast");
     pub const SCENES_SAME_PLACE: GuideRef = at("scenes", "same-place");
+    pub const SCENES_STYLE: GuideRef = at("scenes", "style");
     pub const SCENES_REPLAN: GuideRef = at("scenes", "replan");
     pub const SCENES_PLACE: GuideRef = at("scenes", "place");
     pub const CLIPS_ANIMATE: GuideRef = at("clips", "animate");
@@ -186,6 +188,7 @@ pub mod refs {
     pub const CHANNELS_PERSONA: GuideRef = at("channels", "persona");
     pub const CHANNELS_FORMAT: GuideRef = at("channels", "format");
     pub const CHANNELS_PRODUCTION: GuideRef = at("channels", "production");
+    pub const CHANNELS_STYLE: GuideRef = at("channels", "style");
     pub const CHANNELS_DEFAULTS: GuideRef = at("channels", "defaults");
     pub const ACCOUNTS_ONE: GuideRef = at("network-accounts", "accounts");
     pub const ACCOUNTS_METADATA: GuideRef = at("network-accounts", "metadata");
@@ -221,7 +224,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 93] = [
+    pub const ALL: [GuideRef; 96] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -233,6 +236,7 @@ pub mod refs {
         PERFORMANCE_SYNC,
         PROJECTS_NARRATOR,
         PROJECTS_LENGTH,
+        PROJECTS_STYLE,
         PROJECTS_MODE,
         SCRIPT_WRITE,
         SCRIPT_REVIEW,
@@ -263,6 +267,7 @@ pub mod refs {
         SCENES_REDRAW,
         SCENES_CAST,
         SCENES_SAME_PLACE,
+        SCENES_STYLE,
         SCENES_REPLAN,
         SCENES_PLACE,
         CLIPS_ANIMATE,
@@ -282,6 +287,7 @@ pub mod refs {
         RENDER_LAST,
         CHANNELS_PERSONA,
         CHANNELS_PRODUCTION,
+        CHANNELS_STYLE,
         CHANNELS_DEFAULTS,
         ACCOUNTS_ONE,
         ACCOUNTS_METADATA,

@@ -13,7 +13,7 @@ As cenas dividem a narração nos planos que o vídeo mostra, cada um com uma im
 <a id="plan"></a>
 ## Planejar e desenhar
 
-**Planejar cenas** faz o Claude transformar a narração num storyboard, a partir do **modelo de prompts de imagem** ([Modelos](templates.md)) e das notas de estética do canal. Primeiro ele escreve a história que as imagens contam da primeira à última, depois divide a narração em cenas pelas frases, de modo que cada cena continue a anterior, e escreve um prompt de imagem e um [prompt de movimento](clips.md#motion) para cada uma. Ele também lista as [pessoas que voltam](#cast) e os [lugares aos quais o vídeo volta](#same-place).
+**Planejar cenas** faz o Claude transformar a narração num storyboard, a partir do **modelo de prompts de imagem** ([Modelos](templates.md)), das notas de estética do canal e do [estilo visual](#style) do vídeo. Primeiro ele escreve a história que as imagens contam da primeira à última, depois divide a narração em cenas pelas frases, de modo que cada cena continue a anterior, e escreve um prompt de imagem e um [prompt de movimento](clips.md#motion) para cada uma. Ele também lista as [pessoas que voltam](#cast) e os [lugares aos quais o vídeo volta](#same-place).
 
 O plano cresce com a narração: um vídeo de um minuto tem cerca de dez cenas, um de dez minutos cerca de cem, e esse plano leva alguns minutos para o Claude escrever. O Bardo lê a resposta enquanto ela é escrita, então um plano longo não é abandonado enquanto ainda está chegando, e a estimativa sob **Planejar cenas** acompanha a duração da narração. Uma narração que pode render mais de cerca de 245 cenas (pouco mais de 16 minutos de frases curtas, mais quando elas são longas) não é planejada: o plano poderia não caber numa resposta, e uma resposta cortada é paga e perdida. A etapa avisa no lugar do botão; use uma narração mais curta ou divida o vídeo em mais de um.
 
@@ -56,6 +56,19 @@ A primeira imagem de todas não tem o que seguir, então ela define a cara do v�
 **Editar lugar** muda a descrição para todas as cenas do lugar; um lugar que você mudou ganha a marca **Editado**. As cenas já desenhadas mantêm a imagem: desenhe-as de novo para usar a nova descrição. As imagens desenhadas com a descrição antiga deixam de amarrar o lugar, então desenhe de novo a primeira cena do lugar, aceite a nova imagem, e as cenas desenhadas depois passam a segui-la. Um lugar não pode ser editado enquanto imagens estão sendo desenhadas. Se você reescrever o prompt de uma cena de modo que ele não cite mais o lugar (o nome em palavras inteiras, com ou sem "the"), a cena sai do lugar e é desenhada sem ele.
 
 Um plano guarda no máximo oito lugares, os que têm mais cenas; uma cena em qualquer outro leva a descrição no próprio prompt. Cenas planejadas antes de existirem lugares não têm nenhum; ainda assim recebem a primeira imagem do vídeo, pelo estilo. **Planejar de novo** dá lugares a elas. Um [modelo](templates.md) de plano de cenas que você mesmo editou também recebe lugares, mas não as regras de storyboard do modelo padrão (uma história em ordem, ficando num lugar por várias cenas).
+
+<a id="style"></a>
+## Um estilo para o vídeo inteiro
+
+O [estilo visual](projects.md#style) do vídeo é acrescentado pelo Bardo a cada imagem de cena e a cada retrato, sempre com as mesmas palavras, depois das pessoas e do lugar da cena. Com **Pelas notas do canal**, nada é acrescentado e o visual é o que os prompts das cenas disserem.
+
+Trocar o estilo, no projeto ou no canal, deixa as imagens como estão. A etapa passa a mostrar **Cenas em outro estilo** com a quantidade:
+
+- **Desenhar todas de novo** desenha todas elas no estilo atual, depois de mostrar quanto custa. O retrato de uma pessoa no estilo antigo é desenhado de novo antes, uma vez, e entra na estimativa; ele toma o lugar do antigo, então voltar ao estilo anterior o desenha mais uma vez, e a pessoa pode sair um pouco diferente das cenas já desenhadas. Cada imagem nova espera a revisão ao lado da atual, como qualquer cena desenhada de novo.
+- Uma imagem em outro estilo nunca vai como referência, então não puxa as próximas de volta ao visual antigo. A primeira cena desenhada no estilo novo é desenhada só com o prompt, o lugar e as pessoas dela; as seguintes se guiam pelas imagens novas, mesmo enquanto elas esperam a revisão.
+- Desenhar de novo uma cena só faz o mesmo para essa cena. As cenas desenhadas depois seguem a imagem nova dela.
+
+Os prompts das cenas foram escritos para o estilo que o vídeo tinha quando foi planejado. Se eles citam outro visual (um plano feito pelas notas costuma citar), **Planejar de novo** os reescreve para o estilo novo; isso descarta as imagens, então faça antes de desenhar.
 
 <a id="filter"></a>
 ## Todas ou pendentes

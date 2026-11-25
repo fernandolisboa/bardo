@@ -689,9 +689,10 @@ impl Bardo {
         if let Err(estimate) = self.check_video_budget(project.id, &[draw_call()], consent)? {
             return Err(ThumbnailError::OverBudget(estimate));
         }
+        // In the video's style (#259), as its scenes are drawn.
         let payload = DrawPayload {
             project: project.id.to_string(),
-            prompt: thumbnail.prompt,
+            prompt: self.video_style(&project)?.applied(&thumbnail.prompt),
         };
         let payload = serde_json::to_string(&payload).expect("a thumbnail payload serializes");
         let job = Job::new(self.profile.id, JobKind::ThumbnailImage, payload);
@@ -951,7 +952,8 @@ pub(crate) mod tests {
         for fact in [
             "Channel: Space Archives",
             "Video title on YouTube: The probe that never came home",
-            "Visual style (aesthetic notes): grainy 1960s film",
+            "Aesthetic notes: grainy 1960s film",
+            "Visual style: not chosen: the look comes from the aesthetic notes",
         ] {
             assert!(request.prompt.contains(fact), "{fact}: {}", request.prompt);
         }
@@ -1031,6 +1033,36 @@ pub(crate) mod tests {
             format!("thumbnail-bg-{}.png", second.id())
         );
         assert_eq!(view.thumbnail.design.background.as_ref(), Some(drawn));
+    }
+
+    #[test]
+    fn a_background_is_drawn_in_the_videos_style() {
+        let h = Harness::new();
+        h.answer(answer("Lost signal", "A lone probe, wide"));
+        let app = h.start();
+        let project = project(&app);
+        let noir = bardo_domain::StyleChoice::Catalog(bardo_domain::VisualStyle::FilmNoir);
+        app.set_project_style(project.id, Some(noir)).unwrap();
+        write(&app, project.id);
+        // Claude is told the style and that Bardo adds it.
+        let asked = h.text.requests().pop().unwrap();
+        assert!(
+            asked
+                .prompt
+                .contains("Visual style: chosen. Bardo adds it to every image itself, in these words: Film noir still:")
+        );
+        done(
+            &app,
+            app.draw_thumbnail_background(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let request = h.images.requests.lock().unwrap()[0].clone();
+        assert_eq!(request.prompt, noir.applied("A lone probe, wide"));
+        // The prompt the user edits stays as written.
+        assert_eq!(
+            app.thumbnail(project.id).unwrap().thumbnail.prompt,
+            "A lone probe, wide"
+        );
     }
 
     #[test]

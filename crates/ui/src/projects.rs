@@ -18,8 +18,8 @@ use std::time::Duration;
 use bardo_app::bardo_domain::{
     CaptureVoice, Channel, ChannelId, Generation, Job, JobKind, JobState, Narration,
     NarrationSource, Network, NetworkAccountId, PersonaId, ProductionMode, SceneFieldError,
-    ScenePlanId, ScriptFieldError, TemplateKind, VideoFormat, VideoLength, VideoMetadataDraft,
-    VideoProject, VideoProjectId,
+    ScenePlanId, ScriptFieldError, StyleChoice, TemplateKind, VideoFormat, VideoLength,
+    VideoMetadataDraft, VideoProject, VideoProjectId,
 };
 use bardo_app::{
     Bardo, BudgetConsent, ChaptersView, Control, Destination, ExportSummary, ExportView,
@@ -122,6 +122,9 @@ pub struct ProjectsScreen {
     format_select: ChoiceSelect<Option<VideoFormat>>,
     /// The project's length: its format's (`None`) or its own (#253).
     length_select: ChoiceSelect<Option<VideoLength>>,
+    /// The project's visual style: its channel's (`None`) or its own
+    /// (#259).
+    style_select: ChoiceSelect<Option<StyleChoice>>,
     /// The project's production mode: the channel's (`None`) or its own,
     /// each with what the whole video would cost in it.
     mode_select: ChoiceSelect<Option<ProductionMode>>,
@@ -343,6 +346,9 @@ impl ProjectsScreen {
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let length_select =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
+        let style_select = cx.new(|cx| {
+            SelectState::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(true)
+        });
         let mode_select =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let spend_cap_input = cx.new(|cx| InputState::new(window, cx));
@@ -461,6 +467,19 @@ impl ProjectsScreen {
                 },
             ),
             cx.subscribe_in(
+                &style_select,
+                window,
+                |this,
+                 _,
+                 event: &SelectEvent<SearchableVec<Choice<Option<StyleChoice>>>>,
+                 window,
+                 cx| {
+                    if let SelectEvent::Confirm(Some(style)) = event {
+                        this.set_style(*style, window, cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(
                 &mode_select,
                 window,
                 |this,
@@ -482,6 +501,7 @@ impl ProjectsScreen {
             narrator_select,
             format_select,
             length_select,
+            style_select,
             mode_select,
             production: None,
             spend_cap_input,
@@ -953,6 +973,74 @@ impl ProjectsScreen {
             select.set_selected_value(&project.format, window, cx);
         });
         self.fill_length(project.format(channel_format), project.length, window, cx);
+        self.fill_style(window, cx);
+    }
+
+    /// The style choices: the channel's (named), then the notes and the
+    /// catalog; selects the project's own style or the channel's.
+    fn fill_style(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.view.as_ref().map(|view| view.project.clone()) else {
+            return;
+        };
+        let bardo = self.bardo.read(cx);
+        let channel_style = self
+            .channels
+            .iter()
+            .find(|channel| channel.id == project.channel)
+            .map(|channel| channel.details.style())
+            .unwrap_or_default();
+        // "Channel's: From the channel's notes" would read twice over, and
+        // right above the same words as a choice of the video's own.
+        let channel_title = match channel_style {
+            StyleChoice::FromNotes => tr(bardo, Text::ProjectStyleChannelNotes),
+            StyleChoice::Catalog(_) => SharedString::from(bardo.text_with(
+                Text::ProjectStyleChannel,
+                &[("style", &bardo.text(Text::VisualStyleName(channel_style)))],
+            )),
+        };
+        let choices = SearchableVec::new(
+            std::iter::once(Choice {
+                value: None,
+                title: channel_title,
+            })
+            .chain(StyleChoice::all().map(|style| Choice {
+                value: Some(style),
+                title: tr(bardo, Text::VisualStyleName(style)),
+            }))
+            .collect::<Vec<_>>(),
+        );
+        self.style_select.update(cx, |select, cx| {
+            select.set_items(choices, window, cx);
+            select.set_selected_value(&project.style, window, cx);
+        });
+    }
+
+    /// Saves the project's style. Nothing is drawn: the Scenes stage says
+    /// which scenes are now in another style.
+    fn set_style(
+        &mut self,
+        style: Option<StyleChoice>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self.view.as_ref().map(|view| &view.project) else {
+            return;
+        };
+        if project.style == style {
+            return;
+        }
+        let id = project.id;
+        match self.bardo.read(cx).set_project_style(id, style) {
+            Ok(_) => self.error = None,
+            Err(error) => self.error = Some(error.message()),
+        }
+        // A question still open on the Scenes stage was about the scenes
+        // and the cost of the style before: it is asked again.
+        self.confirm_replan = false;
+        self.scenes_ask = None;
+        self.load(window, cx);
+        self.fill_format(window, cx);
+        cx.notify();
     }
 
     /// The length choices: the format's (named with its length), then 30
@@ -1655,6 +1743,30 @@ impl ProjectsScreen {
                     "project-length-info",
                     tr(bardo, Text::ProjectLengthHint),
                     guide::refs::PROJECTS_LENGTH,
+                ))
+                .into_any_element(),
+            // The format's tour step covers it too.
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(bardo, Text::ProjectStyle)),
+                )
+                .child(
+                    div().w(px(300.)).child(
+                        Select::new(&self.style_select)
+                            .small()
+                            .search_placeholder(tr(bardo, Text::ChannelStyle)),
+                    ),
+                )
+                .child(guide::info(
+                    bardo,
+                    "project-style-info",
+                    tr(bardo, Text::ProjectStyleHint),
+                    guide::refs::PROJECTS_STYLE,
                 ))
                 .into_any_element(),
         ];

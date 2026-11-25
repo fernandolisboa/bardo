@@ -641,6 +641,9 @@ impl LocalizationHandler {
             project.format = Some(source.format(source_channel.details.format()));
             // And its length: a version tells the same video.
             project.length = source.length;
+            // And its style: the images it carries were drawn in it, and
+            // the ones drawn next must belong with them (#259).
+            project.style = Some(source.style(source_channel.details.style()));
             let generation = Generation {
                 id: GenerationId::new(),
                 owner: self.owner,
@@ -1773,12 +1776,49 @@ mod tests {
         assert_eq!(of(&placed), of(&carried));
         // A scene of the version drawn again still follows its place.
         assert_eq!(
-            placed.reference_shots(2),
+            placed.reference_shots(2, bardo_domain::StyleChoice::FromNotes),
             [
                 (0, bardo_domain::OtherShot::SamePlace),
                 (1, bardo_domain::OtherShot::Before)
             ]
         );
+    }
+
+    #[test]
+    fn a_version_keeps_the_style_its_images_were_drawn_in() {
+        let h = Harness::new();
+        let app = h.start();
+        let source = h.narrated_project(&app);
+        let clay = bardo_domain::StyleChoice::Catalog(bardo_domain::VisualStyle::ClayStopMotion);
+        app.set_project_style(source.id, Some(clay)).unwrap();
+        h.answer(crate::scenes::tests::plan_answer());
+        done(
+            &app,
+            app.plan_scenes(source.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        done(
+            &app,
+            app.generate_scene_images(source.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        // The other channel has no style of its own.
+        let channel = english_channel(&app);
+        assert_eq!(
+            channel.details.style(),
+            bardo_domain::StyleChoice::FromNotes
+        );
+        answer(&h, &ADAPTED);
+        done(
+            &app,
+            app.make_version(source.id, channel.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let version = app.versions(source.id).unwrap().made[0].project.clone();
+        assert_eq!(version.style, Some(clay));
+        let view = app.scenes(version.id).unwrap();
+        assert_eq!(view.style, clay);
+        assert!(view.restyled.is_empty(), "its images are in its style");
     }
 
     #[test]
