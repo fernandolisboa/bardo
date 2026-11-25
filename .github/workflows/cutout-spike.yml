@@ -45,7 +45,8 @@ jobs:
       - name: Convert the models
         run: |
           mkdir -p cutout-models
-          python spikes/cutout-probe/tools/convert.py cutout-models --deformconv 2>&1 | tee cutout-models/convert.log
+          grep -m1 'model name' /proc/cpuinfo | tee cutout-models/convert.log
+          python spikes/cutout-probe/tools/convert.py cutout-models --deformconv 2>&1 | tee -a cutout-models/convert.log
       - uses: actions/upload-artifact@v4
         with:
           name: cutout-models
@@ -94,6 +95,13 @@ jobs:
           cargo clippy --release --all-targets --locked -- -D warnings
           cargo test --release --locked
           cargo build --release --locked
+      - name: Say which CPU this runner has
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            powershell -NoProfile -Command "(Get-CimInstance Win32_Processor).Name" | tee cpu-${{ runner.os }}.txt
+          else
+            grep -m1 'model name' /proc/cpuinfo | tee cpu-${{ runner.os }}.txt
+          fi
       - name: Load and run every model (CPU)
         run: $P info --models cutout-models --ep cpu --placement --out info-cpu-${{ runner.os }}.json
       - name: Load and run every model (DirectML, falls back to the CPU when it cannot start)
@@ -135,6 +143,7 @@ jobs:
           name: cutout-results-${{ runner.os }}
           path: |
             *.json
+            cpu-*.txt
             one/*.json
             cutouts/*.jpg
           retention-days: 30

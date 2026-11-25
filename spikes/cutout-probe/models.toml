@@ -88,9 +88,9 @@ license = "MIT"
 # `mean` and `std` are how each upstream prepares a photo; `range` is what
 # its own inference does to the output (U²-Net and IS-Net stretch it from
 # its smallest to its largest value). `sha256` and `size` are those of the
-# files the spike's numbers were measured on. The conversion writes the
-# same bytes on every run so far (the container's and the workflow's),
-# and stops when it does not.
+# files the spike's numbers were measured on. The conversion says when
+# it wrote other bytes, which another CPU can make it do: the files are
+# the pin, not a new conversion.
 
 [[model]]
 file = "u2netp_320x320.onnx"
