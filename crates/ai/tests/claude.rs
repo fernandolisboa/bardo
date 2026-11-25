@@ -9,8 +9,8 @@ use bardo_ai::ClaudeTextGenerator;
 use bardo_ai::claude::{FALLBACK_BETA, MESSAGES_URL, MODEL};
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, ImageFormat, Provider, ProviderFailureKind, TextFormat, TextGenerator, TextImage,
-    TextRequest, TokenUsage,
+    ApiKey, ImageFormat, Provider, ProviderFailureKind, TextEffort, TextFormat, TextGenerator,
+    TextImage, TextRequest, TokenUsage,
 };
 use common::{Scripted, fixture, recording_sleeper};
 use serde_json::json;
@@ -24,6 +24,8 @@ fn key() -> ApiKey {
 
 fn request(format: TextFormat) -> TextRequest {
     TextRequest {
+        effort: TextEffort::Everyday,
+        answer_tokens: None,
         instructions: "You plan videos for a faceless channel.".into(),
         prompt: "Propose three themes about space history.".into(),
         images: Vec::new(),
@@ -76,6 +78,93 @@ fn sends_a_messages_request_with_the_schema_and_the_fallback() {
     assert!(sent.body["max_tokens"].as_u64().unwrap() >= 4_000);
     assert_eq!(sent.body["stream"], true, "read as it is written");
     assert!(sent.body.get("thinking").is_none(), "the model decides");
+}
+
+#[test]
+fn a_careful_request_asks_for_more_thought_and_more_room() {
+    let claude = generator(&["messages-themes"]);
+    let careful = TextRequest {
+        effort: TextEffort::Careful,
+        answer_tokens: None,
+        ..request(TextFormat::Prose)
+    };
+    claude.generate(&key(), &careful).unwrap();
+    let body = &claude.transport().sent()[0].body;
+    assert_eq!(body["output_config"]["effort"], "high");
+    assert_eq!(body["max_tokens"], 32_000);
+    assert!(body.get("thinking").is_none(), "the model decides");
+
+    // Everyday requests are as they were.
+    let claude = generator(&["messages-themes"]);
+    claude
+        .generate(&key(), &request(TextFormat::Prose))
+        .unwrap();
+    let body = &claude.transport().sent()[0].body;
+    assert_eq!(body["output_config"]["effort"], "medium");
+    assert_eq!(body["max_tokens"], 16_000);
+}
+
+/// The token limit sent for an answer of `answer_tokens` at `effort`.
+fn limit_sent(effort: TextEffort, answer_tokens: u64) -> u64 {
+    let claude = generator(&["messages-themes"]);
+    let sized = TextRequest {
+        effort,
+        answer_tokens: Some(answer_tokens),
+        ..request(TextFormat::Prose)
+    };
+    claude.generate(&key(), &sized).unwrap();
+    claude.transport().sent()[0].body["max_tokens"]
+        .as_u64()
+        .unwrap()
+}
+
+#[test]
+fn an_answer_of_a_known_size_gets_room_for_itself_and_for_thought() {
+    // The plan of a ten-minute video: the answer and as much again.
+    assert_eq!(limit_sent(TextEffort::Careful, 39_000), 78_000);
+    assert_eq!(limit_sent(TextEffort::Everyday, 39_000), 78_000);
+    // A short answer keeps the usual room, never less.
+    assert_eq!(limit_sent(TextEffort::Careful, 2_000), 32_000);
+    assert_eq!(limit_sent(TextEffort::Everyday, 2_000), 16_000);
+    // Thought has a least room of its own beside a middling answer.
+    assert_eq!(limit_sent(TextEffort::Careful, 20_000), 40_000);
+    assert_eq!(limit_sent(TextEffort::Careful, 17_000), 34_000);
+    assert_eq!(limit_sent(TextEffort::Everyday, 14_000), 28_000);
+    // Never past what the model can write.
+    assert_eq!(limit_sent(TextEffort::Careful, 80_000), 128_000);
+    assert_eq!(limit_sent(TextEffort::Careful, u64::MAX), 128_000);
+}
+
+#[test]
+fn the_longest_answer_leaves_half_as_much_room_again_for_thought() {
+    let longest = bardo_ai::claude::longest_answer();
+    let limit = limit_sent(TextEffort::Careful, longest);
+    assert_eq!(limit, 128_000);
+    assert!(limit - longest >= longest / 2);
+    assert!(
+        limit - (longest + 2) < (longest + 2) / 2,
+        "and no longer one does"
+    );
+}
+
+#[test]
+fn the_schema_is_sent_in_the_order_it_was_written() {
+    // Claude answers in the schema's order, so a field written first in
+    // the schema is thought through first.
+    let schema = r#"{"type":"object","properties":{"story":{"type":"string"},"cast":{"type":"string"},"answer":{"type":"string"}},"required":["story","cast","answer"],"additionalProperties":false}"#;
+    let claude = generator(&["messages-themes"]);
+    claude
+        .generate(
+            &key(),
+            &request(TextFormat::Json {
+                schema: schema.into(),
+            }),
+        )
+        .unwrap();
+    let sent = String::from_utf8(claude.transport().sent()[0].raw_body.clone()).unwrap();
+    let at = |name: &str| sent.find(&format!("\"{name}\":{{")).unwrap();
+    assert!(at("story") < at("cast"));
+    assert!(at("cast") < at("answer"), "not sorted by name");
 }
 
 #[test]

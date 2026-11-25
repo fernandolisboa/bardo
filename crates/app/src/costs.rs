@@ -170,6 +170,10 @@ pub(crate) struct PlannedCall {
     /// Output tokens, when known before the job (a take model billed by
     /// its video's tokens).
     pub(crate) output_tokens: Option<u64>,
+    /// Output tokens the call takes at least, when what is known before
+    /// the job is only how large its answer gets (a scene plan grows with
+    /// its narration); past calls that took more still count.
+    pub(crate) output_tokens_at_least: Option<u64>,
 }
 
 impl PlannedCall {
@@ -196,6 +200,7 @@ impl PlannedCall {
             video_seconds: None,
             audio_seconds: None,
             output_tokens: None,
+            output_tokens_at_least: None,
         }
     }
 
@@ -212,6 +217,11 @@ impl PlannedCall {
 
     pub(crate) fn with_output_tokens(mut self, tokens: u64) -> Self {
         self.output_tokens = Some(tokens);
+        self
+    }
+
+    pub(crate) fn with_output_tokens_at_least(mut self, tokens: u64) -> Self {
+        self.output_tokens_at_least = Some(tokens);
         self
     }
 
@@ -245,9 +255,12 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         // Ten themes, three questions each (four, with up to 40 past
         // videos in the state, once the channel has history).
         CostPurpose::ThemeRanking => tokens(2_000, 0),
-        CostPurpose::Script => tokens(1_000, 4_000),
+        // Written with more thought (#258): the thinking is billed as
+        // output.
+        CostPurpose::Script => tokens(1_300, 8_000),
         CostPurpose::Narration => Metered::characters(5_000),
-        CostPurpose::ScenePlan => tokens(2_000, 4_000),
+        // The story, the cast, the places and every scene, thought through.
+        CostPurpose::ScenePlan => tokens(3_500, 12_000),
         // A 2K image.
         CostPurpose::SceneImage => Metered {
             input_tokens: 40,
@@ -420,6 +433,9 @@ impl CostBook {
         }
         if let Some(tokens) = call.output_tokens {
             usage.output_tokens = tokens;
+        }
+        if let Some(tokens) = call.output_tokens_at_least {
+            usage.output_tokens = usage.output_tokens.max(tokens);
         }
         Ok(usage.times(call.calls))
     }

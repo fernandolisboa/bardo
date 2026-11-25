@@ -313,10 +313,12 @@ pub use runner::{
     UnknownRunnerRole, running_since,
 };
 pub use scene::{
-    CastDraft, CastMember, CastRecord, MAX_CAST, MAX_CAST_NAME_CHARS, MAX_SENTENCE_WORDS,
-    NoPendingClip, NoPendingImage, NoScenes, NoSuchCastMember, NoSuchScene, Scene, SceneClip,
+    CastDraft, CastMember, CastRecord, MAX_CAST, MAX_CAST_NAME_CHARS, MAX_PLACES,
+    MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes, NoSuchCastMember, NoSuchPlace,
+    NoSuchScene, OtherShot, Place, PlaceDraft, PlaceRecord, PlanDraft, Scene, SceneClip,
     SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord,
-    ScenePlanRepository, ScenePrompt, SceneRecord, Sentence, scene_image_prompt, sentences,
+    ScenePlanRepository, ScenePrompt, SceneRecord, SceneSetting, Sentence, scene_image_prompt,
+    sentences,
 };
 pub use scene_plan_size::ScenePlanSize;
 pub use schedule::{
@@ -352,7 +354,9 @@ pub use template::{
     TemplateProblem, TemplateRepository, TemplateValues, TemplateVariable, TemplateVersion,
     TemplateVersionId, UnknownTemplateKind,
 };
-pub use text::{GeneratedText, TextFormat, TextGenerator, TextImage, TextRequest, TokenUsage};
+pub use text::{
+    GeneratedText, TextEffort, TextFormat, TextGenerator, TextImage, TextRequest, TokenUsage,
+};
 pub use theme::{
     Reason, Theme, ThemeFieldError, ThemeId, ThemeIdea, ThemeNotSuggested, ThemeRanking,
     ThemeRecord, ThemeRepository, ThemeStatus, UnknownThemeStatus, VideoProject, VideoProjectId,

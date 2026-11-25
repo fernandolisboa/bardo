@@ -1014,6 +1014,7 @@ reject = "Discard"
 [scenes.error]
 no_narration = "Generate or import the narration first; scenes are timed on it."
 no_plan = "Plan the scenes first."
+narration_too_long = "This narration is too long to plan in one go. A plan of more than about 330 scenes (20 to 30 minutes of narration) does not fit in one answer and would be paid for without arriving. Shorten the script or make it as more than one video."
 scene_not_found = "That scene is gone; the scenes may have been planned again."
 missing_claude_key = "Save a Claude key under Settings to plan scenes."
 missing_gemini_key = "Save a Gemini key under Settings to generate images and Google clips."
@@ -1830,6 +1831,13 @@ edit = "Edit look"
 redraw = "Draw portrait again"
 failed = "The portrait was not drawn:"
 edited = "Edited"
+
+[scenes.same_place]
+title = "Place"
+hint = "Scenes that happen in the same place share one description of it. Bardo sends it with each of them, along with earlier images of the place, so the place looks the same from scene to scene. Editing it changes the next images drawn there."
+edit = "Edit place"
+edited = "Edited"
+left = "This scene's prompt no longer names the place, so it is drawn without it."
 
 [costs.column]
 provider = "Provider"
@@ -2935,7 +2943,7 @@ name = "Scenes tour"
 
 [tour.scenes.plan]
 title = "Plan and draw"
-body = "Plan scenes splits the narration into scenes on its sentences and writes an image prompt for each one. Then draw the missing images in one run; the estimate is under the button."
+body = "Plan scenes turns the narration into a storyboard: scenes on its sentences that follow one another, the people and places that come back, and an image prompt for each scene. Then draw the missing images in one run, each one with the earlier ones as references; the estimate is under the button."
 
 [tour.scenes.list]
 title = "The scenes"
@@ -2943,7 +2951,7 @@ body = "Each scene in order, with its time, its image and where it stands: to dr
 
 [tour.scenes.scene]
 title = "A scene"
-body = "The scene you picked: the narration it covers, its image and its image prompt, and the people who come back in the video with their reference portraits, so they look the same in every scene. Edit the prompt to change what the next drawing shows."
+body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. Edit the prompt to change what the next drawing shows."
 
 [tour.scenes.redraw]
 title = "Draw again"

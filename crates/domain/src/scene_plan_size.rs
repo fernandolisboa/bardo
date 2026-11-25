@@ -19,9 +19,10 @@ use crate::{Narration, sentences};
 const FASTEST_SCENE: Duration = Duration::from_secs(4);
 /// The pace in the middle of what it asks for (4 to 8 seconds).
 const USUAL_SCENE: Duration = Duration::from_secs(6);
-/// What a plan says once, whatever its length, at most and usually.
-const ONCE_AT_MOST: u64 = 1_500;
-const ONCE_USUALLY: u64 = 400;
+/// What a plan says once, whatever its length (its story, its cast and its
+/// places), at most and usually.
+const ONCE_AT_MOST: u64 = 2_500;
+const ONCE_USUALLY: u64 = 600;
 /// A scene's tokens: at most (well past the largest counted, for prompts
 /// longer than the default template's) and usually.
 const SCENE_AT_MOST: u64 = 250;
@@ -120,9 +121,9 @@ mod tests {
     #[test]
     fn the_room_grows_with_the_scenes() {
         // A Short fits the room every request gets; a long video does not.
-        assert_eq!(minutes(1, 15).answer_tokens_at_most(), 1_500 + 15 * 250);
-        assert_eq!(minutes(10, 150).answer_tokens_at_most(), 1_500 + 150 * 250);
-        assert_eq!(minutes(15, 225).answer_tokens_at_most(), 57_750);
+        assert_eq!(minutes(1, 15).answer_tokens_at_most(), 2_500 + 15 * 250);
+        assert_eq!(minutes(10, 150).answer_tokens_at_most(), 2_500 + 150 * 250);
+        assert_eq!(minutes(15, 225).answer_tokens_at_most(), 58_750);
         assert!(minutes(10, 150).answer_tokens_at_most() > 16_000);
     }
 
@@ -132,7 +133,7 @@ mod tests {
             let size = minutes(length, sentences);
             assert!(size.answer_tokens_usually() < size.answer_tokens_at_most());
         }
-        assert_eq!(minutes(10, 150).answer_tokens_usually(), 400 + 100 * 160);
+        assert_eq!(minutes(10, 150).answer_tokens_usually(), 600 + 100 * 160);
     }
 
     #[test]

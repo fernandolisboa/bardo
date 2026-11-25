@@ -91,13 +91,16 @@ fn reference_portraits_go_inline_after_the_prompt_in_order() {
     };
     adapter.generate(&key(), &with).unwrap();
     let parts = &adapter.transport().sent()[0].body["contents"][0]["parts"];
-    assert_eq!(parts.as_array().unwrap().len(), 3);
+    assert_eq!(parts.as_array().unwrap().len(), 5);
     assert_eq!(parts[0]["text"], PROMPT);
+    // Each image comes after the number the prompt calls it by.
+    assert_eq!(parts[1]["text"], "Reference 1:");
+    assert_eq!(parts[3]["text"], "Reference 2:");
     let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
-    assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
-    assert_eq!(parts[1]["inlineData"]["data"], encode(FINAL_IMAGE));
-    assert_eq!(parts[2]["inlineData"]["mimeType"], "image/jpeg");
-    assert_eq!(parts[2]["inlineData"]["data"], encode(&jpeg));
+    assert_eq!(parts[2]["inlineData"]["mimeType"], "image/png");
+    assert_eq!(parts[2]["inlineData"]["data"], encode(FINAL_IMAGE));
+    assert_eq!(parts[4]["inlineData"]["mimeType"], "image/jpeg");
+    assert_eq!(parts[4]["inlineData"]["data"], encode(&jpeg));
 }
 
 #[test]

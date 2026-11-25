@@ -376,13 +376,13 @@ mod tests {
     }
 
     // Before anything is made, from the rate table and the first guesses:
-    // Claude writes the script (1,000 tokens in, 4,000 out at US$ 4 and
-    // US$ 20 a million: US$ 0.084) and plans the scenes (2,000 in, 4,000
-    // out: US$ 0.088); ElevenLabs reads 15 characters a second at US$ 0.10
+    // Claude writes the script (1,300 tokens in, 8,000 out at US$ 4 and
+    // US$ 20 a million: US$ 0.1652) and plans the scenes (3,500 in, 12,000
+    // out: US$ 0.254); ElevenLabs reads 15 characters a second at US$ 0.10
     // a thousand; Nano Banana draws a scene every 6 seconds and one
     // portrait at US$ 0.10157 each (1,680 image tokens at US$ 60 a million,
     // 40 in, 250 out).
-    const SCRIPT_AND_PLAN: u64 = 84_000 + 88_000;
+    const SCRIPT_AND_PLAN: u64 = 165_200 + 254_000;
     const IMAGE: u64 = 101_570;
 
     #[test]

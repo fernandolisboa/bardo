@@ -4,16 +4,19 @@
 //! a long video takes minutes to write, so no clock bounds the whole
 //! answer: the limit is on silence, and a stream that stops early still
 //! says what was generated. JSON output uses structured outputs
-//! (`output_config.format`), so the answer always matches the schema. If
-//! Claude's safety rules decline a request, the API re-runs it on
-//! Anthropic's recommended fallback model in the same call
+//! (`output_config.format`), so the answer always matches the schema, and
+//! its fields come in the schema's order: the schema is sent as written
+//! (`serde_json` keeps the order of keys, see the workspace manifest), so a
+//! schema can make Claude write one field before another. If Claude's
+//! safety rules decline a request, the API re-runs it on Anthropic's
+//! recommended fallback model in the same call
 //! (`fallbacks: "default"`).
 
 use std::io::Read as _;
 use std::time::Duration;
 
 use bardo_domain::{
-    ApiKey, GeneratedText, Provider, ProviderFailure, ProviderFailureKind, TextFormat,
+    ApiKey, GeneratedText, Provider, ProviderFailure, ProviderFailureKind, TextEffort, TextFormat,
     TextGenerator, TextRequest, TokenUsage,
 };
 use base64::Engine as _;
@@ -32,6 +35,54 @@ pub const MAX_TOKENS: u32 = 16_000;
 /// The model's default made explicit: enough thought for creative work
 /// without paying for deep reasoning.
 pub const EFFORT: &str = "medium";
+/// For the requests a whole video is built on (its script and its scene
+/// plan): more thought before answering.
+pub const CAREFUL_EFFORT: &str = "high";
+/// Room for that thought on top of a long plan.
+pub const CAREFUL_MAX_TOKENS: u32 = 32_000;
+/// The most a model writes in one answer, thought included. Every model
+/// Bardo's requests may be answered by (the fallback's too) has this limit.
+pub const MAX_OUTPUT_TOKENS: u32 = 128_000;
+
+/// The effort and the usual token limit a request of `effort` is sent
+/// with.
+pub fn effort_settings(effort: TextEffort) -> (&'static str, u32) {
+    match effort {
+        TextEffort::Everyday => (EFFORT, MAX_TOKENS),
+        TextEffort::Careful => (CAREFUL_EFFORT, CAREFUL_MAX_TOKENS),
+    }
+}
+
+/// The least room for thought beside an answer whose size is known.
+fn thought_at_least(effort: TextEffort) -> u64 {
+    match effort {
+        TextEffort::Everyday => 4_000,
+        TextEffort::Careful => 16_000,
+    }
+}
+
+/// The longest answer, in tokens, a request can ask for and still leave
+/// room for the thought before it: half as much room again as the answer.
+/// An answer cut at the limit is paid for and lost, so a longer one is not
+/// worth sending.
+pub fn longest_answer() -> u64 {
+    u64::from(MAX_OUTPUT_TOKENS) * 2 / 3
+}
+
+/// The token limit of a request: the usual one, or, for an answer of a
+/// known size, that size and as much again for thought, within what the
+/// model can write. Room that is not used is not billed.
+pub fn max_tokens(effort: TextEffort, answer_tokens: Option<u64>) -> u32 {
+    let (_, usual) = effort_settings(effort);
+    let Some(answer) = answer_tokens else {
+        return usual;
+    };
+    let wanted = answer.saturating_add(answer.max(thought_at_least(effort)));
+    u32::try_from(wanted)
+        .unwrap_or(MAX_OUTPUT_TOKENS)
+        .clamp(usual, MAX_OUTPUT_TOKENS)
+}
+
 /// Gates `fallbacks: "default"`.
 pub const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 
@@ -42,7 +93,8 @@ pub fn message_request(
     request: &TextRequest,
     with_fallback: bool,
 ) -> Result<HttpRequest, ProviderFailure> {
-    let mut output_config = json!({ "effort": EFFORT });
+    let (effort, _) = effort_settings(request.effort);
+    let mut output_config = json!({ "effort": effort });
     if let TextFormat::Json { schema } = &request.format {
         let schema: Value = serde_json::from_str(schema).map_err(|error| {
             ProviderFailure::new(
@@ -75,7 +127,7 @@ pub fn message_request(
     };
     let mut body = json!({
         "model": MODEL,
-        "max_tokens": MAX_TOKENS,
+        "max_tokens": max_tokens(request.effort, request.answer_tokens),
         "stream": true,
         "system": request.instructions,
         "messages": [{ "role": "user", "content": content }],

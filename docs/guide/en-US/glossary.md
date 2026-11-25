@@ -80,7 +80,9 @@ The words Bardo uses, in plain terms.
 
 **Asset id**: a look's id in your ModelArk asset library (`asset://…`), sent to Seedance on BytePlus instead of the look's image: your verified likeness for a photo of you, or a preset character or virtual portrait for a drawn look.
 
-**Scene plan**: the narration split into scenes, each with an image prompt.
+**Scene plan**: the narration split into scenes as a storyboard, each scene with an image prompt, the people who come back and the places the video returns to.
+
+**Place**: a place more than one scene happens in, described once in the scene plan so every scene there is drawn the same ([The same place from scene to scene](scenes.md#same-place)).
 
 **Scene**: a stretch of the narration with one image, and optionally a clip.
 

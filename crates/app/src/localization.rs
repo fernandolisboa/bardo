@@ -22,9 +22,9 @@ use bardo_domain::{
     RenderedPrompt, RepositoryError, Scene, SceneClip, SceneImage, ScenePlan, ScenePlanId,
     ScenePlanRecord, ScenePlanRepository, SceneRecord, Script, ScriptRepository, SecretStore,
     SourceSentence, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
-    TemplateVersionId, TextFormat, TextGenerator, TextRequest, Theme, ThemeIdea, ThemeRepository,
-    TimelineRepository, UiLanguage, VideoProject, VideoProjectId, adaptation_gaps, join_adapted,
-    localized_cut, place_scenes, placed_scene_notes, scene_sentences, sentence_times,
+    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, Theme, ThemeIdea,
+    ThemeRepository, TimelineRepository, UiLanguage, VideoProject, VideoProjectId, adaptation_gaps,
+    join_adapted, localized_cut, place_scenes, placed_scene_notes, scene_sentences, sentence_times,
     sentence_words, sentences, source_gaps,
 };
 use serde::{Deserialize, Serialize};
@@ -331,8 +331,8 @@ fn other_audience(channel: &Channel, language: ContentLanguage, country: Country
 }
 
 /// A copy of `plan` for `project`: the current images and clips with new
-/// generation records, prompts and model picks, and the cast with its
-/// portraits; nothing waiting for review, no failures and no clip of an
+/// generation records, prompts and model picks, the cast with its
+/// portraits and the places; nothing waiting for review, no failures and no clip of an
 /// image the scene no longer shows.
 fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> ScenePlan {
     let copied = |generation: &Generation| Generation {
@@ -375,6 +375,7 @@ fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> Scen
             })
             .with_cast(scene.cast().to_vec())
             .with_planned_motion(scene.planned_motion().cloned())
+            .with_place(scene.place())
         })
         .collect();
     let cast = plan
@@ -403,6 +404,7 @@ fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> Scen
         updated_at: now,
     })
     .with_cast(cast)
+    .with_places(plan.places().to_vec())
 }
 
 /// Runs version jobs.
@@ -457,6 +459,8 @@ impl LocalizationHandler {
     ) -> Result<bardo_domain::GeneratedText, JobFailure> {
         let key = self.key()?;
         let request = TextRequest {
+            effort: TextEffort::Everyday,
+            answer_tokens: None,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),
@@ -1672,6 +1676,54 @@ mod tests {
         );
         assert_eq!(failed.state(), JobState::Failed);
         assert_eq!(app.script(version.id).unwrap().script.unwrap(), script);
+    }
+
+    #[test]
+    fn a_version_carries_the_places_and_keeps_them_when_its_scenes_are_placed() {
+        let h = Harness::new();
+        let app = h.start();
+        let source = crate::scenes::tests::storyboard_project(&h, &app);
+        done(
+            &app,
+            app.generate_scene_images(source.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let planned = app.scenes(source.id).unwrap().plan.unwrap();
+        assert_eq!(planned.places().len(), 2);
+        let channel = english_channel(&app);
+        answer(&h, &ADAPTED);
+        done(
+            &app,
+            app.make_version(source.id, channel.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let version = app.versions(source.id).unwrap().made[0].project.clone();
+
+        let carried = app.scenes(version.id).unwrap().plan.unwrap();
+        assert_eq!(carried.places(), planned.places());
+        let of = |plan: &ScenePlan| -> Vec<Option<usize>> {
+            (0..plan.scenes().len())
+                .map(|index| plan.scene_place(index))
+                .collect()
+        };
+        assert_eq!(of(&carried), [Some(0), Some(0), Some(0), Some(1)]);
+
+        done(
+            &app,
+            app.generate_narration(version.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let placed = app.place_scenes(version.id).unwrap();
+        assert_eq!(placed.places(), planned.places());
+        assert_eq!(of(&placed), of(&carried));
+        // A scene of the version drawn again still follows its place.
+        assert_eq!(
+            placed.reference_shots(2),
+            [
+                (0, bardo_domain::OtherShot::SamePlace),
+                (1, bardo_domain::OtherShot::Before)
+            ]
+        );
     }
 
     #[test]

@@ -882,6 +882,7 @@ pub enum Text {
     RejectSceneClip,
     ScenesNoNarration,
     ScenesNoPlan,
+    ScenesNarrationTooLong,
     SceneNotFound,
     ScenesMissingClaudeKey,
     ScenesMissingGeminiKey,
@@ -1522,6 +1523,11 @@ pub enum Text {
     RedrawCastPortrait,
     CastPortraitFailed,
     CastEdited,
+    ScenePlace,
+    ScenePlaceHint,
+    EditPlaceDescription,
+    PlaceEdited,
+    ScenePlaceLeft,
     SceneCurrentImage,
     SceneNewImage,
     ProjectSwitch,
@@ -3481,6 +3487,7 @@ impl Text {
             Text::RejectSceneClip => "scenes.clip.reject",
             Text::ScenesNoNarration => "scenes.error.no_narration",
             Text::ScenesNoPlan => "scenes.error.no_plan",
+            Text::ScenesNarrationTooLong => "scenes.error.narration_too_long",
             Text::SceneNotFound => "scenes.error.scene_not_found",
             Text::ScenesMissingClaudeKey => "scenes.error.missing_claude_key",
             Text::ScenesMissingGeminiKey => "scenes.error.missing_gemini_key",
@@ -4072,6 +4079,11 @@ impl Text {
             Text::RedrawCastPortrait => "scenes.cast.redraw",
             Text::CastPortraitFailed => "scenes.cast.failed",
             Text::CastEdited => "scenes.cast.edited",
+            Text::ScenePlace => "scenes.same_place.title",
+            Text::ScenePlaceHint => "scenes.same_place.hint",
+            Text::EditPlaceDescription => "scenes.same_place.edit",
+            Text::PlaceEdited => "scenes.same_place.edited",
+            Text::ScenePlaceLeft => "scenes.same_place.left",
             Text::SceneCurrentImage => "scenes.inspector.current",
             Text::SceneNewImage => "scenes.inspector.new",
             Text::ProjectSwitch => "projects.switch",
@@ -5839,6 +5851,7 @@ mod tests {
             Text::RejectSceneClip,
             Text::ScenesNoNarration,
             Text::ScenesNoPlan,
+            Text::ScenesNarrationTooLong,
             Text::SceneNotFound,
             Text::ScenesMissingClaudeKey,
             Text::ScenesMissingGeminiKey,
@@ -6620,6 +6633,11 @@ mod tests {
         texts.push(Text::RedrawCastPortrait);
         texts.push(Text::CastPortraitFailed);
         texts.push(Text::CastEdited);
+        texts.push(Text::ScenePlace);
+        texts.push(Text::ScenePlaceHint);
+        texts.push(Text::EditPlaceDescription);
+        texts.push(Text::PlaceEdited);
+        texts.push(Text::ScenePlaceLeft);
         texts.push(Text::SceneCurrentImage);
         texts.push(Text::SceneNewImage);
         texts.push(Text::ProjectSwitch);

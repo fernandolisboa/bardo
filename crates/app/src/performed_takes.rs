@@ -45,8 +45,9 @@ use bardo_domain::{
     ProviderFailureKind, RepositoryError, SecretStore, StagedFile, StagedUpload, StagingRepository,
     TakeGenerator, TakeInput, TakeMode, TakeModel, TakePrompt, TakePromptError, TakeRequest,
     TakeResult, TakeSpend, TakeStatus, TakeStep, TakeStretch, TemplateKind, TemplateUsed,
-    TemplateValues, TemplateVariable, TemplateVersionId, TextFormat, TextGenerator, TextImage,
-    TextRequest, ThemeRepository, VideoProjectId, preflight, take_model_of, take_prompt_text,
+    TemplateValues, TemplateVariable, TemplateVersionId, TextEffort, TextFormat, TextGenerator,
+    TextImage, TextRequest, ThemeRepository, VideoProjectId, preflight, take_model_of,
+    take_prompt_text,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
@@ -736,6 +737,8 @@ impl JobHandler for TakePromptHandler {
             return Ok(());
         }
         let request = TextRequest {
+            effort: TextEffort::Everyday,
+            answer_tokens: None,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images,
