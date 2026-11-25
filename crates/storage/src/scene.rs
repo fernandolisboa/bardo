@@ -3,7 +3,7 @@ use std::time::Duration;
 use bardo_domain::{
     CastMember, CastRecord, GenerationId, JobFailureKind, NarrationId, Place, PlaceRecord,
     ProfileId, RepositoryError, Scene, SceneClip, SceneImage, ScenePlan, ScenePlanId,
-    ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, VideoProjectId,
+    ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, StretchLimit, VideoProjectId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
@@ -95,7 +95,8 @@ fn clip(
 ) -> Result<Option<SceneClip>, RepositoryError> {
     let row = conn
         .query_row(
-            "SELECT file, seconds, source_image_id, generation_id FROM scene_clip
+            "SELECT file, seconds, source_image_id, generation_id, stretch_percent
+             FROM scene_clip
              WHERE plan_id = ?1 AND position = ?2 AND slot = ?3",
             params![plan, position, slot],
             |row| {
@@ -104,17 +105,19 @@ fn clip(
                     row.get::<_, i64>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
+                    row.get::<_, u32>(4)?,
                 ))
             },
         )
         .optional()
         .map_err(boxed)?;
-    let Some((file, seconds, source, generation_id)) = row else {
+    let Some((file, seconds, source, generation_id, stretch)) = row else {
         return Ok(None);
     };
     Ok(Some(SceneClip {
         file,
         seconds: u32::try_from(seconds).map_err(boxed)?,
+        stretch: (stretch > 0).then(|| StretchLimit::new(stretch)),
         source_image: GenerationId::from(uuid(&source)?),
         generation: generation(conn, &generation_id)?,
     }))
@@ -367,8 +370,8 @@ fn write_clips(
         };
         tx.execute(
             "INSERT INTO scene_clip (plan_id, position, slot, file, seconds, source_image_id,
-                 generation_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                 generation_id, stretch_percent)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 plan,
                 position,
@@ -377,6 +380,7 @@ fn write_clips(
                 i64::from(clip.seconds),
                 clip.source_image.to_string(),
                 clip.generation.id.to_string(),
+                clip.stretch.map_or(0, StretchLimit::percent),
             ],
         )
         .map_err(boxed)?;
@@ -781,6 +785,7 @@ mod tests {
         SceneClip {
             file: file.into(),
             seconds: 6,
+            stretch: None,
             source_image: source.generation.id,
             generation: generation(s, Provider::Higgsfield, file),
         }
@@ -801,7 +806,11 @@ mod tests {
         ));
         scene.add_clip(clip(&s, "one.mp4", &still));
         scene.accept_clip().unwrap();
-        scene.add_clip(clip(&s, "two.mp4", &still));
+        // A new one made to play slowed waits beside it.
+        scene.add_clip(SceneClip {
+            stretch: Some(StretchLimit::default()),
+            ..clip(&s, "two.mp4", &still)
+        });
         scene.fail_clip(JobFailureKind::Declined);
         s.db.save_scene(&plan, 0).unwrap();
         assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));
@@ -819,9 +828,39 @@ mod tests {
         let scene = plan.scene_mut(1, time(1_800_000_032)).unwrap();
         let other = image(&s, "other.png");
         scene.add_image(other.clone());
-        scene.add_clip(clip(&s, "three.mp4", &other));
+        scene.add_clip(SceneClip {
+            stretch: Some(StretchLimit::new(65)),
+            ..clip(&s, "three.mp4", &other)
+        });
         s.db.save_scene_plan(&plan).unwrap();
         assert_eq!(s.db.scene_plan(s.project.id).unwrap(), Some(plan));
+    }
+
+    #[test]
+    fn a_clip_from_before_stretching_plays_at_its_own_speed() {
+        let s = setup();
+        let mut plan = plan(&s);
+        let still = image(&s, "still.png");
+        let scene = plan.scene_mut(0, time(1_800_000_030)).unwrap();
+        scene.add_image(still.clone());
+        scene.add_clip(clip(&s, "one.mp4", &still));
+        scene.accept_clip().unwrap();
+        s.db.save_scene_plan(&plan).unwrap();
+        {
+            // As the database was before migration 64, then migrated.
+            let mut conn = s.db.conn();
+            conn.execute_batch(
+                "ALTER TABLE scene_clip DROP COLUMN stretch_percent;
+                 ALTER TABLE channel DROP COLUMN clip_stretch_percent;
+                 ALTER TABLE channel DROP COLUMN clip_fit;
+                 PRAGMA user_version = 63;",
+            )
+            .unwrap();
+            crate::migrations::run(&mut conn).unwrap();
+        }
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored.scenes()[0].clip().unwrap().stretch, None);
+        assert_eq!(stored, plan);
     }
 
     #[test]

@@ -355,6 +355,7 @@ fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> Scen
                 .map(|(clip, image)| SceneClip {
                     file: clip.file.clone(),
                     seconds: clip.seconds,
+                    stretch: clip.stretch,
                     source_image: image.generation.id,
                     generation: copied(&clip.generation),
                 });

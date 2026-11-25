@@ -207,6 +207,8 @@ mod tests {
             thumbnail_look: Default::default(),
             production: Default::default(),
             style: Default::default(),
+            clip_fit: Default::default(),
+            stretch_limit: Default::default(),
         }
     }
 

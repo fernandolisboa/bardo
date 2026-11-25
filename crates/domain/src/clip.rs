@@ -71,6 +71,105 @@ impl fmt::Display for ClipModelRef {
     }
 }
 
+/// How clips are asked of a model that only makes fixed lengths (5 or 10
+/// seconds, say), when a scene falls between two of them (#260).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ClipFit {
+    /// The shorter length when the scene is only a little longer (within
+    /// the channel's [`StretchLimit`]), played slowed to end with the
+    /// scene: a 6 second scene pays for 5.
+    #[default]
+    Stretch,
+    /// Always a length that covers the scene, the rest trimmed: a 6
+    /// second scene pays for 10. For clips with fast action, where slow
+    /// motion shows.
+    Cover,
+}
+
+impl ClipFit {
+    pub const ALL: [ClipFit; 2] = [ClipFit::Stretch, ClipFit::Cover];
+
+    /// The stable name it is stored under.
+    pub fn code(self) -> &'static str {
+        match self {
+            ClipFit::Stretch => "stretch",
+            ClipFit::Cover => "cover",
+        }
+    }
+
+    /// The fit stored as `code`; one this version does not know reads as
+    /// the default.
+    pub fn from_code(code: &str) -> ClipFit {
+        Self::ALL
+            .into_iter()
+            .find(|fit| fit.code() == code)
+            .unwrap_or_default()
+    }
+}
+
+/// How much longer than itself a stretched clip may play, in percent: at
+/// 40, a 5 second clip covers a scene of up to 7 and plays no slower than
+/// five sevenths of its speed. Always within [`StretchLimit::MIN`] and
+/// [`StretchLimit::MAX`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct StretchLimit(u8);
+
+impl StretchLimit {
+    pub const MIN: u8 = 5;
+    /// Twice its length: the clip at half speed.
+    pub const MAX: u8 = 100;
+    /// The limits a form offers are this far apart.
+    pub const STEP: u8 = 5;
+    /// A clip at 71% of its speed or faster: on the cautious side of
+    /// where slow motion starts to show on ordinary movement.
+    pub const DEFAULT: StretchLimit = StretchLimit(40);
+
+    /// The limit nearest `percent`: within the range and on a step, so
+    /// what is stored is always a limit the form can show.
+    pub fn new(percent: u32) -> StretchLimit {
+        let step = u32::from(Self::STEP);
+        let nearest = (percent.min(Self::MAX.into()) + step / 2) / step * step;
+        StretchLimit(nearest.clamp(Self::MIN.into(), Self::MAX.into()) as u8)
+    }
+
+    pub fn percent(self) -> u8 {
+        self.0
+    }
+
+    /// The limits a form offers, lowest first.
+    pub fn choices() -> impl Iterator<Item = StretchLimit> {
+        (Self::MIN..=Self::MAX)
+            .step_by(Self::STEP.into())
+            .map(StretchLimit)
+    }
+
+    /// The longest a clip of `seconds` plays when stretched.
+    pub fn longest(self, seconds: u32) -> Duration {
+        Duration::from_secs(seconds.into()) * (100 + u32::from(self.0)) / 100
+    }
+
+    /// Whether a clip of `seconds`, played slowed, covers a scene of
+    /// `scene` within the limit.
+    pub fn covers(self, seconds: u32, scene: Duration) -> bool {
+        scene <= self.longest(seconds)
+    }
+}
+
+impl Default for StretchLimit {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// The length to ask a model for, for one scene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipLength {
+    pub seconds: u32,
+    /// Set when that is shorter than the scene on purpose: the clip plays
+    /// slowed, to end when the scene does, within this limit.
+    pub stretch: Option<StretchLimit>,
+}
+
 /// The clip lengths a model accepts, in whole seconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClipDurations {
@@ -84,17 +183,45 @@ impl ClipDurations {
     /// The length to ask for to cover `wanted`: the shortest allowed one
     /// that is at least as long (the rough cut trims the rest), else the
     /// longest allowed (the still image covers the rest).
-    pub fn fit(&self, wanted: Duration) -> u32 {
-        let wanted = u32::try_from(wanted.as_millis().div_ceil(1000)).unwrap_or(u32::MAX);
+    ///
+    /// With a `stretch` limit, a model of fixed lengths gives the longest
+    /// one short of `wanted` instead, when playing it slowed covers the
+    /// scene within the limit: a scene a little over one length does not
+    /// pay for the next. A model of any length in a range is asked for
+    /// what the scene needs either way.
+    pub fn fit(&self, wanted: Duration, stretch: Option<StretchLimit>) -> ClipLength {
+        let whole = u32::try_from(wanted.as_millis().div_ceil(1000)).unwrap_or(u32::MAX);
+        let exact = |seconds| ClipLength {
+            seconds,
+            stretch: None,
+        };
         match self {
-            ClipDurations::Range { min, max } => wanted.clamp(*min, (*max).max(*min)),
-            ClipDurations::Choices(choices) => choices
-                .iter()
-                .copied()
-                .filter(|choice| *choice >= wanted)
-                .min()
-                .or_else(|| choices.iter().copied().max())
-                .unwrap_or(wanted),
+            ClipDurations::Range { min, max } => exact(whole.clamp(*min, (*max).max(*min))),
+            ClipDurations::Choices(choices) => {
+                let slowed = stretch.and_then(|limit| {
+                    choices
+                        .iter()
+                        .copied()
+                        .filter(|&choice| {
+                            Duration::from_secs(choice.into()) < wanted
+                                && limit.covers(choice, wanted)
+                        })
+                        .max()
+                });
+                if let Some(seconds) = slowed {
+                    return ClipLength { seconds, stretch };
+                }
+                if let Some(seconds) = choices.iter().copied().filter(|c| *c >= whole).min() {
+                    return exact(seconds);
+                }
+                // Longer than every length: the longest one, which covers
+                // more of the scene slowed than at its own speed, for the
+                // same price. It holds its last frame for the rest.
+                match choices.iter().copied().max() {
+                    Some(seconds) => ClipLength { seconds, stretch },
+                    None => exact(whole),
+                }
+            }
         }
     }
 
@@ -348,24 +475,141 @@ mod tests {
         );
     }
 
+    const COVER: Option<StretchLimit> = None;
+    const STRETCH: Option<StretchLimit> = Some(StretchLimit::DEFAULT);
+
+    fn exact(seconds: u32) -> ClipLength {
+        ClipLength {
+            seconds,
+            stretch: None,
+        }
+    }
+
+    fn slowed(seconds: u32) -> ClipLength {
+        ClipLength {
+            seconds,
+            stretch: STRETCH,
+        }
+    }
+
     #[test]
     fn a_range_fits_the_scene_rounded_up_within_its_limits() {
         let range = ClipDurations::Range { min: 3, max: 15 };
-        assert_eq!(range.fit(Duration::from_millis(7_200)), 8);
-        assert_eq!(range.fit(secs(7)), 7);
-        assert_eq!(range.fit(Duration::from_millis(900)), 3, "at least min");
-        assert_eq!(range.fit(secs(40)), 15, "at most max");
+        for stretch in [COVER, STRETCH] {
+            assert_eq!(range.fit(Duration::from_millis(7_200), stretch), exact(8));
+            assert_eq!(range.fit(secs(7), stretch), exact(7));
+            assert_eq!(
+                range.fit(Duration::from_millis(900), stretch),
+                exact(3),
+                "at least min"
+            );
+            assert_eq!(range.fit(secs(40), stretch), exact(15), "at most max");
+        }
         assert_eq!(range.longest(), 15);
     }
 
     #[test]
     fn choices_take_the_shortest_that_covers_the_scene() {
         let choices = ClipDurations::Choices(vec![5, 10]);
-        assert_eq!(choices.fit(secs(4)), 5);
-        assert_eq!(choices.fit(Duration::from_millis(5_001)), 10);
-        assert_eq!(choices.fit(secs(10)), 10);
-        assert_eq!(choices.fit(secs(25)), 10, "the longest when none covers");
+        assert_eq!(choices.fit(secs(4), COVER), exact(5));
+        assert_eq!(choices.fit(Duration::from_millis(5_001), COVER), exact(10));
+        assert_eq!(choices.fit(Duration::from_millis(6_500), COVER), exact(10));
+        assert_eq!(choices.fit(secs(10), COVER), exact(10));
+        assert_eq!(
+            choices.fit(secs(25), COVER),
+            exact(10),
+            "the longest when none covers"
+        );
         assert_eq!(choices.longest(), 10);
+    }
+
+    #[test]
+    fn a_scene_a_little_over_a_length_takes_it_and_plays_it_slowed() {
+        let kling = ClipDurations::Choices(vec![5, 10]);
+        assert_eq!(kling.fit(Duration::from_millis(6_500), STRETCH), slowed(5));
+        assert_eq!(kling.fit(Duration::from_millis(5_001), STRETCH), slowed(5));
+        assert_eq!(kling.fit(secs(7), STRETCH), slowed(5), "40% over five");
+        assert_eq!(
+            kling.fit(Duration::from_millis(7_001), STRETCH),
+            exact(10),
+            "past the stretch, the longer one trimmed"
+        );
+        assert_eq!(kling.fit(secs(8), STRETCH), exact(10));
+        assert_eq!(kling.fit(secs(5), STRETCH), exact(5), "a clip that fits");
+        assert_eq!(kling.fit(secs(4), STRETCH), exact(5));
+        assert_eq!(kling.fit(secs(12), STRETCH), slowed(10));
+        assert_eq!(kling.fit(secs(14), STRETCH), slowed(10));
+        assert_eq!(
+            kling.fit(secs(25), STRETCH),
+            slowed(10),
+            "too long for any: the longest, slowed to cover more of it"
+        );
+    }
+
+    #[test]
+    fn the_longest_length_short_of_the_scene_is_the_one_stretched() {
+        let veo = ClipDurations::Choices(vec![4, 6, 8]);
+        // 4 s stretches to 5.6 and 6 s to 8.4.
+        assert_eq!(veo.fit(secs(5), STRETCH), slowed(4));
+        assert_eq!(veo.fit(Duration::from_millis(5_700), STRETCH), exact(6));
+        assert_eq!(veo.fit(secs(7), STRETCH), slowed(6));
+        assert_eq!(veo.fit(secs(8), STRETCH), slowed(6));
+        assert_eq!(veo.fit(Duration::from_millis(8_500), STRETCH), slowed(8));
+        assert_eq!(veo.fit(secs(11), STRETCH), slowed(8));
+        assert_eq!(veo.fit(secs(12), STRETCH), slowed(8), "longer than any");
+    }
+
+    #[test]
+    fn the_limit_says_how_far_a_clip_stretches() {
+        let kling = ClipDurations::Choices(vec![5, 10]);
+        let at = |percent: u32| Some(StretchLimit::new(percent));
+        let stretched = |seconds, percent| ClipLength {
+            seconds,
+            stretch: at(percent),
+        };
+        // At 20%, five seconds cover six and no more.
+        assert_eq!(kling.fit(secs(6), at(20)), stretched(5, 20));
+        assert_eq!(kling.fit(Duration::from_millis(6_500), at(20)), exact(10));
+        // At 100%, five seconds cover ten at half speed: only a scene
+        // past that pays for the longer clip, itself stretched.
+        assert_eq!(kling.fit(secs(9), at(100)), stretched(5, 100));
+        assert_eq!(kling.fit(secs(10), at(100)), stretched(5, 100));
+        assert_eq!(kling.fit(secs(11), at(100)), stretched(10, 100));
+    }
+
+    #[test]
+    fn a_stretch_limit_stays_within_its_range() {
+        assert_eq!(StretchLimit::default().percent(), 40);
+        assert_eq!(StretchLimit::new(0).percent(), StretchLimit::MIN);
+        assert_eq!(StretchLimit::new(37).percent(), 35);
+        assert_eq!(StretchLimit::new(38).percent(), 40);
+        assert_eq!(StretchLimit::new(3).percent(), StretchLimit::MIN);
+        assert_eq!(StretchLimit::new(400).percent(), StretchLimit::MAX);
+        let choices: Vec<u8> = StretchLimit::choices().map(StretchLimit::percent).collect();
+        assert_eq!(choices.len(), 20);
+        assert_eq!((choices[0], choices[19]), (5, 100));
+        assert!(choices.contains(&StretchLimit::DEFAULT.percent()));
+        assert!(choices.windows(2).all(|pair| pair[1] - pair[0] == 5));
+
+        let limit = StretchLimit::default();
+        assert_eq!(limit.longest(5), secs(7));
+        assert_eq!(limit.longest(4), Duration::from_millis(5_600));
+        assert!(limit.covers(5, secs(7)));
+        assert!(!limit.covers(5, Duration::from_millis(7_001)));
+        assert_eq!(StretchLimit::new(100).longest(5), secs(10));
+    }
+
+    #[test]
+    fn a_fit_is_stored_by_a_stable_name() {
+        for fit in ClipFit::ALL {
+            assert_eq!(ClipFit::from_code(fit.code()), fit);
+        }
+        assert_eq!(ClipFit::Stretch.code(), "stretch");
+        assert_eq!(ClipFit::Cover.code(), "cover");
+        assert_eq!(
+            ClipFit::from_code("from-a-newer-version"),
+            ClipFit::default()
+        );
     }
 
     #[test]

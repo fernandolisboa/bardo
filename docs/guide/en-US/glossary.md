@@ -90,6 +90,8 @@ The words Bardo uses, in plain terms.
 
 **Clip**: a short video a video model makes from a scene's image. Optional.
 
+**Slowed clip**: a clip made a little shorter than its scene and played slower to end with it, so fewer seconds are paid for. Only with video models of fixed lengths; the channel sets how far a clip may stretch, or turns it off ([Slowed clips](clips.md#stretch)).
+
 **Motion prompt**: how a scene's image moves in its clip: subject, action, camera.
 
 **Video model**: the model that makes clips, such as Kling (through Higgsfield, the Higgsfield plan or straight from Kling) or Veo through Gemini. Set per channel, changeable per scene.

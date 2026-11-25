@@ -1159,6 +1159,7 @@ mod tests {
         second.clip = Some(SceneClip {
             file: "b.mp4".into(),
             seconds: 5,
+            stretch: None,
             source_image: drawn.generation.id,
             generation: drawn.generation.clone(),
         });
@@ -2499,7 +2500,8 @@ mod tests {
             video[1].source,
             VideoSource::Clip {
                 file: "walk.mp4".into(),
-                length: ms(2_010)
+                length: ms(2_010),
+                stretched_from: None,
             }
         );
         assert_eq!(
