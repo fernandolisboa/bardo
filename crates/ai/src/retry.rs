@@ -8,7 +8,10 @@
 //! narration) is sent with [`Backoff::send_paid`] instead (ADR-0030): it
 //! goes again only after an answer that says nothing was started, and a
 //! request that was sent and got no answer is a lost answer, not an
-//! outage, because the provider may have done and billed the work.
+//! outage, because the provider may have done and billed the work. An
+//! adapter that reads its answer as a stream (Claude's) cannot send
+//! through it and applies the same rules itself, with what this module
+//! shares for that.
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -310,6 +310,7 @@ fn an_overload_after_the_answer_began_is_a_lost_answer_sent_once() {
         "{}",
         failure.detail
     );
+    assert_eq!(failure.billed, None);
     assert_eq!(
         claude.transport().sent().len(),
         1,
@@ -385,15 +386,20 @@ fn an_answer_that_fails_before_its_first_byte_is_a_lost_answer_that_says_why() {
 #[test]
 fn a_whole_answer_is_told_from_a_stream_past_white_space_and_a_byte_order_mark() {
     let whole = fixture("claude", "messages-themes-not-streamed").body;
+    let stream = fixture("claude", "messages-themes").body;
     let claude = ClaudeTextGenerator::with_transport(Pieces::new(vec![
         vec![Ok(b"\r\n \n".to_vec()), Ok(whole.clone().into_bytes())],
         vec![Ok(format!("\u{feff}{whole}").into_bytes())],
+        // The mark in two pieces, and after white space.
         vec![
-            Ok(b"\n\n".to_vec()),
-            Ok(fixture("claude", "messages-themes").body.into_bytes()),
+            Ok(vec![0xEF]),
+            Ok([&[0xBB, 0xBF][..], whole.as_bytes()].concat()),
         ],
+        vec![Ok(format!("\n\u{feff}{whole}").into_bytes())],
+        vec![Ok(b"\n\n".to_vec()), Ok(stream.clone().into_bytes())],
+        vec![Ok(format!("\u{feff}{stream}").into_bytes())],
     ]));
-    for _ in 0..3 {
+    for _ in 0..6 {
         let generated = claude.generate(&key(), &json_request()).unwrap();
         assert!(generated.text.contains("The forgotten first spacewalk"));
         assert_eq!(generated.usage.output_tokens, 893);
@@ -416,6 +422,7 @@ fn a_whole_answer_that_cannot_be_read_is_a_lost_answer() {
         "{}",
         failure.detail
     );
+    assert_eq!(failure.billed, None);
     assert_eq!(claude.transport().sent().len(), 1);
 }
 
@@ -543,17 +550,186 @@ fn an_answer_without_text_says_what_it_billed() {
     );
 }
 
+/// The recorded refusal with another reason, or with something written
+/// before it.
+fn refusal(category: &str, output_tokens: u64) -> ClaudeTextGenerator<Scripted> {
+    let mut refused = fixture("claude", "messages-refusal");
+    refused.body = refused.body.replace("general_harms", category).replace(
+        r#""usage":{"output_tokens":0}"#,
+        &format!(r#""usage":{{"output_tokens":{output_tokens}}}"#),
+    );
+    ClaudeTextGenerator::with_transport(Scripted::new(vec![refused]))
+}
+
 #[test]
-fn a_refusal_says_what_it_billed_under_the_model_that_refused() {
+fn a_refusal_says_what_it_billed_only_when_claude_bills_it() {
+    // Before anything was written, a refusal is billed for some reasons
+    // only; its usage is reported either way.
     let failure = generator(&["messages-refusal"])
         .generate(&key(), &json_request())
         .unwrap_err();
-    let billed = failure.billed.expect("the answer reports its usage");
-    assert_eq!(billed.model, "claude-opus-4-8");
+    assert_eq!(failure.kind, ProviderFailureKind::Declined);
+    assert_eq!(failure.billed, None, "general_harms is not billed");
+
+    for category in ["bio", "frontier_llm", "reasoning_extraction"] {
+        let failure = refusal(category, 0)
+            .generate(&key(), &json_request())
+            .unwrap_err();
+        let billed = failure.billed.expect(category);
+        assert_eq!(billed.model, "claude-opus-4-8", "the model that refused");
+        assert_eq!(
+            (billed.usage.input_tokens, billed.usage.output_tokens),
+            (380, 0)
+        );
+    }
+
+    // A refusal midway bills the input and what was written, whatever
+    // its reason.
+    let failure = refusal("general_harms", 120)
+        .generate(&key(), &json_request())
+        .unwrap_err();
+    let billed = failure.billed.expect("what was written is billed");
     assert_eq!(
         (billed.usage.input_tokens, billed.usage.output_tokens),
-        (380, 0)
+        (380, 120)
     );
+}
+
+fn error_body(kind: &str, message: &str) -> String {
+    json!({ "type": "error", "error": { "type": kind, "message": message } }).to_string()
+}
+
+fn error_event(kind: &str, message: &str) -> String {
+    format!("event: error\ndata: {}\n\n", error_body(kind, message))
+}
+
+fn scripted(answers: Vec<HttpResponse>) -> ClaudeTextGenerator<Scripted> {
+    let (sleeper, _) = recording_sleeper();
+    ClaudeTextGenerator::with_transport(Scripted::new(answers)).with_sleeper(sleeper)
+}
+
+#[test]
+fn claude_running_out_of_time_is_a_lost_answer_whatever_its_status() {
+    // Claude took the request and worked on it: not an outage to send it
+    // again after, as a status or in the place of the answer.
+    let timeout = error_body("timeout_error", "Request timed out");
+    for answer in [
+        HttpResponse::new(500, timeout.clone()),
+        HttpResponse::new(504, timeout.clone()),
+        HttpResponse::new(200, timeout),
+        HttpResponse::new(200, error_event("timeout_error", "Request timed out")),
+    ] {
+        let status = answer.status;
+        let claude = scripted(vec![answer, fixture("claude", "messages-themes")]);
+        let failure = claude.generate(&key(), &json_request()).unwrap_err();
+        assert_eq!(failure.kind, ProviderFailureKind::AnswerLost, "{status}");
+        assert_eq!(failure.billed, None);
+        assert_eq!(claude.transport().sent().len(), 1, "{status}");
+    }
+}
+
+#[test]
+fn a_failure_claude_asks_not_to_be_sent_again_is_not_sent_again() {
+    // `x-should-retry: false` on Claude's own server error: neither the
+    // adapter nor the queue sends it again.
+    for name in ["messages-api-error", "messages-overloaded"] {
+        let told = fixture("claude", name).with_header("x-should-retry", "false");
+        let claude = scripted(vec![told, fixture("claude", "messages-themes")]);
+        let failure = claude.generate(&key(), &json_request()).unwrap_err();
+        assert_eq!(failure.kind, ProviderFailureKind::AnswerLost, "{name}");
+        assert_eq!(claude.transport().sent().len(), 1, "{name}");
+    }
+    // A rate limit started nothing: it is told as it is, once.
+    let told = fixture("claude", "messages-rate-limited").with_header("x-should-retry", "false");
+    let claude = scripted(vec![told, fixture("claude", "messages-themes")]);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::LimitReached);
+    assert_eq!(claude.transport().sent().len(), 1);
+    // The header saying yes changes nothing.
+    let told = fixture("claude", "messages-overloaded").with_header("x-should-retry", "true");
+    let claude = scripted(vec![told, fixture("claude", "messages-themes")]);
+    claude.generate(&key(), &json_request()).unwrap();
+    assert_eq!(claude.transport().sent().len(), 2);
+}
+
+#[test]
+fn a_success_that_is_not_an_answer_is_a_lost_answer() {
+    // Something answered 200 in JSON, or with a stream that only ends:
+    // what Claude may have written did not arrive.
+    for body in [
+        "{}",
+        r#"{"error":{"message":"upstream closed"}}"#,
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    ] {
+        let claude = scripted(vec![
+            HttpResponse::new(200, body),
+            fixture("claude", "messages-themes"),
+        ]);
+        let failure = claude.generate(&key(), &json_request()).unwrap_err();
+        assert_eq!(failure.kind, ProviderFailureKind::AnswerLost, "{body}");
+        assert_eq!(failure.billed, None, "{body}");
+        assert_eq!(claude.transport().sent().len(), 1, "{body}");
+    }
+}
+
+#[test]
+fn a_bad_request_in_the_place_of_the_answer_is_read_like_its_status() {
+    // Without the fallback beta: asked again without it.
+    let beta = fixture("claude", "messages-beta-not-enabled").body;
+    let beta: serde_json::Value = serde_json::from_str(&beta).unwrap();
+    let event = error_event(
+        "invalid_request_error",
+        beta["error"]["message"].as_str().unwrap(),
+    );
+    let claude = scripted(vec![
+        HttpResponse::new(200, event),
+        fixture("claude", "messages-themes"),
+    ]);
+    claude.generate(&key(), &json_request()).unwrap();
+    let sent = claude.transport().sent();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1].header("anthropic-beta"), None);
+
+    // An empty balance is a limit.
+    let event = error_event(
+        "invalid_request_error",
+        "Your credit balance is too low to access the Anthropic API.",
+    );
+    let failure = scripted(vec![HttpResponse::new(200, event)])
+        .generate(&key(), &json_request())
+        .unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::LimitReached);
+}
+
+#[test]
+fn a_rate_limit_that_opens_the_stream_waits_as_long_as_it_asks() {
+    let (sleeper, waits) = recording_sleeper();
+    let limited = HttpResponse::new(200, error_event("rate_limit_error", "Too many requests"))
+        .with_header("retry-after", "7");
+    let claude = ClaudeTextGenerator::with_transport(Scripted::new(vec![
+        limited,
+        fixture("claude", "messages-themes"),
+    ]))
+    .with_sleeper(sleeper);
+    claude.generate(&key(), &json_request()).unwrap();
+    assert_eq!(claude.transport().sent().len(), 2);
+    assert_eq!(*waits.lock().unwrap(), [Duration::from_secs(7)]);
+}
+
+#[test]
+fn claudes_own_word_that_it_has_no_room_is_sent_again() {
+    // A 503 in the API's own error report started nothing.
+    let (sleeper, waits) = recording_sleeper();
+    let busy = HttpResponse::new(503, error_body("overloaded_error", "Overloaded"))
+        .with_header("retry-after", "3");
+    let claude = ClaudeTextGenerator::with_transport(Scripted::new(vec![
+        busy,
+        fixture("claude", "messages-themes"),
+    ]))
+    .with_sleeper(sleeper);
+    claude.generate(&key(), &json_request()).unwrap();
+    assert_eq!(claude.transport().sent().len(), 2);
+    assert_eq!(*waits.lock().unwrap(), [Duration::from_secs(3)]);
 }
 
 #[test]
@@ -612,10 +788,15 @@ fn overload_and_rate_limits_are_retried_with_backoff() {
 
 #[test]
 fn a_lasting_overload_is_reported_as_provider_down() {
-    let failure = generator(&["messages-overloaded"; 4])
-        .generate(&key(), &json_request())
-        .unwrap_err();
+    let claude = generator(&["messages-overloaded"; 4]);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::ProviderDown);
+    assert_eq!(claude.transport().sent().len(), 4, "three more, no more");
+
+    let claude = generator(&["messages-rate-limited"; 4]);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::LimitReached);
+    assert_eq!(claude.transport().sent().len(), 4);
 }
 
 #[test]

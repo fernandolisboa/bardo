@@ -448,7 +448,9 @@ impl ProjectsScreen {
         });
         let hint = match (view.narration, plan) {
             (None, _) => tr(bardo, Text::ScenesNoNarration),
-            (Some(_), _) if view.too_long => tr(bardo, Text::ScenesNarrationTooLong),
+            // With a plan the notice above says it; the hint is about the
+            // images still to draw.
+            (Some(_), None) if view.too_long => tr(bardo, Text::ScenesNarrationTooLong),
             (Some(_), None) => SharedString::from(bardo.text_with(
                 Text::PlanScenesHint,
                 &[("n", &view.template.number.to_string())],

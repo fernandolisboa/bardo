@@ -35,9 +35,12 @@ pub enum StreamEnd {
 /// What a streamed answer said, as far as it got.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamedAnswer {
-    /// The model that answers, from `message_start`. `None` when the
-    /// stream ended before any message started, so nothing was generated.
+    /// The model that answers, from `message_start`. `None` when no
+    /// message start was read.
     pub model: Option<String>,
+    /// Whether anything of an answer arrived: a message started, or a
+    /// part of one came although its start could not be read.
+    pub began: bool,
     /// The text blocks so far, in order.
     pub text: String,
     pub stop_reason: Option<String>,
@@ -55,6 +58,7 @@ impl StreamedAnswer {
     pub fn unstarted(end: StreamEnd) -> Self {
         Self {
             model: None,
+            began: false,
             text: String::new(),
             stop_reason: None,
             stop_details: Value::Null,
@@ -64,10 +68,9 @@ impl StreamedAnswer {
     }
 
     /// Whether generation began, so the request is billed even though the
-    /// answer may not have arrived whole: a message started, or something
-    /// of one arrived although its start could not be read.
+    /// answer may not have arrived whole.
     pub fn started(&self) -> bool {
-        self.model.is_some() || !self.text.is_empty() || self.usage != TokenUsage::default()
+        self.began
     }
 }
 
@@ -89,18 +92,20 @@ fn is_read(kind: &str) -> bool {
 /// error, or the stream breaks.
 pub fn read(body: impl Read) -> StreamedAnswer {
     let mut answer = StreamedAnswer::unstarted(StreamEnd::Complete);
-    answer.end = read_into(&mut answer, body);
+    let mut stopped = false;
+    answer.end = read_into(&mut answer, &mut stopped, body);
     // The stop reason is the last thing a message says, after all of its
     // content: an answer that gave one is whole, whatever happened to the
     // stream after it.
-    if answer.stop_reason.is_some() {
+    if stopped {
         answer.end = StreamEnd::Complete;
     }
     answer
 }
 
-/// Reads events into `answer` and says how the stream ended.
-fn read_into(answer: &mut StreamedAnswer, body: impl Read) -> StreamEnd {
+/// Reads events into `answer` and says how the stream ended. `stopped`
+/// says whether the last the message said was its stop reason.
+fn read_into(answer: &mut StreamedAnswer, stopped: &mut bool, body: impl Read) -> StreamEnd {
     for event in Events::new(body.take(MAX_STREAM_BYTES)) {
         let event = match event {
             Ok(event) => event,
@@ -114,7 +119,13 @@ fn read_into(answer: &mut StreamedAnswer, body: impl Read) -> StreamEnd {
         }
         let data: Value = match serde_json::from_str(&event.data) {
             Ok(data) => data,
-            Err(_) if !named => continue,
+            // Skipped, since a path may add events of its own; but it may
+            // as well be a part of the answer that did not arrive whole,
+            // so an error after it does not open the stream.
+            Err(_) if !named => {
+                answer.began = true;
+                continue;
+            }
             Err(error) => {
                 return StreamEnd::Broken(format!("unreadable {} event: {error}", event.name));
             }
@@ -126,6 +137,7 @@ fn read_into(answer: &mut StreamedAnswer, body: impl Read) -> StreamEnd {
         };
         match kind {
             "message_start" => {
+                answer.began = true;
                 let message = &data["message"];
                 answer.model = Some(message["model"].as_str().unwrap_or_default().to_owned());
                 read_usage(&message["usage"], &mut answer.usage);
@@ -135,9 +147,10 @@ fn read_into(answer: &mut StreamedAnswer, body: impl Read) -> StreamEnd {
             // text carries on after it, written by that model.
             "content_block_start" => {
                 // The stop reason comes after all content. More content
-                // means the answer goes on, so what was said is not its
-                // end.
-                answer.stop_reason = None;
+                // means the answer goes on: it is whole again only when
+                // the message says so again.
+                answer.began = true;
+                *stopped = false;
                 let block = &data["content_block"];
                 if block["type"] == "text" {
                     answer
@@ -151,7 +164,8 @@ fn read_into(answer: &mut StreamedAnswer, body: impl Read) -> StreamEnd {
             }
             // Thinking, signatures and tool input arrive as other deltas.
             "content_block_delta" => {
-                answer.stop_reason = None;
+                answer.began = true;
+                *stopped = false;
                 let delta = &data["delta"];
                 if delta["type"] == "text_delta" {
                     answer
@@ -160,9 +174,11 @@ fn read_into(answer: &mut StreamedAnswer, body: impl Read) -> StreamEnd {
                 }
             }
             "message_delta" => {
+                answer.began = true;
                 let delta = &data["delta"];
                 if let Some(reason) = delta["stop_reason"].as_str() {
                     answer.stop_reason = Some(reason.to_owned());
+                    *stopped = true;
                 }
                 // The details of a refusal belong to the message; read
                 // them wherever the event carries them.
@@ -475,8 +491,22 @@ mod tests {
         .concat();
         let answer = read(stream.as_bytes());
         assert_eq!(answer.text, "half more");
-        assert_eq!(answer.stop_reason, None);
         assert!(matches!(answer.end, StreamEnd::Broken(_)), "{answer:?}");
+
+        // When the message then ends without another reason, the one it
+        // gave stands: a refusal is not forgotten.
+        let stream = [
+            START,
+            &text_block(0, &["half"]),
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":\
+             {\"stop_reason\":\"refusal\"},\"usage\":{\"output_tokens\":40}}\n\n",
+            &text_block(1, &[" more"]),
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        ]
+        .concat();
+        let answer = read(stream.as_bytes());
+        assert_eq!(answer.end, StreamEnd::Complete);
+        assert_eq!(answer.stop_reason.as_deref(), Some("refusal"));
     }
 
     #[test]
@@ -493,6 +523,17 @@ mod tests {
         assert_eq!(answer.model, None);
         assert!(answer.started());
         assert!(!read(&b""[..]).started());
+
+        // Thought alone, or an event that cannot be read, is of an answer
+        // too.
+        let overloaded = "event: error\ndata: {\"type\":\"error\",\"error\":\
+            {\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n";
+        assert!(read([THINKING, overloaded].concat().as_bytes()).started());
+        let garbled = "data: {\"type\":\"message_start\",\"message\":{\"id\n\n";
+        assert!(read([garbled, overloaded].concat().as_bytes()).started());
+        // An error alone, or after a keep-alive, opens the stream.
+        let ping = "event: ping\ndata: {\"type\": \"ping\"}\n\n";
+        assert!(!read([ping, overloaded].concat().as_bytes()).started());
     }
 
     #[test]
