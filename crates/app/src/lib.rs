@@ -1665,13 +1665,18 @@ pub(crate) mod testing {
             assert_eq!(held.message(), Text::JobSameWork);
         }
 
-        /// Runs the job again from Jobs and waits until it is over.
-        pub(crate) fn retried(app: &Bardo, id: JobId) -> Job {
-            app.retry_job(id).unwrap();
-            wait_until("the retried job ended", || {
+        /// Waits until the job is over and its handler has returned.
+        pub(crate) fn ended(app: &Bardo, id: JobId) -> Job {
+            wait_until("the job ended", || {
                 !job(app, id).state().is_active() && !app.job_runs_here(id)
             });
             job(app, id)
+        }
+
+        /// Runs the job again from Jobs and waits until it is over.
+        pub(crate) fn retried(app: &Bardo, id: JobId) -> Job {
+            app.retry_job(id).unwrap();
+            ended(app, id)
         }
     }
 

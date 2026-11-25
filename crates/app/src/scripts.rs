@@ -1284,7 +1284,10 @@ mod tests {
             ProviderFailureKind::Rejected,
             "not this time",
         ));
-        let older = generate(&app, &project);
+        let older = arriving::ended(
+            &app,
+            app.generate_script(project.id, BudgetConsent::Ask).unwrap(),
+        );
         assert_eq!(older.state(), JobState::Failed);
         *h.text.failure.lock().unwrap() = None;
 
@@ -1299,8 +1302,7 @@ mod tests {
 
         // Once it ended, the older one runs again as before.
         h.text.let_go();
-        assert_eq!(wait_done(&app, newer).state(), JobState::Done);
-        arriving::wait_until("the handler returned", || !app.job_runs_here(newer));
+        assert_eq!(arriving::ended(&app, newer).state(), JobState::Done);
         h.answer(&["Outra sonda."]);
         assert_eq!(arriving::retried(&app, older.id()).state(), JobState::Done);
     }

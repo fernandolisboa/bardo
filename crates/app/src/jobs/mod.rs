@@ -12,7 +12,7 @@ use std::sync::Arc;
 use bardo_domain::{Job, JobId, JobKind, JobState};
 
 pub use countdown::TestJob;
-pub(crate) use kept::Kept;
+pub(crate) use kept::{Keeps, Kept};
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 pub(crate) use queue::{JobQueue, PaidCallLog, Runner};
 pub(crate) use work::Work;

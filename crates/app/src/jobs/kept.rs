@@ -56,6 +56,46 @@ impl From<KeptAnswer> for GeneratedText {
     }
 }
 
+/// Where a handler keeps a paid answer until it is applied: the job's
+/// checkpoint ([`Kept`]), or a plain slot for a handler run outside the
+/// queue.
+pub(crate) trait Keeps {
+    /// The answer an earlier run kept, if one did.
+    fn kept(&self) -> Option<GeneratedText>;
+    /// Keeps `generated`, paid for and recorded, until it is applied.
+    fn keep(&mut self, generated: &GeneratedText);
+    /// Lets the kept answer go: it was applied, or is of no use.
+    fn settle(&mut self);
+}
+
+impl Keeps for JobContext {
+    fn kept(&self) -> Option<GeneratedText> {
+        Kept::answer(self)
+    }
+
+    fn keep(&mut self, generated: &GeneratedText) {
+        Kept::keep(self, generated);
+    }
+
+    fn settle(&mut self) {
+        Kept::settle(self);
+    }
+}
+
+impl Keeps for Option<GeneratedText> {
+    fn kept(&self) -> Option<GeneratedText> {
+        self.clone()
+    }
+
+    fn keep(&mut self, generated: &GeneratedText) {
+        *self = Some(generated.clone());
+    }
+
+    fn settle(&mut self) {
+        *self = None;
+    }
+}
+
 impl Kept {
     /// The answer an earlier run of the job kept, if one did.
     pub(crate) fn answer(cx: &JobContext) -> Option<GeneratedText> {

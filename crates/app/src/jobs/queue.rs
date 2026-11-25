@@ -293,6 +293,13 @@ impl JobContext {
         self.stop.is_stopped()
     }
 
+    /// What [`Self::should_stop`] asks, for code that works while something
+    /// else holds the context.
+    pub(crate) fn stopping(&self) -> impl Fn() -> bool + Send + Sync + use<> {
+        let stop = Arc::clone(&self.stop);
+        move || stop.is_stopped()
+    }
+
     /// True once the user cancelled the job. A run stopped for another
     /// reason (the app is closing, another runner took the job) is
     /// started again by itself, so what it leaves behind decides whether

@@ -513,7 +513,7 @@ impl CostBook {
 
     /// `record` under an id the caller keeps: recording it again (after a
     /// crash between the call and the caller's own save) changes nothing.
-    fn record_as(
+    pub(crate) fn record_as(
         &self,
         id: CostRecordId,
         call: PaidCall<'_>,

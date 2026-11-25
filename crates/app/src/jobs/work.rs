@@ -1,9 +1,10 @@
 //! What a job that asks Claude for text works on, so that two of them
 //! never work on the same thing side by side.
 
-use bardo_domain::{Job, JobKind};
+use bardo_domain::{Job, JobId, JobKind};
 use serde::Deserialize;
 
+use super::Kept;
 use crate::Bardo;
 
 /// What a text job works on: one text of a project, the ideas of a
@@ -114,6 +115,20 @@ impl Bardo {
         self.jobs()
             .iter()
             .any(|job| self.at_work(job) && Work::of(job).as_ref() == Some(work))
+    }
+
+    /// A paid answer for `work` that is asked for again: the latest job on
+    /// `work`, failed or cancelled, that holds an answer it has yet to
+    /// apply ([`Kept`]) and that `same` says asked for the same thing. Its
+    /// stage queues that job again instead of starting a new one, so
+    /// nothing is asked of Claude, or of the budget.
+    pub(crate) fn kept_answer(&self, work: &Work, same: impl Fn(&Job) -> bool) -> Option<JobId> {
+        self.jobs()
+            .into_iter()
+            .rev()
+            .find(|job| Work::of(job).as_ref() == Some(work))
+            .filter(|job| job.can_retry() && Kept::held_by(job) && same(job))
+            .map(|job| job.id())
     }
 
     /// Whether queueing `job` again would put it beside another job at

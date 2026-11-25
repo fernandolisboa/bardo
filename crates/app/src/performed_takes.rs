@@ -263,6 +263,9 @@ pub struct PerformedView {
     /// with what it would cost.
     pub test: Option<TakeResult>,
     pub test_job: Option<Job>,
+    /// Whether the test's job is at work: queued, running or, once
+    /// cancelled, still stopping.
+    pub test_running: bool,
     pub test_pending: bool,
     pub test_take: Option<usize>,
     pub test_estimate: Option<SpendEstimate>,
@@ -285,11 +288,10 @@ impl PerformedView {
             .is_some_and(|test| test.accepted_at.is_none())
     }
 
-    /// Whether a test of this capture's takes is being made.
+    /// Whether a test of this capture's takes is being made, or one that
+    /// was cancelled is still stopping.
     pub fn test_busy(&self) -> bool {
-        self.test_job
-            .as_ref()
-            .is_some_and(|job| job.state().is_active())
+        self.test_running
     }
 }
 
@@ -680,6 +682,15 @@ fn private_folder() -> Result<tempfile::TempDir, JobFailure> {
 }
 
 /// The failure of a job whose take changed (or went) while it ran.
+/// Why a take's job was not queued again to check on its request: another
+/// job is at work on the take (its prompt, say), or nothing can be checked.
+fn not_checked_again(error: crate::jobs::JobActionError) -> CaptureError {
+    match error {
+        crate::jobs::JobActionError::SameWork => CaptureError::TakeBusy,
+        _ => CaptureError::NoTakeResult,
+    }
+}
+
 fn take_changed() -> JobFailure {
     JobFailure::new(
         JobFailureKind::NotAllowed,
@@ -736,14 +747,12 @@ impl JobHandler for TakePromptHandler {
         let written = self.write(&payload, project, capture, &generated, &approved, cx);
         // The answer is kept until it is the take's prompt, and no longer.
         // One that turns out not to be a prompt is let go as well, so that
-        // a retry asks Claude again instead of failing on it for good, and
-        // so is one written for a take that changed since.
+        // a retry asks Claude again instead of failing on it for good. Any
+        // other failure (the take changed, storage) leaves it for the next
+        // run.
         let done_with_it = match &written {
             Ok(saved) => *saved,
-            Err(failure) => matches!(
-                failure.kind,
-                JobFailureKind::UnexpectedAnswer | JobFailureKind::NotAllowed
-            ),
+            Err(failure) => failure.kind == JobFailureKind::UnexpectedAnswer,
         };
         if done_with_it {
             Kept::settle(cx);
@@ -2234,7 +2243,7 @@ impl Bardo {
         // A test comes from the first take that could go to its model now,
         // one its preflight checks let through first. While the test runs,
         // its own take stays the one shown.
-        let test_running = test_job.as_ref().is_some_and(|job| job.state().is_active());
+        let test_running = test_job.as_ref().is_some_and(|job| self.at_work(job));
         let ready = |view: &PerformedTakeView| {
             view.block.is_none()
                 && (test_running || !view.is_busy())
@@ -2281,6 +2290,7 @@ impl Bardo {
             takes,
             test,
             test_job,
+            test_running,
             test_pending,
             test_take,
             test_estimate,
@@ -2457,10 +2467,6 @@ impl Bardo {
             .body
             .render(&values)
             .map_err(|missing| CaptureError::Repository(RepositoryError(Box::new(missing))))?;
-        let calls = step_calls(model, PerformedStep::Prompt, take.length(), (0, 0));
-        if let Err(estimate) = self.check_video_budget(project, &calls, consent)? {
-            return Err(CaptureError::OverBudget(estimate));
-        }
         let payload = PromptPayload {
             project: project.to_string(),
             capture: capture.id.to_string(),
@@ -2475,7 +2481,26 @@ impl Bardo {
             prompt: rendered.prompt,
             frame_at_ms: frame.then(|| (take.length() / 2).as_millis() as u64),
         };
-        let job = Job::new(self.profile.id, JobKind::TakePrompt, to_json(&payload));
+        let payload = to_json(&payload);
+        // The same prompt was asked for and answered, and is not the
+        // take's (its job was cancelled as the answer arrived): that
+        // answer is paid for, so its job goes on from it.
+        let work = Work::Take {
+            project: project.to_string(),
+            capture: capture.id.to_string(),
+            position: index as u32,
+        };
+        if let Some(kept) = self.kept_answer(&work, |job| {
+            job.kind() == JobKind::TakePrompt && job.payload() == payload
+        }) && self.jobs.retry(kept).is_ok()
+        {
+            return Ok(kept);
+        }
+        let calls = step_calls(model, PerformedStep::Prompt, take.length(), (0, 0));
+        if let Err(estimate) = self.check_video_budget(project, &calls, consent)? {
+            return Err(CaptureError::OverBudget(estimate));
+        }
+        let job = Job::new(self.profile.id, JobKind::TakePrompt, payload);
         Ok(self.jobs.enqueue(job)?)
     }
 
@@ -2701,8 +2726,7 @@ impl Bardo {
             .job
             .filter(|_| view.pending)
             .ok_or(CaptureError::NoTakeResult)?;
-        self.retry_job(job.id())
-            .map_err(|_| CaptureError::NoTakeResult)
+        self.retry_job(job.id()).map_err(not_checked_again)
     }
 
     /// Whether `job` is a performed take that never reached its provider
@@ -2872,8 +2896,7 @@ impl Bardo {
             .test_job
             .filter(|_| view.test_pending)
             .ok_or(CaptureError::NoTakeResult)?;
-        self.retry_job(job.id())
-            .map_err(|_| CaptureError::NoTakeResult)
+        self.retry_job(job.id()).map_err(not_checked_again)
     }
 
     /// Sends take `index` on although a preflight check failed: it holds
@@ -4624,5 +4647,92 @@ mod tests {
             view(&s, project, 0).prompt.map(|prompt| prompt.text),
             Some("She looks up.".to_owned())
         );
+    }
+
+    #[test]
+    fn asking_for_the_prompt_again_from_the_take_uses_the_answer_its_cancelled_job_kept() {
+        use crate::testing::arriving;
+
+        let (s, project, _) = ready();
+        with_look(&s);
+        s.app.approve_control_video(project, 0).unwrap();
+        let asked = s.h.text.requests().len();
+        s.h.text
+            .answers
+            .lock()
+            .unwrap()
+            .push(serde_json::json!({ "prompt": "She looks up." }).to_string());
+        let id = arriving::cancelled(&s.app, &s.h.text, || {
+            s.app
+                .write_take_prompt(project, 0, BudgetConsent::Ask)
+                .unwrap()
+        });
+        arriving::lands(&s.app, &s.h.text, id);
+        assert_eq!(view(&s, project, 0).prompt, None);
+
+        // The take asks for the same prompt: the job that holds its answer
+        // goes on, and no other is queued.
+        let again = s
+            .app
+            .write_take_prompt(project, 0, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(again, id);
+        assert_eq!(arriving::ended(&s.app, id).state(), JobState::Done);
+        assert_eq!(s.h.text.requests().len(), asked + 1);
+        assert_eq!(prompt_costs(&s, id), 1);
+        assert_eq!(
+            view(&s, project, 0).prompt.map(|prompt| prompt.text),
+            Some("She looks up.".to_owned())
+        );
+    }
+
+    #[test]
+    fn an_answer_that_is_not_a_prompt_is_not_kept_by_a_cancelled_job() {
+        use crate::testing::arriving;
+
+        let (s, project, _) = ready();
+        with_look(&s);
+        s.app.approve_control_video(project, 0).unwrap();
+        let asked = s.h.text.requests().len();
+        s.h.text
+            .answers
+            .lock()
+            .unwrap()
+            .push(serde_json::json!({ "prompt": "" }).to_string());
+        let id = arriving::cancelled(&s.app, &s.h.text, || {
+            s.app
+                .write_take_prompt(project, 0, BudgetConsent::Ask)
+                .unwrap()
+        });
+        arriving::lands(&s.app, &s.h.text, id);
+
+        // Kept, it would fail every later run for good. Run again, the job
+        // asks Claude once more, and both answers are in Costs.
+        s.h.text
+            .answers
+            .lock()
+            .unwrap()
+            .push(serde_json::json!({ "prompt": "She looks up." }).to_string());
+        assert_eq!(arriving::retried(&s.app, id).state(), JobState::Done);
+        assert_eq!(s.h.text.requests().len(), asked + 2);
+        assert_eq!(prompt_costs(&s, id), 2);
+        assert_eq!(
+            view(&s, project, 0).prompt.map(|prompt| prompt.text),
+            Some("She looks up.".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_take_not_checked_again_beside_another_job_at_work_reads_busy() {
+        use crate::jobs::JobActionError;
+
+        assert!(matches!(
+            not_checked_again(JobActionError::SameWork),
+            CaptureError::TakeBusy
+        ));
+        assert!(matches!(
+            not_checked_again(JobActionError::NotFound),
+            CaptureError::NoTakeResult
+        ));
     }
 }
