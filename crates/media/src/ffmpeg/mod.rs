@@ -35,7 +35,7 @@ pub use probe::{AudioStream, MediaInfo, VideoStream};
 pub use proxy::{ProxyCodec, ProxySettings};
 pub use render::{
     AudioClip, AudioTrack, ClipSource, Dip, Duck, Framing, Loudness, LoudnessTarget, Motion,
-    Output, RenderPlan, Transition, VideoClip, View,
+    Output, RenderPlan, Slowed, Transition, VideoClip, View,
 };
 pub use sound::SOUND_RATE;
 pub use thumbnail::ThumbnailSpec;

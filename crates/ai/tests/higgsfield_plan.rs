@@ -330,6 +330,10 @@ fn a_refused_upload_fails_without_confirming() {
 fn a_submission_starts_one_job_with_credits_only() {
     let adapter = plan(&["submitted"]);
     assert!(!adapter.dedupes_submissions(), "no idempotency key");
+    assert!(
+        adapter.lists_submissions(),
+        "the library shows what started"
+    );
     let submission = adapter
         .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
         .unwrap();
@@ -453,7 +457,7 @@ fn an_answer_lost_after_sending_may_have_started_a_clip() {
             .unwrap_err();
         assert_eq!(
             failure.kind,
-            ProviderFailureKind::Unreachable,
+            ProviderFailureKind::AnswerLost,
             "{}",
             failure.detail
         );

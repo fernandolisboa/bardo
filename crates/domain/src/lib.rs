@@ -150,8 +150,9 @@ pub use chapters::{
     chapter_title, place_chapters, timestamp,
 };
 pub use clip::{
-    ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelError, ClipModelRef,
-    ClipRequest, ClipStatus, ClipSubmission, GeneratedClip, StagedImage,
+    ClipDurations, ClipFit, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel,
+    ClipModelError, ClipModelRef, ClipRequest, ClipStatus, ClipSubmission, GeneratedClip,
+    StagedImage, StretchLimit,
 };
 pub use connection::{
     AppCredentials, AppCredentialsFieldError, BrowserSignIn, ConnectedIdentity, ConnectionSecrets,

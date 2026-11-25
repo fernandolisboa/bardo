@@ -2990,7 +2990,18 @@ fn provenance_lines(bardo: &Bardo, clip: &ClipView) -> Vec<String> {
         None => lines.push(bardo.text(Text::EditorSourceNone).into_owned()),
     }
     match &clip.clip {
-        Some(generation) => lines.push(source(Text::EditorSourceClip, generation)),
+        Some(generation) => {
+            lines.push(source(Text::EditorSourceClip, generation));
+            if let Some(slowed) = clip.slowed {
+                lines.push(bardo.text_with(
+                    Text::EditorSourceSlowed,
+                    &[
+                        ("recorded", &short_duration(slowed.recorded)),
+                        ("played", &short_duration(slowed.played)),
+                    ],
+                ));
+            }
+        }
         None if clip.image.is_some() => {
             lines.push(bardo.text(Text::EditorSourceStill).into_owned())
         }

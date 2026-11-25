@@ -1,7 +1,7 @@
 use bardo_domain::{
-    Channel, ChannelDetails, ChannelDraft, ChannelId, ChannelRepository, ClipModelRef,
-    MotionDefault, PersonaId, ProfileId, Provider, RepositoryError, StyleChoice, Transition,
-    TransitionKind,
+    Channel, ChannelDetails, ChannelDraft, ChannelId, ChannelRepository, ClipFit, ClipModelRef,
+    MotionDefault, PersonaId, ProfileId, Provider, RepositoryError, StretchLimit, StyleChoice,
+    Transition, TransitionKind,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -11,7 +11,8 @@ use crate::{Database, boxed};
 const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_notes, language, \
      country, default_persona_id, clip_provider, clip_model, caption_style, transition, \
      transition_frames, video_format, motion, motion_strength, caption_highlight, thumbnail_look, \
-     take_provider, take_model, production_mode, visual_style \
+     take_provider, take_model, production_mode, visual_style, clip_fit, \
+     clip_stretch_percent \
      FROM channel";
 
 /// A channel row before its themes are attached.
@@ -29,6 +30,8 @@ struct ChannelRow {
     motion: (String, String),
     production: String,
     style: String,
+    clip_fit: String,
+    stretch_limit: u32,
     draft: ChannelDraft,
 }
 
@@ -49,6 +52,8 @@ impl ChannelRow {
                 motion: (row.get(14)?, row.get(15)?),
                 production: row.get(20)?,
                 style: row.get(21)?,
+                clip_fit: row.get(22)?,
+                stretch_limit: row.get(23)?,
                 draft: ChannelDraft {
                     name: row.get(2)?,
                     niche: row.get(3)?,
@@ -93,6 +98,8 @@ impl ChannelRow {
         // A style of a newer Bardo reads as the notes: the channel still
         // opens.
         draft.style = StyleChoice::from_code(&self.style);
+        draft.clip_fit = ClipFit::from_code(&self.clip_fit);
+        draft.stretch_limit = StretchLimit::new(self.stretch_limit);
         let (kind, frames) = self.transition;
         draft.transition = Transition::new(
             kind.parse::<TransitionKind>().map_err(boxed)?,
@@ -176,9 +183,10 @@ impl ChannelRepository for Database {
                                   default_persona_id, clip_provider, clip_model, caption_style,
                                   transition, transition_frames, video_format, motion,
                                   motion_strength, caption_highlight, thumbnail_look,
-                                  take_provider, take_model, production_mode, visual_style)
+                                  take_provider, take_model, production_mode, visual_style,
+                                  clip_fit, clip_stretch_percent)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21, ?22)
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  niche = excluded.niche,
@@ -200,6 +208,8 @@ impl ChannelRepository for Database {
                  take_model = excluded.take_model,
                  production_mode = excluded.production_mode,
                  visual_style = excluded.visual_style,
+                 clip_fit = excluded.clip_fit,
+                 clip_stretch_percent = excluded.clip_stretch_percent,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             params![
                 id,
@@ -224,6 +234,8 @@ impl ChannelRepository for Database {
                 details.take_model().map(ClipModelRef::model),
                 details.production().code(),
                 details.style().code(),
+                details.clip_fit().code(),
+                details.stretch_limit().percent(),
             ],
         )
         .map_err(boxed)?;
@@ -283,6 +295,8 @@ mod tests {
             ),
             production: bardo_domain::ProductionMode::Premium,
             style: StyleChoice::Catalog(bardo_domain::VisualStyle::Watercolor),
+            clip_fit: ClipFit::Cover,
+            stretch_limit: StretchLimit::new(25),
         })
         .unwrap();
         Channel::new(owner, details)
@@ -342,6 +356,22 @@ mod tests {
         assert_eq!(
             db.get(old).unwrap().unwrap().details.production(),
             bardo_domain::ProductionMode::ChannelModel
+        );
+        // And a clip a little short of its scene stretched to fit, by up
+        // to 40%, and a fit this version does not know read the same way.
+        assert_eq!(
+            db.get(old).unwrap().unwrap().details.clip_stretch(),
+            Some(StretchLimit::DEFAULT)
+        );
+        db.conn()
+            .execute(
+                "UPDATE channel SET clip_fit = 'warp' WHERE id = ?1",
+                [old.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            db.get(old).unwrap().unwrap().details.clip_fit(),
+            ClipFit::default()
         );
         // And its look from the aesthetic notes, as before styles.
         assert_eq!(
