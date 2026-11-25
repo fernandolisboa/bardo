@@ -19,6 +19,14 @@
 //! keeps one face from scene to scene. The user can edit a member's
 //! description or draw the portrait again; scenes already drawn keep
 //! theirs until drawn again.
+//!
+//! The plan is a storyboard (#258): it names the recurring places once,
+//! each with one fixed description, and says which place each scene
+//! happens in. A scene is drawn with its place's description and with
+//! other scenes' images as references (the first image of its place, the
+//! scene right before it there, or the video's first image for its look),
+//! so the scenes of a video read as one sequence. The scenes are drawn in
+//! order, which is what gives each one its earlier shots.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,11 +36,12 @@ use bardo_domain::{
     ApiKey, AspectRatio, CastDraft, CastMember, CostPurpose, Generation, GenerationId, ImageFormat,
     ImageGenerator, ImageRequest, ImageShape, Job, JobFailure, JobFailureKind, JobId, JobKind,
     Narration, NarrationId, NarrationRepository, NoPendingClip, NoPendingImage, NoSuchCastMember,
-    NoSuchScene, ProfileId, Progress, ProjectFiles, Provider, ReferenceImage, RenderedPrompt,
-    RepositoryError, SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId,
-    ScenePlanRepository, ScenePrompt, SecretStore, TemplateKind, TemplateUsed, TemplateVariable,
-    TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest, VideoProject,
-    VideoProjectId, scene_image_prompt, sentences,
+    NoSuchPlace, NoSuchScene, OtherShot, PlaceDraft, PlanDraft, ProfileId, Progress, ProjectFiles,
+    Provider, ReferenceImage, RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError,
+    SceneImage, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt, SceneSetting,
+    SecretStore, TemplateKind, TemplateUsed, TemplateVariable, TemplateVersion, TemplateVersionId,
+    TextEffort, TextFormat, TextGenerator, TextRequest, VideoProject, VideoProjectId,
+    scene_image_prompt, sentences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +67,8 @@ pub enum SceneError {
     SceneNotFound(#[from] NoSuchScene),
     #[error(transparent)]
     CastMemberNotFound(#[from] NoSuchCastMember),
+    #[error(transparent)]
+    PlaceNotFound(#[from] NoSuchPlace),
     /// Generation calls this provider, and no key is saved for it.
     #[error("no {0} key saved")]
     MissingKey(Provider),
@@ -101,7 +112,9 @@ impl SceneError {
             SceneError::ProjectNotFound => Text::ProjectNotFound,
             SceneError::NoNarration => Text::ScenesNoNarration,
             SceneError::NoPlan => Text::ScenesNoPlan,
-            SceneError::SceneNotFound(_) | SceneError::CastMemberNotFound(_) => Text::SceneNotFound,
+            SceneError::SceneNotFound(_)
+            | SceneError::CastMemberNotFound(_)
+            | SceneError::PlaceNotFound(_) => Text::SceneNotFound,
             SceneError::MissingKey(Provider::Claude) => Text::ScenesMissingClaudeKey,
             SceneError::MissingKey(Provider::Higgsfield) => Text::ScenesMissingHiggsfieldKey,
             SceneError::MissingKey(Provider::Kling) => Text::ScenesMissingKlingKey,
@@ -190,13 +203,29 @@ impl ScenesView {
     }
 }
 
-/// The shape Claude answers in: the cast, then the scenes, each with the
-/// cast members it shows (by their index in `cast`) and how its clip
-/// moves.
+/// The shape Claude answers in, in the order it thinks the video through:
+/// the story the images tell from first to last, the cast, the places,
+/// then the scenes, each with the cast members it shows (by their index
+/// in `cast`), the place it happens in (by its index in `places`, -1 for
+/// a place of its own) and how its clip moves. The story is only there to
+/// be written before the scenes; Bardo keeps it in the plan's provenance.
 const PLAN_SCHEMA: &str = r#"{
   "type": "object",
   "properties": {
+    "story": {"type": "string"},
     "cast": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"}
+        },
+        "required": ["name", "description"],
+        "additionalProperties": false
+      }
+    },
+    "places": {
       "type": "array",
       "items": {
         "type": "object",
@@ -214,16 +243,17 @@ const PLAN_SCHEMA: &str = r#"{
         "type": "object",
         "properties": {
           "first_sentence": {"type": "integer"},
+          "place": {"type": "integer"},
           "prompt": {"type": "string"},
           "cast": {"type": "array", "items": {"type": "integer"}},
           "motion": {"type": "string"}
         },
-        "required": ["first_sentence", "prompt", "cast", "motion"],
+        "required": ["first_sentence", "place", "prompt", "cast", "motion"],
         "additionalProperties": false
       }
     }
   },
-  "required": ["cast", "scenes"],
+  "required": ["story", "cast", "places", "scenes"],
   "additionalProperties": false
 }"#;
 
@@ -231,9 +261,12 @@ const PLAN_SCHEMA: &str = r#"{
 struct PlannedScenes {
     #[serde(default)]
     cast: Vec<PlannedMember>,
+    #[serde(default)]
+    places: Vec<PlannedMember>,
     scenes: Vec<PlannedScene>,
 }
 
+/// A cast member or a place: a name and its fixed description.
 #[derive(Debug, Deserialize)]
 struct PlannedMember {
     name: String,
@@ -248,6 +281,9 @@ struct PlannedScene {
     cast: Vec<i64>,
     #[serde(default)]
     motion: String,
+    /// Negative for a scene in a place of its own.
+    #[serde(default)]
+    place: Option<i64>,
 }
 
 /// The scene plan job's payload: the rendered prompt, where it came from,
@@ -351,6 +387,46 @@ fn saved_format(file: &str) -> Option<ImageFormat> {
         .find(|format| format.extension() == extension)
 }
 
+/// How many bytes of reference images one image request carries at most.
+/// Gemini takes 100 MB of inline data a request, and base64 adds a third.
+const MAX_REFERENCE_BYTES: usize = 48 * 1024 * 1024;
+
+/// The reference images of one image request, in the order they are sent.
+struct References {
+    images: Vec<ReferenceImage>,
+    /// How many more bytes of images the request takes.
+    room: usize,
+}
+
+impl Default for References {
+    fn default() -> Self {
+        Self {
+            images: Vec::new(),
+            room: MAX_REFERENCE_BYTES,
+        }
+    }
+}
+
+impl References {
+    /// Adds the project's image `file`; `false` when it is not an image
+    /// Bardo saved, will not read, or would take the request past
+    /// [`MAX_REFERENCE_BYTES`], and the request then goes without it.
+    fn add(&mut self, files: &dyn ProjectFiles, project: VideoProjectId, file: &str) -> bool {
+        let Some(format) = saved_format(file) else {
+            return false;
+        };
+        let Ok(bytes) = files.read(project, file) else {
+            return false;
+        };
+        let Some(room) = self.room.checked_sub(bytes.len()) else {
+            return false;
+        };
+        self.room = room;
+        self.images.push(ReferenceImage { bytes, format });
+        true
+    }
+}
+
 /// Drawing failures that are about one scene (its prompt, the answer to
 /// it): the job goes on with the other scenes. Any other failure (key,
 /// quota, outage) would hit every scene, so the job stops.
@@ -419,6 +495,7 @@ impl SceneHandler {
 
         let key = self.key(Provider::Claude)?;
         let request = TextRequest {
+            effort: TextEffort::Careful,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),
@@ -456,7 +533,15 @@ impl SceneHandler {
                 description: member.description,
             })
             .collect();
-        let drafts = planned
+        let places = planned
+            .places
+            .into_iter()
+            .map(|place| PlaceDraft {
+                name: place.name,
+                description: place.description,
+            })
+            .collect();
+        let scenes = planned
             .scenes
             .into_iter()
             .filter_map(|scene| {
@@ -469,6 +554,7 @@ impl SceneHandler {
                         .filter_map(|member| usize::try_from(member).ok())
                         .collect(),
                     motion: scene.motion,
+                    place: scene.place.and_then(|place| usize::try_from(place).ok()),
                 })
             })
             .collect();
@@ -490,7 +576,12 @@ impl SceneHandler {
             generated_at: now,
             job: Some(job),
         };
-        let plan = ScenePlan::from_drafts(generation, &narration, cast, drafts, now)
+        let draft = PlanDraft {
+            cast,
+            places,
+            scenes,
+        };
+        let plan = ScenePlan::from_draft(generation, &narration, draft, now)
             .map_err(|error| not_usable(error.to_string()))?;
         self.plans.save_scene_plan(&plan).map_err(unexpected)?;
         // The replaced plan's images go with it. A file that will not go
@@ -616,27 +707,39 @@ impl SceneHandler {
                 .into_iter()
                 .filter_map(|member| plan.cast_member(member).ok())
                 .collect();
-            let mut references = Vec::new();
+            let mut references = References::default();
+            // A portrait that will not read is described instead.
             let referenced: Vec<bool> = shown
                 .iter()
                 .map(|member| {
-                    let Some(portrait) = member.portrait() else {
-                        return false;
-                    };
-                    let Some(format) = saved_format(&portrait.file) else {
-                        return false;
-                    };
-                    // A portrait that will not read is described instead.
-                    match self.files.read(project, &portrait.file) {
-                        Ok(bytes) => {
-                            references.push(ReferenceImage { bytes, format });
-                            true
-                        }
-                        Err(_) => false,
-                    }
+                    member.portrait().is_some_and(|portrait| {
+                        references.add(self.files.as_ref(), project, &portrait.file)
+                    })
                 })
                 .collect();
-            let prompt = scene_image_prompt(scene.prompt().as_str(), &shown, &referenced);
+            // Then the other scenes it belongs with; one whose image will
+            // not read is left out.
+            let shots: Vec<OtherShot> = plan
+                .reference_shots(index)
+                .into_iter()
+                .filter(|(other, _)| {
+                    plan.scene(*other)
+                        .ok()
+                        .and_then(|other| other.image())
+                        .is_some_and(|image| {
+                            references.add(self.files.as_ref(), project, &image.file)
+                        })
+                })
+                .map(|(_, shot)| shot)
+                .collect();
+            let setting = SceneSetting {
+                place: plan
+                    .scene_place(index)
+                    .and_then(|place| plan.place(place).ok()),
+                shots: &shots,
+            };
+            let references = references.images;
+            let prompt = scene_image_prompt(scene.prompt().as_str(), &shown, &referenced, setting);
             let request = ImageRequest {
                 prompt: prompt.clone(),
                 shape: aspect.into(),
@@ -1129,6 +1232,28 @@ impl Bardo {
         }
         if let Some(dropped) = dropped {
             crate::proxies::remove_media(self.files.as_ref(), plan.project, &dropped.file);
+        }
+        Ok(plan)
+    }
+
+    /// Replaces place `place`'s description with the user's. The next
+    /// images drawn there follow it; scenes already drawn keep theirs
+    /// until drawn again.
+    pub fn edit_place_description(
+        &self,
+        project: VideoProjectId,
+        place: usize,
+        description: &str,
+    ) -> Result<ScenePlan, SceneError> {
+        let mut plan = self.own_plan(project)?;
+        // A job drawing the scenes would draw some in the old place.
+        self.scenes_idle(plan.project)?;
+        let description = ScenePrompt::new(description).map_err(SceneError::Invalid)?;
+        if plan
+            .place_mut(place, SystemTime::now())?
+            .edit_description(description)
+        {
+            self.scene_plans.save_place(&plan, place)?;
         }
         Ok(plan)
     }
@@ -1669,16 +1794,36 @@ pub(crate) mod tests {
         let bytes = h.files.read(project.id, &portrait.file).unwrap();
         for scene in [1, 3] {
             let request = &requests[scene];
-            assert_eq!(request.references.len(), 1, "scene {scene}");
-            assert_eq!(request.references[0].bytes, bytes);
+            assert_eq!(request.references[0].bytes, bytes, "scene {scene}");
             assert!(
                 request
                     .prompt
                     .contains("Reference 1: the chef, A man in his fifties")
             );
         }
-        assert!(requests[2].references.is_empty(), "nobody recurs there");
-        assert_eq!(requests[2].prompt, "The probe drifting away from Earth");
+        assert_eq!(requests[1].references.len(), 1, "the first image");
+        // The later scenes also get the first image, for its look.
+        let first = &plan.scenes()[0].image().unwrap().file;
+        let first = h.files.read(project.id, first).unwrap();
+        assert_eq!(requests[2].references.len(), 1, "nobody recurs there");
+        assert_eq!(requests[2].references[0].bytes, first);
+        assert!(
+            requests[2]
+                .prompt
+                .starts_with("The probe drifting away from Earth\n\n")
+        );
+        assert!(
+            requests[2]
+                .prompt
+                .contains("Reference 1: a shot in another place.")
+        );
+        assert_eq!(requests[3].references.len(), 2);
+        assert_eq!(requests[3].references[1].bytes, first);
+        assert!(
+            requests[3]
+                .prompt
+                .contains("Reference 2: a shot in another place.")
+        );
         assert_eq!(
             plan.scenes()[0].image().unwrap().generation.prompt,
             requests[1].prompt,
@@ -1775,8 +1920,205 @@ pub(crate) mod tests {
                 .contains("A woman in her thirties, red hair")
         );
         let scene = requests.last().unwrap();
-        assert_eq!(scene.references.len(), 1);
+        assert_eq!(scene.references.len(), 2, "her portrait and another shot");
+        assert_eq!(scene.references[0].bytes, crate::testing::LOOK_IMAGE);
         assert!(scene.prompt.contains("A woman in her thirties, red hair"));
+    }
+
+    /// The plan of `plan_answer` as a storyboard: the launch pad twice,
+    /// then the control room.
+    fn storyboard_answer() -> String {
+        serde_json::json!({
+            "story": "A probe is launched, drifts away and is lost; the control room goes quiet.",
+            "cast": [],
+            "places": [
+                {"name": "the launch pad", "description": "A concrete pad by the sea at dawn, 1969, a white rocket, orange light"},
+                {"name": "the control room", "description": "A dim room of green screens and grey consoles at night, 1970"},
+                {"name": "the archive", "description": "Shelves of tapes"},
+            ],
+            "scenes": [
+                {"first_sentence": 0, "place": 0, "prompt": "Wide shot of the launch pad, the rocket waiting",
+                 "cast": [], "motion": "Slow push in"},
+                {"first_sentence": 1, "place": 0, "prompt": "Close on the rocket lifting off the launch pad",
+                 "cast": [], "motion": "Tilt up"},
+                {"first_sentence": 2, "place": 1, "prompt": "The control room, a screen gone dark",
+                 "cast": [], "motion": "Static shot"},
+                {"first_sentence": 3, "place": -1, "prompt": "Deep space, a faint dot among the stars",
+                 "cast": [], "motion": "Slow drift"},
+            ],
+        })
+        .to_string()
+    }
+
+    fn storyboard_project(h: &Harness, app: &Bardo) -> VideoProject {
+        let project = h.narrated_project(app);
+        h.answer(storyboard_answer());
+        done(
+            app,
+            app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        project
+    }
+
+    #[test]
+    fn a_storyboard_names_its_places_and_each_scene_is_drawn_from_the_ones_before() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = storyboard_project(&h, &app);
+        let request = h.text.requests().pop().unwrap();
+        assert_eq!(request.effort, TextEffort::Careful);
+        let TextFormat::Json { schema } = &request.format else {
+            panic!("the plan is asked as JSON");
+        };
+        let at = |field: &str| schema.find(&format!("\"{field}\": {{")).unwrap();
+        assert!(
+            at("story") < at("cast") && at("cast") < at("places") && at("places") < at("scenes"),
+            "the story is thought through before the scenes"
+        );
+        assert!(request.instructions.contains("storyboard"));
+
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        let places: Vec<&str> = plan
+            .places()
+            .iter()
+            .map(|place| place.name.as_str())
+            .collect();
+        assert_eq!(
+            places,
+            ["the launch pad", "the control room"],
+            "a place no scene happens in is dropped"
+        );
+        let of: Vec<_> = plan.scenes().iter().map(|scene| scene.place()).collect();
+        assert_eq!(of, [Some(0), Some(0), Some(1), None]);
+        assert!(plan.generation.output.contains("\"story\""));
+
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let requests = h.images.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 4);
+        let references: Vec<_> = requests.iter().map(|r| r.references.len()).collect();
+        assert_eq!(references, [0, 1, 1, 1]);
+        // The first scene of a place: its description, nothing to follow.
+        assert_eq!(
+            requests[0].prompt,
+            "Wide shot of the launch pad, the rocket waiting\n\nThe scene happens in the launch \
+             pad: A concrete pad by the sea at dawn, 1969, a white rocket, orange light"
+        );
+        // The next one there continues from it.
+        assert!(
+            requests[1]
+                .prompt
+                .contains("The scene happens in the launch pad:")
+        );
+        assert!(
+            requests[1]
+                .prompt
+                .contains("Reference 1: the shot right before this one, in this same place.")
+        );
+        // A new place, and a scene in a place of its own: only the look.
+        assert!(
+            requests[2]
+                .prompt
+                .contains("The scene happens in the control room:")
+        );
+        assert!(
+            requests[2]
+                .prompt
+                .contains("Reference 1: a shot in another place.")
+        );
+        assert!(!requests[3].prompt.contains("The scene happens in"));
+        assert!(
+            requests[3]
+                .prompt
+                .contains("Reference 1: a shot in another place.")
+        );
+
+        // Drawn again, the first scene follows the other shot of its place.
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let again = h.images.requests.lock().unwrap().last().unwrap().clone();
+        assert_eq!(again.references.len(), 1);
+        assert!(
+            again
+                .prompt
+                .contains("Reference 1: another shot in this same place.")
+        );
+    }
+
+    #[test]
+    fn a_place_described_again_is_what_the_next_images_there_show() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = storyboard_project(&h, &app);
+
+        let plan = app
+            .edit_place_description(project.id, 0, "A pad in a desert at noon, harsh light")
+            .unwrap();
+        assert!(plan.places()[0].is_edited());
+        assert!(!plan.places()[1].is_edited());
+        assert_eq!(
+            app.scenes(project.id).unwrap().plan.unwrap().places(),
+            plan.places(),
+            "the edit is saved"
+        );
+        assert!(matches!(
+            app.edit_place_description(project.id, 0, " "),
+            Err(SceneError::Invalid(SceneFieldError::PromptRequired))
+        ));
+        assert!(matches!(
+            app.edit_place_description(project.id, 7, "Anywhere"),
+            Err(SceneError::PlaceNotFound(_))
+        ));
+
+        // A scene written somewhere else leaves the place.
+        app.edit_scene_prompt(project.id, 1, "Close on the rocket above the clouds")
+            .unwrap();
+        *h.images.delay.lock().unwrap() = Duration::from_millis(150);
+        let job = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert!(
+            matches!(
+                app.edit_place_description(project.id, 0, "A pad on the moon"),
+                Err(SceneError::Busy)
+            ),
+            "a place does not change while its scenes are drawn"
+        );
+        done(&app, job);
+        let prompts = h.images.prompts();
+        assert!(prompts[0].contains("the launch pad: A pad in a desert at noon, harsh light"));
+        assert!(!prompts[1].contains("The scene happens in"));
+        assert!(prompts[1].contains("Reference 1: a shot in another place."));
+    }
+
+    #[test]
+    fn a_reference_that_will_not_fit_or_read_is_left_out() {
+        let files = MemoryProjectFiles::default();
+        let project = VideoProjectId::new();
+        files.write(project, "scene-a.png", &[1; 40]).unwrap();
+        files.write(project, "scene-b.png", &[2; 40]).unwrap();
+        files.write(project, "notes.txt", &[3; 4]).unwrap();
+        let mut references = References {
+            images: Vec::new(),
+            room: 60,
+        };
+        assert!(references.add(&files, project, "scene-a.png"));
+        assert!(
+            !references.add(&files, project, "scene-b.png"),
+            "past the request's limit"
+        );
+        assert!(!references.add(&files, project, "scene-gone.png"));
+        assert!(!references.add(&files, project, "notes.txt"));
+        assert_eq!(references.images.len(), 1);
+        assert_eq!(references.images[0].bytes, [1; 40]);
+        assert_eq!(references.room, 20);
     }
 
     #[test]
@@ -1813,14 +2155,22 @@ pub(crate) mod tests {
                 .unwrap(),
         );
 
-        let prompts: Vec<_> = planned
-            .scenes()
-            .iter()
-            .map(|scene| scene.prompt().as_str().to_owned())
-            .collect();
-        assert_eq!(h.images.prompts(), prompts);
+        // The first scene is drawn from its prompt alone; the others also
+        // get the first image, for its look.
+        let sent = h.images.prompts();
+        assert_eq!(sent.len(), 3);
+        assert_eq!(sent[0], planned.scenes()[0].prompt().as_str());
+        let requests = h.images.requests.lock().unwrap().clone();
+        assert!(requests[0].references.is_empty());
+        for (scene, request) in planned.scenes().iter().zip(&requests).skip(1) {
+            let prompt = format!("{}\n\n", scene.prompt().as_str());
+            assert!(request.prompt.starts_with(&prompt), "{}", request.prompt);
+            assert!(request.prompt.contains("Match only its rendering style"));
+            assert_eq!(request.references.len(), 1);
+            assert_eq!(request.references[0].bytes, SCENE_IMAGE);
+        }
         let plan = app.scenes(project.id).unwrap().plan.unwrap();
-        for scene in plan.scenes() {
+        for (scene, sent) in plan.scenes().iter().zip(&sent) {
             let image = scene.image().unwrap();
             assert_eq!(scene.pending(), None);
             assert_eq!(scene.failure(), None);
@@ -1829,7 +2179,7 @@ pub(crate) mod tests {
             let generation = &image.generation;
             assert_eq!(generation.provider, Provider::Gemini);
             assert_eq!(generation.model, "nano-banana-fake");
-            assert_eq!(generation.prompt, scene.prompt().as_str());
+            assert_eq!(&generation.prompt, sent, "what was sent is recorded");
             assert_eq!(generation.template, planned.generation.template);
             assert_eq!(generation.usage.output_tokens, 1_890);
             assert_eq!(generation.job, Some(job.id()));
@@ -1906,10 +2256,9 @@ pub(crate) mod tests {
         app.retry_job(id).unwrap();
         done(&app, id);
 
-        assert_eq!(
-            h.images.prompts()[asked..],
-            ["An empty control room at night"]
-        );
+        let retried = &h.images.prompts()[asked..];
+        assert_eq!(retried.len(), 1);
+        assert!(retried[0].starts_with("An empty control room at night\n\n"));
         let plan = app.scenes(project.id).unwrap().plan.unwrap();
         let images: Vec<SceneImage> = images_of(&plan).into_iter().flatten().cloned().collect();
         assert_eq!(images.len(), 3);

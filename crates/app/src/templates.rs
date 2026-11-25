@@ -19,6 +19,14 @@ const SCRIPT_INSTRUCTIONS: &str = "\
 You write narration scripts for a faceless YouTube channel: a narrator speaks over visuals, with \
 no on-camera host. Write in {{language}}; the audience's country is {{country}}.
 
+The script follows one line from beginning to end: a story told in the order it happened, or an \
+explanation built step by step, each sentence following from the one before, about the same \
+main subject from start to finish. The visuals are planned from it, one picture every few \
+seconds, so write what can be shown: people doing things, places, objects. Stay with one moment \
+and one place for a few sentences before moving on, and when the script moves to another time, \
+place or subject, say so in the narration, so the pictures can follow it. Tie an idea to something concrete in the story instead of explaining it \
+in the abstract. No jumping back and forth in time without saying so, and no list of loose facts.
+
 The script is original: no copying or close paraphrase of existing videos. Be accurate where the \
 story touches real events, and keep it safe for advertisers.
 
@@ -41,28 +49,54 @@ sentences, keep the tension through the middle, and end with a payoff that deliv
 promise.";
 
 const IMAGE_PROMPT_INSTRUCTIONS: &str = "\
-You plan the visuals of a faceless YouTube video: a narrator speaks over a sequence of images, \
-one per scene, and some of them become short video clips. You split the narration into scenes \
-and write, for each scene, the prompt an image model draws it from and the motion prompt a video \
+You plan the visuals of a faceless YouTube video as a storyboard: a narrator speaks over a \
+sequence of images, one per scene, and some of them become short video clips. Watched in order \
+with the sound off, the images tell the same story as the narration: each scene shows what its \
+sentences say and follows from the scene before it. You split the narration into scenes and \
+write, for each scene, the prompt an image model draws it from and the motion prompt a video \
 model animates that image with.
+
+First write `story`: one short paragraph with the story the images tell from the first to the \
+last, in order: who is in it, where it happens, and how it moves from place to place and from \
+moment to moment. The cast, the places and the scenes follow from it.
 
 Scenes follow the narration in order and together cover all of it: a scene starts at a sentence \
 and runs until the next scene starts. Change scene when the subject, place or moment changes, \
-about every 4 to 8 seconds of narration; a long sentence may hold a scene on its own.
+about every 4 to 8 seconds of narration; a long sentence may hold a scene on its own. Stay in a \
+place for several scenes in a row, showing it from different distances and angles (a wide shot, \
+then a closer one, then a detail), instead of jumping to a new place at every sentence. When the \
+narration turns abstract, stay in the story and show what its people do or what its place looks \
+like at that moment, never an unrelated symbolic picture.
 
 The cast: when the same person appears in more than one scene (a recurring character such as \
 \"the chef\" or \"the detective\"), list them once in `cast`, at most three, with a short \
 name and one fixed appearance: sex, adult age, skin tone, hair, build and clothes, precise \
 enough to draw the very same person again, in the channel's visual style. Each scene lists in \
 `cast` the members it shows, by their position in `cast` (from 0); its prompt calls them by \
-that name and never describes them differently. A person seen once, crowds and scenes without \
+that name and never describes them differently. Who a person is comes from this video: when the \
+narration does not say, choose the sex, age and looks that fit its subject, period and place, \
+not the same default person for every video. A person seen once, crowds and scenes without \
 people need no cast member; leave `cast` empty when nobody recurs.
 
-Each image prompt stands alone, because the image model sees one prompt at a time and remembers \
-none of the others. Describe the subject, setting, period, composition, lighting and mood, and \
-repeat the channel's visual style in every prompt so the images look like one video. Bardo adds \
-each cast member's appearance and reference portrait to the scenes that show them. Frames are \
-{{frame_shape}}. Write the prompts in English, whatever the narration's language ({{language}}).
+The places: when more than one scene happens in the same place (\"the kitchen\", \"the \
+control room\"), list it once in `places`, at most eight, with a short name and one fixed \
+description: what the place is, its period, its main objects and where they stand, the time of \
+day, the weather, the light and the colors, precise enough to draw the very same place again, \
+in the channel's visual style. Each scene gives in `place` the position of its place in \
+`places` (from 0), or -1 when no other scene happens there; its prompt calls the place by that \
+name and never describes it differently. A place the story returns to at another time or in \
+another state (the same street at night, the house years later) is another entry in the list.
+
+Each image prompt is one shot: what is seen, who does what, and from where it is seen (wide, \
+medium or close, and the angle), at that moment of the narration. A scene in the same place as \
+the scene before it shows the next moment there: nothing changes that the narration does not \
+change (the time of day, the weather, what people wear or hold, where things are). For a scene \
+in a place of its own, the prompt also describes the place, its period and its light. Repeat \
+the channel's visual style in every prompt so the images look like one video. The image model \
+sees one prompt at a time, so Bardo adds to each scene the appearance and reference portrait of \
+its cast members, the description of its place, and earlier images of the same place as \
+references; do not write those out again. Frames are {{frame_shape}}. Write the prompts in \
+English, whatever the narration's language ({{language}}).
 
 The motion prompt says how the image moves in a clip of a few seconds: one camera move (slow push \
 in, pan, tilt, orbit or static) and at most one simple, natural action of the subject that fits \
@@ -84,9 +118,9 @@ Angle: {{theme_angle}}
 The narration, one sentence per line: its number, when it is spoken, and its text.
 {{narration_sentences}}
 
-List the recurring characters, then split the narration into scenes. For each scene give the \
-number of the sentence it starts at, the image prompt that draws it, the cast members it shows \
-and its motion prompt.";
+Write the story the images tell, list the recurring characters and the recurring places, then \
+split the narration into scenes. For each scene give the number of the sentence it starts at, \
+its place, the image prompt that draws it, the cast members it shows and its motion prompt.";
 
 const MUSIC_PROMPT_INSTRUCTIONS: &str = "\
 You write prompts for AI music tools (text-to-music generators). The music is the background bed \
@@ -293,6 +327,67 @@ The narration, one sentence per line: its number, when it is spoken, and its tex
 Split the narration into scenes. For each scene give the number of the sentence it starts at \
 and the image prompt that draws it.";
 
+/// The script rules before the visuals were planned as a storyboard (#258).
+const RETIRED_SCRIPT_INSTRUCTIONS: &str = "\
+You write narration scripts for a faceless YouTube channel: a narrator speaks over visuals, with \
+no on-camera host. Write in {{language}}; the audience's country is {{country}}.
+
+The script is original: no copying or close paraphrase of existing videos. Be accurate where the \
+story touches real events, and keep it safe for advertisers.
+
+Write only what the narrator says, as plain paragraphs: no headings, scene directions, \
+timestamps, speaker labels or markdown.";
+
+/// The scene plan before the story, the places and the storyboard rules
+/// (#258).
+const RETIRED_IMAGE_PROMPT_INSTRUCTIONS_3: &str = "\
+You plan the visuals of a faceless YouTube video: a narrator speaks over a sequence of images, \
+one per scene, and some of them become short video clips. You split the narration into scenes \
+and write, for each scene, the prompt an image model draws it from and the motion prompt a video \
+model animates that image with.
+
+Scenes follow the narration in order and together cover all of it: a scene starts at a sentence \
+and runs until the next scene starts. Change scene when the subject, place or moment changes, \
+about every 4 to 8 seconds of narration; a long sentence may hold a scene on its own.
+
+The cast: when the same person appears in more than one scene (a recurring character such as \
+\"the chef\" or \"the detective\"), list them once in `cast`, at most three, with a short \
+name and one fixed appearance: sex, adult age, skin tone, hair, build and clothes, precise \
+enough to draw the very same person again, in the channel's visual style. Each scene lists in \
+`cast` the members it shows, by their position in `cast` (from 0); its prompt calls them by \
+that name and never describes them differently. A person seen once, crowds and scenes without \
+people need no cast member; leave `cast` empty when nobody recurs.
+
+Each image prompt stands alone, because the image model sees one prompt at a time and remembers \
+none of the others. Describe the subject, setting, period, composition, lighting and mood, and \
+repeat the channel's visual style in every prompt so the images look like one video. Bardo adds \
+each cast member's appearance and reference portrait to the scenes that show them. Frames are \
+{{frame_shape}}. Write the prompts in English, whatever the narration's language ({{language}}).
+
+The motion prompt says how the image moves in a clip of a few seconds: one camera move (slow push \
+in, pan, tilt, orbit or static) and at most one simple, natural action of the subject that fits \
+the narration. Describe motion only: no new people or objects, no cuts, text or sound. One or two \
+sentences, in English.
+
+The images are original: no recognizable real people, logos, brands or copyrighted characters, \
+and no text, captions or watermarks in the image. Keep them safe for advertisers.";
+
+const RETIRED_IMAGE_PROMPT_PROMPT_2: &str = "\
+Channel: {{channel_name}}
+Channel niche: {{channel_niche}}
+Visual style (aesthetic notes): {{aesthetic_notes}}
+
+Video niche: {{niche}}
+Video title: {{theme_title}}
+Angle: {{theme_angle}}
+
+The narration, one sentence per line: its number, when it is spoken, and its text.
+{{narration_sentences}}
+
+List the recurring characters, then split the narration into scenes. For each scene give the \
+number of the sentence it starts at, the image prompt that draws it, the cast members it shows \
+and its motion prompt.";
+
 const LOOK_PROMPT_INSTRUCTIONS: &str = "\
 You write the prompt an image model draws a persona's look from: the character a faceless \
 channel's narrator appears as on screen, whose face and body a video model later moves with the \
@@ -366,7 +461,7 @@ Write the prompt for this take.";
 /// Bardo's earlier defaults for `kind`, oldest first.
 fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
     let (instructions, prompt) = match kind {
-        TemplateKind::Script => (SCRIPT_INSTRUCTIONS, RETIRED_SCRIPT_PROMPT),
+        TemplateKind::Script => (RETIRED_SCRIPT_INSTRUCTIONS, RETIRED_SCRIPT_PROMPT),
         TemplateKind::ImagePrompt => {
             return [
                 (
@@ -376,6 +471,10 @@ fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
                 (
                     RETIRED_IMAGE_PROMPT_INSTRUCTIONS_2,
                     RETIRED_IMAGE_PROMPT_PROMPT,
+                ),
+                (
+                    RETIRED_IMAGE_PROMPT_INSTRUCTIONS_3,
+                    RETIRED_IMAGE_PROMPT_PROMPT_2,
                 ),
             ]
             .into_iter()
@@ -640,6 +739,36 @@ mod tests {
             assert_eq!(versions[1].body, retired, "the old version stays readable");
             assert_eq!(app.template_versions(kind).unwrap().len(), 2, "once");
         }
+    }
+
+    #[test]
+    fn the_defaults_from_before_the_storyboard_move_on_to_it() {
+        for kind in [TemplateKind::Script, TemplateKind::ImagePrompt] {
+            for retired in retired_defaults(kind) {
+                let db = Arc::new(Database::open_in_memory().unwrap());
+                let app = start(&db);
+                db.add_template_version(&TemplateVersion::first(
+                    app.profile().id,
+                    retired,
+                    SystemTime::now(),
+                ))
+                .unwrap();
+                let current = app.current_template(kind).unwrap();
+                assert_eq!(current.number, 2);
+                assert_eq!(current.body, default_template(kind));
+            }
+        }
+        let script = default_template(TemplateKind::Script);
+        assert!(
+            script
+                .instructions()
+                .contains("one line from beginning to end")
+        );
+        let scenes = default_template(TemplateKind::ImagePrompt);
+        for part in ["`story`", "`places`", "`place`", "at most eight", "-1"] {
+            assert!(scenes.instructions().contains(part), "{part}");
+        }
+        assert!(!scenes.instructions().contains("stands alone"));
     }
 
     #[test]

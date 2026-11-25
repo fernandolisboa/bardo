@@ -10,7 +10,7 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    ApiKey, GeneratedText, Provider, ProviderFailure, ProviderFailureKind, TextFormat,
+    ApiKey, GeneratedText, Provider, ProviderFailure, ProviderFailureKind, TextEffort, TextFormat,
     TextGenerator, TextRequest, TokenUsage,
 };
 use base64::Engine as _;
@@ -27,6 +27,19 @@ pub const MAX_TOKENS: u32 = 16_000;
 /// The model's default made explicit: enough thought for creative work
 /// without paying for deep reasoning.
 pub const EFFORT: &str = "medium";
+/// For the requests a whole video is built on (its script and its scene
+/// plan): more thought before answering.
+pub const CAREFUL_EFFORT: &str = "high";
+/// Room for that thought on top of a long plan.
+pub const CAREFUL_MAX_TOKENS: u32 = 32_000;
+
+/// The effort and the token limit a request of `effort` is sent with.
+pub fn effort_settings(effort: TextEffort) -> (&'static str, u32) {
+    match effort {
+        TextEffort::Everyday => (EFFORT, MAX_TOKENS),
+        TextEffort::Careful => (CAREFUL_EFFORT, CAREFUL_MAX_TOKENS),
+    }
+}
 /// Gates `fallbacks: "default"`.
 pub const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 
@@ -37,7 +50,8 @@ pub fn message_request(
     request: &TextRequest,
     with_fallback: bool,
 ) -> Result<HttpRequest, ProviderFailure> {
-    let mut output_config = json!({ "effort": EFFORT });
+    let (effort, max_tokens) = effort_settings(request.effort);
+    let mut output_config = json!({ "effort": effort });
     if let TextFormat::Json { schema } = &request.format {
         let schema: Value = serde_json::from_str(schema).map_err(|error| {
             ProviderFailure::new(
@@ -70,7 +84,7 @@ pub fn message_request(
     };
     let mut body = json!({
         "model": MODEL,
-        "max_tokens": MAX_TOKENS,
+        "max_tokens": max_tokens,
         "system": request.instructions,
         "messages": [{ "role": "user", "content": content }],
         "output_config": output_config,
@@ -150,8 +164,11 @@ pub struct ClaudeTextGenerator<T = UreqTransport> {
 }
 
 impl ClaudeTextGenerator {
-    /// A non-streamed answer with thinking can take a minute or two.
-    pub const TIMEOUT: Duration = Duration::from_secs(180);
+    /// A non-streamed answer with thinking can take a minute or two, and a
+    /// long scene plan thought over carefully several: the ten minutes the
+    /// API allows a request that is not streamed. A shorter wait would give
+    /// up on an answer that is still billed.
+    pub const TIMEOUT: Duration = Duration::from_secs(600);
 
     pub fn new() -> Self {
         Self::with_transport(UreqTransport::new(Self::TIMEOUT))

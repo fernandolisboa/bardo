@@ -22,9 +22,9 @@ use bardo_domain::{
     RenderedPrompt, RepositoryError, Scene, SceneClip, SceneImage, ScenePlan, ScenePlanId,
     ScenePlanRecord, ScenePlanRepository, SceneRecord, Script, ScriptRepository, SecretStore,
     SourceSentence, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
-    TemplateVersionId, TextFormat, TextGenerator, TextRequest, Theme, ThemeIdea, ThemeRepository,
-    TimelineRepository, UiLanguage, VideoProject, VideoProjectId, adaptation_gaps, join_adapted,
-    localized_cut, place_scenes, placed_scene_notes, scene_sentences, sentence_times,
+    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, Theme, ThemeIdea,
+    ThemeRepository, TimelineRepository, UiLanguage, VideoProject, VideoProjectId, adaptation_gaps,
+    join_adapted, localized_cut, place_scenes, placed_scene_notes, scene_sentences, sentence_times,
     sentence_words, sentences, source_gaps,
 };
 use serde::{Deserialize, Serialize};
@@ -331,8 +331,8 @@ fn other_audience(channel: &Channel, language: ContentLanguage, country: Country
 }
 
 /// A copy of `plan` for `project`: the current images and clips with new
-/// generation records, prompts and model picks, and the cast with its
-/// portraits; nothing waiting for review, no failures and no clip of an
+/// generation records, prompts and model picks, the cast with its
+/// portraits and the places; nothing waiting for review, no failures and no clip of an
 /// image the scene no longer shows.
 fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> ScenePlan {
     let copied = |generation: &Generation| Generation {
@@ -375,6 +375,7 @@ fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> Scen
             })
             .with_cast(scene.cast().to_vec())
             .with_planned_motion(scene.planned_motion().cloned())
+            .with_place(scene.place())
         })
         .collect();
     let cast = plan
@@ -403,6 +404,7 @@ fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> Scen
         updated_at: now,
     })
     .with_cast(cast)
+    .with_places(plan.places().to_vec())
 }
 
 /// Runs version jobs.
@@ -457,6 +459,7 @@ impl LocalizationHandler {
     ) -> Result<bardo_domain::GeneratedText, JobFailure> {
         let key = self.key()?;
         let request = TextRequest {
+            effort: TextEffort::Everyday,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),

@@ -5,6 +5,13 @@
 //! the image provider draws one image per scene. Regenerating one scene's
 //! image leaves the others alone and keeps the current image until the user
 //! accepts the new one.
+//!
+//! A plan is a storyboard (#258): it names the video's recurring people
+//! (the cast, #246) and places once, each with one fixed description, and
+//! every scene says who it shows and where it happens. A scene's image is
+//! drawn with the cast's portraits and with earlier scenes of the video as
+//! references, so the place, the light and the look hold from one scene to
+//! the next.
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -205,11 +212,7 @@ impl CastMember {
     /// The name without a leading article ("the chef" is "chef"), as an
     /// edited prompt may still call them.
     fn called(&self) -> &str {
-        let lower = self.name.to_lowercase();
-        ["the ", "a ", "an "]
-            .iter()
-            .find(|article| lower.starts_with(**article))
-            .map_or(self.name.as_str(), |article| &self.name[article.len()..])
+        without_article(&self.name)
     }
 
     pub fn generated_description(&self) -> &ScenePrompt {
@@ -268,14 +271,18 @@ impl CastMember {
     }
 }
 
-/// The prompt an image of a scene is drawn from: the scene's prompt, then
-/// who each cast member it shows is. `referenced` are the members whose
-/// portrait goes with the request, in that order; the others are only
-/// described.
-pub fn scene_image_prompt(prompt: &str, shown: &[&CastMember], referenced: &[bool]) -> String {
-    if shown.is_empty() {
-        return prompt.to_owned();
-    }
+/// The prompt an image of a scene is drawn from: the scene's prompt, who
+/// each cast member it shows is, where it happens, and what each other
+/// scene sent with it is for. `referenced` are the members whose portrait
+/// goes with the request, in that order; the others are only described.
+/// The other scenes' images follow the portraits, in `setting.shots`
+/// order.
+pub fn scene_image_prompt(
+    prompt: &str,
+    shown: &[&CastMember],
+    referenced: &[bool],
+    setting: SceneSetting<'_>,
+) -> String {
     let mut text = prompt.to_owned();
     let with: Vec<&CastMember> = shown
         .iter()
@@ -315,6 +322,42 @@ pub fn scene_image_prompt(prompt: &str, shown: &[&CastMember], referenced: &[boo
             ));
         }
     }
+    if let Some(place) = setting.place {
+        text.push_str(&format!(
+            "\n\nThe scene happens in {}: {}",
+            place.name,
+            place.description.as_str()
+        ));
+    }
+    if !setting.shots.is_empty() {
+        text.push_str(
+            "\n\nThe other reference images are other shots of the same video, so that this \
+             image belongs with them.",
+        );
+    }
+    for (offset, shot) in setting.shots.iter().enumerate() {
+        let number = with.len() + offset + 1;
+        text.push_str(&format!("\nReference {number}: "));
+        text.push_str(match shot {
+            OtherShot::SamePlace => {
+                "another shot in this same place. Keep the place as it is there: its \
+                 architecture, objects, colors, light and time of day, and the same rendering \
+                 style. Draw a new shot of it, from another angle or distance; do not repeat \
+                 its composition."
+            }
+            OtherShot::Before => {
+                "the shot right before this one, in this same place. This scene continues \
+                 from it: keep the place, the light, the time of day, what people wear and \
+                 where things are, and the same rendering style. Draw the next moment as a \
+                 new shot, from another angle or distance; do not repeat its composition."
+            }
+            OtherShot::Look => {
+                "a shot in another place. Match only its rendering style, palette and level \
+                 of detail; its place, its people and its composition are not part of this \
+                 scene."
+            }
+        });
+    }
     text
 }
 
@@ -322,6 +365,133 @@ pub fn scene_image_prompt(prompt: &str, shown: &[&CastMember], referenced: &[boo
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("the plan has no cast member {0}")]
 pub struct NoSuchCastMember(pub usize);
+
+/// The most recurring places a plan keeps.
+pub const MAX_PLACES: usize = 8;
+
+/// One of the video's recurring places (#258) as the planner proposed it:
+/// what the scene prompts call it and its fixed description.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaceDraft {
+    pub name: String,
+    pub description: String,
+}
+
+/// A recurring place of the video: the planner names it once with one
+/// fixed description (the place, its period, time of day, light and
+/// colors), and every scene that happens there is drawn with it and with
+/// an earlier scene of the place as a reference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Place {
+    /// What the scene prompts call it, e.g. "the kitchen".
+    pub name: String,
+    /// The description as planned. The user's edits change `description`.
+    generated_description: ScenePrompt,
+    description: ScenePrompt,
+}
+
+/// Every stored field of a place, for adapters that rebuild one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaceRecord {
+    pub name: String,
+    pub generated_description: ScenePrompt,
+    pub description: ScenePrompt,
+}
+
+impl Place {
+    pub fn restore(record: PlaceRecord) -> Self {
+        Self {
+            name: record.name,
+            generated_description: record.generated_description,
+            description: record.description,
+        }
+    }
+
+    /// A planned place, or `None` when the name or the description is not
+    /// usable.
+    fn planned(draft: &PlaceDraft) -> Option<Self> {
+        let name: String = draft
+            .name
+            .trim()
+            .chars()
+            .take(MAX_CAST_NAME_CHARS)
+            .collect();
+        let description = ScenePrompt::new(&draft.description).ok()?;
+        (!name.trim().is_empty()).then(|| Self {
+            name: name.trim().to_owned(),
+            generated_description: description.clone(),
+            description,
+        })
+    }
+
+    pub fn description(&self) -> &ScenePrompt {
+        &self.description
+    }
+
+    pub fn generated_description(&self) -> &ScenePrompt {
+        &self.generated_description
+    }
+
+    /// Whether the user changed the description since it was planned.
+    pub fn is_edited(&self) -> bool {
+        self.description != self.generated_description
+    }
+
+    /// Replaces the description with the user's; the next images drawn in
+    /// the place follow it. Returns whether it changed.
+    pub fn edit_description(&mut self, description: ScenePrompt) -> bool {
+        if description == self.description {
+            return false;
+        }
+        self.description = description;
+        true
+    }
+
+    /// The name without a leading article ("the kitchen" is "kitchen"),
+    /// as an edited prompt may still call it.
+    fn called(&self) -> &str {
+        without_article(&self.name)
+    }
+}
+
+/// A user action on a place that does not apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the plan has no place {0}")]
+pub struct NoSuchPlace(pub usize);
+
+/// `name` without a leading English article.
+fn without_article(name: &str) -> &str {
+    let lower = name.to_lowercase();
+    ["the ", "a ", "an "]
+        .iter()
+        .find(|article| lower.starts_with(**article))
+        .map_or(name, |article| &name[article.len()..])
+}
+
+/// What another scene of the video is to a scene drawn with its image as
+/// a reference (#258).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OtherShot {
+    /// Another scene in the same place: the place holds.
+    SamePlace,
+    /// The scene right before, in the same place: the scene continues
+    /// from it.
+    Before,
+    /// A scene of another place, for a scene whose place has no image
+    /// yet: only the video's look holds.
+    Look,
+}
+
+/// Where a scene happens and which other scenes go with its image
+/// request, in the order of their reference images (after the cast's
+/// portraits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SceneSetting<'a> {
+    /// The scene's place, described in the prompt.
+    pub place: Option<&'a Place>,
+    /// What each other scene sent as a reference is to this one.
+    pub shots: &'a [OtherShot],
+}
 
 /// A clip made from a scene's image: the file in the project folder, its
 /// length, the image it animated and the generation that made it.
@@ -372,6 +542,9 @@ pub struct Scene {
     cast: Vec<usize>,
     /// How the clip moves, as planned; plans made before #246 have none.
     planned_motion: Option<ScenePrompt>,
+    /// The recurring place it happens in, as an index into the plan's
+    /// places; `None` for a place seen once or a plan made before #258.
+    place: Option<usize>,
 }
 
 /// Every stored field of a scene, for adapters that rebuild one.
@@ -410,6 +583,7 @@ impl Scene {
             clip_failure: record.clip_failure,
             cast: Vec::new(),
             planned_motion: None,
+            place: None,
         }
     }
 
@@ -423,6 +597,13 @@ impl Scene {
     /// The scene with its planned motion prompt, as an adapter rebuilds it.
     pub fn with_planned_motion(mut self, motion: Option<ScenePrompt>) -> Self {
         self.planned_motion = motion;
+        self
+    }
+
+    /// The scene happening in `place` (an index into its plan's places),
+    /// as an adapter rebuilds it.
+    pub fn with_place(mut self, place: Option<usize>) -> Self {
+        self.place = place;
         self
     }
 
@@ -444,12 +625,19 @@ impl Scene {
             clip_failure: None,
             cast: Vec::new(),
             planned_motion: None,
+            place: None,
         }
     }
 
     /// The cast members it shows, as indexes into the plan's cast.
     pub fn cast(&self) -> &[usize] {
         &self.cast
+    }
+
+    /// The recurring place it was planned in, as an index into the plan's
+    /// places.
+    pub fn place(&self) -> Option<usize> {
+        self.place
     }
 
     pub fn duration(&self) -> Duration {
@@ -646,13 +834,23 @@ impl Scene {
 
 /// One scene as the planner proposed it: the sentence it starts at (an
 /// index into `sentences`), its image prompt, the cast members it shows
-/// (indexes into the drafted cast) and how its clip moves.
+/// (indexes into the drafted cast), how its clip moves and the recurring
+/// place it happens in (an index into the drafted places).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SceneDraft {
     pub first_sentence: usize,
     pub prompt: String,
     pub cast: Vec<usize>,
     pub motion: String,
+    pub place: Option<usize>,
+}
+
+/// A whole plan as the planner proposed it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlanDraft {
+    pub cast: Vec<CastDraft>,
+    pub places: Vec<PlaceDraft>,
+    pub scenes: Vec<SceneDraft>,
 }
 
 /// The planner's answer has no usable scene.
@@ -678,6 +876,8 @@ pub struct ScenePlan {
     scenes: Vec<Scene>,
     /// The recurring characters the scenes show (#246).
     cast: Vec<CastMember>,
+    /// The recurring places the scenes happen in (#258).
+    places: Vec<Place>,
     pub updated_at: SystemTime,
 }
 
@@ -693,6 +893,15 @@ pub struct ScenePlanRecord {
     pub updated_at: SystemTime,
 }
 
+/// A usable scene of a draft: the sentence it starts at and what it shows.
+struct PlannedStart {
+    first: usize,
+    prompt: ScenePrompt,
+    cast: Vec<usize>,
+    motion: Option<ScenePrompt>,
+    place: Option<usize>,
+}
+
 impl ScenePlan {
     /// The plan the planner proposed, made to fit the narration: scenes in
     /// the order of their first sentence, one per sentence at most, the
@@ -701,27 +910,37 @@ impl ScenePlan {
     /// sentence the narration does not have or an unusable prompt are
     /// dropped. Cast members without a name or a usable description, past
     /// `MAX_CAST`, or shown in no scene are dropped too, and each scene
-    /// keeps the members it names that are left, each once.
-    pub fn from_drafts(
+    /// keeps the members it names that are left, each once. Places follow
+    /// the same rule, up to `MAX_PLACES`.
+    pub fn from_draft(
         generation: Generation,
         narration: &Narration,
-        cast: Vec<CastDraft>,
-        mut drafts: Vec<SceneDraft>,
+        draft: PlanDraft,
         now: SystemTime,
     ) -> Result<Self, NoScenes> {
+        let PlanDraft {
+            cast,
+            places,
+            scenes: mut drafts,
+        } = draft;
         let sentences = sentences(narration);
         drafts.sort_by_key(|draft| draft.first_sentence);
-        let mut starts: Vec<(usize, ScenePrompt, Vec<usize>, Option<ScenePrompt>)> = Vec::new();
+        let mut starts: Vec<PlannedStart> = Vec::new();
         for draft in drafts {
             let Ok(prompt) = ScenePrompt::new(&draft.prompt) else {
                 continue;
             };
             let taken = starts
                 .last()
-                .is_some_and(|(first, ..)| *first == draft.first_sentence);
+                .is_some_and(|start| start.first == draft.first_sentence);
             if draft.first_sentence < sentences.len() && !taken {
-                let motion = ScenePrompt::new(&draft.motion).ok();
-                starts.push((draft.first_sentence, prompt, draft.cast, motion));
+                starts.push(PlannedStart {
+                    first: draft.first_sentence,
+                    prompt,
+                    cast: draft.cast,
+                    motion: ScenePrompt::new(&draft.motion).ok(),
+                    place: draft.place,
+                });
             }
         }
         // The usable members, by their drafted index.
@@ -730,26 +949,33 @@ impl ScenePlan {
             .enumerate()
             .filter_map(|(index, draft)| Some((index, CastMember::planned(draft)?)))
             .collect();
-        usable.retain(|(index, _)| starts.iter().any(|(_, _, shown, _)| shown.contains(index)));
+        usable.retain(|(index, _)| starts.iter().any(|start| start.cast.contains(index)));
         usable.truncate(MAX_CAST);
-        let renumber = |shown: &[usize]| -> Vec<usize> {
+        // The usable places, likewise.
+        let mut somewhere: Vec<(usize, Place)> = places
+            .iter()
+            .enumerate()
+            .filter_map(|(index, draft)| Some((index, Place::planned(draft)?)))
+            .collect();
+        somewhere.retain(|(index, _)| starts.iter().any(|start| start.place == Some(*index)));
+        somewhere.truncate(MAX_PLACES);
+        for start in &mut starts {
             let mut kept: Vec<usize> = Vec::new();
-            for drafted in shown {
+            for drafted in &start.cast {
                 if let Some(at) = usable.iter().position(|(index, _)| index == drafted)
                     && !kept.contains(&at)
                 {
                     kept.push(at);
                 }
             }
-            kept
-        };
-        let mut starts: Vec<(usize, ScenePrompt, Vec<usize>, Option<ScenePrompt>)> = starts
-            .into_iter()
-            .map(|(first, prompt, shown, motion)| (first, prompt, renumber(&shown), motion))
-            .collect();
+            start.cast = kept;
+            start.place = start
+                .place
+                .and_then(|drafted| somewhere.iter().position(|(index, _)| *index == drafted));
+        }
         // The opening sentences belong to the first scene.
         match starts.first_mut() {
-            Some((first, ..)) => *first = 0,
+            Some(start) => start.first = 0,
             None => return Err(NoScenes),
         }
         let text = narration.text.as_str();
@@ -759,21 +985,22 @@ impl ScenePlan {
         let scenes = starts
             .iter()
             .enumerate()
-            .map(|(index, (first, prompt, shown, motion))| {
-                let next = starts.get(index + 1).map(|(next, ..)| *next);
+            .map(|(index, start)| {
+                let next = starts.get(index + 1).map(|next| next.first);
                 let last = &sentences[next.unwrap_or(sentences.len()) - 1];
                 Scene::planned(
                     if index == 0 {
                         Duration::ZERO
                     } else {
-                        sentences[*first].start
+                        sentences[start.first].start
                     },
                     next.map_or(end, |next| sentences[next].start),
-                    text[sentences[*first].text.start..last.text.end].to_owned(),
-                    prompt.clone(),
+                    text[sentences[start.first].text.start..last.text.end].to_owned(),
+                    start.prompt.clone(),
                 )
-                .with_cast(shown.clone())
-                .with_planned_motion(motion.clone())
+                .with_cast(start.cast.clone())
+                .with_planned_motion(start.motion.clone())
+                .with_place(start.place)
             })
             .collect();
         Ok(Self {
@@ -784,8 +1011,29 @@ impl ScenePlan {
             generation,
             scenes,
             cast: usable.into_iter().map(|(_, member)| member).collect(),
+            places: somewhere.into_iter().map(|(_, place)| place).collect(),
             updated_at: now,
         })
+    }
+
+    /// [`ScenePlan::from_draft`] for a plan without recurring places.
+    pub fn from_drafts(
+        generation: Generation,
+        narration: &Narration,
+        cast: Vec<CastDraft>,
+        drafts: Vec<SceneDraft>,
+        now: SystemTime,
+    ) -> Result<Self, NoScenes> {
+        Self::from_draft(
+            generation,
+            narration,
+            PlanDraft {
+                cast,
+                places: Vec::new(),
+                scenes: drafts,
+            },
+            now,
+        )
     }
 
     pub fn restore(record: ScenePlanRecord) -> Self {
@@ -797,6 +1045,7 @@ impl ScenePlan {
             generation: record.generation,
             scenes: record.scenes,
             cast: Vec::new(),
+            places: Vec::new(),
             updated_at: record.updated_at,
         }
     }
@@ -805,6 +1054,81 @@ impl ScenePlan {
     pub fn with_cast(mut self, cast: Vec<CastMember>) -> Self {
         self.cast = cast;
         self
+    }
+
+    /// The plan with its places, as an adapter rebuilds it.
+    pub fn with_places(mut self, places: Vec<Place>) -> Self {
+        self.places = places;
+        self
+    }
+
+    /// The recurring places the scenes happen in.
+    pub fn places(&self) -> &[Place] {
+        &self.places
+    }
+
+    pub fn place(&self, index: usize) -> Result<&Place, NoSuchPlace> {
+        self.places.get(index).ok_or(NoSuchPlace(index))
+    }
+
+    /// The place at `index`, to change; the plan's time moves to `now`.
+    pub fn place_mut(&mut self, index: usize, now: SystemTime) -> Result<&mut Place, NoSuchPlace> {
+        let place = self.places.get_mut(index).ok_or(NoSuchPlace(index))?;
+        self.updated_at = now;
+        Ok(place)
+    }
+
+    /// The place scene `index` is drawn in, by its index in the places:
+    /// the one it was planned in, and once the user edited its prompt,
+    /// only while the prompt still names it, so writing a scene somewhere
+    /// else takes the place out of its image.
+    pub fn scene_place(&self, index: usize) -> Option<usize> {
+        let scene = self.scenes.get(index)?;
+        let place = self.places.get(scene.place?)?;
+        let named = || {
+            scene
+                .prompt
+                .as_str()
+                .to_lowercase()
+                .contains(&place.called().to_lowercase())
+        };
+        (!scene.is_edited() || named()).then_some(scene.place?)
+    }
+
+    /// The other scenes whose images go with scene `index`'s image
+    /// request, so the video holds together from scene to scene, with what
+    /// each one is to it. Only scenes that have an image count, never the
+    /// scene itself:
+    ///
+    /// - the first other scene of the same place, as the place;
+    /// - the scene right before it, when it is in the same place, as what
+    ///   it continues from (alone when it is also the first of the place);
+    /// - for a scene whose place has no image yet, or with no place: the
+    ///   video's first other image, for its look only.
+    pub fn reference_shots(&self, index: usize) -> Vec<(usize, OtherShot)> {
+        let drawn = |other: usize| other != index && self.scenes[other].image.is_some();
+        if index >= self.scenes.len() {
+            return Vec::new();
+        }
+        let place = self.scene_place(index);
+        let same_place =
+            |other: usize| place.is_some() && self.scene_place(other) == place && drawn(other);
+        let before = index
+            .checked_sub(1)
+            .filter(|&before| same_place(before))
+            .map(|before| (before, OtherShot::Before));
+        let anchor = (0..self.scenes.len())
+            .find(|&other| same_place(other))
+            .filter(|&anchor| before.is_none_or(|(before, _)| before != anchor))
+            .map(|anchor| (anchor, OtherShot::SamePlace));
+        if anchor.is_some() || before.is_some() {
+            return anchor.into_iter().chain(before).collect();
+        }
+        (0..self.scenes.len())
+            .find(|&other| drawn(other))
+            .map(|look| (look, OtherShot::Look))
+            .into_iter()
+            .collect()
     }
 
     /// The recurring characters the scenes show.
@@ -938,6 +1262,10 @@ pub trait ScenePlanRepository: Send + Sync {
     /// portrait, failure) and its portrait's generation, leaving the rest
     /// as it is. Fails when the plan is no longer saved.
     fn save_cast_member(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError>;
+
+    /// Saves place `index` of the saved plan `plan` (its description),
+    /// leaving the rest as it is. Fails when the plan is no longer saved.
+    fn save_place(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError>;
 }
 
 impl<T: ScenePlanRepository + ?Sized> ScenePlanRepository for Arc<T> {
@@ -955,6 +1283,10 @@ impl<T: ScenePlanRepository + ?Sized> ScenePlanRepository for Arc<T> {
 
     fn save_cast_member(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
         (**self).save_cast_member(plan, index)
+    }
+
+    fn save_place(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
+        (**self).save_place(plan, index)
     }
 }
 
@@ -1331,6 +1663,7 @@ mod tests {
             prompt: prompt.into(),
             cast,
             motion: "Slow push in.".into(),
+            place: None,
         }
     }
 
@@ -1477,17 +1810,306 @@ mod tests {
         )
         .unwrap();
         let shown: Vec<&CastMember> = plan.cast().iter().collect();
-        let prompt = scene_image_prompt("The chef serves the critic.", &shown, &[true, false]);
+        let prompt = scene_image_prompt(
+            "The chef serves the critic.",
+            &shown,
+            &[true, false],
+            SceneSetting::default(),
+        );
         assert!(prompt.starts_with("The chef serves the critic.\n\n"));
         assert!(prompt.contains("Reference 1: the chef, A man in his fifties, brown skin."));
         assert!(!prompt.contains("Reference 2"));
         assert!(prompt.contains("the critic: A woman in her forties, grey bob."));
-        assert_eq!(scene_image_prompt("Stars.", &[], &[]), "Stars.");
+        assert_eq!(
+            scene_image_prompt("Stars.", &[], &[], SceneSetting::default()),
+            "Stars."
+        );
         assert!(
             plan.cast()[0]
                 .portrait_prompt()
                 .contains("the chef: A man in his fifties")
         );
+    }
+
+    fn somewhere(name: &str, description: &str) -> PlaceDraft {
+        PlaceDraft {
+            name: name.into(),
+            description: description.into(),
+        }
+    }
+
+    fn placed(first_sentence: usize, prompt: &str, place: Option<usize>) -> SceneDraft {
+        SceneDraft {
+            first_sentence,
+            prompt: prompt.into(),
+            place,
+            ..SceneDraft::default()
+        }
+    }
+
+    /// Four scenes: the kitchen, the street, nowhere that recurs, and the
+    /// kitchen again.
+    fn storyboard(n: &Narration) -> ScenePlan {
+        ScenePlan::from_draft(
+            generation(n, Provider::Claude, "{}"),
+            n,
+            PlanDraft {
+                cast: Vec::new(),
+                places: vec![
+                    somewhere(
+                        "the kitchen",
+                        "A small tiled kitchen at night, one warm lamp.",
+                    ),
+                    somewhere("  ", "No name."),
+                    somewhere("the cellar", "Never shown."),
+                    somewhere("The Street", "A wet cobbled street at dawn."),
+                    somewhere("the attic", "  "),
+                ],
+                scenes: vec![
+                    placed(0, "Wide shot of the kitchen.", Some(0)),
+                    placed(1, "The street, empty.", Some(3)),
+                    placed(2, "A map of the city.", Some(9)),
+                    placed(3, "Close on the stove in the kitchen.", Some(0)),
+                ],
+            },
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap()
+    }
+
+    fn draw(plan: &mut ScenePlan, n: &Narration, index: usize) {
+        plan.scene_mut(index, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .add_image(image(n, &format!("scene-{index}.png")));
+    }
+
+    #[test]
+    fn places_are_planned_once_and_scenes_point_at_them() {
+        let n = narration(STORY, 0);
+        let plan = storyboard(&n);
+        let names: Vec<&str> = plan
+            .places()
+            .iter()
+            .map(|place| place.name.as_str())
+            .collect();
+        assert_eq!(names, ["the kitchen", "The Street"], "usable and shown");
+        let places: Vec<Option<usize>> = plan.scenes().iter().map(Scene::place).collect();
+        assert_eq!(places, [Some(0), Some(1), None, Some(0)]);
+        assert_eq!(
+            plan.place(0).unwrap().description().as_str(),
+            "A small tiled kitchen at night, one warm lamp."
+        );
+        assert_eq!(plan.place(2), Err(NoSuchPlace(2)));
+        assert!(plan.scenes().iter().all(|scene| scene.cast().is_empty()));
+
+        // A plan without places is the plan it always was.
+        let plain = self::plan(&n, vec![draft(0, "A."), draft(2, "B.")]);
+        assert!(plain.places().is_empty());
+        assert_eq!(plain.scene_place(0), None);
+    }
+
+    #[test]
+    fn no_more_places_than_the_limit_are_kept() {
+        let text = ["Go."; MAX_PLACES + 2].join(" ");
+        let n = narration(&text, 0);
+        let plan = ScenePlan::from_draft(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            PlanDraft {
+                cast: Vec::new(),
+                places: (0..MAX_PLACES + 2)
+                    .map(|index| somewhere(&format!("room {index}"), "A room."))
+                    .collect(),
+                scenes: (0..MAX_PLACES + 2)
+                    .map(|index| placed(index, "A room.", Some(index)))
+                    .collect(),
+            },
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(plan.places().len(), MAX_PLACES);
+        assert_eq!(plan.scenes()[MAX_PLACES - 1].place(), Some(MAX_PLACES - 1));
+        assert_eq!(plan.scenes()[MAX_PLACES].place(), None, "past the limit");
+    }
+
+    #[test]
+    fn a_scene_is_drawn_with_the_shots_it_belongs_with() {
+        let n = narration(STORY, 0);
+        let mut plan = storyboard(&n);
+        for index in 0..4 {
+            assert!(plan.reference_shots(index).is_empty(), "nothing is drawn");
+        }
+
+        draw(&mut plan, &n, 0);
+        assert!(plan.reference_shots(0).is_empty(), "never itself");
+        assert_eq!(
+            plan.reference_shots(1),
+            [(0, OtherShot::Look)],
+            "a new place takes only the video's look"
+        );
+        assert_eq!(
+            plan.reference_shots(2),
+            [(0, OtherShot::Look)],
+            "and so does a scene with no place"
+        );
+        assert_eq!(
+            plan.reference_shots(3),
+            [(0, OtherShot::SamePlace)],
+            "back in the kitchen"
+        );
+
+        // A second scene in the street, right after the first.
+        let street = Scene::planned(
+            ms(0),
+            ms(1),
+            String::new(),
+            ScenePrompt::new("A cat crosses the street.").unwrap(),
+        )
+        .with_place(Some(1));
+        plan.scenes.insert(2, street);
+        draw(&mut plan, &n, 1);
+        assert_eq!(
+            plan.reference_shots(2),
+            [(1, OtherShot::Before)],
+            "the scene before is also the place's first"
+        );
+        draw(&mut plan, &n, 2);
+        let third = Scene::planned(
+            ms(1),
+            ms(2),
+            String::new(),
+            ScenePrompt::new("The cat on a wall of the street.").unwrap(),
+        )
+        .with_place(Some(1));
+        plan.scenes.insert(3, third);
+        assert_eq!(
+            plan.reference_shots(3),
+            [(1, OtherShot::SamePlace), (2, OtherShot::Before)],
+            "the place, then what it continues from"
+        );
+        assert_eq!(
+            plan.reference_shots(1),
+            [(2, OtherShot::SamePlace)],
+            "drawn again, the first of a place follows the others"
+        );
+        assert!(plan.reference_shots(99).is_empty());
+    }
+
+    #[test]
+    fn a_plan_without_places_still_shares_its_look() {
+        let n = narration(STORY, 0);
+        let mut plan = plan(&n, vec![draft(0, "A."), draft(1, "B."), draft(2, "C.")]);
+        draw(&mut plan, &n, 1);
+        assert_eq!(plan.reference_shots(0), [(1, OtherShot::Look)]);
+        assert!(plan.reference_shots(1).is_empty());
+        assert_eq!(plan.reference_shots(2), [(1, OtherShot::Look)]);
+    }
+
+    #[test]
+    fn an_edited_prompt_keeps_its_place_only_while_it_names_it() {
+        let n = narration(STORY, 0);
+        let mut plan = storyboard(&n);
+        draw(&mut plan, &n, 0);
+        assert_eq!(plan.scene_place(3), Some(0));
+        let scene = plan.scene_mut(3, SystemTime::UNIX_EPOCH).unwrap();
+        scene.edit_prompt(ScenePrompt::new("The stove, cold, in the Kitchen.").unwrap());
+        assert_eq!(plan.scene_place(3), Some(0), "still there");
+        let scene = plan.scene_mut(3, SystemTime::UNIX_EPOCH).unwrap();
+        scene.edit_prompt(ScenePrompt::new("A train leaving the city.").unwrap());
+        assert_eq!(plan.scene_place(3), None, "written somewhere else");
+        assert_eq!(
+            plan.reference_shots(3),
+            [(0, OtherShot::Look)],
+            "so the kitchen is no longer its place"
+        );
+        assert_eq!(plan.scenes()[3].place(), Some(0), "as planned");
+    }
+
+    #[test]
+    fn a_place_can_be_described_again() {
+        let n = narration(STORY, 0);
+        let mut plan = storyboard(&n);
+        let later = SystemTime::UNIX_EPOCH + Duration::from_secs(5);
+        let kitchen = plan.place_mut(0, later).unwrap();
+        assert!(!kitchen.is_edited());
+        let same = kitchen.description().clone();
+        assert!(!kitchen.edit_description(same));
+        assert!(kitchen.edit_description(ScenePrompt::new("A steel kitchen at noon.").unwrap()));
+        assert!(kitchen.is_edited());
+        assert_eq!(
+            kitchen.generated_description().as_str(),
+            "A small tiled kitchen at night, one warm lamp."
+        );
+        assert_eq!(plan.updated_at, later);
+        assert_eq!(plan.place_mut(7, later).map(|_| ()), Err(NoSuchPlace(7)));
+    }
+
+    #[test]
+    fn a_scene_prompt_says_where_it_happens_and_what_each_shot_is_for() {
+        let n = narration(STORY, 0);
+        let plan = ScenePlan::from_draft(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            PlanDraft {
+                cast: vec![member("the chef", "A man in his fifties.")],
+                places: vec![somewhere("the kitchen", "A small tiled kitchen at night.")],
+                scenes: vec![SceneDraft {
+                    place: Some(0),
+                    ..cast_draft(0, "The chef plates a dish in the kitchen.", vec![0])
+                }],
+            },
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let shown: Vec<&CastMember> = plan.cast().iter().collect();
+        let kitchen = plan.place(0).ok();
+
+        // Described, with nothing drawn yet to follow.
+        let alone = scene_image_prompt(
+            "The chef plates a dish.",
+            &shown,
+            &[false],
+            SceneSetting {
+                place: kitchen,
+                shots: &[],
+            },
+        );
+        assert!(
+            alone
+                .ends_with("\n\nThe scene happens in the kitchen: A small tiled kitchen at night.")
+        );
+        assert!(!alone.contains("Reference"));
+
+        // Portraits first, then the other shots, numbered on.
+        let prompt = scene_image_prompt(
+            "The chef plates a dish.",
+            &shown,
+            &[true],
+            SceneSetting {
+                place: kitchen,
+                shots: &[OtherShot::SamePlace, OtherShot::Before],
+            },
+        );
+        assert!(prompt.contains("Reference 1: the chef, A man in his fifties."));
+        assert!(prompt.contains("Reference 2: another shot in this same place."));
+        assert!(prompt.contains("Reference 3: the shot right before this one"));
+        assert!(!prompt.contains("Reference 4"));
+        let place = prompt.find("The scene happens in the kitchen").unwrap();
+        assert!(place < prompt.find("Reference 2").unwrap());
+
+        // The look of another place is all a new place takes.
+        let look = scene_image_prompt(
+            "A wet street at dawn.",
+            &[],
+            &[],
+            SceneSetting {
+                place: None,
+                shots: &[OtherShot::Look],
+            },
+        );
+        assert!(look.contains("Reference 1: a shot in another place."));
+        assert!(look.contains("its place, its people and its composition are not part"));
+        assert!(!look.contains("The scene happens in"));
     }
 
     #[test]

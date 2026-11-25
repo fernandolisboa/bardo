@@ -1831,6 +1831,13 @@ redraw = "Desenhar retrato de novo"
 failed = "O retrato não foi desenhado:"
 edited = "Editado"
 
+[scenes.same_place]
+title = "Lugar"
+hint = "As cenas que acontecem no mesmo lugar compartilham uma única descrição dele. O Bardo a envia com cada uma, junto com imagens anteriores do lugar, para que ele pareça o mesmo de cena em cena. Editá-la muda as próximas imagens desenhadas ali."
+edit = "Editar lugar"
+edited = "Editado"
+left = "O prompt desta cena não cita mais o lugar, então ela é desenhada sem ele."
+
 [costs.column]
 provider = "Provedor"
 usage = "Uso"
@@ -2935,7 +2942,7 @@ name = "Tour das Cenas"
 
 [tour.scenes.plan]
 title = "Planeje e desenhe"
-body = "Planejar cenas divide a narração em cenas pelas frases e escreve um prompt de imagem para cada uma. Depois desenhe as imagens que faltam de uma vez; a estimativa fica sob o botão."
+body = "Planejar cenas transforma a narração num storyboard: cenas pelas frases, uma continuando a outra, as pessoas e os lugares que voltam e um prompt de imagem para cada cena. Depois desenhe as imagens que faltam de uma vez, cada uma com as anteriores como referência; a estimativa fica sob o botão."
 
 [tour.scenes.list]
 title = "As cenas"
@@ -2943,7 +2950,7 @@ body = "Cada cena em ordem, com o tempo, a imagem e como está: para desenhar, p
 
 [tour.scenes.scene]
 title = "Uma cena"
-body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, e as pessoas que voltam no vídeo com os retratos de referência, para que fiquem iguais em toda cena. Edite o prompt para mudar o que o próximo desenho mostra."
+body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Edite o prompt para mudar o que o próximo desenho mostra."
 
 [tour.scenes.redraw]
 title = "Desenhe de novo"

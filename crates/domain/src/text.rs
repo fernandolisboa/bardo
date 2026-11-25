@@ -37,6 +37,19 @@ impl std::fmt::Debug for TextImage {
     }
 }
 
+/// How much thought the writer gives a task before answering. More thought
+/// costs more and takes longer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TextEffort {
+    /// What suits most tasks: titles, prompts, ideas, tags.
+    #[default]
+    Everyday,
+    /// For the tasks the rest of a video is built on (its script and its
+    /// scene plan, #258), where a weak answer is paid for again in every
+    /// image and clip.
+    Careful,
+}
+
 /// What to write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextRequest {
@@ -47,6 +60,7 @@ pub struct TextRequest {
     /// Pictures that go with the task, before it.
     pub images: Vec<TextImage>,
     pub format: TextFormat,
+    pub effort: TextEffort,
 }
 
 /// Tokens a generation used, as the provider counted them. Cost tracking

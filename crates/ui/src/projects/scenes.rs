@@ -62,6 +62,8 @@ pub(super) enum ScenePromptField {
     Motion,
     /// A cast member's description.
     Cast(usize),
+    /// A place's description.
+    Place(usize),
 }
 
 impl ProjectsScreen {
@@ -167,6 +169,10 @@ impl ProjectsScreen {
                 Ok(member) => member.description().as_str().to_owned(),
                 Err(_) => return,
             },
+            ScenePromptField::Place(place) => match plan.place(place) {
+                Ok(place) => place.description().as_str().to_owned(),
+                Err(_) => return,
+            },
         };
         self.editing_scene = Some((plan.id, index, field));
         self.scene_field_error = None;
@@ -184,6 +190,7 @@ impl ProjectsScreen {
             ScenePromptField::Image => bardo.edit_scene_prompt(id, index, &text),
             ScenePromptField::Motion => bardo.edit_scene_motion_prompt(id, index, &text),
             ScenePromptField::Cast(member) => bardo.edit_cast_description(id, member, &text),
+            ScenePromptField::Place(place) => bardo.edit_place_description(id, place, &text),
         });
         match saved {
             Some(_) => {
@@ -1171,6 +1178,7 @@ impl ProjectsScreen {
         });
 
         let media = usize::from(failure.is_some());
+        let place = self.render_scene_place(index, scene, open, busy, cx);
         let cast = self.render_scene_cast(index, scene, open, busy, cx);
         let body = failure
             .into_iter()
@@ -1183,9 +1191,88 @@ impl ProjectsScreen {
                     .into_any_element(),
             ))
             .chain(redraw)
+            .chain(place)
             .chain(cast)
             .collect();
         (body, media)
+    }
+
+    /// The recurring place scene `index` happens in (#258): its name and
+    /// the one description every scene there is drawn with, with editing
+    /// it. `None` for a scene in a place of its own.
+    fn render_scene_place(
+        &self,
+        index: usize,
+        scene: &Scene,
+        open: Option<ScenePromptField>,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let plan = self.scenes.as_ref()?.plan.as_ref()?;
+        let at = scene.place()?;
+        let place = plan.place(at).ok()?.clone();
+        // An edited prompt that stopped naming the place left it.
+        let left = plan.scene_place(index).is_none();
+        let editor = (open == Some(ScenePromptField::Place(at)))
+            .then(|| self.render_prompt_editor(index, None, cx));
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let title = h_flex()
+            .gap_1()
+            .items_center()
+            .child(field_label(tr(bardo, Text::ScenePlace)))
+            .child(guide::info(
+                bardo,
+                ("scene-place-info", index),
+                tr(bardo, Text::ScenePlaceHint),
+                guide::refs::SCENES_SAME_PLACE,
+            ))
+            .child(div().flex_1())
+            .when(open.is_none() && !busy, |row| {
+                row.child(
+                    Button::new(("edit-place", index))
+                        .ghost()
+                        .xsmall()
+                        .label(tr(bardo, Text::EditPlaceDescription))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.edit_scene(index, ScenePromptField::Place(at), window, cx)
+                        })),
+                )
+            });
+        let name = h_flex()
+            .gap_2()
+            .items_center()
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(SharedString::from(place.name.clone())),
+            )
+            .when(place.is_edited(), |row| {
+                row.child(kit::status(Tone::Info, tr(bardo, Text::PlaceEdited), cx))
+            });
+        let description: AnyElement = match editor {
+            Some(editor) => editor,
+            None => kit::well(cx)
+                .text_xs()
+                .child(SharedString::from(place.description().as_str().to_owned()))
+                .into_any_element(),
+        };
+        let left = left.then(|| {
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(tr(bardo, Text::ScenePlaceLeft))
+        });
+        Some(
+            v_flex()
+                .gap_1()
+                .child(title)
+                .child(name)
+                .child(description)
+                .children(left)
+                .into_any_element(),
+        )
     }
 
     /// The recurring people scene `index` shows (#246): each one's

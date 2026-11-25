@@ -13,9 +13,9 @@ As cenas dividem a narração nos planos que o vídeo mostra, cada um com uma im
 <a id="plan"></a>
 ## Planejar e desenhar
 
-**Planejar cenas** faz o Claude dividir a narração em cenas pelas frases e escrever um prompt de imagem e um [prompt de movimento](clips.md#motion) para cada uma, a partir do **modelo de prompts de imagem** ([Modelos](templates.md)) e das notas de estética do canal. Ele também lista as [pessoas que voltam](#cast) em mais de uma cena.
+**Planejar cenas** faz o Claude transformar a narração num storyboard, a partir do **modelo de prompts de imagem** ([Modelos](templates.md)) e das notas de estética do canal. Primeiro ele escreve a história que as imagens contam da primeira à última, depois divide a narração em cenas pelas frases, de modo que cada cena continue a anterior, e escreve um prompt de imagem e um [prompt de movimento](clips.md#motion) para cada uma. Ele também lista as [pessoas que voltam](#cast) e os [lugares aos quais o vídeo volta](#same-place).
 
-**Gerar N imagens** então desenha, numa só tarefa, cada cena que ainda não tem imagem. O Nano Banana desenha cada uma a 2K no formato do [vídeo](projects.md#format), 9:16 para um Short e 16:9 para um vídeo longo, e o Gemini cobra cada imagem; uma cena que o provedor recusa não para as outras. A estimativa sob o botão principal diz quanto a rodada custa. Planejar exige uma chave do Claude, e desenhar uma chave do Gemini ([Suas chaves de API](api-keys.md#providers)).
+**Gerar N imagens** então desenha, numa só tarefa e em ordem, cada cena que ainda não tem imagem: cada imagem é desenhada com [imagens anteriores do vídeo](#same-place) ao lado do prompt, para que as cenas pareçam um só vídeo. O Nano Banana desenha cada uma a 2K no formato do [vídeo](projects.md#format), 9:16 para um Short e 16:9 para um vídeo longo, e o Gemini cobra cada imagem; uma cena que o provedor recusa não para as outras. A estimativa sob o botão principal diz quanto a rodada custa. Planejar exige uma chave do Claude, e desenhar uma chave do Gemini ([Suas chaves de API](api-keys.md#providers)).
 
 <a id="list"></a>
 ## As cenas
@@ -30,7 +30,7 @@ A cena escolhida mostra o trecho da narração que ela cobre, a imagem e o **pro
 <a id="redraw"></a>
 ## Desenhar de novo
 
-**Desenhar de novo** faz uma nova imagem a partir do prompt da cena. A nova imagem espera ao lado da atual: **Usar a nova imagem** a substitui, **Manter a atual** descarta a nova. Até você decidir, a cena mostra **Revisar** e a etapa diz quantas esperam.
+**Desenhar de novo** faz uma nova imagem a partir do prompt da cena, do lugar, das pessoas e das outras imagens do vídeo como estão agora. A nova imagem espera ao lado da atual: **Usar a nova imagem** a substitui, **Manter a atual** descarta a nova. Até você decidir, a cena mostra **Revisar** e a etapa diz quantas esperam.
 
 <a id="cast"></a>
 ## Pessoas que voltam
@@ -38,6 +38,22 @@ A cena escolhida mostra o trecho da narração que ela cobre, a imagem e o **pro
 Quando a mesma pessoa aparece em mais de uma cena (o chef, a detetive), o plano a lista uma vez com uma aparência fixa: sexo, idade, tom de pele, cabelo, porte e roupas. Antes de desenhar a primeira cena em que ela aparece, o Nano Banana desenha o **retrato de referência** dela, e toda cena com ela é desenhada com esse retrato e essa aparência, para que mantenha o mesmo rosto de cena para cena. O retrato é cobrado como uma imagem de cena, e a estimativa o conta.
 
 Uma cena que mostra alguém que volta lista essa pessoa em **Pessoas nesta cena**, com o retrato. **Editar aparência** muda a descrição; o retrato deixa de corresponder a ela e sai, e a próxima cena desenhada com essa pessoa desenha um novo antes. **Desenhar retrato de novo** faz um novo retrato com a mesma aparência. Nos dois casos, as cenas já desenhadas mantêm a imagem: desenhe-as de novo para usar o novo retrato. Um retrato que o provedor recusa fica marcado na pessoa, e as cenas dela são desenhadas só pela descrição.
+
+<a id="same-place"></a>
+## O mesmo lugar de cena em cena
+
+Quando mais de uma cena acontece no mesmo lugar (a cozinha, a sala de controle), o plano lista o lugar uma vez com uma única descrição fixa: o que ele é, a época, os objetos principais, a hora do dia, a luz e as cores. Uma cena que acontece ali o mostra em **Lugar**. Uma cena num lugar onde nenhuma outra acontece não tem lugar listado, e descreve o lugar no próprio prompt.
+
+Toda imagem é desenhada com outras imagens do vídeo, que o Nano Banana recebe como referências ao lado do prompt:
+
+- **Uma cena num lugar já desenhado** recebe a descrição do lugar, a primeira imagem desenhada ali e, quando a cena logo antes dela é no mesmo lugar, essa imagem também, para continuar a partir dela: a mesma sala, luz e hora do dia, vistas de outro ângulo.
+- **A primeira cena de um lugar**, e uma cena num lugar só dela, recebe a primeira imagem do vídeo, só para seguir o estilo e as cores.
+
+A primeira imagem de todas não tem o que seguir, então ela define a cara do vídeo: desenhe-a de novo até ficar boa antes de desenhar o resto. As referências quase não custam nada a mais: uma imagem custa o mesmo com ou sem elas.
+
+**Editar lugar** muda a descrição para todas as cenas do lugar; um lugar que você mudou ganha a marca **Editado**. As cenas já desenhadas mantêm a imagem: desenhe-as de novo para usar a nova descrição. Um lugar não pode ser editado enquanto imagens estão sendo desenhadas. Se você reescrever o prompt de uma cena de modo que ele não cite mais o lugar, a cena sai do lugar e é desenhada sem ele.
+
+Cenas planejadas antes de existirem lugares não têm nenhum; ainda assim recebem a primeira imagem do vídeo, pelo estilo. **Planejar de novo** dá lugares a elas.
 
 <a id="filter"></a>
 ## Todas ou pendentes

@@ -1522,6 +1522,11 @@ pub enum Text {
     RedrawCastPortrait,
     CastPortraitFailed,
     CastEdited,
+    ScenePlace,
+    ScenePlaceHint,
+    EditPlaceDescription,
+    PlaceEdited,
+    ScenePlaceLeft,
     SceneCurrentImage,
     SceneNewImage,
     ProjectSwitch,
@@ -4072,6 +4077,11 @@ impl Text {
             Text::RedrawCastPortrait => "scenes.cast.redraw",
             Text::CastPortraitFailed => "scenes.cast.failed",
             Text::CastEdited => "scenes.cast.edited",
+            Text::ScenePlace => "scenes.same_place.title",
+            Text::ScenePlaceHint => "scenes.same_place.hint",
+            Text::EditPlaceDescription => "scenes.same_place.edit",
+            Text::PlaceEdited => "scenes.same_place.edited",
+            Text::ScenePlaceLeft => "scenes.same_place.left",
             Text::SceneCurrentImage => "scenes.inspector.current",
             Text::SceneNewImage => "scenes.inspector.new",
             Text::ProjectSwitch => "projects.switch",
@@ -6620,6 +6630,11 @@ mod tests {
         texts.push(Text::RedrawCastPortrait);
         texts.push(Text::CastPortraitFailed);
         texts.push(Text::CastEdited);
+        texts.push(Text::ScenePlace);
+        texts.push(Text::ScenePlaceHint);
+        texts.push(Text::EditPlaceDescription);
+        texts.push(Text::PlaceEdited);
+        texts.push(Text::ScenePlaceLeft);
         texts.push(Text::SceneCurrentImage);
         texts.push(Text::SceneNewImage);
         texts.push(Text::ProjectSwitch);

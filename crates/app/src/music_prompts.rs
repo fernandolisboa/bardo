@@ -15,8 +15,8 @@ use bardo_domain::{
     ApiKey, CostPurpose, Generation, GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind,
     MusicPrompt, MusicPromptFieldError, MusicPromptRepository, ProfileId, Provider, RenderedPrompt,
     RepositoryError, SecretStore, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
-    TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest, VideoProject,
-    VideoProjectId,
+    TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest,
+    VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -171,6 +171,7 @@ impl MusicPromptHandler {
 
         let key = self.key()?;
         let request = TextRequest {
+            effort: TextEffort::Everyday,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),

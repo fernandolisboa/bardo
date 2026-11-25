@@ -16,8 +16,8 @@ use bardo_domain::{
     JobFailure, JobFailureKind, JobId, JobKind, Money, NoPendingScript, ProfileId, Provider,
     RepositoryError, Script, ScriptFieldError, ScriptRepository, ScriptText, SecretStore,
     TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
-    TemplateVersionId, TextFormat, TextGenerator, TextRequest, UiLanguage, VideoProject,
-    VideoProjectId,
+    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, UiLanguage,
+    VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -189,6 +189,7 @@ impl ScriptHandler {
 
         let key = self.key()?;
         let request = TextRequest {
+            effort: TextEffort::Careful,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),
