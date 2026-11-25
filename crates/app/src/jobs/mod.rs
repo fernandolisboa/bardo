@@ -11,7 +11,7 @@ use bardo_domain::{Job, JobId, JobKind, JobState};
 
 pub use countdown::TestJob;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
-pub(crate) use queue::{JobQueue, Runner};
+pub(crate) use queue::{JobQueue, PaidCallLog, Runner};
 
 use crate::backup::{BackupHandler, RestoreHandler};
 use crate::chapters::ChaptersHandler;
@@ -1222,6 +1222,89 @@ mod tests {
         let left = stored(&db, owner, id);
         assert_eq!(left.external_handle(), None);
         assert_eq!(left.checkpoint(), None);
+    }
+
+    /// A handler that notes a paid call, waits to be told to stop, then
+    /// notes another and clears it, telling in `notes` how each went.
+    #[derive(Default)]
+    struct PaysLate {
+        noted: AtomicBool,
+        notes: Mutex<Option<[Saved; 3]>>,
+    }
+
+    impl PaysLate {
+        fn handlers(self: &Arc<Self>) -> HashMap<JobKind, Arc<dyn JobHandler>> {
+            let this = Arc::clone(self);
+            handlers(move |_, cx| {
+                let log = cx.paid_call_log();
+                let first = Saved::of(log.note(cx.id(), Some("first".into())));
+                this.noted.store(true, Ordering::SeqCst);
+                until_stopped(cx);
+                let second = Saved::of(log.note(cx.id(), Some("second".into())));
+                let cleared = Saved::of(log.note(cx.id(), None));
+                *this.notes.lock().unwrap() = Some([first, second, cleared]);
+                Ok(())
+            })
+        }
+
+        fn wait_noted(&self) {
+            let deadline = Instant::now() + PATIENCE;
+            while !self.noted.load(Ordering::SeqCst) {
+                assert!(Instant::now() < deadline, "the run never noted its call");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+
+        fn notes(&self) -> [Saved; 3] {
+            let deadline = Instant::now() + PATIENCE;
+            loop {
+                if let Some(notes) = *self.notes.lock().unwrap() {
+                    return notes;
+                }
+                assert!(Instant::now() < deadline, "the run never ended");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+    }
+
+    #[test]
+    fn a_closing_queue_notes_no_new_paid_call_and_still_clears_one() {
+        let (db, owner) = memory_db();
+        let pays = Arc::new(PaysLate::default());
+        // The closing queue waits for the run however slow the machine is.
+        let patient = JobSettings {
+            closing_wait: PATIENCE,
+            ..settings()
+        };
+        let q = queue(&db, owner, pays.handlers(), patient);
+        let id = enqueue(&q, owner);
+        pays.wait_noted();
+        assert_eq!(stored(&db, owner, id).paid_call(), Some("first"));
+
+        drop(q);
+
+        // A call noted now would be sent with nobody left to wait for it.
+        assert_eq!(pays.notes(), [Saved::Kept, Saved::NotKept, Saved::Kept]);
+        let left = stored(&db, owner, id);
+        assert_eq!(left.state(), JobState::Running, "closing is not cancelling");
+        assert_eq!(left.paid_call(), None, "the next run goes on by itself");
+    }
+
+    #[test]
+    fn a_cancelled_job_notes_no_new_paid_call_and_still_clears_one() {
+        let (db, owner) = memory_db();
+        let pays = Arc::new(PaysLate::default());
+        let q = queue(&db, owner, pays.handlers(), settings());
+        let id = enqueue(&q, owner);
+        pays.wait_noted();
+
+        q.cancel(id).unwrap();
+
+        assert_eq!(pays.notes(), [Saved::Kept, Saved::NotKept, Saved::Kept]);
+        wait_for(|| q.jobs(), id, |_| !q.runs_here(id));
+        let left = stored(&db, owner, id);
+        assert_eq!(left.state(), JobState::Cancelled);
+        assert_eq!(left.paid_call(), None);
     }
 
     #[test]

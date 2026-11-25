@@ -418,21 +418,21 @@ impl NarrationHandler {
                 previous_text: index.checked_sub(1).and_then(piece),
                 next_text: piece(index + 1),
             };
-            let speech = self.speech.synthesize(key, &request).map_err(|failure| {
-                // A reading that was lost or cannot be used may still have
-                // been billed, by its characters.
-                self.costs.record_failed_for_project(
-                    &failure,
-                    &PlannedCall::new(Provider::ElevenLabs, CostPurpose::Narration, 1)
-                        .with_characters(request.text.chars().count()),
-                    Some(job),
-                    project,
-                );
-                JobFailure::new(
-                    failure.kind.into(),
-                    format!("ElevenLabs: {}", failure.detail),
-                )
-            })?;
+            let paid_call = PlannedCall::new(Provider::ElevenLabs, CostPurpose::Narration, 1)
+                .with_characters(request.text.chars().count());
+            let speech = {
+                let _paying = self.costs.paying_for_project(job, &paid_call, project)?;
+                self.speech.synthesize(key, &request).map_err(|failure| {
+                    // A reading that was lost or cannot be used may still have
+                    // been billed, by its characters.
+                    self.costs
+                        .record_failed_for_project(&failure, &paid_call, Some(job), project);
+                    JobFailure::new(
+                        failure.kind.into(),
+                        format!("ElevenLabs: {}", failure.detail),
+                    )
+                })
+            }?;
             self.costs.record_for_project(
                 PaidCall {
                     provider: Provider::ElevenLabs,
@@ -1339,6 +1339,7 @@ pub(crate) mod tests {
                 owner: app.profile().id,
                 costs: Arc::clone(&h.db) as _,
                 themes: Arc::clone(&h.db) as _,
+                in_flight: std::sync::Arc::default(),
             },
         };
         handler.narrate(job.payload(), job.id(), None).unwrap();

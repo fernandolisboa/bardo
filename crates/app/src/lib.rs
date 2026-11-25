@@ -755,6 +755,7 @@ impl Bardo {
             owner: profile.id,
             costs,
             themes: Arc::clone(&themes),
+            in_flight: Arc::default(),
         };
         let research_handler = NicheResearchHandler {
             owner: profile.id,
@@ -1036,41 +1037,44 @@ impl Bardo {
             jobs,
             profile.id,
             runner,
-            crate::jobs::built_in_handlers(crate::jobs::BuiltInHandlers {
-                research: research_handler,
-                themes: theme_handler,
-                scripts: script_handler,
-                localizations: localization_handler,
-                narrations: narration_handler,
-                imports: import_handler,
-                captures: capture_handler,
-                analyses: analysis_handler,
-                controls: control_handler,
-                take_prompts: take_prompt_handler,
-                performed: performed_handler,
-                staging: staging_handler,
-                framing: framing_handler,
-                scenes: scene_handler,
-                clips: clip_handler,
-                proxies: proxy_handler,
-                music_prompts: music_prompt_handler,
-                music: music_handler,
-                thumbnails: thumbnail_handler,
-                looks: look_handler,
-                chapters: chapters_handler,
-                renders: render_handler,
-                metadata: metadata_handler,
-                exports: export_handler,
-                metrics: metrics_handler,
-                cuts: cut_handler,
-                uploads: upload_handler,
-                backups: backup_handler,
-                restores: restore_handler,
-                updates: crate::updates::UpdateDownloadHandler {
-                    feed: Arc::clone(&providers.releases),
-                    installers: Arc::clone(&installers),
-                },
-            }),
+            crate::costs::paid_calls_sent_once(
+                crate::jobs::built_in_handlers(crate::jobs::BuiltInHandlers {
+                    research: research_handler,
+                    themes: theme_handler,
+                    scripts: script_handler,
+                    localizations: localization_handler,
+                    narrations: narration_handler,
+                    imports: import_handler,
+                    captures: capture_handler,
+                    analyses: analysis_handler,
+                    controls: control_handler,
+                    take_prompts: take_prompt_handler,
+                    performed: performed_handler,
+                    staging: staging_handler,
+                    framing: framing_handler,
+                    scenes: scene_handler,
+                    clips: clip_handler,
+                    proxies: proxy_handler,
+                    music_prompts: music_prompt_handler,
+                    music: music_handler,
+                    thumbnails: thumbnail_handler,
+                    looks: look_handler,
+                    chapters: chapters_handler,
+                    renders: render_handler,
+                    metadata: metadata_handler,
+                    exports: export_handler,
+                    metrics: metrics_handler,
+                    cuts: cut_handler,
+                    uploads: upload_handler,
+                    backups: backup_handler,
+                    restores: restore_handler,
+                    updates: crate::updates::UpdateDownloadHandler {
+                        feed: Arc::clone(&providers.releases),
+                        installers: Arc::clone(&installers),
+                    },
+                }),
+                &cost_book,
+            ),
             job_settings,
             redactor,
         )?;
@@ -1452,6 +1456,14 @@ pub(crate) mod testing {
         pub(crate) usage: Mutex<TokenUsage>,
         /// How long each call takes, to catch a job mid-run.
         pub(crate) delay: Mutex<Duration>,
+        /// The next call hangs until `release`, as when Bardo closes while
+        /// the provider works, and then answers nothing: the process that
+        /// sent it is gone.
+        pub(crate) hang: std::sync::atomic::AtomicBool,
+        /// A call is hanging.
+        pub(crate) hanging: std::sync::atomic::AtomicBool,
+        /// Lets a hanging call end.
+        pub(crate) release: std::sync::atomic::AtomicBool,
     }
 
     impl FakeTextGenerator {
@@ -1482,6 +1494,19 @@ pub(crate) mod testing {
             self.requests.lock().unwrap().push(request.clone());
             let delay = *self.delay.lock().unwrap();
             std::thread::sleep(delay);
+            if self.hang.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                self.hanging
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                while !self.release.load(std::sync::atomic::Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                self.hanging
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::AnswerLost,
+                    "the app that sent it closed",
+                ));
+            }
             if let Some(failure) = self.failure.lock().unwrap().clone() {
                 return Err(failure);
             }

@@ -39,7 +39,7 @@ Um pedido de clipe que o provedor aceitou e que depois terminou sem clipe (falho
 <a id="restart"></a>
 ## Fechar o Bardo no meio de uma tarefa
 
-Fechar o Bardo, ou desligar o computador, nunca perde uma tarefa. Na próxima vez que o Bardo abrir, cada tarefa em execução continua do último ponto que salvou, e a tentativa em que estava não conta nas novas tentativas. Uma tarefa que já tinha entregado trabalho a um provedor (um clipe sendo feito, um envio sendo processado) pergunta ao provedor como ficou, em vez de pagar duas vezes. Uma tarefa esperando nova tentativa, ou esperando a hora dela, continua esperando.
+Fechar o Bardo, ou desligar o computador, nunca perde uma tarefa. Na próxima vez que o Bardo abrir, cada tarefa em execução continua do último ponto que salvou, e a tentativa em que estava não conta nas novas tentativas. Uma tarefa que já tinha entregado trabalho a um provedor (um clipe sendo feito, um envio sendo processado) pergunta ao provedor como ficou, em vez de pagar duas vezes. Uma tarefa que esperava a resposta de um pedido pago de texto, imagem, voz ou música, sobre o qual não dá para perguntar, não o envia de novo: ela para como **Com falha**, como num [pedido pago que ficou sem resposta](troubleshooting.md#answer-lost), e [Custos](costs.md#spent) conta uma estimativa do que ele pode ter custado. Uma tarefa esperando nova tentativa, ou esperando a hora dela, continua esperando.
 
 <a id="test"></a>
 ## Tarefas de teste

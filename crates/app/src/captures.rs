@@ -236,6 +236,13 @@ fn billed_seconds(duration: Duration) -> u64 {
     duration.as_millis().div_ceil(1_000) as u64
 }
 
+/// The paid call over `sound`, as planned before it is sent.
+fn planned(purpose: CostPurpose, model: &str, sound: Duration) -> PlannedCall {
+    PlannedCall::new(PROVIDER, purpose, 1)
+        .with_model(model)
+        .with_audio_seconds(billed_seconds(sound))
+}
+
 /// Reads recordings the user chooses. It holds no UI state, so the screen
 /// moves it to a background thread for the file chosen.
 #[derive(Clone)]
@@ -602,12 +609,26 @@ impl CaptureHandler {
         sound: Duration,
         failure: ProviderFailure,
     ) -> JobFailure {
-        let call = PlannedCall::new(PROVIDER, purpose, 1)
-            .with_model(model)
-            .with_audio_seconds(billed_seconds(sound));
-        self.costs
-            .record_failed_for_project(&failure, &call, Some(work.job), work.project);
+        self.costs.record_failed_for_project(
+            &failure,
+            &planned(purpose, model, sound),
+            Some(work.job),
+            work.project,
+        );
         provider_failure(failure)
+    }
+
+    /// Notes the paid call over `sound` before it is sent, so a run cut
+    /// short while it is in flight does not send it again (ADR-0030).
+    fn paying(
+        &self,
+        work: &Work,
+        purpose: CostPurpose,
+        model: &str,
+        sound: Duration,
+    ) -> Result<crate::costs::Paying, JobFailure> {
+        self.costs
+            .paying_for_project(work.job, &planned(purpose, model, sound), work.project)
     }
 
     /// Imports the recording `job` asks for. Without a context (tests
@@ -734,25 +755,30 @@ impl CaptureHandler {
                 return Ok(());
             }
             let key = key.insert(self.key()?);
-            let transcript = self
-                .transcriber
-                .transcribe(
-                    key,
-                    &TranscriptionRequest {
-                        audio: &sound,
-                        file_name: &sound_name,
-                        language: Some(&payload.language),
-                    },
+            let paying = self.paying(
+                &work,
+                CostPurpose::ScriptCheck,
+                bardo_ai::elevenlabs::TRANSCRIPTION_MODEL,
+                length,
+            )?;
+            let transcript = self.transcriber.transcribe(
+                key,
+                &TranscriptionRequest {
+                    audio: &sound,
+                    file_name: &sound_name,
+                    language: Some(&payload.language),
+                },
+            );
+            drop(paying);
+            let transcript = transcript.map_err(|failure| {
+                self.failed(
+                    &work,
+                    CostPurpose::ScriptCheck,
+                    bardo_ai::elevenlabs::TRANSCRIPTION_MODEL,
+                    length,
+                    failure,
                 )
-                .map_err(|failure| {
-                    self.failed(
-                        &work,
-                        CostPurpose::ScriptCheck,
-                        bardo_ai::elevenlabs::TRANSCRIPTION_MODEL,
-                        length,
-                        failure,
-                    )
-                })?;
+            })?;
             let record = HeardRecord {
                 model: transcript.model.clone(),
                 words: transcript
@@ -817,18 +843,24 @@ impl CaptureHandler {
                 audio: &piece,
                 file_name: &file_name,
             };
-            let (changed, purpose, model) = match &work.voice {
-                CaptureVoice::Persona { voice, presets } => (
-                    self.voice_changer.change(key, voice, *presets, &request),
+            let (purpose, model) = match &work.voice {
+                CaptureVoice::Persona { .. } => (
                     CostPurpose::VoiceChange,
                     bardo_ai::elevenlabs::VOICE_CHANGER_MODEL,
                 ),
                 CaptureVoice::Own => (
-                    self.voice_isolator.isolate(key, &request),
                     CostPurpose::VoiceIsolation,
                     bardo_ai::elevenlabs::ISOLATION_MODEL,
                 ),
             };
+            let paying = self.paying(&work, purpose, model, span.end - span.start)?;
+            let changed = match &work.voice {
+                CaptureVoice::Persona { voice, presets } => {
+                    self.voice_changer.change(key, voice, *presets, &request)
+                }
+                CaptureVoice::Own => self.voice_isolator.isolate(key, &request),
+            };
+            drop(paying);
             let changed = changed.map_err(|failure| {
                 self.failed(&work, purpose, model, span.end - span.start, failure)
             })?;
@@ -901,25 +933,30 @@ impl CaptureHandler {
                 Some(key) => key,
                 None => key.insert(self.key()?),
             };
-            let aligned = self
-                .aligner
-                .align(
-                    key,
-                    &AlignmentRequest {
-                        audio: &joined.bytes,
-                        file_name: &audio_file,
-                        text: work.text.as_str(),
-                    },
+            let paying = self.paying(
+                &work,
+                CostPurpose::NarrationAlignment,
+                bardo_ai::elevenlabs::ALIGNMENT_MODEL,
+                joined.duration,
+            )?;
+            let aligned = self.aligner.align(
+                key,
+                &AlignmentRequest {
+                    audio: &joined.bytes,
+                    file_name: &audio_file,
+                    text: work.text.as_str(),
+                },
+            );
+            drop(paying);
+            let aligned = aligned.map_err(|failure| {
+                self.failed(
+                    &work,
+                    CostPurpose::NarrationAlignment,
+                    bardo_ai::elevenlabs::ALIGNMENT_MODEL,
+                    joined.duration,
+                    failure,
                 )
-                .map_err(|failure| {
-                    self.failed(
-                        &work,
-                        CostPurpose::NarrationAlignment,
-                        bardo_ai::elevenlabs::ALIGNMENT_MODEL,
-                        joined.duration,
-                        failure,
-                    )
-                })?;
+            })?;
             let record = AlignedRecord {
                 model: aligned.model.clone(),
                 chars: aligned

@@ -246,28 +246,27 @@ impl NarrationImportHandler {
         }
 
         let key = self.key()?;
-        let aligned = self
-            .aligner
-            .align(
-                &key,
-                &AlignmentRequest {
-                    audio: &audio,
-                    file_name: &file,
-                    text: text.as_str(),
-                },
-            )
-            .map_err(|failure| {
-                self.costs.record_failed_for_project(
-                    &failure,
-                    &alignment_call(billed_seconds(info.duration)),
-                    Some(job),
-                    project,
-                );
-                JobFailure::new(
-                    failure.kind.into(),
-                    format!("ElevenLabs: {}", failure.detail),
+        let paid_call = alignment_call(billed_seconds(info.duration));
+        let aligned = {
+            let _paying = self.costs.paying_for_project(job, &paid_call, project)?;
+            self.aligner
+                .align(
+                    &key,
+                    &AlignmentRequest {
+                        audio: &audio,
+                        file_name: &file,
+                        text: text.as_str(),
+                    },
                 )
-            })?;
+                .map_err(|failure| {
+                    self.costs
+                        .record_failed_for_project(&failure, &paid_call, Some(job), project);
+                    JobFailure::new(
+                        failure.kind.into(),
+                        format!("ElevenLabs: {}", failure.detail),
+                    )
+                })
+        }?;
         self.costs.record_for_project(
             PaidCall {
                 provider: ALIGNER,
@@ -954,6 +953,7 @@ mod tests {
                 owner: app.profile().id,
                 costs: Arc::clone(&h.db) as _,
                 themes: Arc::clone(&h.db) as _,
+                in_flight: std::sync::Arc::default(),
             },
         }
     }
