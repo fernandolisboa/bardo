@@ -2,7 +2,7 @@ HTTP/2 200
 content-type: application/json; charset=UTF-8
 
 {
-  "metadata": {
-    "@type": "type.googleapis.com/google.ai.generativelanguage.v1beta.PredictLongRunningMetadata"
-  }
+  "status": "in_progress",
+  "model": "gemini-omni-1.2-flash",
+  "object": "interaction"
 }

@@ -151,8 +151,8 @@ pub use chapters::{
 };
 pub use clip::{
     ClipDurations, ClipFit, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel,
-    ClipModelError, ClipModelRef, ClipRequest, ClipStatus, ClipSubmission, GeneratedClip,
-    StagedImage, StretchLimit,
+    ClipModelError, ClipModelRef, ClipRequest, ClipStatus, ClipSubmission, CurrentClipModel,
+    GeneratedClip, RetiredClipModel, StagedImage, StretchLimit, current_clip_model,
 };
 pub use connection::{
     AppCredentials, AppCredentialsFieldError, BrowserSignIn, ConnectedIdentity, ConnectionSecrets,

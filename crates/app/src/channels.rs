@@ -59,7 +59,15 @@ impl Bardo {
         Ok(self.channels.list(self.profile.id)?)
     }
 
+    /// `draft` with the video model its choice names today: a form or a
+    /// settings file may still name one its provider has since retired.
+    fn with_current_clip_model(&self, mut draft: ChannelDraft) -> ChannelDraft {
+        draft.clip_model = draft.clip_model.map(|model| self.clip_model_now(&model));
+        draft
+    }
+
     pub fn create_channel(&self, draft: ChannelDraft) -> Result<Channel, ChannelError> {
+        let draft = self.with_current_clip_model(draft);
         let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
         self.ensure_name_free(&details, None)?;
         self.ensure_own_persona(&details)?;
@@ -79,6 +87,7 @@ impl Bardo {
             .get(id)?
             .filter(|channel| channel.owner == self.profile.id)
             .ok_or(ChannelError::NotFound)?;
+        let draft = self.with_current_clip_model(draft);
         let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
         self.ensure_name_free(&details, Some(id))?;
         self.ensure_own_persona(&details)?;

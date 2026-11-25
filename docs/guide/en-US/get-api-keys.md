@@ -87,7 +87,7 @@ Seedance 2.5 refuses real faces in what it is sent, so a photo of you goes throu
 ## Gemini
 
 1. Open [Google AI Studio](https://aistudio.google.com/) with your Google account and accept the terms. A new account gets a Google Cloud project made for it; if you already use Google Cloud, bring a project in from [Projects](https://aistudio.google.com/projects) with **Import projects**.
-2. Set up billing. Google's image models (Nano Banana) and video models (Veo) have no free tier, so the project needs a billing account. On [API Keys](https://aistudio.google.com/api-keys) or [Projects](https://aistudio.google.com/projects), select **Set up billing** next to the project and follow the steps; a prepaid account needs a balance, which you manage in [Billing](https://aistudio.google.com/billing). When a prepaid balance reaches zero, Google refuses the calls until you top it up.
+2. Set up billing. Google's image models (Nano Banana) and video models (Gemini Omni Flash) have no free tier, so the project needs a billing account. On [API Keys](https://aistudio.google.com/api-keys) or [Projects](https://aistudio.google.com/projects), select **Set up billing** next to the project and follow the steps; a prepaid account needs a balance, which you manage in [Billing](https://aistudio.google.com/billing). When a prepaid balance reaches zero, Google refuses the calls until you top it up.
 3. On [API Keys](https://aistudio.google.com/api-keys), select **Create API key** and pick the project.
 4. Copy the key. Depending on when it was made it starts with `AIza` or `AQ.`; copy all of it.
 5. Paste it into the **Gemini** card in [Settings › API keys](bardo:go/settings/keys), select **Save key**, then **Test key**.

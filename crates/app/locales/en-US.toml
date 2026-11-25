@@ -460,7 +460,7 @@ placeholder = "Your ElevenLabs API key"
 
 [provider.gemini]
 name = "Gemini"
-purpose = "Images (Nano Banana) and video clips (Veo, Gemini Omni Flash), from Google AI Studio."
+purpose = "Images (Nano Banana) and video clips (Gemini Omni Flash), from Google AI Studio."
 placeholder = "Your Gemini API key"
 
 [provider.higgsfield]
@@ -1043,6 +1043,8 @@ failed = "No clip:"
 model = "Video model"
 model_channel = "Default ({model})"
 model_gone = "This scene's video model is no longer offered. Pick another one."
+model_replaced = "This scene's video model, {old}, was retired by its provider. New clips use {new}."
+channel_model_replaced = "The channel's video model, {old}, was retired by its provider. New clips use {new}; saving the channel keeps it."
 plan = "Next clip: {seconds} s · {price}"
 plan_unpriced = "Next clip: {seconds} s · no rate for this model"
 slowed_next = "Plays slowed to fit the scene"
