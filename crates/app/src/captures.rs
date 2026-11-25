@@ -580,6 +580,24 @@ impl CaptureHandler {
         Ok(())
     }
 
+    /// The failure of a paid call over `sound`, with what it may have
+    /// cost although it gave nothing recorded.
+    fn failed(
+        &self,
+        work: &Work,
+        purpose: CostPurpose,
+        model: &str,
+        sound: Duration,
+        failure: ProviderFailure,
+    ) -> JobFailure {
+        let call = PlannedCall::new(PROVIDER, purpose, 1)
+            .with_model(model)
+            .with_audio_seconds(billed_seconds(sound));
+        self.costs
+            .record_failed_for_project(&failure, &call, Some(work.job), work.project);
+        provider_failure(failure)
+    }
+
     /// Imports the recording `job` asks for. Without a context (tests
     /// replaying a job) nothing reports progress or stops it.
     fn import(
@@ -714,7 +732,15 @@ impl CaptureHandler {
                         language: Some(&payload.language),
                     },
                 )
-                .map_err(provider_failure)?;
+                .map_err(|failure| {
+                    self.failed(
+                        &work,
+                        CostPurpose::ScriptCheck,
+                        bardo_ai::elevenlabs::TRANSCRIPTION_MODEL,
+                        length,
+                        failure,
+                    )
+                })?;
             let record = HeardRecord {
                 model: transcript.model.clone(),
                 words: transcript
@@ -779,17 +805,21 @@ impl CaptureHandler {
                 audio: &piece,
                 file_name: &file_name,
             };
-            let (changed, purpose) = match &work.voice {
+            let (changed, purpose, model) = match &work.voice {
                 CaptureVoice::Persona { voice, presets } => (
                     self.voice_changer.change(key, voice, *presets, &request),
                     CostPurpose::VoiceChange,
+                    bardo_ai::elevenlabs::VOICE_CHANGER_MODEL,
                 ),
                 CaptureVoice::Own => (
                     self.voice_isolator.isolate(key, &request),
                     CostPurpose::VoiceIsolation,
+                    bardo_ai::elevenlabs::ISOLATION_MODEL,
                 ),
             };
-            let changed = changed.map_err(provider_failure)?;
+            let changed = changed.map_err(|failure| {
+                self.failed(&work, purpose, model, span.end - span.start, failure)
+            })?;
             self.files
                 .write(project, &part_audio(work.capture, index), &changed.audio)
                 .map_err(unexpected)?;
@@ -869,7 +899,15 @@ impl CaptureHandler {
                         text: work.text.as_str(),
                     },
                 )
-                .map_err(provider_failure)?;
+                .map_err(|failure| {
+                    self.failed(
+                        &work,
+                        CostPurpose::NarrationAlignment,
+                        bardo_ai::elevenlabs::ALIGNMENT_MODEL,
+                        joined.duration,
+                        failure,
+                    )
+                })?;
             let record = AlignedRecord {
                 model: aligned.model.clone(),
                 chars: aligned
@@ -1872,10 +1910,10 @@ pub(crate) mod tests {
         let project = project(&s.app);
         // Parts of five seconds at most: the 13 seconds go in three.
         *s.h.voice_changer.max.lock().unwrap() = Some(Duration::from_secs(5));
-        *s.h.aligner.failure.lock().unwrap() = Some(ProviderFailure {
-            kind: ProviderFailureKind::Rejected,
-            detail: "invalid key".into(),
-        });
+        *s.h.aligner.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid key",
+        ));
 
         let job = s.import(project.id, &s.chosen(13), CaptureVoiceChoice::Persona);
         assert_eq!(job.state(), JobState::Failed);
@@ -1915,13 +1953,64 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_capture_step_whose_answer_is_lost_is_asked_for_once_and_is_in_costs() {
+        use crate::costs::tests::lost_answer;
+
+        let heard = (
+            CostPurpose::ScriptCheck,
+            bardo_ai::elevenlabs::TRANSCRIPTION_MODEL.to_owned(),
+            13,
+        );
+        let voiced = (
+            CostPurpose::VoiceChange,
+            bardo_ai::elevenlabs::VOICE_CHANGER_MODEL.to_owned(),
+            13,
+        );
+        // Each step lost in turn: it and the steps that answered before it
+        // are in Costs, nothing after it was asked for.
+        for step in 0..3 {
+            let s = setup(13);
+            let project = project(&s.app);
+            let lost = Some(lost_answer());
+            match step {
+                0 => *s.h.transcriber.failure.lock().unwrap() = lost,
+                1 => *s.h.voice_changer.failure.lock().unwrap() = lost,
+                _ => *s.h.aligner.failure.lock().unwrap() = lost,
+            }
+            let job = s.import(project.id, &s.chosen(13), CaptureVoiceChoice::Persona);
+            assert_eq!(job.state(), JobState::Failed, "step {step}");
+            assert_eq!(job.attempts(), 1, "the queue allows two");
+            assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+            assert_eq!(s.h.transcriber.requests.lock().unwrap().len(), 1);
+            assert_eq!(
+                s.h.voice_changer.requests.lock().unwrap().len(),
+                step.min(1)
+            );
+            let costs = s.costs(project.id);
+            match step {
+                0 => assert_eq!(costs, std::slice::from_ref(&heard)),
+                1 => assert_eq!(costs, [heard.clone(), voiced.clone()]),
+                _ => {
+                    assert_eq!(costs.len(), 3, "{costs:?}");
+                    let timed = costs
+                        .iter()
+                        .find(|(purpose, ..)| *purpose == CostPurpose::NarrationAlignment)
+                        .expect("the timing that may have been done");
+                    assert_eq!(timed.1, bardo_ai::elevenlabs::ALIGNMENT_MODEL);
+                    assert!(timed.2 > 0, "by the length of the voiced sound");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_failed_import_stays_retryable_until_a_newer_one_replaces_it() {
         let mut s = setup(13);
         let project = project(&s.app);
-        *s.h.aligner.failure.lock().unwrap() = Some(ProviderFailure {
-            kind: ProviderFailureKind::Rejected,
-            detail: "invalid key".into(),
-        });
+        *s.h.aligner.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid key",
+        ));
         let failed = s.import(project.id, &s.chosen(13), CaptureVoiceChoice::Persona);
         assert_eq!(failed.state(), JobState::Failed);
         let left = CapturePayload::parse(failed.payload())

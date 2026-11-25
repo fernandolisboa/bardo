@@ -45,16 +45,29 @@ pub struct StreamedAnswer {
     pub stop_details: Value,
     /// As the API counted them so far, from `message_start` and then from
     /// each `message_delta`. When more than one model worked on the answer
-    /// (a fallback), the sum of what each is billed.
+    /// (a fallback), the sum of what each used.
     pub usage: TokenUsage,
     pub end: StreamEnd,
 }
 
 impl StreamedAnswer {
+    /// An answer of which nothing arrived, ended as `end` says.
+    pub fn unstarted(end: StreamEnd) -> Self {
+        Self {
+            model: None,
+            text: String::new(),
+            stop_reason: None,
+            stop_details: Value::Null,
+            usage: TokenUsage::default(),
+            end,
+        }
+    }
+
     /// Whether generation began, so the request is billed even though the
-    /// answer may not have arrived whole.
+    /// answer may not have arrived whole: a message started, or something
+    /// of one arrived although its start could not be read.
     pub fn started(&self) -> bool {
-        self.model.is_some()
+        self.model.is_some() || !self.text.is_empty() || self.usage != TokenUsage::default()
     }
 }
 
@@ -75,14 +88,7 @@ fn is_read(kind: &str) -> bool {
 /// Reads the events of `body` until the message stops, the API reports an
 /// error, or the stream breaks.
 pub fn read(body: impl Read) -> StreamedAnswer {
-    let mut answer = StreamedAnswer {
-        model: None,
-        text: String::new(),
-        stop_reason: None,
-        stop_details: Value::Null,
-        usage: TokenUsage::default(),
-        end: StreamEnd::Complete,
-    };
+    let mut answer = StreamedAnswer::unstarted(StreamEnd::Complete);
     answer.end = read_into(&mut answer, body);
     // The stop reason is the last thing a message says, after all of its
     // content: an answer that gave one is whole, whatever happened to the
@@ -128,6 +134,10 @@ fn read_into(answer: &mut StreamedAnswer, body: impl Read) -> StreamEnd {
             // block marks where another model took the answer over: the
             // text carries on after it, written by that model.
             "content_block_start" => {
+                // The stop reason comes after all content. More content
+                // means the answer goes on, so what was said is not its
+                // end.
+                answer.stop_reason = None;
                 let block = &data["content_block"];
                 if block["type"] == "text" {
                     answer
@@ -141,6 +151,7 @@ fn read_into(answer: &mut StreamedAnswer, body: impl Read) -> StreamEnd {
             }
             // Thinking, signatures and tool input arrive as other deltas.
             "content_block_delta" => {
+                answer.stop_reason = None;
                 let delta = &data["delta"];
                 if delta["type"] == "text_delta" {
                     answer
@@ -179,8 +190,12 @@ fn read_into(answer: &mut StreamedAnswer, body: impl Read) -> StreamEnd {
 /// Counts are cumulative, and an event may leave one out: a count that is
 /// absent keeps what an earlier event said. When the answer took more than
 /// one attempt (a declined request that a fallback model answered),
-/// `iterations` lists what each attempt is billed and the counts beside it
-/// are only the last attempt's, so the bill is their sum.
+/// `iterations` lists what each attempt used and the counts beside it are
+/// only the last attempt's, so the use is their sum. That sum is the most
+/// the answer can cost, not always the bill: an attempt that declined
+/// before it wrote anything is billed only for some reasons, and each
+/// attempt is billed at its own model's rate, while the sum is recorded
+/// under the model that answered.
 pub(crate) fn read_usage(usage: &Value, into: &mut TokenUsage) {
     if let Some(input) = usage["input_tokens"].as_u64() {
         into.input_tokens = input;
@@ -353,7 +368,7 @@ mod tests {
                 if self.0.is_empty() {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::TimedOut,
-                        "no data for 180 seconds",
+                        "no data for 600 seconds",
                     ));
                 }
                 let count = buffer.len().min(self.0.len());
@@ -366,7 +381,7 @@ mod tests {
         let answer = read(Silent(stream.as_bytes()));
         assert_eq!(
             answer.end,
-            StreamEnd::Broken("no data for 180 seconds".to_owned())
+            StreamEnd::Broken("no data for 600 seconds".to_owned())
         );
         assert_eq!(answer.text, "so far");
     }
@@ -443,6 +458,41 @@ mod tests {
         ]
         .concat();
         assert_eq!(read(stream.as_bytes()).end, StreamEnd::Complete);
+    }
+
+    #[test]
+    fn a_stop_reason_followed_by_more_of_the_answer_is_not_its_end() {
+        // Not a flow the API documents: if more content follows a stop
+        // reason, the answer was not over, and a stream that then drops
+        // did not bring it whole.
+        let stream = [
+            START,
+            &text_block(0, &["half"]),
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":\
+             {\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":40}}\n\n",
+            &text_block(1, &[" more"]),
+        ]
+        .concat();
+        let answer = read(stream.as_bytes());
+        assert_eq!(answer.text, "half more");
+        assert_eq!(answer.stop_reason, None);
+        assert!(matches!(answer.end, StreamEnd::Broken(_)), "{answer:?}");
+    }
+
+    #[test]
+    fn an_answer_whose_start_could_not_be_read_still_started() {
+        // Text arrived although no `message_start` was read: an error
+        // after it is not one that opens the stream.
+        let stream = [
+            &text_block(0, &["half"]),
+            "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\
+             \"message\":\"Overloaded\"}}\n\n",
+        ]
+        .concat();
+        let answer = read(stream.as_bytes());
+        assert_eq!(answer.model, None);
+        assert!(answer.started());
+        assert!(!read(&b""[..]).started());
     }
 
     #[test]

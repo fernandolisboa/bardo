@@ -143,6 +143,19 @@ fn a_rate_limit_is_waited_out() {
 }
 
 #[test]
+fn an_alignment_whose_answer_is_lost_is_asked_for_once() {
+    let adapter = ElevenLabsAlignment::with_transport(Scripted::losing_the_answer());
+    let failure = adapter.align(&key(), &request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+
+    let adapter = aligner(&["alignment-gateway-timeout"]);
+    let failure = adapter.align(&key(), &request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+}
+
+#[test]
 fn an_unreachable_provider_is_reported() {
     let failure = ElevenLabsAlignment::with_transport(Scripted::offline())
         .align(&key(), &request())

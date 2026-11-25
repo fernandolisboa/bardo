@@ -593,9 +593,10 @@ impl SceneHandler {
             ));
         }
         let key = self.key(Provider::Claude)?;
+        let size = ScenePlanSize::of(&narration);
         let request = TextRequest {
             effort: TextEffort::Careful,
-            answer_tokens: Some(ScenePlanSize::of(&narration).answer_tokens_at_most()),
+            answer_tokens: Some(size.answer_tokens_at_most()),
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),
@@ -604,6 +605,15 @@ impl SceneHandler {
             },
         };
         let generated = self.text.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost or cut may still have been billed.
+            // One that was lost is recorded as a plan of this length, as
+            // it was estimated: what other plans took says little.
+            self.costs.record_failed_for_project(
+                &failure,
+                &sized_plan_call(size).with_prompt(&request.instructions, &request.prompt),
+                Some(job),
+                project,
+            );
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })?;
         self.costs.record_for_project(
@@ -906,6 +916,13 @@ impl SceneHandler {
                     }
                 }
                 Err(failure) => {
+                    // An answer that was lost may still have been billed.
+                    self.costs.record_failed_for_project(
+                        &failure,
+                        &images_call(1),
+                        Some(job),
+                        project,
+                    );
                     let kind = JobFailureKind::from(failure.kind);
                     let failure = JobFailure::new(
                         kind,
@@ -1031,6 +1048,9 @@ impl SceneHandler {
                 Ok(())
             }
             Err(failure) => {
+                // An answer that was lost may still have been billed.
+                self.costs
+                    .record_failed_for_project(&failure, &images_call(1), Some(job), project);
                 let kind = JobFailureKind::from(failure.kind);
                 let failure = JobFailure::new(
                     kind,

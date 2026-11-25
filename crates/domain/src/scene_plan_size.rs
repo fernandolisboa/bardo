@@ -178,8 +178,9 @@ mod tests {
     fn the_bill_counts_the_thought_before_the_answer() {
         // A Short: 600 + 10 scenes of 160, and the thought a plan takes.
         assert_eq!(minutes(1, 15).output_tokens_usually(), 2_200 + 10_000);
-        // Ten minutes: 16,600 of answer and half as much again.
+        // Ten minutes: 16,600 of answer and the same thought.
         assert_eq!(minutes(10, 150).output_tokens_usually(), 16_600 + 10_000);
+        // Twenty: the thought is half the answer once that is more.
         assert_eq!(minutes(20, 300).output_tokens_usually(), 32_600 + 16_300);
     }
 }

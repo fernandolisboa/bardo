@@ -23,6 +23,11 @@ What Bardo's messages mean when something stops, and what to do. A job that stop
 
 "A quota or rate limit stopped the provider" means the provider is refusing calls for now, not that anything is broken. YouTube's quotas, for the Data API and for uploads, reset daily at midnight Pacific time; research results are kept for seven days, so running again within a week costs none. A provider that runs on credits stops when they run out: add credit in its dashboard. Jobs stopped by a rate limit retry by themselves first; when they give up, **Retry** them later.
 
+<a id="answer-lost"></a>
+## A paid request got no answer
+
+"The request was sent, but no answer came back" means Bardo sent a paid request (a script, a scene plan, an image, a narration part, a music track) and the connection dropped, or the wait ran out, before the provider answered or while a long answer was still arriving. The provider may have done the work and charged for it, so Bardo did not send it again by itself: the job stopped after that one request, and [Costs](costs.md#spent) counts an estimate of what it may have cost, so budgets and a video's spend cap do not undercount. Check the connection, look at the provider's usage page if the amount matters, then **Retry** when you are ready; the retry is a new paid request. A request that never left the computer, as when the network is off, costs nothing and is still retried by itself.
+
 <a id="reconnect"></a>
 ## An account needs to reconnect
 

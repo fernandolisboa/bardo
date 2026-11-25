@@ -69,8 +69,8 @@ impl Scripted {
 
     pub fn offline() -> Self {
         Self {
-            answers: Mutex::new(VecDeque::from([Err(TransportError(
-                "dns error: no such host".into(),
+            answers: Mutex::new(VecDeque::from([Err(TransportError::not_sent(
+                "dns error: no such host",
             ))])),
             ..Self::default()
         }

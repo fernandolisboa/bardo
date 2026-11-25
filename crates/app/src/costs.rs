@@ -18,8 +18,9 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     Budget, BudgetLevel, ChannelId, Cost, CostPurpose, CostRecord, CostRecordId, CostRepository,
-    JobId, Meter, Metered, Money, MoneyError, Month, ProfileId, Provider, Rate, RateFieldError,
-    RateTable, RepositoryError, Spend, ThemeRepository, VideoProjectId,
+    JobId, Meter, Metered, Money, MoneyError, Month, ProfileId, Provider, ProviderFailure,
+    ProviderFailureKind, Rate, RateFieldError, RateTable, RepositoryError, Spend, TextRequest,
+    ThemeRepository, VideoProjectId,
 };
 
 use crate::{Bardo, Text};
@@ -199,6 +200,18 @@ impl PlannedCall {
         }
     }
 
+    /// The one call to Claude that answers `request`. Pictures are input
+    /// too, and their size in tokens is not known from the text, so a
+    /// request with pictures keeps the usual input of its purpose.
+    pub(crate) fn text(purpose: CostPurpose, request: &TextRequest) -> Self {
+        let call = Self::new(Provider::Claude, purpose, 1);
+        if request.images.is_empty() {
+            call.with_prompt(&request.instructions, &request.prompt)
+        } else {
+            call
+        }
+    }
+
     /// For providers whose model the user picks.
     pub(crate) fn with_model(mut self, model: &str) -> Self {
         self.model = Cow::Owned(model.to_owned());
@@ -228,6 +241,27 @@ impl PlannedCall {
     pub(crate) fn with_characters(mut self, characters: usize) -> Self {
         self.characters = Some(characters);
         self
+    }
+
+    /// `usage` of one call, with what is known before the call in place
+    /// of what was guessed.
+    fn known(&self, mut usage: Metered) -> Metered {
+        if let Some(chars) = self.prompt_chars {
+            usage.input_tokens = (chars as u64).div_ceil(CHARS_PER_TOKEN);
+        }
+        if let Some(characters) = self.characters {
+            usage.characters = characters as u64;
+        }
+        if let Some(seconds) = self.video_seconds {
+            usage.video_seconds = u64::from(seconds);
+        }
+        if let Some(seconds) = self.audio_seconds {
+            usage.audio_seconds = seconds;
+        }
+        if let Some(tokens) = self.output_tokens {
+            usage.output_tokens = tokens;
+        }
+        usage
     }
 }
 
@@ -387,14 +421,79 @@ impl CostBook {
 
     /// `record` for a call made for a video project, under its channel.
     pub(crate) fn record_for_project(&self, call: PaidCall<'_>, project: VideoProjectId) {
-        let channel = match self.themes.project(project) {
+        self.record(call, self.channel_of(project), Some(project));
+    }
+
+    fn channel_of(&self, project: VideoProjectId) -> Option<ChannelId> {
+        match self.themes.project(project) {
             Ok(found) => found.map(|project| project.channel),
             Err(error) => {
                 tracing::warn!("could not find the channel of project {project}: {error}");
                 None
             }
+        }
+    }
+
+    /// Records what a failed call cost although it gave no result
+    /// (ADR-0030). When the provider's answer says what it used (an answer
+    /// cut at the token limit), that. When the request was sent and its
+    /// answer never came, what `call` typically uses, as an estimate: the
+    /// provider may have done and billed the work, and a spend that may
+    /// have happened counts toward budgets and caps. Any other failure
+    /// started nothing and records nothing.
+    pub(crate) fn record_failed(
+        &self,
+        failure: &ProviderFailure,
+        call: &PlannedCall,
+        job: Option<JobId>,
+        channel: Option<ChannelId>,
+        project: Option<VideoProjectId>,
+    ) {
+        let (model, usage) = match &failure.billed {
+            Some(billed) => (billed.model.clone(), billed.usage),
+            None if failure.kind == ProviderFailureKind::AnswerLost => {
+                let usage = self.typical(call).unwrap_or_else(|error| {
+                    tracing::warn!("could not read past costs to estimate a lost answer: {error}");
+                    call.known(first_guess(call.purpose, call.provider))
+                        .times(call.calls)
+                });
+                (call.model.to_string(), usage)
+            }
+            None => return,
         };
-        self.record(call, channel, Some(project));
+        // An answer that reports no usage says nothing about its cost, and
+        // a record of nothing would only pull later estimates down.
+        if usage == Metered::default() {
+            return;
+        }
+        self.record(
+            PaidCall {
+                provider: call.provider,
+                model: &model,
+                purpose: call.purpose,
+                usage,
+                job,
+                reported: None,
+            },
+            channel,
+            project,
+        );
+    }
+
+    /// `record_failed` for a call made for a video project, under its
+    /// channel.
+    pub(crate) fn record_failed_for_project(
+        &self,
+        failure: &ProviderFailure,
+        call: &PlannedCall,
+        job: Option<JobId>,
+        project: VideoProjectId,
+    ) {
+        // Most failures cost nothing: no need to look the channel up.
+        if failure.billed.is_none() && failure.kind != ProviderFailureKind::AnswerLost {
+            return;
+        }
+        self.record_failed(failure, call, job, self.channel_of(project), Some(project));
     }
 
     /// What `call` would use, from the last calls for the same purpose or
@@ -407,24 +506,9 @@ impl CostBook {
             .filter(|record| record.provider == call.provider)
             .map(|record| record.usage)
             .collect();
-        let mut usage =
+        let usage =
             Metered::mean(&samples).unwrap_or_else(|| first_guess(call.purpose, call.provider));
-        if let Some(chars) = call.prompt_chars {
-            usage.input_tokens = (chars as u64).div_ceil(CHARS_PER_TOKEN);
-        }
-        if let Some(characters) = call.characters {
-            usage.characters = characters as u64;
-        }
-        if let Some(seconds) = call.video_seconds {
-            usage.video_seconds = u64::from(seconds);
-        }
-        if let Some(seconds) = call.audio_seconds {
-            usage.audio_seconds = seconds;
-        }
-        if let Some(tokens) = call.output_tokens {
-            usage.output_tokens = tokens;
-        }
-        Ok(usage.times(call.calls))
+        Ok(call.known(usage).times(call.calls))
     }
 
     /// Spend with each provider in `month`.
@@ -803,7 +887,7 @@ impl Bardo {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn price(provider: Provider, model: &str, meter: Meter) -> Option<Money> {
@@ -983,5 +1067,342 @@ mod tests {
         assert_eq!(estimate.near_budget().count(), 1);
         assert_eq!(estimate.over_budget().count(), 0);
         assert_eq!(SpendEstimate::default().level(), BudgetLevel::Under);
+    }
+
+    /// A paid call's failure when its request was sent and no answer came.
+    pub(crate) fn lost_answer() -> ProviderFailure {
+        ProviderFailure::new(
+            ProviderFailureKind::AnswerLost,
+            "no answer came back, so the provider may have done and billed the work (timeout: global)",
+        )
+    }
+
+    /// The one record of `purpose` in Costs, priced: what a lost answer
+    /// leaves there.
+    pub(crate) fn only_cost(
+        costs: &dyn CostRepository,
+        owner: ProfileId,
+        purpose: CostPurpose,
+    ) -> CostRecord {
+        let mut records = costs.recent_costs(owner, purpose, 10).unwrap();
+        assert_eq!(records.len(), 1, "one {purpose} record: {records:?}");
+        let record = records.remove(0);
+        assert!(record.cost.amount() > Money::ZERO, "priced: {record:?}");
+        record
+    }
+
+    /// What a failed paid call leaves in Costs, and whether the queue makes
+    /// it again (ADR-0030).
+    mod failed_calls {
+        use bardo_domain::{
+            BilledUse, JobFailureKind, JobState, TokenUsage, VideoProject, VideoProjectId,
+        };
+
+        use super::*;
+        use crate::scenes::tests::{Harness, done, wait_done};
+
+        fn lost() -> ProviderFailure {
+            lost_answer()
+        }
+
+        fn costs(h: &Harness, project: VideoProjectId, purpose: CostPurpose) -> Vec<CostRecord> {
+            h.db.project_costs(project)
+                .unwrap()
+                .into_iter()
+                .filter(|record| record.purpose == purpose)
+                .collect()
+        }
+
+        #[test]
+        fn a_paid_call_whose_answer_is_lost_is_made_once_and_recorded_as_an_estimate() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = h.narrated_project(&app);
+            let before = h.text.requests().len();
+            *h.text.failure.lock().unwrap() = Some(lost());
+
+            let id = app
+                .plan_scenes(project.id, false, BudgetConsent::Confirmed)
+                .unwrap();
+            let job = wait_done(&app, id);
+
+            assert_eq!(job.state(), JobState::Failed);
+            assert_eq!(job.attempts(), 1, "the queue allows two");
+            let failure = job.failure().unwrap();
+            assert_eq!(failure.kind, JobFailureKind::AnswerLost);
+            assert!(failure.detail.starts_with("Claude: no answer came back"));
+            let asked = h.text.requests();
+            assert_eq!(asked.len() - before, 1, "one click, one call");
+
+            let records = costs(&h, project.id, CostPurpose::ScenePlan);
+            assert_eq!(records.len(), 1, "what it may have cost is in Costs");
+            let record = &records[0];
+            assert_eq!(record.provider, Provider::Claude);
+            assert_eq!(record.model, bardo_ai::claude::MODEL);
+            assert_eq!(record.job, Some(id));
+            assert_eq!(record.channel, Some(project.channel));
+            // The prompt is known; the answer is what a plan of this
+            // narration usually takes, thought included.
+            let request = asked.last().unwrap();
+            let chars = request.instructions.chars().count() + request.prompt.chars().count();
+            let narration = app.narrations.narration(project.id).unwrap().unwrap();
+            assert_eq!(
+                record.usage,
+                Metered {
+                    input_tokens: (chars as u64).div_ceil(4),
+                    output_tokens: bardo_domain::ScenePlanSize::of(&narration)
+                        .output_tokens_usually(),
+                    ..Metered::default()
+                }
+            );
+            assert!(
+                matches!(record.cost, Cost::Estimated(amount) if amount > Money::ZERO),
+                "{:?}",
+                record.cost
+            );
+        }
+
+        #[test]
+        fn a_paid_call_that_never_left_is_still_retried_and_costs_nothing() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = h.narrated_project(&app);
+            let before = h.text.requests().len();
+            *h.text.failure.lock().unwrap() = Some(ProviderFailure::new(
+                ProviderFailureKind::Unreachable,
+                "host not found",
+            ));
+
+            let id = app
+                .plan_scenes(project.id, false, BudgetConsent::Confirmed)
+                .unwrap();
+            let job = wait_done(&app, id);
+
+            assert_eq!(job.state(), JobState::Failed);
+            assert_eq!(
+                job.failure().unwrap().kind,
+                JobFailureKind::ProviderUnavailable
+            );
+            assert_eq!(h.text.requests().len() - before, 2, "every attempt");
+            assert!(costs(&h, project.id, CostPurpose::ScenePlan).is_empty());
+        }
+
+        #[test]
+        fn an_answer_cut_at_the_token_limit_is_recorded_from_its_usage() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = h.narrated_project(&app);
+            let usage = TokenUsage {
+                input_tokens: 412,
+                output_tokens: 16_000,
+            };
+            *h.text.failure.lock().unwrap() = Some(
+                ProviderFailure::new(
+                    ProviderFailureKind::Unexpected,
+                    "the answer was cut at the token limit",
+                )
+                .billed("claude-opus-5-5", usage.into()),
+            );
+
+            let id = app
+                .plan_scenes(project.id, false, BudgetConsent::Confirmed)
+                .unwrap();
+            let job = wait_done(&app, id);
+
+            assert_eq!(
+                job.failure().unwrap().kind,
+                JobFailureKind::UnexpectedAnswer
+            );
+            let records = costs(&h, project.id, CostPurpose::ScenePlan);
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].model, "claude-opus-5-5");
+            assert_eq!(records[0].usage, Metered::from(usage));
+            assert_eq!(records[0].job, Some(id));
+        }
+
+        fn script_costs(h: &Harness, project: &VideoProject) -> usize {
+            costs(h, project.id, CostPurpose::Script).len()
+        }
+
+        #[test]
+        fn a_lost_script_is_in_costs_and_a_refused_one_is_not() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = crate::scenes::tests::project(&app);
+            *h.text.failure.lock().unwrap() = Some(ProviderFailure::new(
+                ProviderFailureKind::Rejected,
+                "invalid x-api-key",
+            ));
+            let refused = wait_done(
+                &app,
+                app.generate_script(project.id, BudgetConsent::Confirmed)
+                    .unwrap(),
+            );
+            assert_eq!(refused.state(), JobState::Failed);
+            assert_eq!(script_costs(&h, &project), 0, "it started nothing");
+
+            *h.text.failure.lock().unwrap() = Some(lost());
+            let failed = wait_done(
+                &app,
+                app.generate_script(project.id, BudgetConsent::Confirmed)
+                    .unwrap(),
+            );
+            assert_eq!(failed.failure().unwrap().kind, JobFailureKind::AnswerLost);
+            assert_eq!(script_costs(&h, &project), 1);
+
+            // An answer that reports no usage says nothing of its cost.
+            *h.text.failure.lock().unwrap() = Some(
+                ProviderFailure::new(ProviderFailureKind::Unexpected, "no text in the answer")
+                    .billed("claude-opus-5-5", Metered::default()),
+            );
+            wait_done(
+                &app,
+                app.generate_script(project.id, BudgetConsent::Confirmed)
+                    .unwrap(),
+            );
+            assert_eq!(
+                script_costs(&h, &project),
+                1,
+                "nothing known, nothing recorded"
+            );
+        }
+
+        #[test]
+        fn a_lost_answer_is_estimated_from_what_such_calls_used_before() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = crate::scenes::tests::project(&app);
+            // One script answered, using 4,321 tokens of output.
+            *h.text.usage.lock().unwrap() = TokenUsage {
+                input_tokens: 900,
+                output_tokens: 4_321,
+            };
+            h.answer(crate::scenes::tests::SCRIPT.to_owned());
+            done(
+                &app,
+                app.generate_script(project.id, BudgetConsent::Confirmed)
+                    .unwrap(),
+            );
+
+            *h.text.failure.lock().unwrap() = Some(lost());
+            let id = app
+                .generate_script(project.id, BudgetConsent::Confirmed)
+                .unwrap();
+            wait_done(&app, id);
+
+            let lost = costs(&h, project.id, CostPurpose::Script)
+                .into_iter()
+                .find(|record| record.job == Some(id))
+                .expect("the lost answer's record");
+            assert_eq!(lost.usage.output_tokens, 4_321, "as the last script");
+            let asked = h.text.requests().pop().unwrap();
+            let prompt = asked.instructions.chars().count() + asked.prompt.chars().count();
+            assert_eq!(
+                lost.usage.input_tokens,
+                (prompt as u64).div_ceil(CHARS_PER_TOKEN),
+                "the prompt that was sent, not the last one's"
+            );
+        }
+
+        #[test]
+        fn a_lost_image_stops_the_job_and_is_in_costs() {
+            let h = Harness::new();
+            let app = h.start();
+            let (project, plan) = h.planned_project(&app);
+            assert!(plan.scenes().len() > 1);
+            *h.images.failure.lock().unwrap() = Some(lost());
+
+            let id = app
+                .generate_scene_images(project.id, BudgetConsent::Confirmed)
+                .unwrap();
+            let job = wait_done(&app, id);
+
+            assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+            assert_eq!(job.attempts(), 1);
+            assert_eq!(
+                h.images.requests.lock().unwrap().len(),
+                1,
+                "the other images wait for the user's word"
+            );
+            let records = costs(&h, project.id, CostPurpose::SceneImage);
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].provider, Provider::Gemini);
+            assert_eq!(records[0].model, bardo_ai::gemini::IMAGE_MODEL);
+            assert_eq!(records[0].usage.image_tokens, 1_680, "a 2K image");
+        }
+
+        #[test]
+        fn a_lost_narration_part_is_in_costs_by_its_characters() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = crate::scenes::tests::project(&app);
+            h.answer(crate::scenes::tests::SCRIPT.to_owned());
+            done(
+                &app,
+                app.generate_script(project.id, BudgetConsent::Ask).unwrap(),
+            );
+            *h.speech.failure.lock().unwrap() = Some(lost());
+
+            let id = app
+                .generate_narration(project.id, BudgetConsent::Confirmed)
+                .unwrap();
+            let job = wait_done(&app, id);
+
+            assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+            let sent = h.speech.requests();
+            assert_eq!(sent.len(), 1);
+            let records = costs(&h, project.id, CostPurpose::Narration);
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].model, bardo_ai::elevenlabs::SPEECH_MODEL);
+            assert_eq!(
+                records[0].usage,
+                Metered::characters(sent[0].text.chars().count() as u64)
+            );
+
+            // The user's Retry is a new request: every request sent, lost
+            // or answered, is in Costs once.
+            *h.speech.failure.lock().unwrap() = None;
+            app.retry_job(id).unwrap();
+            let job = wait_done(&app, id);
+            assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+            let sent = h.speech.requests();
+            assert!(sent.len() > 1);
+            assert_eq!(
+                costs(&h, project.id, CostPurpose::Narration).len(),
+                sent.len()
+            );
+        }
+
+        #[test]
+        fn a_reading_that_cannot_be_used_is_in_costs_as_billed() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = crate::scenes::tests::project(&app);
+            h.answer(crate::scenes::tests::SCRIPT.to_owned());
+            done(
+                &app,
+                app.generate_script(project.id, BudgetConsent::Ask).unwrap(),
+            );
+            let billed = BilledUse {
+                model: "eleven_multilingual_v2".into(),
+                usage: Metered::characters(77),
+            };
+            *h.speech.failure.lock().unwrap() = Some(ProviderFailure {
+                billed: Some(billed.clone()),
+                ..ProviderFailure::new(
+                    ProviderFailureKind::Unexpected,
+                    "the timings do not line up",
+                )
+            });
+
+            let id = app
+                .generate_narration(project.id, BudgetConsent::Confirmed)
+                .unwrap();
+            wait_done(&app, id);
+
+            let records = costs(&h, project.id, CostPurpose::Narration);
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].usage, billed.usage);
+        }
     }
 }

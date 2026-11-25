@@ -452,17 +452,23 @@ impl LocalizationHandler {
             .ok_or_else(|| JobFailure::new(JobFailureKind::MissingKey, "no Claude key is saved"))
     }
 
-    /// Asks Claude for the adaptation.
+    /// Asks Claude for the adaptation. An answer that was lost or cut may
+    /// still have been billed: it is recorded on `channel` and `project`.
     fn ask(
         &self,
         payload: &LocalizationPayload,
+        job: JobId,
+        channel: Option<ChannelId>,
+        project: Option<VideoProjectId>,
     ) -> Result<bardo_domain::GeneratedText, JobFailure> {
         let key = self.key()?;
         let request = TextRequest {
             effort: TextEffort::Everyday,
             // The adaptation is about as long as the script it adapts,
-            // which the prompt carries: a token is three characters or
-            // more. A long script needs more than the usual room.
+            // which the prompt carries, at about three characters a token.
+            // A language that takes more tokens fits in the room the
+            // adapter leaves around this size. A long script needs more
+            // than the usual room.
             answer_tokens: Some((payload.prompt.chars().count() as u64).div_ceil(3)),
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
@@ -472,6 +478,13 @@ impl LocalizationHandler {
             },
         };
         self.text.generate(&key, &request).map_err(|failure| {
+            self.costs.record_failed(
+                &failure,
+                &PlannedCall::text(CostPurpose::Script, &request),
+                Some(job),
+                channel,
+                project,
+            );
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })
     }
@@ -589,9 +602,9 @@ impl LocalizationHandler {
         let spoken = sentences(&narration);
         let gaps = source_gaps(&narration, &spoken);
 
-        let generated = self.ask(payload)?;
         // The adaptation is billed on the version once it exists; an
-        // unusable or stopped one only on the channel.
+        // unusable, stopped or failed one only on the channel.
+        let generated = self.ask(payload, job, Some(target.id), None)?;
         let saved = (|| -> Result<bool, JobFailure> {
             let adapted: Adapted =
                 serde_json::from_str(&generated.text).map_err(|e| not_usable(&e.to_string()))?;
@@ -824,7 +837,7 @@ impl LocalizationHandler {
             .project(project)
             .map_err(unexpected)?
             .map(|project| project.channel);
-        let generated = self.ask(payload)?;
+        let generated = self.ask(payload, job, channel, Some(project))?;
         self.bill(&generated, job, channel, Some(project));
         let adapted: Adapted =
             serde_json::from_str(&generated.text).map_err(|e| not_usable(&e.to_string()))?;
@@ -1360,6 +1373,40 @@ mod tests {
         );
         let version = app.versions(source.id).unwrap().made[0].project.clone();
         (source, channel, version)
+    }
+
+    #[test]
+    fn a_version_whose_answer_is_lost_is_asked_for_once_and_is_in_costs_of_its_channel() {
+        use crate::costs::tests::lost_answer;
+
+        let h = Harness::new();
+        let app = h.start();
+        let (source, _) = h.drawn_project(&app);
+        let channel = english_channel(&app);
+        let before = h.text.requests().len();
+        *h.text.failure.lock().unwrap() = Some(lost_answer());
+        let id = app
+            .make_version(source.id, channel.id, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(h.text.requests().len() - before, 1);
+        // The source's own script is a Script cost too: this one is the job's.
+        let costs: Vec<_> =
+            h.db.recent_costs(app.profile().id, CostPurpose::Script, 10)
+                .unwrap()
+                .into_iter()
+                .filter(|cost| cost.job == Some(id))
+                .collect();
+        assert_eq!(
+            costs.len(),
+            1,
+            "the adaptation may have been written and billed"
+        );
+        assert_eq!(costs[0].channel, Some(channel.id));
+        assert_eq!(costs[0].project, None, "no version exists yet");
     }
 
     #[test]

@@ -535,6 +535,13 @@ impl MetadataHandler {
             },
         };
         let generated = self.text.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost or cut may still have been billed.
+            self.costs.record_failed_for_project(
+                &failure,
+                &PlannedCall::text(CostPurpose::Metadata, &request),
+                Some(job),
+                project,
+            );
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })?;
         self.costs.record_for_project(
@@ -1503,6 +1510,26 @@ pub(crate) mod tests {
             .iter()
             .find(|target| target.network == network)
             .unwrap()
+    }
+
+    #[test]
+    fn metadata_whose_answer_is_lost_is_asked_for_once_and_is_in_costs() {
+        use crate::costs::tests::{lost_answer, only_cost};
+
+        let s = rendered();
+        let before = s.h.text.requests().len();
+        *s.h.text.failure.lock().unwrap() = Some(lost_answer());
+        let id = s
+            .app
+            .generate_metadata(s.project.id, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&s.app, id);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(s.h.text.requests().len() - before, 1);
+        let cost = only_cost(&*s.h.db, s.app.profile().id, CostPurpose::Metadata);
+        assert_eq!((cost.project, cost.job), (Some(s.project.id), Some(id)));
     }
 
     #[test]

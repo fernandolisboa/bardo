@@ -179,6 +179,13 @@ impl MusicPromptHandler {
             format: TextFormat::Prose,
         };
         let generated = self.text.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost or cut may still have been billed.
+            self.costs.record_failed_for_project(
+                &failure,
+                &PlannedCall::text(CostPurpose::MusicPrompt, &request),
+                Some(job),
+                project,
+            );
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })?;
         self.costs.record_for_project(
@@ -496,6 +503,23 @@ mod tests {
             .generate_music_prompt(project.id, BudgetConsent::Ask)
             .unwrap();
         wait_done(app, id)
+    }
+
+    #[test]
+    fn a_prompt_whose_answer_is_lost_is_asked_for_once_and_is_in_costs() {
+        use crate::costs::tests::{lost_answer, only_cost};
+
+        let h = Harness::new();
+        *h.text.failure.lock().unwrap() = Some(lost_answer());
+        let app = h.start_with_key();
+        let project = project(&app);
+        let job = generate(&app, &project);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(h.text.requests().len(), 1);
+        let cost = only_cost(&*h.db, app.profile().id, CostPurpose::MusicPrompt);
+        assert_eq!((cost.project, cost.job), (Some(project.id), Some(job.id())));
     }
 
     #[test]

@@ -187,6 +187,8 @@ The words Bardo uses, in plain terms.
 
 **Budget**: a monthly spending limit per provider. Once reached, new jobs for that provider ask before starting.
 
+**Lost answer**: a paid request that was sent and never answered. The provider may have charged for it, so Bardo does not send it again by itself and counts an estimate in Costs. See [A paid request got no answer](troubleshooting.md#answer-lost).
+
 **Decision engine**: the AI that ranks and scores (ideas, cuts) with typed answers and a confidence. It never writes content. You pick it in [Settings › API keys](api-keys.md#decision-engine).
 
 <a id="interface"></a>

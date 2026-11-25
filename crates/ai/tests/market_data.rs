@@ -71,7 +71,7 @@ struct Offline;
 
 impl Transport for Offline {
     fn send(&self, _: &HttpRequest) -> Result<HttpResponse, TransportError> {
-        Err(TransportError("dns error: no such host".into()))
+        Err(TransportError::not_sent("dns error: no such host"))
     }
 }
 

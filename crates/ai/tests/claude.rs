@@ -3,14 +3,19 @@
 
 mod common;
 
+use std::collections::VecDeque;
+use std::io::Read;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use bardo_ai::ClaudeTextGenerator;
 use bardo_ai::claude::{FALLBACK_BETA, MESSAGES_URL, MODEL};
-use bardo_ai::http::{HttpResponse, Method};
+use bardo_ai::http::{
+    HttpRequest, HttpResponse, Method, StreamedResponse, Transport, TransportError,
+};
 use bardo_domain::{
-    ApiKey, ImageFormat, Provider, ProviderFailureKind, TextEffort, TextFormat, TextGenerator,
-    TextImage, TextRequest, TokenUsage,
+    ApiKey, BilledUse, ImageFormat, Metered, Provider, ProviderFailureKind, TextEffort, TextFormat,
+    TextGenerator, TextImage, TextRequest, TokenUsage,
 };
 use common::{Scripted, fixture, recording_sleeper};
 use serde_json::json;
@@ -250,7 +255,7 @@ fn a_stream_is_read_as_one_whatever_its_headers_say() {
 }
 
 #[test]
-fn a_stream_that_opens_and_brings_no_answer_is_not_an_outage() {
+fn a_stream_that_opens_and_brings_no_answer_is_a_lost_answer_sent_once() {
     // Claude took the request, and a path that holds the answer back or
     // loses it brought only this. The answer may be written and billed all
     // the same: the queue must not take it for an outage and send it again.
@@ -263,33 +268,38 @@ fn a_stream_that_opens_and_brings_no_answer_is_not_an_outage() {
     ]))
     .with_sleeper(sleeper);
     let failure = claude.generate(&key(), &json_request()).unwrap_err();
-    assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
     assert!(
-        failure.detail.contains("may be billed"),
+        failure.detail.contains("no answer arrived"),
         "{}",
         failure.detail
     );
+    assert_eq!(failure.billed, None, "nothing says what it used");
     assert_eq!(claude.transport().sent().len(), 1);
 }
 
 #[test]
-fn a_connection_that_drops_after_claude_began_is_not_an_outage() {
-    let claude = generator(&["messages-dropped-midway"]);
+fn a_connection_that_drops_after_claude_began_is_a_lost_answer_sent_once() {
+    let claude = generator(&["messages-dropped-midway", "messages-themes"]);
     let failure = claude.generate(&key(), &json_request()).unwrap_err();
-    // What was generated is billed: not a call to make again unasked.
-    assert_ne!(failure.kind, ProviderFailureKind::Unreachable);
+    // What was written is billed: not a call to make again unasked.
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
     assert!(
         failure.detail.contains("stopped midway"),
         "{}",
         failure.detail
     );
+    // The stream counted the input and nothing of what it wrote: Costs
+    // records what such a call usually uses instead.
+    assert_eq!(failure.billed, None);
     assert_eq!(claude.transport().sent().len(), 1);
 }
 
 #[test]
-fn an_overload_after_the_answer_began_is_not_sent_again() {
+fn an_overload_after_the_answer_began_is_a_lost_answer_sent_once() {
     let claude = generator(&["messages-overloaded-midway", "messages-themes"]);
     let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
     assert!(
         failure.detail.contains("overloaded_error"),
         "{}",
@@ -305,6 +315,153 @@ fn an_overload_after_the_answer_began_is_not_sent_again() {
         1,
         "the backoff is for answers that generated nothing"
     );
+}
+
+/// Hands over a successful answer in the pieces given, one per read; an
+/// `Err` is a read that fails.
+struct Pieces(Mutex<Vec<Vec<std::io::Result<Vec<u8>>>>>, Mutex<u32>);
+
+impl Pieces {
+    fn new(answers: Vec<Vec<std::io::Result<Vec<u8>>>>) -> Self {
+        Self(Mutex::new(answers), Mutex::new(0))
+    }
+
+    fn sent(&self) -> u32 {
+        *self.1.lock().unwrap()
+    }
+}
+
+struct PieceReader(VecDeque<std::io::Result<Vec<u8>>>);
+
+impl Read for PieceReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        match self.0.pop_front() {
+            None => Ok(0),
+            Some(Err(error)) => Err(error),
+            Some(Ok(piece)) => {
+                let count = piece.len().min(buffer.len());
+                buffer[..count].copy_from_slice(&piece[..count]);
+                if count < piece.len() {
+                    self.0.push_front(Ok(piece[count..].to_vec()));
+                }
+                Ok(count)
+            }
+        }
+    }
+}
+
+impl Transport for Pieces {
+    fn send(&self, _: &HttpRequest) -> Result<HttpResponse, TransportError> {
+        unreachable!("the adapter streams every request")
+    }
+
+    fn send_streamed(&self, _: &HttpRequest) -> Result<StreamedResponse, TransportError> {
+        *self.1.lock().unwrap() += 1;
+        let pieces = self.0.lock().unwrap().remove(0);
+        Ok(StreamedResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: Box::new(PieceReader(pieces.into())),
+        })
+    }
+}
+
+#[test]
+fn an_answer_that_fails_before_its_first_byte_is_a_lost_answer_that_says_why() {
+    for (kind, reason) in [
+        (std::io::ErrorKind::ConnectionReset, "connection reset"),
+        (std::io::ErrorKind::TimedOut, "no data for 600 seconds"),
+    ] {
+        let claude = ClaudeTextGenerator::with_transport(Pieces::new(vec![vec![Err(
+            std::io::Error::new(kind, reason),
+        )]]));
+        let failure = claude.generate(&key(), &json_request()).unwrap_err();
+        assert_eq!(failure.kind, ProviderFailureKind::AnswerLost, "{reason}");
+        assert!(failure.detail.contains(reason), "{}", failure.detail);
+        assert_eq!(claude.transport().sent(), 1, "{reason}");
+    }
+}
+
+#[test]
+fn a_whole_answer_is_told_from_a_stream_past_white_space_and_a_byte_order_mark() {
+    let whole = fixture("claude", "messages-themes-not-streamed").body;
+    let claude = ClaudeTextGenerator::with_transport(Pieces::new(vec![
+        vec![Ok(b"\r\n \n".to_vec()), Ok(whole.clone().into_bytes())],
+        vec![Ok(format!("\u{feff}{whole}").into_bytes())],
+        vec![
+            Ok(b"\n\n".to_vec()),
+            Ok(fixture("claude", "messages-themes").body.into_bytes()),
+        ],
+    ]));
+    for _ in 0..3 {
+        let generated = claude.generate(&key(), &json_request()).unwrap();
+        assert!(generated.text.contains("The forgotten first spacewalk"));
+        assert_eq!(generated.usage.output_tokens, 893);
+    }
+}
+
+#[test]
+fn a_whole_answer_that_cannot_be_read_is_a_lost_answer() {
+    // Cut before its end: Claude wrote it, and what came of it is gone.
+    let (sleeper, _) = recording_sleeper();
+    let claude = ClaudeTextGenerator::with_transport(Scripted::new(vec![HttpResponse::new(
+        200,
+        r#"{"id":"msg_01","type":"message","content":[{"type":"te"#,
+    )]))
+    .with_sleeper(sleeper);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert!(
+        failure.detail.contains("could not be read"),
+        "{}",
+        failure.detail
+    );
+    assert_eq!(claude.transport().sent().len(), 1);
+}
+
+#[test]
+fn an_error_in_the_place_of_a_whole_answer_is_told_as_the_error() {
+    let overloaded = fixture("claude", "messages-overloaded").body;
+    let (sleeper, waits) = recording_sleeper();
+    let claude = ClaudeTextGenerator::with_transport(Scripted::new(vec![
+        HttpResponse::new(200, overloaded),
+        fixture("claude", "messages-themes"),
+    ]))
+    .with_sleeper(sleeper);
+    claude.generate(&key(), &json_request()).unwrap();
+    assert_eq!(claude.transport().sent().len(), 2);
+    assert_eq!(*waits.lock().unwrap(), [Duration::from_secs(1)]);
+
+    let rejected = fixture("claude", "messages-rejected").body;
+    let claude =
+        ClaudeTextGenerator::with_transport(Scripted::new(vec![HttpResponse::new(200, rejected)]));
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::Rejected);
+    assert_eq!(failure.billed, None);
+}
+
+#[test]
+fn a_server_error_that_is_not_claude_speaking_is_a_lost_answer_sent_once() {
+    // A proxy in front answers after Claude took the request: its 503 or
+    // 529 says nothing about the answer behind it.
+    for (status, body) in [
+        (
+            503,
+            "upstream connect error or disconnect/reset before headers",
+        ),
+        (529, ""),
+        (500, r#"{"message":"Internal Server Error"}"#),
+    ] {
+        let (sleeper, _) = recording_sleeper();
+        let claude = ClaudeTextGenerator::with_transport(Scripted::new(vec![
+            HttpResponse::new(status, body),
+            fixture("claude", "messages-themes"),
+        ]))
+        .with_sleeper(sleeper);
+        let failure = claude.generate(&key(), &json_request()).unwrap_err();
+        assert_eq!(failure.kind, ProviderFailureKind::AnswerLost, "{status}");
+        assert_eq!(claude.transport().sent().len(), 1, "{status}");
+    }
 }
 
 #[test]
@@ -354,11 +511,59 @@ fn a_refusal_is_declined_with_the_reason() {
 }
 
 #[test]
-fn an_answer_cut_at_the_limit_is_unexpected() {
+fn an_answer_cut_at_the_limit_is_unexpected_and_says_what_it_billed() {
     let failure = generator(&["messages-max-tokens"])
         .generate(&key(), &json_request())
         .unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
+    // Claude bills every token of an answer it cuts.
+    assert_eq!(
+        failure.billed,
+        Some(BilledUse {
+            model: "claude-opus-5-5".into(),
+            usage: Metered {
+                input_tokens: 412,
+                output_tokens: 16_000,
+                ..Metered::default()
+            },
+        })
+    );
+}
+
+#[test]
+fn an_answer_without_text_says_what_it_billed() {
+    let failure = generator(&["messages-no-text"])
+        .generate(&key(), &json_request())
+        .unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
+    let billed = failure.billed.expect("the answer reports its usage");
+    assert_eq!(
+        (billed.usage.input_tokens, billed.usage.output_tokens),
+        (412, 950)
+    );
+}
+
+#[test]
+fn a_refusal_says_what_it_billed_under_the_model_that_refused() {
+    let failure = generator(&["messages-refusal"])
+        .generate(&key(), &json_request())
+        .unwrap_err();
+    let billed = failure.billed.expect("the answer reports its usage");
+    assert_eq!(billed.model, "claude-opus-4-8");
+    assert_eq!(
+        (billed.usage.input_tokens, billed.usage.output_tokens),
+        (380, 0)
+    );
+}
+
+#[test]
+fn a_failure_that_started_nothing_bills_nothing() {
+    for name in ["messages-rejected", "messages-credit-balance"] {
+        let failure = generator(&[name])
+            .generate(&key(), &json_request())
+            .unwrap_err();
+        assert_eq!(failure.billed, None, "{name}");
+    }
 }
 
 #[test]
@@ -414,11 +619,39 @@ fn a_lasting_overload_is_reported_as_provider_down() {
 }
 
 #[test]
-fn no_answer_is_unreachable() {
+fn a_request_that_never_left_is_unreachable() {
     let claude = ClaudeTextGenerator::with_transport(Scripted::offline());
     let failure = claude.generate(&key(), &json_request()).unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unreachable);
     assert!(failure.detail.contains("dns"));
+}
+
+#[test]
+fn a_request_that_was_sent_and_got_no_answer_is_a_lost_answer_sent_once() {
+    let claude = ClaudeTextGenerator::with_transport(Scripted::losing_the_answer());
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert!(failure.detail.contains("timeout"), "{}", failure.detail);
+    assert_eq!(failure.billed, None, "nothing says what it used");
+    assert_eq!(claude.transport().sent().len(), 1);
+}
+
+#[test]
+fn a_gateway_that_gave_up_on_claude_is_a_lost_answer_sent_once() {
+    let claude = generator(&["messages-gateway-timeout"]);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert!(failure.detail.contains("504"), "{}", failure.detail);
+    assert_eq!(claude.transport().sent().len(), 1);
+}
+
+#[test]
+fn claude_failing_on_its_side_is_told_once_and_left_to_the_queue() {
+    let claude = generator(&["messages-api-error"]);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::ProviderDown);
+    assert_eq!(failure.detail, "Internal server error");
+    assert_eq!(claude.transport().sent().len(), 1);
 }
 
 #[test]

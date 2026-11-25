@@ -442,7 +442,9 @@ fn losing(last: Result<HttpResponse, TransportError>) -> HiggsfieldPlan<Scripted
 
 #[test]
 fn an_answer_lost_after_sending_may_have_started_a_clip() {
-    let timed_out = losing(Err(TransportError("timed out reading the answer".into())));
+    let timed_out = losing(Err(TransportError::unanswered(
+        "timed out reading the answer",
+    )));
     let cut_off = losing(Ok(fixture("higgsfield-plan", "answer-cut-off")));
     let no_id = plan(&["submitted-no-id"]);
     for adapter in [timed_out, cut_off, no_id] {

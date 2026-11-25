@@ -331,6 +331,7 @@ key_rejected = "O provedor recusou a chave salva ou o login do plano. Confira em
 not_allowed = "A chave não tem o acesso necessário, como uma API não ativada no projeto."
 limit_reached = "Uma cota ou limite de uso parou o provedor. As cotas do YouTube renovam todo dia à meia-noite do horário do Pacífico."
 provider_unavailable = "Não foi possível falar com o provedor, ou ele está com problemas. Tentando de novo automaticamente."
+answer_lost = "O pedido foi enviado, mas a resposta não voltou. O provedor pode ter feito o trabalho e cobrado por ele, então o Bardo não enviou de novo sozinho e somou uma estimativa em Custos. Tente de novo quando quiser."
 unexpected_answer = "O provedor deu uma resposta que o Bardo não entende."
 declined = "O provedor recusou este pedido pelas regras de segurança dele. Mude o que foi pedido (o prompt, o canal ou o nicho) e tente de novo."
 media = "O ffmpeg não conseguiu ler ou gravar um arquivo de mídia. Confira o arquivo indicado e tente de novo."
@@ -3318,7 +3319,7 @@ body = "Cancelar para uma tarefa em execução ou na fila e guarda o que ela fez
 
 [tour.jobs.retry]
 title = "Tentar de novo"
-body = "Uma falha passageira, como tempo esgotado, faz a tarefa tentar de novo sozinha, até quatro tentativas no total. Uma duradoura para a tarefa: resolva o que ela diz, e Tentar de novo continua de onde parou."
+body = "Uma falha passageira, como uma conexão que não pôde ser feita, faz a tarefa tentar de novo sozinha, até quatro tentativas no total. Uma duradoura para a tarefa: resolva o que ela diz, e Tentar de novo continua de onde parou. Um pedido pago que foi enviado e ficou sem resposta não é reenviado sozinho, porque o provedor pode ter cobrado por ele."
 
 [tour.jobs.restart]
 title = "Fechar o Bardo no meio de uma tarefa"

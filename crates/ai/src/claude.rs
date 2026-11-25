@@ -3,7 +3,10 @@
 //! One request per generation, read as Claude streams it. A scene plan of
 //! a long video takes minutes to write, so no clock bounds the whole
 //! answer: the limit is on silence, and a stream that stops early still
-//! says what was generated. JSON output uses structured outputs
+//! says how far it got. Claude bills what it writes, read or not, so a
+//! request that left is never sent again by itself (ADR-0030): one whose
+//! answer never arrives, stops midway or cannot be read is a lost answer,
+//! not an outage. JSON output uses structured outputs
 //! (`output_config.format`), so the answer always matches the schema, and
 //! its fields come in the schema's order: the schema is sent as written
 //! (`serde_json` keeps the order of keys, see the workspace manifest), so a
@@ -26,7 +29,9 @@ use crate::claude_stream::{self, StreamEnd, StreamedAnswer};
 use crate::http::{HttpRequest, HttpResponse, StreamedResponse, Transport, UreqTransport};
 use crate::idle::Watched;
 use crate::key_check::failure;
-use crate::retry::{Backoff, Sleeper, thread_sleeper};
+use crate::retry::{
+    Backoff, PaidAnswer, Sleeper, lost_upstream, thread_sleeper, unanswered, unreadable,
+};
 
 pub const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
 pub const MODEL: &str = "claude-opus-5-5";
@@ -40,8 +45,8 @@ pub const EFFORT: &str = "medium";
 pub const CAREFUL_EFFORT: &str = "high";
 /// Room for that thought on top of the answer.
 pub const CAREFUL_MAX_TOKENS: u32 = 32_000;
-/// The most a model writes in one answer, thought included. Every model
-/// Bardo's requests may be answered by (the fallback's too) has this limit.
+/// The most a model writes in one answer, thought included: the limit of
+/// the model Bardo asks and of the fallback Anthropic documents for it.
 pub const MAX_OUTPUT_TOKENS: u32 = 128_000;
 
 /// The effort and the usual token limit a request of `effort` is sent
@@ -140,11 +145,27 @@ pub fn message_request(
     })
 }
 
+/// Whether an error body is the Messages API's own: `{"type": "error",
+/// "error": {"type": ...}}`.
+fn own_words(body: &Value) -> bool {
+    body["type"] == "error" && body["error"]["type"].is_string()
+}
+
 /// A successful answer that came whole instead of streamed, in the shape
-/// a streamed one is read into.
+/// a streamed one is read into. One that cannot be read is a lost answer:
+/// Claude wrote it.
 fn parse_whole(response: &HttpResponse) -> Result<StreamedAnswer, ProviderFailure> {
-    let body: Value = serde_json::from_str(&response.body)
-        .map_err(|error| unexpected(format!("unreadable response: {error}")))?;
+    let body: Value = serde_json::from_str(response.body.trim_start_matches('\u{feff}'))
+        .map_err(|_| unreadable(response.status))?;
+    // An error in the place of the answer, as an `error` event that opens
+    // a stream.
+    if own_words(&body) {
+        let error = &body["error"];
+        return Ok(StreamedAnswer::unstarted(StreamEnd::Failed {
+            kind: error["type"].as_str().unwrap_or("error").to_owned(),
+            message: error["message"].as_str().unwrap_or_default().to_owned(),
+        }));
+    }
     let text: String = body["content"]
         .as_array()
         .into_iter()
@@ -164,9 +185,11 @@ fn parse_whole(response: &HttpResponse) -> Result<StreamedAnswer, ProviderFailur
     })
 }
 
-/// What an answer means, streamed or not: its text when it is whole; a
-/// failure when Claude declined, the token limit cut it, it has no text, or
-/// the stream stopped before its end.
+/// What an answer means, streamed or not: its text when it is whole. A
+/// refusal, an answer cut by the token limit or one without text is a
+/// failure that says what the answer used: Claude bills an answer as it
+/// wrote it, usable or not. A stream that stopped before the answer's end
+/// is a lost answer.
 pub fn read_answer(answer: StreamedAnswer) -> Result<GeneratedText, ProviderFailure> {
     match &answer.end {
         StreamEnd::Complete => {}
@@ -178,19 +201,28 @@ pub fn read_answer(answer: StreamedAnswer) -> Result<GeneratedText, ProviderFail
             ));
         }
         StreamEnd::Failed { kind, message } => {
-            return Err(stopped_midway(format!("{kind}: {message}")));
+            return Err(stopped_midway(&format!("{kind}: {message}")));
         }
         // Claude took the request (the stream opened) and then nothing
         // readable came. A path that holds the answer back looks the same
         // as one that lost it, and the answer may be written and billed all
-        // the same, so this is not an outage to send again after.
+        // the same.
         StreamEnd::Broken(detail) if !answer.started() => {
-            return Err(unexpected(format!(
-                "Claude took the request and no answer arrived; it may be billed ({detail})"
-            )));
+            return Err(ProviderFailure::new(
+                ProviderFailureKind::AnswerLost,
+                format!(
+                    "Claude took the request and no answer arrived, so it may have written and billed one ({detail})"
+                ),
+            ));
         }
-        StreamEnd::Broken(detail) => return Err(stopped_midway(detail.clone())),
+        StreamEnd::Broken(detail) => return Err(stopped_midway(detail)),
     }
+    let model = answer
+        .model
+        .filter(|model| !model.is_empty())
+        .unwrap_or_else(|| MODEL.to_owned());
+    let usage = answer.usage;
+    let failed = |failure: ProviderFailure| failure.billed(model.clone(), usage.into());
     match answer.stop_reason.as_deref() {
         Some("refusal") => {
             let details = &answer.stop_details;
@@ -198,40 +230,41 @@ pub fn read_answer(answer: StreamedAnswer) -> Result<GeneratedText, ProviderFail
                 .as_str()
                 .or(details["category"].as_str())
                 .unwrap_or("no reason given");
-            return Err(ProviderFailure::new(
+            return Err(failed(ProviderFailure::new(
                 ProviderFailureKind::Declined,
                 format!("Claude declined the request: {reason}"),
-            ));
+            )));
         }
         Some("max_tokens") => {
-            return Err(unexpected("the answer was cut at the token limit"));
+            return Err(failed(unexpected("the answer was cut at the token limit")));
         }
         Some("model_context_window_exceeded") => {
-            return Err(unexpected(
+            return Err(failed(unexpected(
                 "the answer was cut at the end of the model's context window",
-            ));
+            )));
         }
         _ => {}
     }
     if answer.text.trim().is_empty() {
-        return Err(unexpected("the answer has no text"));
+        return Err(failed(unexpected("the answer has no text")));
     }
     Ok(GeneratedText {
         text: answer.text,
-        model: answer
-            .model
-            .filter(|model| !model.is_empty())
-            .unwrap_or_else(|| MODEL.to_owned()),
-        usage: answer.usage,
+        model,
+        usage,
     })
 }
 
-/// A stream that stopped after Claude began to answer. What was generated
-/// is billed, so the request is not one to send again unasked.
-fn stopped_midway(detail: String) -> ProviderFailure {
-    unexpected(format!(
-        "the answer stopped midway and what was generated may be billed ({detail})"
-    ))
+/// A stream that stopped after Claude began to answer: a lost answer. It
+/// carries no count of what it used, because a stream counts its output
+/// only at its end (what it says before is the input and a placeholder),
+/// so Costs records what such a call usually uses instead of a figure that
+/// leaves the writing out.
+fn stopped_midway(detail: &str) -> ProviderFailure {
+    ProviderFailure::new(
+        ProviderFailureKind::AnswerLost,
+        format!("the answer stopped midway, and Claude bills what it wrote of it ({detail})"),
+    )
 }
 
 /// An `error` event that opens a stream, by its type.
@@ -291,15 +324,24 @@ fn buffered(status: u16, headers: Vec<(String, String)>, body: impl Read) -> Htt
 }
 
 /// Whether a successful answer is one JSON message instead of a stream of
-/// events, by how it begins. The headers are not asked: a path that
-/// rewrites them does not change what the body is.
-fn comes_whole(body: &mut impl BufRead) -> bool {
-    body.fill_buf().is_ok_and(|start| {
-        start
-            .iter()
-            .find(|byte| !byte.is_ascii_whitespace())
-            .is_some_and(|byte| *byte == b'{')
-    })
+/// events, by how it begins (after white space and a byte order mark).
+/// The headers are not asked: a path that rewrites them does not change
+/// what the body is. An answer that fails before it begins says why.
+fn comes_whole(body: &mut impl BufRead) -> std::io::Result<bool> {
+    const MARK: &[u8] = "\u{feff}".as_bytes();
+    loop {
+        let start = body.fill_buf()?;
+        if start.is_empty() {
+            return Ok(false);
+        }
+        let read = start.strip_prefix(MARK).unwrap_or(start);
+        if let Some(byte) = read.iter().find(|byte| !byte.is_ascii_whitespace()) {
+            return Ok(*byte == b'{');
+        }
+        // Nothing but white space so far: neither form needs it.
+        let blank = start.len();
+        body.consume(blank);
+    }
 }
 
 /// Generates text with Claude over HTTPS.
@@ -315,7 +357,8 @@ impl ClaudeTextGenerator {
     /// How long a request may take to be sent, and Claude to start
     /// answering it. Claude starts a stream at once, but a path that holds
     /// the answer back until it is whole (a proxy that inspects it) makes
-    /// the wait as long as the answer.
+    /// the wait as long as the answer; past this the request is a lost
+    /// answer, not one to send again.
     pub const FIRST_ANSWER: Duration = Duration::from_secs(600);
     /// How long a started answer may say nothing. Claude sends keep-alives
     /// while it thinks, but says nowhere how often, and the two mistakes
@@ -362,10 +405,11 @@ impl<T: Transport> ClaudeTextGenerator<T> {
         &self.transport
     }
 
-    /// Sends the request and reads its answer as it arrives. An answer
-    /// that asks to come back shortly, by its status or by an error that
-    /// opens the stream, is sent again after a wait; nothing was generated
-    /// for it.
+    /// Sends the request and reads its answer as it arrives. It goes
+    /// again, after a wait, only when Claude says nothing was started: a
+    /// rate limit or an overload, by the status or by an error in the
+    /// place of the answer. An error status that is not Claude speaking is
+    /// a lost answer, as for every paid call.
     fn send(
         &self,
         key: &ApiKey,
@@ -375,29 +419,34 @@ impl<T: Transport> ClaudeTextGenerator<T> {
         let http = message_request(key, request, with_fallback)?;
         let mut retry = 0;
         loop {
-            let response = self
-                .transport
-                .send_streamed(&http)
-                .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+            // Billed for what it writes, read or not: a request that left
+            // and got no answer is a lost answer, never sent again by
+            // itself.
             let StreamedResponse {
                 status,
                 headers,
                 body,
-            } = response;
+            } = self.transport.send_streamed(&http).map_err(unanswered)?;
             let mut body = BufReader::new(body);
-            let (answered, wait) = if !(200..=299).contains(&status) {
-                let response = buffered(status, headers, body);
-                let wait =
-                    Backoff::is_retryable(&response).then(|| self.backoff.delay(retry, &response));
-                (Answered::Refused(response), wait)
-            } else if comes_whole(&mut body) {
-                // A server that does not stream hands the answer over whole.
-                return parse_whole(&buffered(status, headers, body)).map(Answered::Answer);
-            } else {
-                let answer = claude_stream::read(body);
+            let (answered, wait) = if (200..=299).contains(&status) {
+                let answer = match comes_whole(&mut body) {
+                    // A server that does not stream hands the answer over
+                    // whole.
+                    Ok(true) => parse_whole(&buffered(status, headers, body))?,
+                    Ok(false) => claude_stream::read(body),
+                    Err(error) => StreamedAnswer::unstarted(StreamEnd::Broken(error.to_string())),
+                };
                 let wait = comes_back_shortly(&answer)
                     .then(|| self.backoff.delay(retry, &HttpResponse::new(529, "")));
                 (Answered::Answer(answer), wait)
+            } else {
+                let response = buffered(status, headers, body);
+                let wait = match PaidAnswer::of(status, response.body.as_bytes(), own_words) {
+                    PaidAnswer::StartedNothing => Some(self.backoff.delay(retry, &response)),
+                    PaidAnswer::Lost => return Err(lost_upstream(status)),
+                    PaidAnswer::Told => None,
+                };
+                (Answered::Refused(response), wait)
             };
             match wait {
                 Some(wait) if retry < self.backoff.retries => {

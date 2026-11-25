@@ -65,8 +65,18 @@ impl Scripted {
 
     pub fn offline() -> Self {
         Self {
-            answers: Mutex::new(VecDeque::from([Err(TransportError(
-                "dns error: no such host".into(),
+            answers: Mutex::new(VecDeque::from([Err(TransportError::not_sent(
+                "dns error: no such host",
+            ))])),
+            ..Self::default()
+        }
+    }
+
+    /// Takes the request and loses its answer: the time runs out.
+    pub fn losing_the_answer() -> Self {
+        Self {
+            answers: Mutex::new(VecDeque::from([Err(TransportError::unanswered(
+                "timeout: global",
             ))])),
             ..Self::default()
         }

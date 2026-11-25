@@ -304,6 +304,13 @@ impl ChaptersHandler {
             },
         };
         let generated = self.text.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost or cut may still have been billed.
+            self.costs.record_failed_for_project(
+                &failure,
+                &PlannedCall::text(CostPurpose::Chapters, &request),
+                Some(job),
+                project,
+            );
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })?;
         self.costs.record_for_project(
@@ -722,6 +729,25 @@ mod tests {
         h.answer(text);
         let id = app.write_chapters(project, BudgetConsent::Ask).unwrap();
         wait_done(app, id)
+    }
+
+    #[test]
+    fn chapters_whose_answer_is_lost_are_asked_for_once_and_are_in_costs() {
+        use crate::costs::tests::{lost_answer, only_cost};
+
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let before = h.text.requests().len();
+        *h.text.failure.lock().unwrap() = Some(lost_answer());
+        let id = app.write_chapters(project.id, BudgetConsent::Ask).unwrap();
+        let job = wait_done(&app, id);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(h.text.requests().len() - before, 1);
+        let cost = only_cost(&*h.db, app.profile().id, CostPurpose::Chapters);
+        assert_eq!((cost.project, cost.job), (Some(project.id), Some(id)));
     }
 
     #[test]

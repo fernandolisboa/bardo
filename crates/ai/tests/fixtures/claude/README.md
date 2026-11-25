@@ -23,7 +23,9 @@ misbehaves with a real key). An answer is a stream of server-sent events
 - `messages-overloaded-midway.http`: an `error` event after part of the
   text arrived.
 - `messages-dropped-midway.http`: a stream that ends inside an event,
-  after part of the text arrived.
+  after part of the text arrived. This one and the one above are lost
+  answers (ADR-0030, ADR-0031): never sent again, and without a usage,
+  because a stream counts its output only at its end.
 - `messages-themes-not-streamed.http`: the same answer as one JSON
   message, as a server that does not stream hands it over.
 
@@ -31,3 +33,12 @@ Error statuses answer with a JSON body, streamed request or not:
 
 - `messages-overloaded.http`, `messages-rate-limited.http`,
   `messages-credit-balance.http`, `messages-beta-not-enabled.http`.
+
+Lost and failed answers (ADR-0030):
+
+- `messages-api-error.http`: the API's own 500 (`api_error`), written from
+  the documented error shape.
+- `messages-gateway-timeout.http`: synthetic, a gateway's 504 page in
+  place of the API's answer.
+- `messages-no-text.http`: synthetic, a finished answer with an empty
+  thinking block and no text, with its usage.

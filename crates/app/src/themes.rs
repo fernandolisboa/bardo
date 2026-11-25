@@ -676,10 +676,17 @@ impl ThemeHandler {
 
         let key = self.key(Provider::Claude)?;
         let request = proposal_request(&payload.brief, niche, &avoid);
-        let generated = self
-            .text
-            .generate(&key, &request)
-            .map_err(|failure| provider_failure("Claude", failure))?;
+        let generated = self.text.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost or cut may still have been billed.
+            self.costs.record_failed(
+                &failure,
+                &PlannedCall::text(CostPurpose::ThemeIdeas, &request),
+                Some(job),
+                Some(channel),
+                None,
+            );
+            provider_failure("Claude", failure)
+        })?;
         self.costs.record(
             PaidCall {
                 provider: Provider::Claude,
@@ -764,9 +771,17 @@ impl ThemeHandler {
                         .map_err(unexpected)?;
                 }
             }
-            let decisions = engine
-                .decide(&key, &state, &questions)
-                .map_err(|failure| provider_failure("decision engine", failure))?;
+            let decisions = engine.decide(&key, &state, &questions).map_err(|failure| {
+                // An answer that was lost may still have been billed.
+                self.costs.record_failed(
+                    &failure,
+                    &PlannedCall::new(provider, CostPurpose::ThemeRanking, 1),
+                    Some(cx.id()),
+                    Some(channel),
+                    None,
+                );
+                provider_failure("decision engine", failure)
+            })?;
             self.costs.record(
                 PaidCall {
                     provider,
@@ -1543,6 +1558,35 @@ mod tests {
         assert_eq!(failure.kind, JobFailureKind::Declined);
         assert_eq!(failure.detail, "Claude: refused");
         assert_eq!(h.text.requests().len(), 1);
+    }
+
+    #[test]
+    fn ideas_and_a_ranking_whose_answer_is_lost_are_asked_for_once_and_are_in_costs() {
+        use crate::costs::tests::{lost_answer, only_cost};
+
+        let h = Harness::new();
+        *h.text.failure.lock().unwrap() = Some(lost_answer());
+        let app = h.start_with_keys();
+        let channel = channel(&app, "space history");
+
+        let job = suggest(&app, &channel);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(h.text.requests().len(), 1);
+        let cost = only_cost(&*h.db, app.profile().id, CostPurpose::ThemeIdeas);
+        assert_eq!(cost.provider, Provider::Claude);
+        assert_eq!((cost.channel, cost.job), (Some(channel.id), Some(job.id())));
+
+        *h.text.failure.lock().unwrap() = None;
+        *h.decisions.failure.lock().unwrap() = Some(lost_answer());
+        let job = suggest(&app, &channel);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        let cost = only_cost(&*h.db, app.profile().id, CostPurpose::ThemeRanking);
+        assert_eq!(cost.provider, Provider::TypeSafe);
+        assert_eq!((cost.channel, cost.job), (Some(channel.id), Some(job.id())));
     }
 
     #[test]

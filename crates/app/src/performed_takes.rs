@@ -747,6 +747,13 @@ impl JobHandler for TakePromptHandler {
             },
         };
         let generated = self.text.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost or cut may still have been billed.
+            self.costs.record_failed_for_project(
+                &failure,
+                &PlannedCall::text(CostPurpose::TakePrompt, &request),
+                Some(cx.id()),
+                project,
+            );
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })?;
         self.costs.record_for_project(
@@ -3199,6 +3206,31 @@ mod tests {
             .filter(|record| record.purpose != CostPurpose::TakeTest)
             .map(|record| (record.purpose, record.model, record.usage.video_seconds))
             .collect()
+    }
+
+    #[test]
+    fn a_take_prompt_whose_answer_is_lost_is_asked_for_once_and_is_in_costs() {
+        use crate::costs::tests::{lost_answer, only_cost};
+
+        let (s, project, _) = ready();
+        with_look(&s);
+        s.app.approve_control_video(project, 0).unwrap();
+        let before = s.h.text.requests().len();
+        *s.h.text.failure.lock().unwrap() = Some(lost_answer());
+        let id = s
+            .app
+            .write_take_prompt(project, 0, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&s.app, id);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(s.h.text.requests().len() - before, 1);
+        let cost = only_cost(&*s.h.db, s.app.profile().id, CostPurpose::TakePrompt);
+        assert_eq!((cost.project, cost.job), (Some(project), Some(id)));
+        // The prompt reads a frame of the take: its size in tokens is not
+        // known from the text, so the usual input of a take prompt stands.
+        assert!(cost.usage.input_tokens >= 1_000, "{:?}", cost.usage);
     }
 
     #[test]

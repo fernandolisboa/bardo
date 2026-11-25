@@ -257,6 +257,12 @@ impl NarrationImportHandler {
                 },
             )
             .map_err(|failure| {
+                self.costs.record_failed_for_project(
+                    &failure,
+                    &alignment_call(billed_seconds(info.duration)),
+                    Some(job),
+                    project,
+                );
                 JobFailure::new(
                     failure.kind.into(),
                     format!("ElevenLabs: {}", failure.detail),
@@ -808,6 +814,38 @@ mod tests {
             app.import_narration(project.id, &recording, BudgetConsent::Ask),
             Err(NarrationError::NoScript)
         ));
+    }
+
+    #[test]
+    fn an_alignment_whose_answer_is_lost_is_asked_for_once_and_is_in_costs() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = Harness::new();
+        *h.aligner.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::AnswerLost,
+            "no answer came back (timeout: global)",
+        ));
+        let app = h.start();
+        let project = project(&app);
+        let recording = Recording::open(&user_file(&dir, "take.wav", &silent_wav(3))).unwrap();
+
+        let id = app
+            .import_narration(project.id, &recording, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "the queue allows two");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        let costs: Vec<_> =
+            h.db.project_costs(project.id)
+                .unwrap()
+                .into_iter()
+                .filter(|record| record.purpose == CostPurpose::NarrationAlignment)
+                .collect();
+        assert_eq!(costs.len(), 1, "the timing may have been done and billed");
+        assert_eq!(costs[0].usage, Metered::audio_seconds(3));
+        assert_eq!(costs[0].job, Some(id));
+        assert!(costs[0].cost.amount() > bardo_domain::Money::ZERO, "priced");
     }
 
     #[test]

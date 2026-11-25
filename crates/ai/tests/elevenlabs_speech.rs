@@ -11,8 +11,8 @@ use bardo_ai::elevenlabs::{
 };
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, GenerationPresets, Provider, ProviderFailureKind, SpeechRequest, SpeechSynthesizer,
-    VoiceRef,
+    ApiKey, GenerationPresets, Metered, Provider, ProviderFailureKind, SpeechRequest,
+    SpeechSynthesizer, VoiceRef,
 };
 use common::{Scripted, fixture, recording_sleeper};
 
@@ -163,6 +163,44 @@ fn rate_limits_are_retried_before_failing() {
     let adapter = speech(&["tts-rate-limited", "tts-hello"]);
     assert!(adapter.synthesize(&key(), &request()).is_ok());
     assert_eq!(adapter.transport().sent().len(), 2);
+}
+
+#[test]
+fn a_busy_service_is_retried_before_failing() {
+    let adapter = speech(&["tts-system-busy", "tts-hello"]);
+    assert!(adapter.synthesize(&key(), &request()).is_ok());
+    assert_eq!(adapter.transport().sent().len(), 2);
+}
+
+#[test]
+fn a_reading_whose_answer_is_lost_is_asked_for_once() {
+    let adapter = ElevenLabsSpeech::with_transport(Scripted::losing_the_answer());
+    let failure = adapter.synthesize(&key(), &request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+
+    let adapter = speech(&["tts-gateway-timeout"]);
+    let failure = adapter.synthesize(&key(), &request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+}
+
+#[test]
+fn a_reading_that_cannot_be_used_says_what_it_billed() {
+    // The characters were read and charged, whatever came back with them.
+    let failure = speech(&["tts-misaligned"])
+        .synthesize(&key(), &request())
+        .unwrap_err();
+    let billed = failure.billed.expect("a reading bills its characters");
+    assert_eq!(billed.model, SPEECH_MODEL);
+    assert_eq!(
+        billed.usage,
+        Metered::characters(request().text.chars().count() as u64)
+    );
+    let rejected = speech(&["tts-rejected"])
+        .synthesize(&key(), &request())
+        .unwrap_err();
+    assert_eq!(rejected.billed, None);
 }
 
 #[test]

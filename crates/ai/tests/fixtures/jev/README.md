@@ -19,3 +19,6 @@ ranking misbehaves with a real key):
 
 Synthetic, for edge cases: `systemone-missing-answer.http` (a question
 left unanswered).
+
+Lost answers (ADR-0030): `systemone-gateway-timeout.http`, synthetic, a
+gateway's 504 page in place of the API's answer.

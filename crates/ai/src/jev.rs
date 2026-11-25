@@ -137,6 +137,11 @@ fn parse_answer(id: &str, question: &Question, answer: &Value) -> Result<Answer,
     }
 }
 
+/// Whether an error body is the API's own: `{"detail": ...}`.
+fn own_words(body: &Value) -> bool {
+    !body["detail"].is_null()
+}
+
 /// Reads a successful answer: one typed answer per question asked.
 pub fn parse_decisions(
     questions: &Questions,
@@ -144,22 +149,28 @@ pub fn parse_decisions(
 ) -> Result<Decisions, ProviderFailure> {
     let body: Value = serde_json::from_str(&response.body)
         .map_err(|error| unexpected(format!("unreadable response: {error}")))?;
+    let model = body["model"].as_str().unwrap_or(MODEL).to_owned();
+    let usage = TokenUsage {
+        input_tokens: body["usage"]["input_tokens"].as_u64().unwrap_or(0),
+        output_tokens: body["usage"]["output_tokens"].as_u64().unwrap_or(0),
+    };
+    // Answers that cannot be used were still given, and billed.
+    let failed = |failure: ProviderFailure| failure.billed(model.clone(), usage.into());
     let mut answers = HashMap::new();
     for (id, question) in questions.iter() {
         let answer = &body["answers"][id];
         if answer.is_null() {
-            return Err(unexpected(format!("no answer for {id}")));
+            return Err(failed(unexpected(format!("no answer for {id}"))));
         }
-        answers.insert(id.to_owned(), parse_answer(id, question, answer)?);
+        answers.insert(
+            id.to_owned(),
+            parse_answer(id, question, answer).map_err(failed)?,
+        );
     }
-    let usage = &body["usage"];
     Ok(Decisions {
         answers,
-        model: body["model"].as_str().unwrap_or(MODEL).to_owned(),
-        usage: TokenUsage {
-            input_tokens: usage["input_tokens"].as_u64().unwrap_or(0),
-            output_tokens: usage["output_tokens"].as_u64().unwrap_or(0),
-        },
+        model,
+        usage,
     })
 }
 
@@ -185,7 +196,7 @@ impl JevDecisionEngine {
     pub const TIMEOUT: Duration = Duration::from_secs(60);
 
     pub fn new() -> Self {
-        Self::with_transport(UreqTransport::new(Self::TIMEOUT))
+        Self::with_transport(UreqTransport::for_paid_calls(Self::TIMEOUT))
     }
 }
 
@@ -235,10 +246,10 @@ impl<T: Transport> DecisionEngine for JevDecisionEngine<T> {
             });
         }
         let request = decision_request(key, state, questions);
+        // A paid call, however small (ADR-0030).
         let response = self
             .backoff
-            .send(&self.transport, &request, &self.sleep)
-            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+            .send_paid(&self.transport, &request, own_words, &self.sleep)?;
         match response.status {
             200..=299 => parse_decisions(questions, &response),
             // The body names the offending field; it is Bardo's bug.
