@@ -108,6 +108,31 @@ mod tests {
     }
 
     #[test]
+    fn a_wide_input_keeps_rows_and_columns_apart() {
+        // Two rows of four: the left half white, the right half black.
+        let wide = Entry {
+            input: [2, 4],
+            ..entry(Scale::Byte, Range::AsIs)
+        };
+        let photo = RgbImage::from_fn(8, 4, |x, _| image::Rgb([if x < 4 { 255 } else { 0 }; 3]));
+        let chw = prepare(&photo, &wide);
+        assert_eq!(chw.len(), 3 * 2 * 4);
+        for row in chw[..8].chunks(4) {
+            // The filter blends the two columns at the seam.
+            assert!(row[0] > 0.4 && row[1] > 0.0, "left of {row:?}");
+            assert!(row[2] < 0.0 && row[3] < -0.4, "right of {row:?}");
+        }
+
+        let alpha = [1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0];
+        let mask = to_photo_size(&alpha, [2, 4], 8, 6);
+        assert_eq!(mask.dimensions(), (8, 6));
+        for y in 0..6 {
+            assert_eq!(mask.get_pixel(0, y).0[0], 255);
+            assert_eq!(mask.get_pixel(7, y).0[0], 0);
+        }
+    }
+
+    #[test]
     fn prepare_by_the_largest_value_ignores_exposure() {
         let dark = RgbImage::from_pixel(2, 2, image::Rgb([100, 50, 0]));
         let chw = prepare(&dark, &entry(Scale::Max, Range::AsIs));

@@ -34,6 +34,12 @@ use serde::Serialize;
 use crate::runtime::{Ep, Model, Placement};
 use crate::stats::MaskStats;
 
+/// Options that take a value, and those that take none.
+const VALUES: [&str; 10] = [
+    "models", "model", "ep", "threads", "photos", "out", "runs", "max-dim", "backdrop", "report",
+];
+const FLAGS: [&str; 2] = ["placement", "no-arena"];
+
 struct Args {
     command: String,
     opts: HashMap<String, String>,
@@ -53,15 +59,18 @@ impl Args {
             let key = rest[i]
                 .strip_prefix("--")
                 .with_context(|| format!("unexpected {}", rest[i]))?;
-            match rest.get(i + 1) {
-                Some(v) if !v.starts_with("--") => {
-                    opts.insert(key.to_owned(), v.clone());
-                    i += 2;
-                }
-                _ => {
-                    flags.push(key.to_owned());
-                    i += 1;
-                }
+            if FLAGS.contains(&key) {
+                flags.push(key.to_owned());
+                i += 1;
+            } else if VALUES.contains(&key) {
+                let value = rest
+                    .get(i + 1)
+                    .filter(|v| !v.starts_with("--"))
+                    .with_context(|| format!("--{key} needs a value"))?;
+                opts.insert(key.to_owned(), value.clone());
+                i += 2;
+            } else {
+                bail!("unknown option --{key}");
             }
         }
         Ok(Self {

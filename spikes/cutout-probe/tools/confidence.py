@@ -4,15 +4,21 @@
 
 Reads the probe's reports (`cut-MODEL-*.json`, one run of `cutout-probe
 cut --report`) and the grades given by eye to every cutout
-(../grades.toml: good, usable or bad). For each statistic of the mask it
+(../grades.toml: good, usable or bad), first counted by the photo's
+background. For each statistic of the mask it
 prints how well a threshold on it alone separates the bad cutouts from
 the rest, then what the rule in `refuse` does: how many bad cutouts it
 refuses and how many good ones it refuses with them.
 
 `--agree A,B` asks a second question of the cutouts beside the reports
-(`PHOTO.MODEL.png`): how much do the masks of models A and B overlap on
-each photo (intersection over union), and does a low overlap go with a
-bad cutout from A?
+(`PHOTO.MODEL.png`, which the probe writes with `--out REPORTS_DIR`; the
+workflow's results artifact leaves them out for their size): how much do
+the masks of models A and B overlap on each photo (intersection over
+union), and does a low overlap go with a bad cutout from A?
+
+REPORTS_DIR should hold one run's reports: where two reports cut the
+same photo with the same model, the first one read is used and the
+script says so.
 """
 
 import argparse
@@ -34,9 +40,9 @@ def refuse(s):
     return (
         s["area"] < 0.02  # found next to nothing
         or s["area"] > 0.90  # took the whole photo
-        or s["border"] > 0.10  # the object runs off the photo, or the background came along
+        or s["border"] > 0.05  # the object is cut by the photo's edge, or background came along
         or s["unsure_to_area"] > 0.25  # much of it undecided
-        or s["pieces"] >= 3  # in pieces (two is a jar beside its lid)
+        or s["pieces"] >= 3  # in pieces (two is a product beside its lid; three may be a set)
     )
 
 
@@ -44,7 +50,7 @@ def agree(reports, a, b):
     """The overlap of two models' masks on every photo, lowest first."""
     out = []
     for path in sorted(reports.glob(f"*.{a}.png")):
-        photo = path.name.split(".")[0]
+        photo = path.name[: -len(f".{a}.png")]
         x = np.asarray(Image.open(path))[..., 3] > 127
         y = np.asarray(Image.open(reports / f"{photo}.{b}.png"))[..., 3] > 127
         out.append((float((x & y).sum() / max((x | y).sum(), 1)), photo))
@@ -88,11 +94,20 @@ def main():
     data = rows(a.reports, a.model)
     seen = {}
     for name, photo, grade, stats in data:
-        seen[(name, photo)] = (grade, stats)
+        if (name, photo) in seen:
+            print(f"{name}, {photo}: in more than one report; the first is used")
+        seen.setdefault((name, photo), (grade, stats))
     data = [(n, ph, g, s) for (n, ph), (g, s) in seen.items()]
     by_grade = {g: sum(1 for d in data if d[2] == g) for g in ("good", "usable", "bad")}
     print(f"{len(data)} graded cutouts: {by_grade}")
     names = sorted({d[0] for d in data})
+    print("\ngood / usable / bad by background: plain, then a real scene")
+    for name in names:
+        cells = []
+        for scene in (False, True):
+            mine = [d[2] for d in data if d[0] == name and (d[1] in GRADES["scene"]) == scene]
+            cells.append(" / ".join(str(mine.count(g)) for g in ("good", "usable", "bad")))
+        print(f"{name:34} " + "    ".join(cells))
     print("\nAUC of each statistic (bad against the rest): all models, then " + ", ".join(names))
     for stat in STATS:
         cells = []

@@ -18,6 +18,11 @@ concurrency:
   group: cutout-spike-${{ github.ref }}
   cancel-in-progress: true
 
+# The conversion runs upstream model code; nothing here writes to the
+# repository.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -40,7 +45,7 @@ jobs:
       - name: Convert the models
         run: |
           mkdir -p cutout-models
-          python spikes/cutout-probe/tools/convert.py cutout-models --deformconv | tee cutout-models/convert.log
+          python spikes/cutout-probe/tools/convert.py cutout-models --deformconv 2>&1 | tee cutout-models/convert.log
       - uses: actions/upload-artifact@v4
         with:
           name: cutout-models
@@ -59,7 +64,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
@@ -97,11 +102,17 @@ jobs:
       - name: Cut every photo with every model (CPU), a model a process for its own memory
         run: |
           mkdir -p cutouts
-          for model in u2netp_320x320 u2net_320x320 isnet_general_use_1024x1024 birefnet_lite_1024x1024 birefnet_lite_matting_1024x1024; do
-            $P cut --models cutout-models --photos $PHOTOS --model $model --out cutouts --report cut-$model-${{ runner.os }}.json
+          for model in u2netp_320x320 u2net_320x320 isnet_general_use_1024x1024 birefnet_lite_512x512 birefnet_lite_768x768 birefnet_lite_1024x1024; do
+            $P cut --models cutout-models --photos $PHOTOS --model $model --runs 2 --out cutouts --report cut-$model-${{ runner.os }}.json
           done
-      - name: Cut again with BiRefNet lite and the CPU's memory arena off
-        run: $P cut --models cutout-models --photos $PHOTOS --model birefnet_lite_1024x1024 --no-arena --out cutouts-no-arena --report cut-birefnet_lite_1024x1024-no-arena-${{ runner.os }}.json
+          $P cut --models cutout-models --photos $PHOTOS --model birefnet_lite_matting_1024x1024 --runs 1 --out cutouts --report cut-birefnet_lite_matting_1024x1024-${{ runner.os }}.json
+      - name: Cut one photo in a process of its own, as a job in the app would, with the CPU's memory arena on and off
+        run: |
+          mkdir -p one
+          for model in birefnet_lite_512x512 birefnet_lite_768x768 birefnet_lite_1024x1024; do
+            $P cut --models cutout-models --photos $PHOTOS/box-1.jpg --model $model --runs 1 --out one --report one/$model-${{ runner.os }}.json
+            $P cut --models cutout-models --photos $PHOTOS/box-1.jpg --model $model --runs 1 --no-arena --out one --report one/$model-no-arena-${{ runner.os }}.json
+          done
       - name: Put together the kit for the checks on a real Windows machine
         if: runner.os == 'Windows'
         run: |
@@ -124,5 +135,6 @@ jobs:
           name: cutout-results-${{ runner.os }}
           path: |
             *.json
+            one/*.json
             cutouts/*.jpg
           retention-days: 30

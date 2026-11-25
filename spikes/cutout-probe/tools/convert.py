@@ -151,21 +151,40 @@ def register_deformconv():
     register_custom_op_symbolic("torchvision::deform_conv2d", deform, 19)
 
 
-def export(model, x, out, opset=OPSET):
-    """Exports `model` at `x`'s size and compares the file with PyTorch."""
+def worst_of(differences, what):
+    """The largest of the differences; stops when one is not a number,
+    which no comparison with a limit catches."""
+    if not all(np.isfinite(d) for d in differences):
+        sys.exit(f"{what}: a difference that is not a number")
+    return max(differences)
+
+
+def export(model, entry, out, opset=OPSET):
+    """Exports `model` at the entry's input size and compares the file
+    with PyTorch on the test photos. On noise some of these models answer
+    with an empty mask, which any file would match."""
     import onnxruntime as ort
     import torch
 
+    x = sample(*entry["input"])
     with torch.no_grad():
-        ref = model(x).numpy()
         torch.onnx.export(model, (x,), str(out), input_names=["image"], output_names=["mask"], opset_version=opset, dynamo=False)
-    got = ort.InferenceSession(str(out), providers=["CPUExecutionProvider"]).run(None, {"image": x.numpy()})[0]
-    if got.shape != (1, 1, x.shape[2], x.shape[3]):
-        sys.exit(f"{out.name}: output {got.shape}")
-    worst = float(np.abs(got - ref).max())
-    print(f"{out.name}: max difference from PyTorch {worst:.2e} (the mask runs 0..1)", flush=True)
+    session = ort.InferenceSession(str(out), providers=["CPUExecutionProvider"])
+    differences, fullest = [], 0.0
+    for photo in photo_inputs(entry):
+        with torch.no_grad():
+            ref = model(torch.from_numpy(photo)).numpy()
+        got = session.run(None, {"image": photo})[0]
+        if got.shape != (1, 1, *entry["input"]):
+            sys.exit(f"{out.name}: output {got.shape}")
+        differences.append(float(np.abs(got - ref).max()))
+        fullest = max(fullest, float(ref.max()))
+    worst = worst_of(differences, out.name)
+    print(f"{out.name}: max difference from PyTorch {worst:.2e} on {len(CHECK_PHOTOS)} test photos (the mask runs 0..1)", flush=True)
     if worst > 1e-3:
         sys.exit(f"{out.name} does not match PyTorch")
+    if fullest < 0.9:
+        sys.exit(f"{out.name}: PyTorch finds nothing in the test photos, so the comparison says nothing")
 
 
 def wrap(model, pick):
@@ -200,7 +219,7 @@ def export_u2net(key, entry, work, out):
     net.load_state_dict(torch.load(fetch(SOURCES[key], work), map_location="cpu"))
     sys.path.pop(0)
     # The first of the seven outputs is the fused map, already a sigmoid.
-    export(wrap(net.eval(), lambda o: o[0]), sample(*entry["input"]), out)
+    export(wrap(net.eval(), lambda o: o[0]), entry, out)
 
 
 def export_isnet(key, entry, work, out):
@@ -216,7 +235,7 @@ def export_isnet(key, entry, work, out):
     sys.path.pop(0)
     forget("models")
     # ([maps], [features]); the first map is the finest, already a sigmoid.
-    export(wrap(net.eval(), lambda o: o[0][0]), sample(*entry["input"]), out)
+    export(wrap(net.eval(), lambda o: o[0][0]), entry, out)
 
 
 def export_birefnet(key, entry, work, out, deformconv):
@@ -254,26 +273,26 @@ def export_birefnet(key, entry, work, out, deformconv):
     net.load_state_dict(state, strict=True)
     # The last output is the finest map, as logits.
     model = wrap(net.eval(), lambda o: torch.sigmoid(o[-1]))
-    x = sample(*entry["input"])
-
     upstream_forward = deform_conv.DeformableConv2d.forward
-    if deformconv:
+    # The DeformConv file is for comparison; one size of it is enough.
+    if deformconv and entry["input"] == [1024, 1024]:
         register_deformconv()
-        export(model, x, out.with_name(out.stem + "_deformconv.onnx"), opset=19)
+        export(model, entry, out.with_name(out.stem + "_deformconv.onnx"), opset=19)
 
     def by_taps(self, x):
         offset = self.offset_conv(x)
         modulator = 2.0 * torch.sigmoid(self.modulator_conv(x))
         return deform_conv2d_taps(x, offset, self.regular_conv.weight, self.regular_conv.bias, self.padding, modulator)
 
+    photos = [torch.from_numpy(photo) for photo in photo_inputs(entry)]
     with torch.no_grad():
-        ref = model(x)
+        refs = [model(photo) for photo in photos]
         deform_conv.DeformableConv2d.forward = by_taps
-        worst = float((model(x) - ref).abs().max())
-    print(f"{out.name}: deform_conv2d by taps, max difference from upstream's forward {worst:.2e}")
+        worst = worst_of([float((model(photo) - ref).abs().max()) for photo, ref in zip(photos, refs)], out.name)
+    print(f"{out.name}: deform_conv2d by taps, max difference from upstream's forward {worst:.2e} on {len(photos)} test photos")
     if worst > 1e-3:
         sys.exit(f"{out.name}: the rewrite changes the mask")
-    export(model, x, out)
+    export(model, entry, out)
     deform_conv.DeformableConv2d.forward = upstream_forward
     sys.path.pop(0)
     forget("config", "dataset", "utils", "models", "image_proc")
@@ -283,14 +302,14 @@ def half_weights(path, inputs):
     """Keeps every float32 weight of the model at `path` as float16, with a
     Cast back to float32 in front of the graph: ONNX Runtime folds the
     casts when it loads the model, so it computes in float32 as before.
-    Compares the result with the float32 model on `inputs` and rewrites the
-    file."""
+    Rewrites the file and compares it with the float32 model on each of
+    `inputs`."""
     import onnx
     import onnxruntime as ort
     from onnx import TensorProto, helper, numpy_helper
 
     sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
-    ref = sess.run(None, inputs)
+    refs = [sess.run(None, {"image": x})[0] for x in inputs]
     del sess
     model = onnx.load(str(path))
     graph = model.graph
@@ -315,28 +334,40 @@ def half_weights(path, inputs):
     graph.node.extend(casts + nodes)
     onnx.checker.check_model(model, full_check=False)
     onnx.save(model, str(path))
-    got = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"]).run(None, inputs)
-    worst = max(float(np.abs(g - r).max()) for r, g in zip(ref, got))
-    mean = max(float(np.abs(g - r).mean()) for r, g in zip(ref, got))
-    print(f"{path.name}: {halved} weights as float16, difference from float32 on a test photo: mean {mean:.2e}, max {worst:.2e} (the mask runs 0..1)", flush=True)
+    sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+    differences = [np.abs(sess.run(None, {"image": x})[0] - ref) for x, ref in zip(inputs, refs)]
+    if not all(np.isfinite(d).all() for d in differences):
+        sys.exit(f"{path.name}: float16 weights give a mask that is not a number")
+    worst = max(float(d.max()) for d in differences)
+    mean = max(float(d.mean()) for d in differences)
+    print(f"{path.name}: {halved} weights as float16, difference from float32 on the worst of {len(inputs)} test photos: mean {mean:.2e}, max {worst:.2e} (the mask runs 0..1)", flush=True)
     # An alpha is kept in 8 bits, whose step is 4e-3. Single pixels on a
     # steep edge move more than the mask does; a wrong conversion moves
-    # everything.
-    if mean > 1e-3 or worst > 0.1:
+    # everything. The limits catch a broken file; the numbers printed are
+    # what float16 costs each model.
+    if mean > 2e-3 or worst > 0.25:
         sys.exit(f"{path.name}: float16 weights change the mask too much")
 
 
-def photo_input(entry):
-    """A test photo as the probe prepares it for this model: what the
-    float16 weights are checked on, since a mask of noise says little."""
+# The photos every check runs on: an easy one, clear glass twice (where
+# the small models are least sure) and a box on black.
+CHECK_PHOTOS = ["plain-2", "glass-1", "bottle-3", "box-1"]
+
+
+def photo_inputs(entry):
+    """The test photos as the probe prepares them for this model: what
+    the conversions are checked on, since a mask of noise says little."""
     from PIL import Image
 
     h, w = entry["input"]
-    photo = Image.open(HERE.parent / "photos" / "plain-2.jpg").convert("RGB").resize((w, h), Image.BILINEAR)
-    x = np.asarray(photo, dtype=np.float32)
-    x = x / (x.max() if entry["scale"] == "max" else 255.0)
-    x = (x - np.array(entry["mean"], dtype=np.float32)) / np.array(entry["std"], dtype=np.float32)
-    return np.ascontiguousarray(x.transpose(2, 0, 1)[None])
+    inputs = []
+    for name in CHECK_PHOTOS:
+        photo = Image.open(HERE.parent / "photos" / f"{name}.jpg").convert("RGB").resize((w, h), Image.BILINEAR)
+        x = np.asarray(photo, dtype=np.float32)
+        x = x / (x.max() if entry["scale"] == "max" else 255.0)
+        x = (x - np.array(entry["mean"], dtype=np.float32)) / np.array(entry["std"], dtype=np.float32)
+        inputs.append(np.ascontiguousarray(x.transpose(2, 0, 1)[None]))
+    return inputs
 
 
 def main():
@@ -362,20 +393,27 @@ def main():
         else:
             exporters[key](key, entry, work, path)
         wanted.append(path)
-    extra = sorted(out.glob("*_deformconv.onnx"))
+    extra = sorted(out.glob("*_deformconv.onnx")) if a.deformconv else []
 
     for path in wanted + extra:
         entry = next(e for e in MANIFEST["model"] if path.name.startswith(e["file"][: -len(".onnx")]))
-        half_weights(path, {"image": photo_input(entry)})
+        half_weights(path, photo_inputs(entry))
 
-    sums = []
+    sums, changed = [], []
+    pinned = {e["file"]: e.get("sha256") for e in MANIFEST["model"]}
     print("\nSHA-256 of the files written:")
     for path in wanted + extra:
         digest = sha256(path.read_bytes())
         sums.append(f"{digest}  {path.name}\n")
         print(f"{digest}  {path.name}  {path.stat().st_size} bytes")
+        if pinned.get(path.name) not in (None, digest):
+            changed.append(path.name)
     (out / "SHA256SUMS").write_text("".join(sums))
     shutil.copyfile(MANIFEST_PATH, out / "models.toml")
+    # The spike's numbers were measured on the files the manifest names.
+    if changed:
+        sys.exit(f"not the files the manifest names: {', '.join(changed)}")
+    print("every file is the one the manifest names, byte for byte")
 
 
 if __name__ == "__main__":

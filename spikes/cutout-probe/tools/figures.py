@@ -19,7 +19,7 @@ import pathlib
 import tomllib
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 
 HERE = pathlib.Path(__file__).resolve().parent
 MODELS = [m["file"][: -len(".onnx")] for m in tomllib.loads((HERE.parent / "models.toml").read_text())["model"]]
@@ -28,6 +28,8 @@ LABELS = {
     "u2net_320x320": "U2-Net",
     "isnet_general_use_1024x1024": "IS-Net",
     "birefnet_lite_1024x1024": "BiRefNet lite",
+    "birefnet_lite_768x768": "BiRefNet lite at 768",
+    "birefnet_lite_512x512": "BiRefNet lite at 512",
     "birefnet_lite_matting_1024x1024": "BiRefNet lite matting",
 }
 HEAD, GAP = 18, 4
@@ -56,6 +58,18 @@ def differ_most(photo, cutouts, models, cell):
     return (int(x), int(y), int(x) + side, int(y) + side)
 
 
+def upright(photo, cutouts, models):
+    """The photo as the probe read it: turned upright and at the size of
+    its cutouts, so that a square of one is the same square of the
+    other."""
+    image = ImageOps.exif_transpose(Image.open(photo))
+    for model in models:
+        cut = cutouts / f"{photo.stem}.{model}.jpg"
+        if cut.exists():
+            return image.resize(Image.open(cut).size, Image.LANCZOS)
+    return image
+
+
 def sheet(photos, cutouts, models, cell, zoom=False):
     columns = ["photo"] + [LABELS.get(m, m) for m in models]
     width = len(columns) * (cell + GAP) - GAP
@@ -66,7 +80,7 @@ def sheet(photos, cutouts, models, cell, zoom=False):
     for r, photo in enumerate(photos):
         y = HEAD + r * (cell + GAP)
         box = differ_most(photo, cutouts, models, cell) if zoom else None
-        out.paste(fit(Image.open(photo).crop(box), cell), (0, y))
+        out.paste(fit(upright(photo, cutouts, models).crop(box), cell), (0, y))
         for c, model in enumerate(models, start=1):
             cut = cutouts / f"{photo.stem}.{model}.jpg"
             if cut.exists():

@@ -1,6 +1,9 @@
 //! The process's memory while something runs, sampled from another thread:
 //! the largest resident size seen. Portable and without `unsafe`, at the
-//! price of missing a peak shorter than the sampling step.
+//! price of missing a peak shorter than the sampling step. The step is
+//! long because a sample is not free everywhere: on Windows `sysinfo`
+//! lists every process to read one, and the sampler runs while the model
+//! is being timed.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -8,6 +11,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+
+const STEP: Duration = Duration::from_millis(100);
 
 pub struct Sampler {
     stop: Arc<AtomicBool>,
@@ -33,7 +38,7 @@ impl Sampler {
             let pid = Pid::from_u32(std::process::id());
             while !stop2.load(Ordering::Relaxed) {
                 peak2.fetch_max(resident(&mut system, pid), Ordering::Relaxed);
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(STEP);
             }
             peak2.fetch_max(resident(&mut system, pid), Ordering::Relaxed);
         });
@@ -44,7 +49,7 @@ impl Sampler {
         }
     }
 
-    /// Stops sampling and returns the peak in megabytes.
+    /// Stops sampling and returns the peak in mebibytes (2²⁰ bytes).
     pub fn finish(mut self) -> f64 {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(thread) = self.thread.take() {
@@ -64,7 +69,6 @@ mod tests {
         assert!(before > 0.0, "the process has no resident memory");
         let sampler = Sampler::start();
         let block = std::hint::black_box(vec![1u8; 64 * 1024 * 1024]);
-        std::thread::sleep(Duration::from_millis(50));
         let peak = sampler.finish();
         assert!(
             peak > before + 48.0,

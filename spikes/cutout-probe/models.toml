@@ -84,8 +84,9 @@ license = "MIT"
 # `mean` and `std` are how each upstream prepares a photo; `range` is what
 # its own inference does to the output (U²-Net and IS-Net stretch it from
 # its smallest to its largest value). `sha256` and `size` are those of the
-# files the conversion wrote for the spike's numbers; another run of the
-# conversion need not write the same bytes, and nothing checks these.
+# files the spike's numbers were measured on. The conversion writes the
+# same bytes on every run so far (the container's and the workflow's),
+# and stops when it does not.
 
 [[model]]
 file = "u2netp_320x320.onnx"
@@ -126,6 +127,30 @@ sha256 = "24b1439a4980fbb958c6b4bf1485f3e370b7d4d028b676a49854b0b6a6f791a1"
 size = 94670931
 from = "birefnet_lite"
 input = [1024, 1024]
+scale = "byte"
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
+range = "as-is"
+
+# The same weights at smaller inputs: less time and memory, for a
+# coarser mask.
+[[model]]
+file = "birefnet_lite_768x768.onnx"
+sha256 = "5d589b5abc03530addf90037759bbc78b3c0b888c909589ae94ce24a7593f0b0"
+size = 94670931
+from = "birefnet_lite"
+input = [768, 768]
+scale = "byte"
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
+range = "as-is"
+
+[[model]]
+file = "birefnet_lite_512x512.onnx"
+sha256 = "78ea5e9857829c3597caa4e81ffca1cd370f9bcefaacbdcf9648ba8516ed4b8c"
+size = 94670931
+from = "birefnet_lite"
+input = [512, 512]
 scale = "byte"
 mean = [0.485, 0.456, 0.406]
 std = [0.229, 0.224, 0.225]
