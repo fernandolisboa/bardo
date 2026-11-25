@@ -204,10 +204,16 @@ impl ProductRepository for Database {
         Ok(())
     }
 
-    fn projects_using(&self, _id: ProductId) -> Result<usize, RepositoryError> {
-        // No video project names a product yet: ad projects, which start
-        // from a product's ad angle, bring the reference this counts.
-        Ok(0)
+    fn projects_using(&self, id: ProductId) -> Result<usize, RepositoryError> {
+        let count: i64 = self
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM video_project WHERE product_id = ?1",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(boxed)?;
+        Ok(usize::try_from(count).unwrap_or(0))
     }
 
     fn images(&self, product: ProductId) -> Result<Vec<ProductImage>, RepositoryError> {

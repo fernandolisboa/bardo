@@ -14,6 +14,7 @@ use gpui_kit::{
 };
 
 use crate::accounts::AccountsScreen;
+use crate::ad_angles::OpenProject;
 use crate::appearance::{self, look};
 use crate::channels::ChannelsScreen;
 use crate::costs::CostsScreen;
@@ -192,6 +193,18 @@ impl Shell {
                 window,
                 |this, _, event: &OpenRetention, window, cx| {
                     this.open_retention(event, window, cx);
+                },
+            ),
+            // An ad angle's project, asked for on Products.
+            cx.subscribe_in(
+                &products,
+                window,
+                |this, _, event: &OpenProject, window, cx| {
+                    let project = event.0;
+                    this.pick(Destination::Projects, window, cx);
+                    this.projects.update(cx, |projects, cx| {
+                        projects.show_project(project, window, cx)
+                    });
                 },
             ),
         ];
@@ -995,7 +1008,15 @@ impl Shell {
         self.jobs_open = false;
         self.guide.update(cx, |guide, cx| guide.close_cards(cx));
         match place {
-            bardo_app::ShowcasePlace::Place(place) => self.go(place, window, cx),
+            bardo_app::ShowcasePlace::Place(place) => {
+                // The Brief stage opened an ad project; the stages after
+                // it show the project the walk was on.
+                if matches!(place, GuidePlace::Stage(stage) if stage != Stage::Brief) {
+                    self.projects
+                        .update(cx, |projects, cx| projects.leave_ad_project(window, cx));
+                }
+                self.go(place, window, cx)
+            }
             bardo_app::ShowcasePlace::Guide => {
                 self.close_editor(window, cx);
                 self.show(Destination::Guide, window, cx);

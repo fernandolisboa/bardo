@@ -44,10 +44,13 @@ pub enum TemplateKind {
     /// The prompt a take model makes a take from: the look, the set, the
     /// take's words and the model's instruction (#192).
     TakePrompt,
+    /// The ad angles Claude proposes for a product and a channel, from the
+    /// product sheet's confirmed claims and the ad frameworks (#275).
+    AdAngles,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 9] = [
+    pub const ALL: [TemplateKind; 10] = [
         TemplateKind::Script,
         TemplateKind::ImagePrompt,
         TemplateKind::MusicPrompt,
@@ -57,6 +60,7 @@ impl TemplateKind {
         TemplateKind::Localization,
         TemplateKind::LookPrompt,
         TemplateKind::TakePrompt,
+        TemplateKind::AdAngles,
     ];
 
     /// Stable name stored in the database.
@@ -71,6 +75,7 @@ impl TemplateKind {
             TemplateKind::Localization => "localization",
             TemplateKind::LookPrompt => "look_prompt",
             TemplateKind::TakePrompt => "take_prompt",
+            TemplateKind::AdAngles => "ad_angles",
         }
     }
 
@@ -161,6 +166,20 @@ impl TemplateKind {
                 TemplateVariable::Words,
                 TemplateVariable::Instruction,
             ],
+            TemplateKind::AdAngles => &[
+                TemplateVariable::ChannelName,
+                TemplateVariable::ChannelNiche,
+                TemplateVariable::Language,
+                TemplateVariable::Country,
+                TemplateVariable::Persona,
+                TemplateVariable::Product,
+                TemplateVariable::ProductAudience,
+                TemplateVariable::ProductClaims,
+                TemplateVariable::ProductNotes,
+                TemplateVariable::AdFrameworks,
+                TemplateVariable::AnglesToAvoid,
+                TemplateVariable::AngleCount,
+            ],
         }
     }
 }
@@ -242,10 +261,26 @@ pub enum TemplateVariable {
     /// The video's visual style (#259): that one was chosen and the text
     /// Bardo adds to every image for it, or that none was chosen.
     VisualStyle,
+    /// The product an ad is for: its name, what kind of thing it is, what
+    /// it is and what its sheet says of it.
+    Product,
+    /// Who the product is for: the brief's audience and the sheet's
+    /// audience segments.
+    ProductAudience,
+    /// The claims an ad may state: the sheet's confirmed claims, numbered.
+    ProductClaims,
+    /// What an ad for the product must say and must never say.
+    ProductNotes,
+    /// The ad frameworks to pick from: each one's code, name and steps.
+    AdFrameworks,
+    /// The ad angles already proposed for the product and the channel.
+    AnglesToAvoid,
+    /// How many ad angles to propose.
+    AngleCount,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 25] = [
+    pub const ALL: [TemplateVariable; 32] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -271,6 +306,13 @@ impl TemplateVariable {
         TemplateVariable::Words,
         TemplateVariable::Instruction,
         TemplateVariable::VisualStyle,
+        TemplateVariable::Product,
+        TemplateVariable::ProductAudience,
+        TemplateVariable::ProductClaims,
+        TemplateVariable::ProductNotes,
+        TemplateVariable::AdFrameworks,
+        TemplateVariable::AnglesToAvoid,
+        TemplateVariable::AngleCount,
     ];
 
     /// The name written between the braces.
@@ -301,6 +343,13 @@ impl TemplateVariable {
             TemplateVariable::Words => "words",
             TemplateVariable::Instruction => "instruction",
             TemplateVariable::VisualStyle => "visual_style",
+            TemplateVariable::Product => "product",
+            TemplateVariable::ProductAudience => "product_audience",
+            TemplateVariable::ProductClaims => "product_claims",
+            TemplateVariable::ProductNotes => "product_notes",
+            TemplateVariable::AdFrameworks => "ad_frameworks",
+            TemplateVariable::AnglesToAvoid => "angles_to_avoid",
+            TemplateVariable::AngleCount => "angle_count",
         }
     }
 

@@ -138,6 +138,10 @@ pub mod refs {
     pub const PROJECTS_LENGTH: GuideRef = at("projects", "length");
     pub const PROJECTS_STYLE: GuideRef = at("projects", "style");
     pub const PROJECTS_MODE: GuideRef = at("projects", "mode");
+    pub const BRIEF_ANGLE: GuideRef = at("brief", "angle");
+    pub const BRIEF_CLAIMS: GuideRef = at("brief", "claims");
+    pub const BRIEF_WORDS: GuideRef = at("brief", "words");
+    pub const BRIEF_CONFIRM: GuideRef = at("brief", "confirm");
     pub const SCRIPT_WRITE: GuideRef = at("script", "write");
     pub const SCRIPT_REVIEW: GuideRef = at("script", "review");
     pub const SCRIPT_MUSIC: GuideRef = at("script", "music");
@@ -184,6 +188,8 @@ pub mod refs {
     pub const PRODUCTS_SHEET: GuideRef = at("products", "sheet");
     pub const PRODUCTS_RESEARCH: GuideRef = at("products", "research");
     pub const PRODUCTS_CLAIMS: GuideRef = at("products", "claims");
+    pub const PRODUCTS_ANGLES: GuideRef = at("products", "angles");
+    pub const PRODUCTS_ANGLE_REVIEW: GuideRef = at("products", "angle-review");
     pub const PERSONAS_LIBRARY: GuideRef = at("personas", "library");
     pub const PERSONAS_VOICE: GuideRef = at("personas", "voice");
     pub const PERSONAS_PRESETS: GuideRef = at("personas", "presets");
@@ -237,7 +243,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 109] = [
+    pub const ALL: [GuideRef; 115] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -251,6 +257,10 @@ pub mod refs {
         PROJECTS_LENGTH,
         PROJECTS_STYLE,
         PROJECTS_MODE,
+        BRIEF_ANGLE,
+        BRIEF_CLAIMS,
+        BRIEF_WORDS,
+        BRIEF_CONFIRM,
         SCRIPT_WRITE,
         SCRIPT_REVIEW,
         SCRIPT_MUSIC,
@@ -297,6 +307,8 @@ pub mod refs {
         PRODUCTS_SHEET,
         PRODUCTS_RESEARCH,
         PRODUCTS_CLAIMS,
+        PRODUCTS_ANGLES,
+        PRODUCTS_ANGLE_REVIEW,
         PERSONAS_LIBRARY,
         PERSONAS_VOICE,
         PERSONAS_PRESETS,

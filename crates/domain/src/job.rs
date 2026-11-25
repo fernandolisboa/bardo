@@ -149,6 +149,14 @@ pub enum JobKind {
     /// claims wait for review. Or writes the sheet from the brief alone.
     /// The notes are kept, so a resumed job does not research twice.
     ProductResearch,
+    /// Has Claude propose ad angles for a product and a channel from the
+    /// product sheet's confirmed claims, then has the decision engine rank
+    /// them (docs/spec/marketing-videos.md). The angles are saved before
+    /// the ranking, so a resumed job does not propose twice.
+    AdAngleSuggestion,
+    /// Has the decision engine rank the ad angles of a product and a
+    /// channel that have no ranking, e.g. after an edit.
+    AdAngleRanking,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -177,7 +185,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 35] = [
+    pub const ALL: [JobKind; 37] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -213,6 +221,8 @@ impl JobKind {
         JobKind::StagingCleanup,
         JobKind::LookFraming,
         JobKind::ProductResearch,
+        JobKind::AdAngleSuggestion,
+        JobKind::AdAngleRanking,
     ];
 
     /// Stable name stored in the database.
@@ -253,6 +263,8 @@ impl JobKind {
             JobKind::StagingCleanup => "staging_cleanup",
             JobKind::LookFraming => "look_framing",
             JobKind::ProductResearch => "product_research",
+            JobKind::AdAngleSuggestion => "ad_angle_suggestion",
+            JobKind::AdAngleRanking => "ad_angle_ranking",
         }
     }
 }

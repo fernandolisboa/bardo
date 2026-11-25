@@ -23,10 +23,11 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, Image, ObjectFit, PathPromptOptions, ScrollHandle,
-    SharedString, Subscription, Task, Window, div, img, px,
+    AnyElement, App, ClickEvent, Entity, EventEmitter, Image, ObjectFit, PathPromptOptions,
+    ScrollHandle, SharedString, Subscription, Task, Window, div, img, px,
 };
 
+use crate::ad_angles::{AnglesSection, OpenProject};
 use crate::kit::{self, Tone};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::product_sheet::SheetSection;
@@ -109,15 +110,17 @@ fn decoded(picture: &ProductPicture) -> Arc<Image> {
 enum Tab {
     Brief,
     Sheet,
+    Angles,
 }
 
 impl Tab {
-    const ALL: [Tab; 2] = [Tab::Brief, Tab::Sheet];
+    const ALL: [Tab; 3] = [Tab::Brief, Tab::Sheet, Tab::Angles];
 
     fn label(self) -> Text {
         match self {
             Tab::Brief => Text::ProductTabBrief,
             Tab::Sheet => Text::ProductTabSheet,
+            Tab::Angles => Text::ProductTabAngles,
         }
     }
 }
@@ -131,6 +134,8 @@ struct ShownLogo {
     logo: ProductLogo,
     picture: Arc<Image>,
 }
+
+impl EventEmitter<OpenProject> for ProductsScreen {}
 
 pub struct ProductsScreen {
     bardo: Entity<Bardo>,
@@ -147,6 +152,11 @@ pub struct ProductsScreen {
     /// The Sheet tab is not showing the edited product as it is stored
     /// (or not yet): the next frame that shows the tab reads it.
     sheet_pending: bool,
+    /// The Ad angles tab, which reads and reviews the product's angles
+    /// itself.
+    angles: Entity<AnglesSection>,
+    /// As `sheet_pending`, for the Ad angles tab.
+    angles_pending: bool,
     name: Entity<InputState>,
     kind: ProductKind,
     description: Entity<TextareaState>,
@@ -228,6 +238,13 @@ impl ProductsScreen {
 
         let form_scroll = ScrollHandle::new();
         let sheet = cx.new(|cx| SheetSection::new(bardo.clone(), form_scroll.clone(), window, cx));
+        let angles =
+            cx.new(|cx| AnglesSection::new(bardo.clone(), form_scroll.clone(), window, cx));
+        let mut subscriptions = subscriptions;
+        // An angle's ad project opens on the Projects screen.
+        subscriptions.push(cx.subscribe(&angles, |_, _, event: &OpenProject, cx| {
+            cx.emit(OpenProject(event.0))
+        }));
 
         let mut screen = Self {
             bardo,
@@ -239,6 +256,8 @@ impl ProductsScreen {
             tab: Tab::Brief,
             sheet,
             sheet_pending: true,
+            angles,
+            angles_pending: true,
             name,
             kind: ProductKind::default(),
             description,
@@ -278,6 +297,7 @@ impl ProductsScreen {
     pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.reload_list(cx);
         self.sheet_pending = true;
+        self.angles_pending = true;
         if let Some(id) = self.editing {
             let stored = self
                 .products
@@ -496,6 +516,7 @@ impl ProductsScreen {
         // A product has a sheet only once it is saved.
         self.tab = Tab::Brief;
         self.sheet_pending = true;
+        self.angles_pending = true;
         self.filled = None;
         self.reset_feedback();
         self.fill(&ProductDraft::default(), window, cx);
@@ -511,6 +532,7 @@ impl ProductsScreen {
         self.filled = Some(product.brief.clone());
         self.editing = Some(id);
         self.sheet_pending = true;
+        self.angles_pending = true;
         self.reset_feedback();
         self.fill(&draft, window, cx);
         self.pictures_pending = true;
@@ -533,6 +555,7 @@ impl ProductsScreen {
                 self.editing = Some(saved.id);
                 // Facts added to the brief are on the sheet now.
                 self.sheet_pending = true;
+                self.angles_pending = true;
                 // The pictures section stays as it is: saving the brief
                 // says nothing about a picture being chosen.
                 self.field_errors.clear();
@@ -583,6 +606,8 @@ impl ProductsScreen {
         match self.bardo.read(cx).set_product_archived(id, archived) {
             Ok(_) => {
                 self.reload_list(cx);
+                // An archived product takes no new angles.
+                self.angles_pending = true;
                 self.confirm_delete = false;
                 self.notice = Some(if archived {
                     Notice::Archived
@@ -1432,7 +1457,7 @@ impl ProductsScreen {
             .into_any_element()
     }
 
-    /// The switch between the brief and the sheet.
+    /// The switch between the brief, the sheet and the ad angles.
     fn render_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let group = ButtonGroup::new("product-tab")
@@ -1446,6 +1471,9 @@ impl ProductsScreen {
             .on_click(cx.listener(|this, clicked: &Vec<usize>, _, cx| {
                 if let Some(tab) = clicked.first().and_then(|&i| Tab::ALL.get(i)) {
                     this.tab = *tab;
+                    // Claims confirmed on the Sheet tab since are what an
+                    // angle may lean on.
+                    this.angles_pending = true;
                     cx.notify();
                 }
             }));
@@ -1459,25 +1487,34 @@ impl ProductsScreen {
 
     fn render_form(&self, cx: &mut Context<Self>) -> AnyElement {
         let tabs = self.render_tabs(cx);
-        if self.tab == Tab::Sheet {
+        if self.tab != Tab::Brief {
             // A run works from the saved brief, so edits waiting in the
             // other tab are pointed out.
             let unsaved = (self.editing.is_some() && self.dirty(cx)).then(|| {
                 kit::notice(
                     Tone::Warning,
-                    tr(self.bardo.read(cx), Text::SheetBriefUnsaved),
+                    tr(
+                        self.bardo.read(cx),
+                        if self.tab == Tab::Sheet {
+                            Text::SheetBriefUnsaved
+                        } else {
+                            Text::AdAnglesBriefUnsaved
+                        },
+                    ),
                     cx,
                 )
             });
+            let column = v_flex()
+                .max_w(px(720.))
+                .gap_4()
+                .child(tabs)
+                .children(unsaved);
             return div()
-                .child(
-                    v_flex()
-                        .max_w(px(720.))
-                        .gap_4()
-                        .child(tabs)
-                        .children(unsaved)
-                        .child(self.sheet.clone()),
-                )
+                .child(if self.tab == Tab::Sheet {
+                    column.child(self.sheet.clone())
+                } else {
+                    column.child(self.angles.clone())
+                })
                 .into_any_element();
         }
         let kind = self.render_kind(cx);
@@ -1705,6 +1742,9 @@ impl Render for ProductsScreen {
                 Some(Tab::Sheet)
             }
             Some(TourAnchor::Control(
+                Control::ProductAngles | Control::ProductAngleReview | Control::ProductAngleActions,
+            )) => Some(Tab::Angles),
+            Some(TourAnchor::Control(
                 Control::ProductBrief
                 | Control::ProductFacts
                 | Control::ProductOwnership
@@ -1715,6 +1755,10 @@ impl Render for ProductsScreen {
             _ => None,
         };
         if let Some(tab) = toured {
+            if self.tab != tab {
+                // Shown as stored, like a tab the user picks.
+                self.angles_pending = true;
+            }
             self.tab = tab;
         }
         if self.tab == Tab::Sheet && self.sheet_pending {
@@ -1722,6 +1766,12 @@ impl Render for ProductsScreen {
             let product = self.editing;
             self.sheet
                 .update(cx, |sheet, cx| sheet.show(product, window, cx));
+        }
+        if self.tab == Tab::Angles && self.angles_pending {
+            self.angles_pending = false;
+            let product = self.editing;
+            self.angles
+                .update(cx, |angles, cx| angles.show(product, cx));
         }
         let collection = self.collection(cx);
         let form = self.render_form(cx);

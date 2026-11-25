@@ -185,7 +185,8 @@ impl PastPerformance {
     /// The first weeks of the channel's video projects: `publications` and
     /// `snapshots` of the channel, matched to `projects`. Publications of
     /// other projects are left out, as are projects without a first week
-    /// yet.
+    /// yet. Ad projects are left out too: an ad is made for a product, and
+    /// how it did says nothing of how the channel's own ideas do.
     pub fn of_channel(
         projects: &[VideoProject],
         publications: &[Publication],
@@ -200,6 +201,7 @@ impl PastPerformance {
         }
         let mut videos: Vec<PublishedVideo> = projects
             .iter()
+            .filter(|project| !project.is_ad())
             .filter_map(|project| {
                 let mut views = 0u64;
                 let mut projected = false;
@@ -451,6 +453,7 @@ mod tests {
                 spend_cap: crate::SpendCap::Default,
                 style: None,
                 length: None,
+                product: None,
             };
             let id = project.id;
             self.projects.push(project);
@@ -549,6 +552,21 @@ mod tests {
         c.post(mine, Network::YouTube, 0, &[(7.0, 1_000)]);
         c.post(VideoProjectId::new(), Network::YouTube, 0, &[(7.0, 9_000)]);
         assert_eq!(c.past().videos().len(), 1);
+    }
+
+    #[test]
+    fn ad_projects_are_left_out() {
+        let mut c = Channel::new();
+        let mine = c.project("Mine", "space history");
+        c.post(mine, Network::YouTube, 0, &[(7.0, 1_000)]);
+        let ad = c.project("An ad", "desk lamps");
+        c.post(ad, Network::YouTube, 0, &[(7.0, 90_000)]);
+        c.projects[1].product = Some(crate::ProductId::new());
+
+        let past = c.past();
+        let titles: Vec<_> = past.videos().iter().map(|v| v.title.as_str()).collect();
+        assert_eq!(titles, ["Mine"]);
+        assert_eq!(past.usual(), Some(1_000));
     }
 
     #[test]

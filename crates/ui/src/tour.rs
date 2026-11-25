@@ -650,11 +650,12 @@ mod tests {
     }
 
     /// The screens that tag their own controls, in every layout alike.
-    const SCREENS: [&str; 31] = [
+    const SCREENS: [&str; 33] = [
         include_str!("research.rs"),
         include_str!("themes.rs"),
         include_str!("performance.rs"),
         include_str!("projects.rs"),
+        include_str!("projects/brief.rs"),
         include_str!("projects/music.rs"),
         include_str!("projects/capture.rs"),
         include_str!("projects/scenes.rs"),
@@ -667,6 +668,7 @@ mod tests {
         include_str!("personas.rs"),
         include_str!("products.rs"),
         include_str!("product_sheet.rs"),
+        include_str!("ad_angles.rs"),
         include_str!("templates.rs"),
         include_str!("channels.rs"),
         include_str!("network_accounts.rs"),

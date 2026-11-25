@@ -356,6 +356,8 @@ take_prompt = "Prompt da tomada"
 performed_take = "Tomada interpretada"
 staging_cleanup = "Limpeza de arquivos enviados"
 look_framing = "Enquadramento da aparência"
+ad_angle_suggestion = "Sugestão de ângulos de anúncio"
+ad_angle_ranking = "Ranqueamento de ângulos de anúncio"
 
 [job.state]
 queued = "Na fila"
@@ -625,7 +627,7 @@ angle_too_long = "Use no máximo 500 caracteres no ângulo."
 switch = "Trocar de projeto"
 nav = "Projetos"
 title = "Projetos de vídeo"
-empty = "Aprove uma ideia para começar um projeto de vídeo."
+empty = "Aprove uma ideia em Temas, ou um ângulo de anúncio em Produtos, para começar um projeto de vídeo."
 started = "Projeto de vídeo iniciado: {title}"
 no_channels = "Crie um canal e aprove um dos temas dele para começar um projeto de vídeo."
 narrator = "Narrador"
@@ -650,6 +652,8 @@ mode_missing_sign_in = "{provider}: sem login"
 mode_hint = "Quais cenas viram clipes de IA e com qual modelo; o resto fica em imagens com movimento. Cada opção mostra quanto o vídeo inteiro custaria, pela tabela de preços. Clipes já feitos ficam, e qualquer cena ainda pode ser animada à mão."
 estimate = "Vídeo inteiro: cerca de {total} ({spent} gastos)"
 estimate_partial = "Vídeo inteiro: cerca de {total}, mais chamadas sem preço ({spent} gastos)"
+ad = "Anúncio"
+ad_for = "Anúncio de {product}"
 
 [projects.cap]
 label = "Teto"
@@ -685,6 +689,8 @@ saved = "Roteiro salvo."
 edited = "Editado"
 words = "{n} palavras"
 current = "Roteiro atual"
+brief_changed = "O briefing mudou depois que este roteiro foi escrito. Leia o roteiro com o briefing ao lado e mantenha ou escreva de novo."
+keep_after_brief = "O roteiro continua valendo"
 
 [script.pending]
 title = "Novo roteiro para revisar"
@@ -700,6 +706,8 @@ busy = "Já há um roteiro sendo escrito para este projeto, ou uma tarefa cancel
 not_saved = "Não foi possível salvar o roteiro. Tente de novo."
 text_required = "O roteiro não pode ficar vazio."
 text_too_long = "Use no máximo 60000 caracteres no roteiro."
+brief_first = "Confirme o briefing primeiro: o roteiro é escrito a partir dele."
+brief_not_ready = "O briefing tem algo a resolver primeiro: abra a etapa Briefing."
 
 [narration]
 title = "Narração"
@@ -1161,6 +1169,7 @@ chapters = "Capítulos"
 localization = "Versão localizada"
 look_prompt = "Prompt de aparência"
 take_prompt = "Prompt da tomada"
+ad_angles = "Ângulos de anúncio"
 
 [templates.variable]
 channel_name = "O nome do canal."
@@ -1188,6 +1197,13 @@ set = "Onde a tomada acontece: descrito a partir de um quadro do vídeo de contr
 words = "O que a persona diz na tomada."
 instruction = "O que o modelo de vídeo faz com o vídeo de controle e a aparência, fixo para o modo da tomada."
 visual_style = "O estilo visual do vídeo: que um foi escolhido e o texto que o Bardo acrescenta a cada imagem por ele, ou que nenhum foi escolhido e o visual vem das notas de estética."
+product = "O produto: o nome, o tipo, a categoria e o que ele é, pelo briefing e pela ficha."
+product_audience = "Para quem é o produto: o público do briefing e os segmentos da ficha, cada um com o que quer e o que os faz hesitar."
+product_claims = "As afirmações confirmadas da ficha, numeradas, uma por linha. As que aguardam ou foram rejeitadas ficam de fora."
+product_notes = "O que o anunciante pede: a oferta, a chamada para ação, o que precisa ser dito e o que nunca pode ser dito."
+ad_frameworks = "Os formatos de anúncio do Bardo, um por linha: o código, o nome e os passos."
+angles_to_avoid = "Os títulos dos ângulos já propostos para este produto neste canal (\"none yet\" antes da primeira execução)."
+angle_count = "Quantos ângulos uma execução pede."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."
@@ -1901,6 +1917,13 @@ exported = "Exportadas: {n}"
 export_outdated = "Desatualizadas: {n}"
 exporting = "Exportando…"
 export_stopped = "Parada"
+brief_to_confirm = "Para confirmar"
+brief_claim_changed = "1 afirmação mudou"
+brief_claims_changed = "{n} afirmações mudaram"
+brief_incomplete = "Falta alguma coisa"
+brief_claim = "1 afirmação"
+brief_claims = "{n} afirmações"
+script_brief_changed = "O briefing mudou"
 
 [scenes.filter]
 all = "Todas"
@@ -1988,6 +2011,7 @@ clips = "Clipes"
 edit = "Edição"
 render = "Render"
 publish = "Publicação"
+brief = "Briefing"
 
 [stage.after]
 script = "Depois do roteiro"
@@ -1998,6 +2022,7 @@ clips = "Depois dos clipes"
 edit = "Depois da edição"
 render = "Depois do render"
 publish = "Depois da publicação"
+brief = "Depois de confirmar o briefing"
 
 [appearance.layout]
 title = "Layout"
@@ -3174,7 +3199,7 @@ name = "Tour de Produtos, parte 2: a ficha"
 
 [tour.products-sheet.sheet]
 title = "Briefing e ficha"
-body = "O briefing é o que você escreve. A ficha é o que o Bardo sabe além dele: quem compra, o que faz a pessoa hesitar, as alternativas e as afirmações que um anúncio pode fazer. Alterne entre os dois aqui."
+body = "O briefing é o que você escreve. A ficha é o que o Bardo sabe além dele: quem compra, o que faz a pessoa hesitar, as alternativas e as afirmações que um anúncio pode fazer. Alterne entre eles aqui."
 
 [tour.products-sheet.research]
 title = "Preencher a ficha"
@@ -4061,6 +4086,7 @@ no_plan = "Planeje as cenas na narração atual primeiro: a versão as mantém."
 no_channel = "Nenhum outro canal fala outro idioma ou para outro país. Crie um na tela Canais."
 busy = "Uma versão deste vídeo já está sendo feita, ou uma tarefa cancelada ainda está parando."
 not_saved = "Não foi possível carregar ou salvar as versões. Tente de novo."
+ad_project = "Um anúncio ainda não tem versões em outros idiomas: o produto, o briefing e as afirmações dele não são levados para outro canal. Aprove um ângulo para esse canal em Produtos."
 
 [scenes.place]
 title = "Cenas do original"
@@ -4216,6 +4242,7 @@ file_too_large = "O arquivo tem {mb} MB; o máximo é 10 MB."
 [product.tab]
 brief = "Briefing"
 sheet = "Ficha"
+angles = "Ângulos"
 
 [sheet]
 title = "Ficha do produto"
@@ -4361,3 +4388,175 @@ not_rejected = "Só uma afirmação rejeitada pode ser trazida de volta."
 known = "A ficha já tem uma afirmação que diz isso."
 too_many = "Uma ficha tem no máximo 80 afirmações, sem contar as rejeitadas. Rejeite uma que você não quer para abrir espaço."
 gone = "Esta afirmação não está mais na ficha."
+
+[ad_angle.error]
+not_saved = "Não foi possível salvar o ângulo. Tente de novo."
+not_found = "Este ângulo não existe mais ou não pode mais mudar."
+title_required = "Dê um título ao ângulo."
+title_too_long = "Use no máximo 120 caracteres no título."
+angle_too_long = "Use no máximo 500 caracteres no ângulo."
+segment_too_long = "Use no máximo 120 caracteres no segmento do público."
+hook_required = "Escreva as primeiras palavras do anúncio."
+hook_too_long = "Use no máximo 200 caracteres nas primeiras palavras."
+
+[ad_angles.error]
+busy = "Ainda há ângulos sendo propostos ou ranqueados para este produto neste canal, ou uma tarefa cancelada ainda está parando."
+nothing_to_rank = "Todos os ângulos daqui já estão ranqueados."
+not_loaded = "Não foi possível carregar os ângulos."
+
+[ad_angles.missing]
+sheet = "Este produto ainda não tem ficha. Preencha na aba Ficha: um anúncio diz só o que a ficha confirma."
+confirmed_claim = "A ficha não tem nenhuma afirmação confirmada, então um anúncio não teria o que dizer. Confirme ou adicione pelo menos uma afirmação na aba Ficha."
+archived = "Este produto está arquivado, então não recebe anúncios novos. Restaure o produto para propor ângulos."
+channel = "Ainda não há nenhum canal. Crie um em Canais: um anúncio é feito para o público de um canal."
+
+[ad_angles.error.missing_key]
+claude = "Salve uma chave do Claude em Configurações para receber ângulos."
+typesafe = "Salve uma chave da TypeSafe em Configurações para ranquear os ângulos."
+
+[brief.error]
+not_an_ad = "Este projeto não é um anúncio, então não tem briefing."
+claim_not_confirmed = "O produto não confirma mais esta afirmação, então o vídeo não pode usá-la."
+claim_not_used = "Este vídeo não usa mais essa afirmação."
+not_saved = "Não foi possível salvar o briefing. Tente de novo."
+not_loaded = "Não foi possível carregar o briefing."
+offer_too_long = "Use no máximo 300 caracteres na oferta."
+call_to_action_too_long = "Use no máximo 120 caracteres na chamada para ação."
+link_too_long = "Use no máximo 500 caracteres no link ou no @."
+
+[brief.not_ready]
+no_claim = "Use pelo menos uma afirmação: um anúncio diz só as afirmações do briefing."
+claims_to_decide = "Algumas afirmações mudaram no produto. Responda cada uma primeiro."
+no_call_to_action = "Escreva a chamada para ação: o que quem assiste deve fazer em seguida."
+
+[ad_angles]
+title = "Ângulos de anúncio"
+info = "Um ângulo de anúncio é um jeito de um anúncio deste produto falar com o público de um canal: o que ele diz, em que formato, para quem e as primeiras palavras. Aprovar um ângulo começa um projeto de anúncio naquele canal."
+hint = "O Claude propõe ângulos a partir das afirmações que você confirmou na ficha, e o motor de decisão ranqueia. Edite, descarte ou aprove cada um."
+save_first = "Salve o produto para propor ângulos de anúncio para ele."
+brief_unsaved = "O briefing tem mudanças que você não salvou. Os ângulos são propostos a partir do que está salvo."
+propose_title = "Propor ângulos"
+channel = "Para o canal"
+channel_hint = "Um ângulo fala com o público de um canal, no idioma e no estilo dele. Cada canal guarda os próprios ângulos deste produto."
+suggest = "Propor ângulos de anúncio"
+suggest_hint = "O Claude propõe {n} ângulos com a versão {version} do template Ângulos de anúncio, só a partir das afirmações confirmadas. Depois o motor de decisão ranqueia por gancho, encaixe com o público e clareza."
+rank = "Ranquear ângulos"
+unranked = "{n} esperando ranqueamento: um ângulo editado perde o ranqueamento até ser ranqueado de novo."
+rank_cost = "Ranquear esses: estimativa de {amount}."
+running = "Propondo e ranqueando ângulos de anúncio…"
+stopped = "A última execução parou antes de terminar."
+empty = "Ainda não há ângulos para este canal."
+discarded = "Ângulos descartados, que não aparecem: {n}."
+
+[ad_angle]
+approved = "Aprovado"
+not_ranked = "Ainda sem ranqueamento. Use Ranquear ângulos."
+sensitive = "Usa uma afirmação sensível"
+framework = "Formato"
+segment = "Fala com"
+hook = "Primeiras palavras"
+claims = "Usa"
+claims_none = "Nenhuma afirmação em particular."
+claim_gone = "Uma afirmação que a ficha não confirma mais"
+approve = "Aprovar e começar o anúncio"
+approve_hint = "Aprovar começa um projeto de anúncio neste canal, na etapa Briefing, onde você escolhe o que este vídeo diz. A prioridade pesa o gancho (40%), o encaixe com o público (35%) e a clareza (25%). Editar um ângulo tira o ranqueamento dele."
+edit_hint = "Salvar uma mudança tira o ranqueamento até você ranquear o ângulo de novo. Um ângulo usa até 8 afirmações confirmadas."
+started = "Projeto de anúncio iniciado. A etapa Briefing está esperando você."
+open_project = "Abrir o projeto"
+
+[ad_angle.score]
+hook = "Gancho"
+audience_fit = "Encaixe com o público"
+clarity = "Clareza"
+
+[brief]
+info = "O briefing é o que este vídeo diz sobre o produto: as afirmações que ele pode fazer, a oferta, a chamada para ação e o link. O roteiro é escrito a partir dele e não pode dizer mais nada."
+hint = "Escolha o que este vídeo diz e confirme. A etapa Roteiro abre quando o briefing está confirmado."
+angle_title = "Produto e ângulo"
+product = "Produto"
+link = "Link ou @ (opcional)"
+save = "Salvar as palavras"
+saved = "Briefing salvo."
+length_hint = "Quanto tempo o anúncio tem. Um anúncio começa com 30 segundos; a escolha é a mesma de Duração no topo do projeto."
+confirm = "Confirmar o briefing"
+confirm_hint = "Confirmar abre a etapa Roteiro. Você ainda pode mudar o briefing depois: um roteiro escrito antes da mudança fica marcado para você ler de novo."
+confirmed = "Briefing confirmado"
+confirmed_notice = "Briefing confirmado. A etapa Roteiro está aberta."
+to_script = "Ir para o roteiro"
+after_confirm = "Uma mudança aqui depois que o roteiro foi escrito marca o roteiro para você ler de novo."
+
+[brief.claims]
+title = "Afirmações neste vídeo ({n})"
+info = "O vídeo guarda a própria cópia de cada afirmação. Editar ou rejeitar uma afirmação no produto nunca muda um vídeo sozinho: a etapa Briefing fica marcada com quantas mudaram, e você decide aqui."
+hint = "O roteiro só pode dizer estas. Tire o que este vídeo não deve dizer."
+none = "Este vídeo ainda não usa nenhuma afirmação."
+left_out = "Confirmadas no produto, fora deste vídeo ({n})"
+
+[brief.claim]
+in_angle = "No ângulo"
+leave_out = "Tirar"
+use = "Usar"
+edited = "O produto agora diz esta afirmação de outro jeito:"
+unconfirmed = "O produto não confirma mais esta afirmação."
+keep = "Manter as palavras deste vídeo"
+take = "Usar as palavras do produto"
+
+[brief.words]
+title = "Oferta, chamada para ação e duração"
+info = "Começam iguais aos do produto e passam a ser deste vídeo: mudar aqui não muda o produto nem outro vídeo."
+
+[ad_framework.name]
+problem_solution = "Problema e solução"
+demonstration = "Demonstração"
+before_after = "Antes e depois"
+how_it_works = "Como funciona"
+story_behind = "A história por trás"
+old_way_new_way = "Jeito antigo e jeito novo"
+three_reasons = "Três motivos"
+myth_fact = "Mito e fato"
+offer = "Oferta"
+
+[ad_framework.steps]
+problem_solution = "Um problema de quem assiste · o que ele custa · o produto como saída · o que fazer em seguida"
+demonstration = "O produto em uso numa tarefa real · a tarefa até o resultado · o que deixou fácil · o que fazer em seguida"
+before_after = "Como é antes · como fica depois · o produto como o que mudou · o que fazer em seguida"
+how_it_works = "O que o produto faz em uma frase · como funciona em dois ou três passos · o resultado · o que fazer em seguida"
+story_behind = "Por que o produto foi feito · o que foi construído e para quem · o que ele faz por essas pessoas hoje · o que fazer em seguida"
+old_way_new_way = "O jeito antigo e onde ele dói · o jeito novo, com o produto · a diferença que mais importa · o que fazer em seguida"
+three_reasons = "A promessa de três motivos · o primeiro · o segundo · o terceiro, o mais forte · o que fazer em seguida"
+myth_fact = "Uma crença comum · o fato que corrige · o produto como a escolha que vem daí · o que fazer em seguida"
+offer = "A oferta em si · o que é o produto e para quem · o motivo mais forte para aceitar · o que fazer em seguida"
+
+[tour.brief]
+name = "Tour do Briefing"
+
+[tour.brief.angle]
+title = "Produto e ângulo"
+body = "Um projeto de anúncio guarda o produto que ele anuncia e o ângulo que você aprovou: o que o anúncio diz, em que formato, para quem e as primeiras palavras."
+
+[tour.brief.claims]
+title = "As afirmações deste vídeo"
+body = "O roteiro só pode dizer estas afirmações. Tire o que este vídeo não deve dizer. Quando uma afirmação muda no produto, o vídeo fica com a própria cópia até você decidir aqui."
+
+[tour.brief.words]
+title = "Oferta, chamada para ação e duração"
+body = "A oferta, a chamada para ação e o link começam iguais aos do produto e passam a ser deste vídeo. Um anúncio começa com 30 segundos."
+
+[tour.brief.confirm]
+title = "Confirme o briefing"
+body = "Confirmar abre a etapa Roteiro. Uma mudança no briefing depois que o roteiro foi escrito marca o roteiro para você ler de novo."
+
+[tour.products-angles]
+name = "Tour de Produtos, parte 3: ângulos de anúncio"
+
+[tour.products-angles.angles]
+title = "Proponha ângulos de anúncio"
+body = "Escolha o canal do anúncio. O Claude propõe cinco ângulos a partir das afirmações que você confirmou, e o motor de decisão ranqueia. O custo aparece antes de a execução começar."
+
+[tour.products-angles.review]
+title = "Aprove, edite ou descarte"
+body = "Aprovar um ângulo começa um projeto de anúncio naquele canal, na etapa Briefing. Editar tira o ranqueamento até você ranquear de novo, e um ângulo descartado sai da lista."
+
+[tour.products-angles.ranking]
+title = "O que um ângulo diz"
+body = "Cada ângulo mostra o formato, com quem fala, as primeiras palavras e as afirmações que usa. A prioridade pesa o gancho, o encaixe com o público e a clareza; o próprio Bardo marca um ângulo que usa uma afirmação sensível."

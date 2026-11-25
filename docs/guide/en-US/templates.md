@@ -24,6 +24,7 @@ There is one template per kind of generation:
 - **Localized version**: a version's script, adapted sentence by sentence for another language or country ([Versions in other languages](script.md#versions)). Besides the target channel's facts, it reads `{{source_language}}`, `{{source_country}}`, the original title and its numbered sentences.
 - **Look prompt**: the image prompt for a persona's drawn look, from your description ([The look](personas.md#look)). It reads `{{persona}}` and `{{look_description}}`, and it must keep declining real people.
 - **Take prompt**: the prompt a take model gets for one take of a capture ([The take's prompt](capture.md#take-prompt)). It reads `{{look}}`, `{{set}}`, `{{words}}` and `{{instruction}}`: what the model does with the take's mode, which the prompt should keep.
+- **Ad angles**: the ad angles proposed for a product on a channel ([Ad angles](products.md#angles)). Besides the channel's facts, it reads `{{product}}`, `{{product_audience}}`, `{{product_claims}}` (the confirmed claims, numbered), `{{product_notes}}`, `{{ad_frameworks}}`, `{{angles_to_avoid}}` and `{{angle_count}}`. After its instructions Bardo always adds the rules of every ad, which no edit removes: state only what the numbered claims state; invent no testimonial, review, rating, number of customers, award or press mention; state no deadline or scarcity the advertiser's notes do not state; never present a drawn person as a real customer, doctor or expert; never show another brand's logo or copy a competitor's ad.
 
 <a id="versions"></a>
 ## Versions

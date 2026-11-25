@@ -62,6 +62,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) thumbnails: ThumbnailHandler,
     pub(crate) looks: PersonaLookHandler,
     pub(crate) sheets: crate::product_sheets::ProductSheetHandler,
+    pub(crate) ad_angles: crate::ad_angles::AdAngleHandler,
     pub(crate) chapters: ChaptersHandler,
     pub(crate) renders: RenderHandler,
     pub(crate) metadata: MetadataHandler,
@@ -100,6 +101,7 @@ pub(crate) fn built_in_handlers(
         thumbnails,
         looks,
         sheets,
+        ad_angles,
         chapters,
         renders,
         metadata,
@@ -140,6 +142,9 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::ThumbnailImage, thumbnails);
     handlers.insert(JobKind::PersonaLook, Arc::new(looks));
     handlers.insert(JobKind::ProductResearch, Arc::new(sheets));
+    let ad_angles = Arc::new(ad_angles);
+    handlers.insert(JobKind::AdAngleSuggestion, Arc::clone(&ad_angles) as _);
+    handlers.insert(JobKind::AdAngleRanking, ad_angles);
     handlers.insert(JobKind::Chapters, Arc::new(chapters));
     handlers.insert(JobKind::Render, Arc::new(renders));
     handlers.insert(JobKind::Metadata, Arc::new(metadata));
@@ -328,7 +333,8 @@ impl Bardo {
     /// What to ask before `job` is run again: the estimate of the images
     /// or clips it still has to pay for, when that reaches a budget,
     /// passes the video's cap or has no price, or of the research and the
-    /// sheet a product's sheet job still has to pay for. What the job
+    /// sheet a product's sheet job still has to pay for, or of the
+    /// proposal and the ranking an ad angle job still has to pay for. What the job
     /// already delivered or sent is not counted again: it is in what the
     /// video has
     /// cost. The first start's answer does not carry over: the cap, the
@@ -346,6 +352,11 @@ impl Bardo {
         // A product's sheet job belongs to no video: what it still has to
         // pay for is checked against the provider's budget alone.
         if let Some(calls) = self.sheet_calls_left(&job) {
+            return Ok(self.check_budget(&calls, consent)?.err());
+        }
+        // Nor do a product's ad angles: Claude's proposal, when the job
+        // has yet to save one, and the ranking of what waits for it.
+        if let Some(calls) = self.ad_angle_calls_left(&job) {
             return Ok(self.check_budget(&calls, consent)?.err());
         }
         let Some((project, calls)) = self.images_left(&job).or_else(|| self.clips_left(&job))
@@ -2172,6 +2183,7 @@ mod tests {
             scripts: Arc::clone(db) as _,
             personas: Arc::clone(db) as _,
             products: Arc::clone(db) as _,
+            ads: Arc::clone(db) as _,
             narrations: Arc::clone(db) as _,
             captures: Arc::clone(db) as _,
             staging: Arc::clone(db) as _,

@@ -74,6 +74,10 @@ pub enum LocalizationError {
     /// A version of the project is being made.
     #[error("a version of this project is being made")]
     Busy,
+    /// An ad project has no versions in other languages: its product,
+    /// brief and claims are not carried across.
+    #[error("an ad project has no versions in other languages")]
+    AdProject,
     /// The project is not a version.
     #[error("the project is not a version of another")]
     NotAVersion,
@@ -105,6 +109,7 @@ impl LocalizationError {
             LocalizationError::NoNarration => Text::VersionNoNarration,
             LocalizationError::NoPlan => Text::VersionNoPlan,
             LocalizationError::Busy => Text::VersionBusy,
+            LocalizationError::AdProject => Text::VersionAdProject,
             LocalizationError::NotAVersion | LocalizationError::NothingToPlace => {
                 Text::PlaceScenesNothing
             }
@@ -174,6 +179,9 @@ pub enum VersionBlock {
     NoPlan,
     /// No other channel has another language or country.
     NoChannel,
+    /// The project is an ad: its product and brief are not carried to
+    /// another language.
+    Ad,
 }
 
 /// The Script stage's "Versions in other languages".
@@ -1113,6 +1121,7 @@ impl Bardo {
             })
             .collect();
         let blocked = match (&narration, &plan) {
+            _ if project.is_ad() => Some(VersionBlock::Ad),
             (None, _) => Some(VersionBlock::NoNarration),
             (Some(narration), plan)
                 if plan
@@ -1180,6 +1189,9 @@ impl Bardo {
         consent: BudgetConsent,
     ) -> Result<JobId, LocalizationError> {
         let project = self.version_project(project)?;
+        if project.is_ad() {
+            return Err(LocalizationError::AdProject);
+        }
         if self.work_busy(&Work::Versions(project.id.to_string())) {
             return Err(LocalizationError::Busy);
         }

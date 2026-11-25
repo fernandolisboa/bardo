@@ -42,7 +42,8 @@ impl Bardo {
 
     /// Sets the project's own length, or goes back to its format's
     /// (`None`). The script already written stays: the next one follows
-    /// the new length.
+    /// the new length. An ad's script is marked for review, as after any
+    /// change to its brief.
     pub fn set_project_length(
         &self,
         project: VideoProjectId,
@@ -54,6 +55,10 @@ impl Bardo {
             .filter(|project| project.owner == self.profile.id)
             .ok_or(ScriptError::ProjectNotFound)?;
         self.themes.set_project_length(project.id, length)?;
+        if project.length != length {
+            // An ad's script reads its length beside its brief.
+            self.touch_brief(project.id)?;
+        }
         project.length = length;
         Ok(project)
     }

@@ -8,12 +8,12 @@ tour: projects
 
 # Projects and stages
 
-A video project is one video on its way from an approved idea to a published post. [Projects](bardo:go/projects) shows one project at a time: who narrates it, its stages from the script to publishing, and what it has cost. Approving an idea on [Themes](themes-ranking.md#review) starts a project. [Show me the screen](bardo:tour/projects).
+A video project is one video on its way from an approved idea to a published post. [Projects](bardo:go/projects) shows one project at a time: who narrates it, its stages from the script to publishing, and what it has cost. Approving an idea on [Themes](themes-ranking.md#review) starts a project, and approving an [ad angle](products.md#angle-review) on Products starts an ad project. [Show me the screen](bardo:tour/projects).
 
 <a id="switch"></a>
 ## Picking a project
 
-The project's name heads the screen, with a menu beside it that lists the channel's other projects; pick one to switch. The channel picker next to **Projects** lists another channel's projects.
+The project's name heads the screen, with a menu beside it that lists the channel's other projects; pick one to switch. An ad project is marked **Ad** in that menu, and the line under its name starts with **Ad for** and the product it advertises. The channel picker next to **Projects** lists another channel's projects.
 
 <a id="narrator"></a>
 ## The narrator
@@ -61,7 +61,7 @@ A mode whose clips need a key you have not saved says so in the menu: Kling's mo
 <a id="stages"></a>
 ## The stages
 
-The stages run across the top, in order: [Script](script.md), [Narration](narration.md), [Scenes](scenes.md), [Clips](clips.md), [Edit](editor.md), [Render](render.md) and Publish. Pick one to open it; Edit opens the editor. The line under each stage says where it stands:
+The stages run across the top, in order: [Script](script.md), [Narration](narration.md), [Scenes](scenes.md), [Clips](clips.md), [Edit](editor.md), [Render](render.md) and Publish. Pick one to open it; Edit opens the editor. An ad project has one more stage before them all, [Brief](brief.md): what this video says about its product. The line under each stage says where it stands:
 
 - Once done, what it holds: the script's words, the narration's length, the images or clips made.
 - **Generating…** while one of its jobs runs. Follow it in [Jobs](bardo:go/jobs).
@@ -74,13 +74,14 @@ The stages run across the top, in order: [Script](script.md), [Narration](narrat
 
 Each stage works on what the one before gave it, so a stage is locked until then and its line says what it waits for:
 
+- In an ad project, **Script** opens once the [brief is confirmed](brief.md#confirm), since the script may state only what the brief holds.
 - **Narration** opens once there is a script, since the narrator reads it.
 - **Scenes** opens once there is a narration, since scenes are timed on its words.
 - **Clips** opens once a scene has an image, since a clip animates it.
 - **Edit** opens once the scenes are planned: the editor lays out a rough cut from them and the narration.
 - **Render** and **Publish** open after the edit and the render.
 
-Nothing is thrown away when an earlier stage changes. What was made from it shows as **Out of date**, so you know what to make again: a narration after the script changed, scenes after the narration was made again.
+Nothing is thrown away when an earlier stage changes. What was made from it shows as **Out of date**, so you know what to make again: a narration after the script changed, scenes after the narration was made again. An ad's script written before its brief changed shows **The brief changed** until you [keep it or write it again](brief.md#changes).
 
 <a id="cost"></a>
 ## What it has cost

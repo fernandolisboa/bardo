@@ -1035,6 +1035,9 @@ impl Bardo {
         let now = crate::publications::whole_millis(SystemTime::now());
         sheet.change_claim(claim, now, |claim| change(claim, now))?;
         self.products.save_sheet(&sheet)?;
+        // The videos that copied the claim keep their copies; each Brief
+        // stage reads the change from the sheet.
+        self.settle_briefs(id, &sheet);
         Ok(sheet)
     }
 

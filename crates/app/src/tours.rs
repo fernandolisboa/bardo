@@ -89,6 +89,14 @@ pub enum Control {
     /// Projects: how the open project is produced, what the whole video
     /// costs in each mode, and its spend cap.
     ProjectMode,
+    /// Brief: the product and the angle the ad project was approved from.
+    BriefAngle,
+    /// Brief: the claims the video uses, each switchable off.
+    BriefClaims,
+    /// Brief: the offer, the call to action, the link and the length.
+    BriefWords,
+    /// Brief: confirming it, which opens the Script stage.
+    BriefConfirm,
     /// Script: the script's editor, or the button that generates it.
     ScriptBody,
     /// Script: a new version waiting beside the current one.
@@ -181,6 +189,13 @@ pub enum Control {
     ProductResearch,
     /// Products: the claims of the sheet, to confirm or reject.
     ProductClaims,
+    /// Products: the channel an ad is for and the run that proposes ad
+    /// angles.
+    ProductAngles,
+    /// Products: an ad angle, with what it says and its ranking.
+    ProductAngleReview,
+    /// Products: approving, editing or discarding an ad angle.
+    ProductAngleActions,
     /// Templates: one button per kind of template.
     TemplateKinds,
     /// Templates: the instructions and the prompt.
@@ -626,6 +641,33 @@ pub const PROJECTS: Tour = {
     }
 };
 
+/// Brief: the product and the angle, the claims this video uses, its
+/// offer, call to action, link and length, and confirming it.
+pub const BRIEF: Tour = {
+    const AT: Stage = Stage::Brief;
+    const PAGE: &str = "brief";
+    const PAGE_PART: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::Brief,
+        version: 1,
+        place: Some(TourPlace::Stage(AT)),
+        steps: &[
+            at_stage(AT, "angle", control(Control::BriefAngle))
+                .missing(PAGE_PART)
+                .learn(PAGE, "angle"),
+            at_stage(AT, "claims", control(Control::BriefClaims))
+                .missing(PAGE_PART)
+                .learn(PAGE, "claims"),
+            at_stage(AT, "words", control(Control::BriefWords))
+                .missing(PAGE_PART)
+                .learn(PAGE, "words"),
+            at_stage(AT, "confirm", control(Control::BriefConfirm))
+                .missing(PAGE_PART)
+                .learn(PAGE, "confirm"),
+        ],
+    }
+};
+
 /// Script: writing or generating it, a new version to review, saving,
 /// what a generation costs, where the script came from, the music, and
 /// versions in other languages.
@@ -894,6 +936,34 @@ pub const PRODUCT_SHEET: Tour = {
             on(AT, "claims", control(Control::ProductClaims))
                 .missing(FORM)
                 .learn(PAGE, "claims"),
+        ],
+    }
+};
+
+/// Products, part three: a product's ad angles. Offered once the first
+/// two parts are completed or dismissed. The screen shows the Ad angles
+/// tab while a step is about it.
+pub const PRODUCT_ANGLES: Tour = {
+    const AT: Destination = Destination::Products;
+    const PAGE: &str = "products";
+    const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
+    Tour {
+        id: TourId::ProductAngles,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            // Shown for a saved product; else the form, which says to
+            // save it first.
+            on(AT, "angles", control(Control::ProductAngles))
+                .missing(FORM)
+                .learn(PAGE, "angles"),
+            // Shown once the channel has an angle.
+            on(AT, "ranking", control(Control::ProductAngleReview))
+                .missing(FORM)
+                .learn(PAGE, "angle-review"),
+            on(AT, "review", control(Control::ProductAngleActions))
+                .missing(FORM)
+                .learn(PAGE, "angle-review"),
         ],
     }
 };
@@ -1445,12 +1515,13 @@ pub const BACKUP: Tour = {
 
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 30] = [
+    pub const ALL: [&'static Tour; 32] = [
         &WELCOME,
         &RESEARCH,
         &THEMES,
         &PERFORMANCE,
         &PROJECTS,
+        &BRIEF,
         &SCRIPT,
         &NARRATION,
         &CAPTURE,
@@ -1459,6 +1530,7 @@ impl Tour {
         &PERSONAS,
         &PRODUCTS,
         &PRODUCT_SHEET,
+        &PRODUCT_ANGLES,
         &TEMPLATES,
         &EDITOR,
         &EDITOR_MORE,
@@ -1485,6 +1557,7 @@ impl Tour {
             TourId::Themes => &THEMES,
             TourId::Performance => &PERFORMANCE,
             TourId::Projects => &PROJECTS,
+            TourId::Brief => &BRIEF,
             TourId::Script => &SCRIPT,
             TourId::Narration => &NARRATION,
             TourId::Capture => &CAPTURE,
@@ -1493,6 +1566,7 @@ impl Tour {
             TourId::Personas => &PERSONAS,
             TourId::Products => &PRODUCTS,
             TourId::ProductSheet => &PRODUCT_SHEET,
+            TourId::ProductAngles => &PRODUCT_ANGLES,
             TourId::Templates => &TEMPLATES,
             TourId::Editor => &EDITOR,
             TourId::EditorMore => &EDITOR_MORE,
@@ -2543,6 +2617,7 @@ mod tests {
             assert_eq!(Tour::of_screen(screen).map(|t| t.id), Some(tour));
         }
         let stages = [
+            (Stage::Brief, TourId::Brief),
             (Stage::Script, TourId::Script),
             (Stage::Narration, TourId::Narration),
             (Stage::Capture, TourId::Capture),

@@ -356,6 +356,8 @@ take_prompt = "Take prompt"
 performed_take = "Performed take"
 staging_cleanup = "Staged files cleanup"
 look_framing = "Look framing"
+ad_angle_suggestion = "Ad angle suggestion"
+ad_angle_ranking = "Ad angle ranking"
 
 [job.state]
 queued = "Queued"
@@ -625,7 +627,7 @@ angle_too_long = "Keep the angle to at most 500 characters."
 switch = "Switch project"
 nav = "Projects"
 title = "Video projects"
-empty = "Approve an idea to start a video project."
+empty = "Approve an idea on Themes, or an ad angle on Products, to start a video project."
 started = "Video project started: {title}"
 no_channels = "Create a channel and approve one of its themes to start a video project."
 narrator = "Narrator"
@@ -650,6 +652,8 @@ mode_missing_sign_in = "{provider}: not signed in"
 mode_hint = "Which scenes become AI clips and with which model; the rest stay stills with motion. Each choice shows what the whole video would cost, from the rate table. Clips made already stay, and any scene can still be animated by hand."
 estimate = "Whole video: about {total} ({spent} spent)"
 estimate_partial = "Whole video: about {total}, plus calls without a rate ({spent} spent)"
+ad = "Ad"
+ad_for = "Ad for {product}"
 
 [projects.cap]
 label = "Cap"
@@ -685,6 +689,8 @@ saved = "Script saved."
 edited = "Edited"
 words = "{n} words"
 current = "Current script"
+brief_changed = "The brief changed after this script was written. Read the script against it, then keep it or write it again."
+keep_after_brief = "The script still holds"
 
 [script.pending]
 title = "New script to review"
@@ -700,6 +706,8 @@ busy = "A script is already being written for this project, or a cancelled job i
 not_saved = "Could not save the script. Try again."
 text_required = "The script cannot be empty."
 text_too_long = "Keep the script to at most 60000 characters."
+brief_first = "Confirm the brief first: the script is written from it."
+brief_not_ready = "The brief has something to settle first: open the Brief stage."
 
 [narration]
 title = "Narration"
@@ -1161,6 +1169,7 @@ chapters = "Chapters"
 localization = "Localized version"
 look_prompt = "Look prompt"
 take_prompt = "Take prompt"
+ad_angles = "Ad angles"
 
 [templates.variable]
 channel_name = "The channel's name."
@@ -1188,6 +1197,13 @@ set = "Where the take happens: described from a frame of the control video for t
 words = "What the persona says in the take."
 instruction = "What the video model does with the control video and the look, fixed for the take's mode."
 visual_style = "The video's visual style: that one was chosen and the text Bardo adds to every image for it, or that none was chosen and the look comes from the aesthetic notes."
+product = "The product: its name, what kind of thing it is, its category and what it is, from the brief and the sheet."
+product_audience = "Who the product is for: the brief's audience and the sheet's segments, each with what they want and what holds them back."
+product_claims = "The sheet's confirmed claims, numbered, one per line. Claims that wait or were rejected are left out."
+product_notes = "What the advertiser asks for: the offer, the call to action, what must be said and what must never be said."
+ad_frameworks = "Bardo's ad frameworks, one per line: the code, the name and the steps."
+angles_to_avoid = "The titles of the angles already proposed for this product on this channel (\"none yet\" before the first run)."
+angle_count = "How many angles one run asks for."
 
 [templates.error]
 not_saved = "Could not save the template. Try again."
@@ -1901,6 +1917,13 @@ exported = "Exported: {n}"
 export_outdated = "Out of date: {n}"
 exporting = "Exporting…"
 export_stopped = "Stopped"
+brief_to_confirm = "To confirm"
+brief_claim_changed = "1 claim changed"
+brief_claims_changed = "{n} claims changed"
+brief_incomplete = "Something is missing"
+brief_claim = "1 claim"
+brief_claims = "{n} claims"
+script_brief_changed = "The brief changed"
 
 [scenes.filter]
 all = "All"
@@ -1988,6 +2011,7 @@ clips = "Clips"
 edit = "Edit"
 render = "Render"
 publish = "Publish"
+brief = "Brief"
 
 [stage.after]
 script = "After the script"
@@ -1998,6 +2022,7 @@ clips = "After the clips"
 edit = "After the edit"
 render = "After the render"
 publish = "After publishing"
+brief = "After the brief is confirmed"
 
 [appearance.layout]
 title = "Layout"
@@ -3174,7 +3199,7 @@ name = "Products tour, part 2: the sheet"
 
 [tour.products-sheet.sheet]
 title = "Brief and sheet"
-body = "The brief is what you write. The sheet is what Bardo knows beyond it: who buys, what holds them back, the alternatives and the claims an ad may make. Switch between the two here."
+body = "The brief is what you write. The sheet is what Bardo knows beyond it: who buys, what holds them back, the alternatives and the claims an ad may make. Switch between them here."
 
 [tour.products-sheet.research]
 title = "Fill the sheet"
@@ -4061,6 +4086,7 @@ no_plan = "Plan the scenes on the current narration first: the version keeps the
 no_channel = "No other channel speaks another language or to another country. Create one on the Channels screen."
 busy = "A version of this video is already being made, or a cancelled job is still stopping."
 not_saved = "Could not load or save the versions. Try again."
+ad_project = "An ad has no versions in other languages yet: its product, brief and claims are not carried to another channel. Approve an angle for that channel on Products instead."
 
 [scenes.place]
 title = "Scenes from the original"
@@ -4216,6 +4242,7 @@ file_too_large = "The file has {mb} MB; the most is 10 MB."
 [product.tab]
 brief = "Brief"
 sheet = "Sheet"
+angles = "Ad angles"
 
 [sheet]
 title = "Product sheet"
@@ -4361,3 +4388,175 @@ not_rejected = "Only a rejected claim can be brought back."
 known = "The sheet already has a claim that says this."
 too_many = "A sheet holds at most 80 claims, not counting the rejected ones. Reject one you do not want to make room."
 gone = "This claim is no longer on the sheet."
+
+[ad_angle.error]
+not_saved = "Could not save the angle. Try again."
+not_found = "This angle is gone or can no longer change."
+title_required = "Give the angle a title."
+title_too_long = "Keep the title to at most 120 characters."
+angle_too_long = "Keep the angle to at most 500 characters."
+segment_too_long = "Keep the audience segment to at most 120 characters."
+hook_required = "Write the first words of the ad."
+hook_too_long = "Keep the first words to at most 200 characters."
+
+[ad_angles.error]
+busy = "Angles are still being proposed or ranked for this product on this channel, or a cancelled job is still stopping."
+nothing_to_rank = "Every angle here already has a ranking."
+not_loaded = "Could not load the angles."
+
+[ad_angles.missing]
+sheet = "This product has no sheet yet. Fill it on the Sheet tab: an ad states only what its sheet confirms."
+confirmed_claim = "The sheet has no confirmed claim, so an ad would have nothing to state. Confirm or add at least one claim on the Sheet tab."
+archived = "This product is archived, so it takes no new ads. Restore it to propose angles."
+channel = "There is no channel yet. Create one under Channels: an ad is made for a channel's audience."
+
+[ad_angles.error.missing_key]
+claude = "Save a Claude key under Settings to have angles proposed."
+typesafe = "Save a TypeSafe key under Settings to have angles ranked."
+
+[brief.error]
+not_an_ad = "This project is not an ad, so it has no brief."
+claim_not_confirmed = "The product no longer confirms this claim, so the video cannot take it."
+claim_not_used = "This video no longer uses that claim."
+not_saved = "Could not save the brief. Try again."
+not_loaded = "Could not load the brief."
+offer_too_long = "Keep the offer to at most 300 characters."
+call_to_action_too_long = "Keep the call to action to at most 120 characters."
+link_too_long = "Keep the link or handle to at most 500 characters."
+
+[brief.not_ready]
+no_claim = "Use at least one claim: an ad states only the claims of its brief."
+claims_to_decide = "Some claims changed in the product. Answer each one first."
+no_call_to_action = "Write the call to action: what the viewer should do next."
+
+[ad_angles]
+title = "Ad angles"
+info = "An ad angle is one way an ad for this product could speak to a channel's audience: what it says, in which format, to whom, and its first words. Approving one starts an ad project in that channel."
+hint = "Claude proposes angles from the claims you confirmed on the sheet, and the decision engine ranks them. Edit, discard or approve each one."
+save_first = "Save the product to propose ad angles for it."
+brief_unsaved = "The brief has changes you have not saved. Angles are proposed from the saved one."
+propose_title = "Propose angles"
+channel = "For the channel"
+channel_hint = "An angle speaks to one channel's audience, in its language and style. Each channel keeps its own angles for this product."
+suggest = "Propose ad angles"
+suggest_hint = "Claude proposes {n} angles with version {version} of the Ad angles template, from the confirmed claims only. The decision engine then ranks them by hook, audience fit and clarity."
+rank = "Rank angles"
+unranked = "{n} waiting for a ranking: an edited angle loses its ranking until it is ranked again."
+rank_cost = "Ranking those is estimated at {amount}."
+running = "Proposing and ranking ad angles…"
+stopped = "The last run stopped before it finished."
+empty = "No angles for this channel yet."
+discarded = "Discarded angles, not shown: {n}."
+
+[ad_angle]
+approved = "Approved"
+not_ranked = "Not ranked yet. Use Rank angles."
+sensitive = "Leans on a sensitive claim"
+framework = "Format"
+segment = "Speaks to"
+hook = "First words"
+claims = "Leans on"
+claims_none = "No claim in particular."
+claim_gone = "A claim the sheet no longer confirms"
+approve = "Approve and start the ad"
+approve_hint = "Approving starts an ad project in this channel, at its Brief stage, where you choose what this video says. Priority weighs the hook (40%), audience fit (35%) and clarity (25%). Editing an angle drops its ranking."
+edit_hint = "Saving a change drops the ranking until you rank the angle again. An angle leans on up to 8 confirmed claims."
+started = "Ad project started. Its Brief stage is waiting for you."
+open_project = "Open the project"
+
+[ad_angle.score]
+hook = "Hook"
+audience_fit = "Audience fit"
+clarity = "Clarity"
+
+[brief]
+info = "The brief is what this one video says about its product: the claims it may state, the offer, the call to action and the link. The script is written from it, and may state nothing else."
+hint = "Choose what this video says, then confirm. The Script stage opens once the brief is confirmed."
+angle_title = "Product and angle"
+product = "Product"
+link = "Link or handle (optional)"
+save = "Save the words"
+saved = "Brief saved."
+length_hint = "How long the ad is. An ad starts at 30 seconds; the choice is the same as Length at the top of the project."
+confirm = "Confirm the brief"
+confirm_hint = "Confirming opens the Script stage. You can still change the brief afterwards: a script written before the change is then marked for you to read again."
+confirmed = "Brief confirmed"
+confirmed_notice = "Brief confirmed. The Script stage is open."
+to_script = "Go to the script"
+after_confirm = "A change here after a script is written marks the script for you to read again."
+
+[brief.claims]
+title = "Claims in this video ({n})"
+info = "The video keeps its own copy of each claim. Editing or rejecting a claim in the product never changes a video by itself: the Brief stage is marked with how many changed, and you decide here."
+hint = "The script may state only these. Leave out what this video should not say."
+none = "This video uses no claim yet."
+left_out = "Confirmed in the product, not in this video ({n})"
+
+[brief.claim]
+in_angle = "In the angle"
+leave_out = "Leave out"
+use = "Use"
+edited = "The product now states this claim differently:"
+unconfirmed = "The product no longer confirms this claim."
+keep = "Keep this video's words"
+take = "Take the product's words"
+
+[brief.words]
+title = "Offer, call to action and length"
+info = "They start as the product's own and are this video's from then on: changing them here changes neither the product nor another video."
+
+[ad_framework.name]
+problem_solution = "Problem and solution"
+demonstration = "Demonstration"
+before_after = "Before and after"
+how_it_works = "How it works"
+story_behind = "The story behind it"
+old_way_new_way = "Old way and new way"
+three_reasons = "Three reasons"
+myth_fact = "Myth and fact"
+offer = "Offer"
+
+[ad_framework.steps]
+problem_solution = "A problem the viewer has · what it costs them · the product as the way out · what to do next"
+demonstration = "The product at work on a real task · the task to its result · what made it easy · what to do next"
+before_after = "How things are before · how they are after · the product as what changed them · what to do next"
+how_it_works = "What the product does in one sentence · how it works in two or three steps · the result · what to do next"
+story_behind = "Why the product was made · what was built, and for whom · what it does for them now · what to do next"
+old_way_new_way = "The old way and where it hurts · the new way, with the product · the difference that matters most · what to do next"
+three_reasons = "A promise of three reasons · the first · the second · the third, the strongest · what to do next"
+myth_fact = "A common belief · the fact that corrects it · the product as the choice that follows · what to do next"
+offer = "The offer itself · what the product is and for whom · the strongest reason to take it · what to do next"
+
+[tour.brief]
+name = "Brief tour"
+
+[tour.brief.angle]
+title = "Product and angle"
+body = "An ad project keeps the product it advertises and the angle you approved: what the ad says, in which format, to whom, and its first words."
+
+[tour.brief.claims]
+title = "The claims of this video"
+body = "The script may state only these claims. Leave out what this video should not say. When a claim changes in the product, the video keeps its own copy until you decide here."
+
+[tour.brief.words]
+title = "Offer, call to action and length"
+body = "The offer, the call to action and the link start as the product's own and belong to this video from then on. An ad starts at 30 seconds."
+
+[tour.brief.confirm]
+title = "Confirm the brief"
+body = "Confirming opens the Script stage. A change to the brief after a script is written marks the script for you to read again."
+
+[tour.products-angles]
+name = "Products tour, part 3: ad angles"
+
+[tour.products-angles.angles]
+title = "Propose ad angles"
+body = "Pick the channel the ad is for. Claude proposes five angles from the claims you confirmed, and the decision engine ranks them. The cost shows before the run starts."
+
+[tour.products-angles.review]
+title = "Approve, edit or discard"
+body = "Approving an angle starts an ad project in that channel, at its Brief stage. Editing it drops its ranking until you rank it again, and a discarded angle leaves the list."
+
+[tour.products-angles.ranking]
+title = "What an angle says"
+body = "Each angle shows its format, who it speaks to, its first words and the claims it leans on. Priority weighs the hook, the audience fit and the clarity; Bardo itself marks an angle that leans on a sensitive claim."
