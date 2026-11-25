@@ -1900,6 +1900,7 @@ guide = "Guide"
 performance = "Performance"
 research = "Research"
 themes = "Themes"
+products = "Products"
 projects = "Projects"
 personas = "Personas"
 templates = "Templates"
@@ -3068,6 +3069,37 @@ body = "Tick it when the voice sounds like a real person, such as a clone. Netwo
 title = "Look"
 body = "The character this persona appears as in performed clips. Draw an original character from a description, review it and keep it, or import a photo of yourself. A photo of you never leaves in a package. For Seedance on BytePlus, the look can also go by its id in your ModelArk asset library."
 
+[tour.products]
+name = "Products tour"
+
+[tour.products.library]
+title = "Your products"
+body = "A product is what an ad sells: an app, a course, an object, a service or just an idea. Pick one to edit it, or press New product."
+
+[tour.products.brief]
+title = "The brief"
+body = "Say what the product is, who it is for, the offer, the link and the call to action. The ad works only from what you write here and what you confirm later."
+
+[tour.products.facts]
+title = "Facts"
+body = "One fact per line: features, numbers, prices. An ad may state only these facts, so leave out anything you cannot back."
+
+[tour.products.owner]
+title = "Whose product"
+body = "Mine or a client's: it sets how the posts of its ads are disclosed. An ad must say and An ad must never say hold the rules to follow, such as a required legal line or claims to avoid."
+
+[tour.products.pictures]
+title = "Images"
+body = "Up to three images, each a photo of the product or a screen of the app. Before each one you confirm you may use it. A photo with a transparent background is used as a cut-out."
+
+[tour.products.logo]
+title = "Logo"
+body = "An optional PNG logo for the ad's end card. Like the images, it stays in Bardo's database and goes into backups."
+
+[tour.products.actions]
+title = "Save and tidy up"
+body = "Save the brief, duplicate it for a variant, archive a product you no longer advertise, or delete one no project uses."
+
 [tour.templates]
 name = "Templates tour"
 
@@ -3776,6 +3808,7 @@ group_keys = "API keys"
 group_apps = "App credentials"
 group_preferences = "Preferences and costs"
 group_personas = "Personas"
+group_products = "Products"
 group_channels = "Channels, with their network accounts"
 group_sign_ins = "Sign-ins"
 sign_ins_hint = "Usually leave these off and sign in again in the other copy. Some networks, X among them, keep only one copy signed in: the first copy to renew its sign-in signs the other out. A sign-in goes only with its channel."
@@ -3957,3 +3990,138 @@ all = "All {n}"
 past_clip = "Now longer than its {clip} s clip, which holds its last frame. Make a new clip or recut it."
 stretched = "Was {was} s, now {now} s."
 dropped = "This version does not narrate it; it is left out of the cut."
+
+# Products (#273).
+
+[products]
+hint = "Things you advertise, reused across channels: what each one is, the facts you stand behind, its images and logo."
+empty = "No products yet. Add one to make ads for it."
+not_loaded = "Products could not be loaded."
+new = "New product"
+show_archived = "Show archived ({n})"
+
+[product]
+new_title = "New product"
+edit_title = "Edit product"
+brief_hint = "What you tell Bardo about the product. Ads made from it say only what you confirm."
+name = "Name"
+name_placeholder = "e.g. Refillable notebook"
+kind = "Kind"
+kind_hint = "An idea is something that does not exist yet: its ads present it as an idea, never as a product anyone can buy today."
+ownership = "Whose it is"
+ownership_hint = "It sets how the posts of its ads are disclosed: your own brand, or a paid partnership when it is a client's."
+description = "What it is"
+description_placeholder = "What it does and how, in a few sentences."
+audience = "Who it is for"
+audience_placeholder = "Who buys or uses it, and what they want."
+facts = "Facts you stand behind"
+facts_placeholder = "One per line, e.g. Ships in 2 days"
+facts_hint = "One statement per line, in your own words. They are the only claims an ad may make until you confirm others."
+facts_count = "Facts read: {n}"
+offer = "Offer (optional)"
+offer_placeholder = "Price, discount, deadline"
+link = "Link (optional)"
+link_placeholder = "example.com/product"
+call_to_action = "Call to action"
+call_to_action_placeholder = "e.g. Get yours at the link in bio"
+must_say = "An ad must say"
+must_say_placeholder = "What every ad says, e.g. a required legal line."
+never_say = "An ad must never say"
+never_say_placeholder = "Words, promises or comparisons to keep out."
+create = "Create product"
+save = "Save changes"
+duplicate = "Duplicate"
+archive = "Archive"
+restore = "Restore"
+delete = "Delete…"
+delete_title = "Delete {name}?"
+delete_hint = "Its images and logo go with it. This cannot be undone."
+confirm_delete = "Delete"
+cancel = "Cancel"
+saved = "Saved."
+duplicated = "Duplicated as {name}."
+archived = "Archived: hidden from the list and from new ads."
+restored = "Restored."
+deleted = "Deleted {name}."
+archived_tag = "Archived"
+copy_suffix = "copy"
+
+[product.error]
+name_taken = "A product with this name already exists."
+not_found = "This product no longer exists."
+in_use = "Videos use this product, so it cannot be deleted. Archive it instead."
+not_saved = "The product could not be saved."
+name_required = "Give the product a name."
+name_too_long = "Use at most 80 characters."
+description_required = "Say what the product is."
+description_too_long = "Use at most 2,000 characters."
+audience_too_long = "Use at most 1,000 characters."
+fact_too_long = "Each fact can have at most 300 characters."
+too_many_facts = "List at most 30 facts."
+offer_too_long = "Use at most 300 characters."
+link_invalid = "Type a web address, such as example.com/product."
+link_too_long = "Use at most 500 characters."
+call_to_action_too_long = "Use at most 120 characters."
+must_say_too_long = "Use at most 1,000 characters."
+never_say_too_long = "Use at most 1,000 characters."
+
+[product.pictures]
+title = "Images and logo"
+hint = "Up to three images (PNG, JPEG or WebP, 600 to 6,000 px a side, at most 10 MB) and a PNG logo. Your files are kept as they are."
+save_first = "Create the product to add its images and logo."
+not_loaded = "The images could not be loaded."
+none = "No images yet. A product can do without: its ads then use drawn scenes and an end card of text."
+count = "Images: {n} of 3"
+add_image = "Add image…"
+kind_hint = "A photo shows the product, its packaging or a place. A screen is a screenshot of an app or site: Bardo only ever shows it as it is and never redraws it."
+cut_out = "Cut out"
+size = "{width}×{height} px"
+remove_image = "Remove"
+confirmed_at = "Use confirmed {when}"
+rights_title = "Pictures you may use"
+rights_hint = "Bardo keeps your confirmation, with its time, beside each picture."
+rights_confirm = "I may use this picture and the brand it shows in ads."
+choose_image = "Choose image…"
+choose_logo = "Choose logo…"
+image_dialog = "Choose a product image"
+logo_dialog = "Choose the logo (PNG)"
+logo_title = "Logo"
+logo_hint = "A PNG, used only on the ad's end card. A transparent background looks best."
+logo_none = "No logo."
+add_logo = "Add logo…"
+replace_logo = "Replace logo…"
+remove_logo = "Remove logo"
+image_added = "Image added."
+image_removed = "Image removed."
+logo_added = "Logo saved."
+logo_removed = "Logo removed."
+
+[product.pictures.error]
+not_confirmed = "Confirm first that you may use the picture."
+too_many = "A product holds three images. Remove one to add another."
+refused = "This picture cannot be used."
+unreadable = "The file could not be read."
+not_found = "This image is no longer there."
+no_logo = "The product has no logo."
+
+[product.kind_name]
+digital = "Digital product"
+physical = "Physical product"
+service = "Service"
+idea = "Idea"
+
+[product.ownership_name]
+mine = "Mine"
+client = "A client's"
+
+[product.pictures.kind]
+photo = "Photo"
+screen = "Screen"
+
+[product.pictures.reason]
+not_an_image = "Use a PNG, JPEG or WebP file."
+logo_not_png = "A logo has to be a PNG file."
+too_small = "It is {width}×{height} px: too small. An image needs 600 px on each side; a logo, 200 px on its longer side."
+too_large = "It is {width}×{height} px; each side can be at most 6,000 px."
+shape = "It is {width}×{height} px: too narrow or too wide. An image's long side can be at most 3 times its short side; a logo's, 10 times."
+file_too_large = "The file has {mb} MB; the most is 10 MB."

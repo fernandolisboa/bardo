@@ -28,6 +28,7 @@ use crate::network_accounts::OpenNetworkSettings;
 use crate::parts::{BudgetMeter, Navigation};
 use crate::performance::{OpenRetention, PerformanceScreen};
 use crate::personas::PersonasScreen;
+use crate::products::ProductsScreen;
 use crate::projects::{OpenEditor, ProjectsScreen};
 use crate::research::ResearchScreen;
 use crate::settings::SettingsScreen;
@@ -50,6 +51,7 @@ pub struct Shell {
     channels: Entity<ChannelsScreen>,
     accounts: Entity<AccountsScreen>,
     personas: Entity<PersonasScreen>,
+    products: Entity<ProductsScreen>,
     research: Entity<ResearchScreen>,
     themes: Entity<ThemesScreen>,
     performance: Entity<PerformanceScreen>,
@@ -95,6 +97,7 @@ impl Shell {
         let channels = cx.new(|cx| ChannelsScreen::new(bardo.clone(), window, cx));
         let accounts = cx.new(|cx| AccountsScreen::new(bardo.clone(), window, cx));
         let personas = cx.new(|cx| PersonasScreen::new(bardo.clone(), window, cx));
+        let products = cx.new(|cx| ProductsScreen::new(bardo.clone(), window, cx));
         let research = cx.new(|cx| ResearchScreen::new(bardo.clone(), window, cx));
         let themes = cx.new(|cx| ThemesScreen::new(bardo.clone(), window, cx));
         let performance = cx.new(|cx| PerformanceScreen::new(bardo.clone(), window, cx));
@@ -221,6 +224,7 @@ impl Shell {
             channels,
             accounts,
             personas,
+            products,
             research,
             themes,
             performance,
@@ -289,6 +293,9 @@ impl Shell {
                 Destination::Personas => self
                     .personas
                     .update(cx, |personas, cx| personas.reload(window, cx)),
+                Destination::Products => self
+                    .products
+                    .update(cx, |products, cx| products.reload(window, cx)),
                 Destination::Research => self
                     .research
                     .update(cx, |research, cx| research.reload_channels(window, cx)),
@@ -533,6 +540,7 @@ impl Shell {
             Destination::Performance => self.performance.read(cx).has_content(),
             Destination::Projects => self.projects.read(cx).has_content(),
             Destination::Personas => self.personas.read(cx).has_content(),
+            Destination::Products => self.products.read(cx).has_content(),
             Destination::Templates => self.templates.read(cx).has_content(),
             // Its providers and rates always show.
             Destination::Costs => true,
@@ -902,6 +910,7 @@ impl Shell {
             Destination::Channels => self.channels.clone().into_any_element(),
             Destination::Accounts => self.accounts.clone().into_any_element(),
             Destination::Personas => self.personas.clone().into_any_element(),
+            Destination::Products => self.products.clone().into_any_element(),
             Destination::Research => self.research.clone().into_any_element(),
             Destination::Themes => self.themes.clone().into_any_element(),
             Destination::Performance => self.performance.clone().into_any_element(),

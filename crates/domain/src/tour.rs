@@ -32,6 +32,8 @@ pub enum TourId {
     Clips,
     /// The Personas screen's tour.
     Personas,
+    /// The Products screen's tour: the brief, the pictures and the logo.
+    Products,
     /// The Templates screen's tour.
     Templates,
     /// The editor's tour: playback, the tracks and cutting.
@@ -72,7 +74,7 @@ pub enum TourId {
 }
 
 impl TourId {
-    pub const ALL: [TourId; 28] = [
+    pub const ALL: [TourId; 29] = [
         TourId::Welcome,
         TourId::Research,
         TourId::Themes,
@@ -84,6 +86,7 @@ impl TourId {
         TourId::Scenes,
         TourId::Clips,
         TourId::Personas,
+        TourId::Products,
         TourId::Templates,
         TourId::Editor,
         TourId::EditorMore,
@@ -116,6 +119,7 @@ impl TourId {
             TourId::Scenes => "scenes",
             TourId::Clips => "clips",
             TourId::Personas => "personas",
+            TourId::Products => "products",
             TourId::Templates => "templates",
             TourId::Editor => "editor",
             TourId::EditorMore => "editor-more",

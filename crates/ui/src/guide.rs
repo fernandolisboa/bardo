@@ -172,6 +172,13 @@ pub mod refs {
     pub const SCENES_PLACE: GuideRef = at("scenes", "place");
     pub const CLIPS_ANIMATE: GuideRef = at("clips", "animate");
     pub const CLIPS_REVIEW: GuideRef = at("clips", "review");
+    pub const PRODUCTS_LIBRARY: GuideRef = at("products", "library");
+    pub const PRODUCTS_BRIEF: GuideRef = at("products", "brief");
+    pub const PRODUCTS_FACTS: GuideRef = at("products", "facts");
+    pub const PRODUCTS_OWNER: GuideRef = at("products", "owner");
+    pub const PRODUCTS_PICTURES: GuideRef = at("products", "pictures");
+    pub const PRODUCTS_LOGO: GuideRef = at("products", "logo");
+    pub const PRODUCTS_ARCHIVE: GuideRef = at("products", "archive");
     pub const PERSONAS_LIBRARY: GuideRef = at("personas", "library");
     pub const PERSONAS_VOICE: GuideRef = at("personas", "voice");
     pub const PERSONAS_PRESETS: GuideRef = at("personas", "presets");
@@ -224,7 +231,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 96] = [
+    pub const ALL: [GuideRef; 103] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -272,6 +279,13 @@ pub mod refs {
         SCENES_PLACE,
         CLIPS_ANIMATE,
         CLIPS_REVIEW,
+        PRODUCTS_LIBRARY,
+        PRODUCTS_BRIEF,
+        PRODUCTS_FACTS,
+        PRODUCTS_OWNER,
+        PRODUCTS_PICTURES,
+        PRODUCTS_LOGO,
+        PRODUCTS_ARCHIVE,
         PERSONAS_LIBRARY,
         PERSONAS_VOICE,
         PERSONAS_PRESETS,

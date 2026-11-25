@@ -29,6 +29,8 @@ The words Bardo uses, in plain terms.
 
 **Theme ranking**: why the decision engine ranks an idea where it does: fit with the channel, trend and competition, each with a score and a confidence, plus past performance once the channel has published videos.
 
+**Product**: something you advertise: a digital or physical product, a service or an idea, described once in a brief with the facts you stand behind, up to three images and a logo ([Products](products.md)).
+
 **Past performance**: how the channel's own videos did, as the ranking reads it: each video's first week next to the channel's usual.
 
 **First week**: a video's views seven days after it went live.
