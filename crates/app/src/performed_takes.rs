@@ -3890,6 +3890,8 @@ mod tests {
                 "6.40",
             )
             .unwrap();
+        // At that rate the two takes pass a Short's default cap.
+        s.app.set_spend_cap(project, "50").unwrap();
         let waiting = view(&s, project, 0);
         assert_eq!(waiting.next, PerformedStep::Make(TakeStep::Draft));
         let estimate = waiting.estimate.unwrap();

@@ -623,6 +623,27 @@ fn is_about_the_scene(kind: JobFailureKind) -> bool {
     )
 }
 
+/// Whether the scene has an image, current or waiting, drawn by `job`.
+fn drawn_by(scene: &bardo_domain::Scene, job: JobId) -> bool {
+    scene
+        .image()
+        .into_iter()
+        .chain(scene.pending())
+        .any(|image| image.generation.job == Some(job))
+}
+
+/// Whether the scene has an image, current or waiting, that another job
+/// drew after `job` was started, when the scene held the images `had`.
+fn drawn_since(scene: &bardo_domain::Scene, job: JobId, had: &[String]) -> bool {
+    scene
+        .image()
+        .into_iter()
+        .chain(scene.pending())
+        .any(|image| {
+            image.generation.job != Some(job) && !had.contains(&image.generation.id.to_string())
+        })
+}
+
 /// Whether `job` plans or draws the scenes of `project`.
 fn is_scene_job_of(job: &Job, project: &str) -> bool {
     matches!(job.kind(), JobKind::ScenePlan | JobKind::SceneImages)
@@ -1005,12 +1026,7 @@ impl SceneHandler {
             }
             // Saved by a run cut before it noted so, or by a job from
             // before deliveries were noted.
-            let drawn = scene
-                .image()
-                .into_iter()
-                .chain(scene.pending())
-                .any(|image| image.generation.job == Some(job));
-            if drawn {
+            if drawn_by(scene, job) {
                 deliver(&mut cx, &mut state, index)?;
                 continue;
             }
@@ -1021,16 +1037,7 @@ impl SceneHandler {
                 .had
                 .as_ref()
                 .and_then(|had| had.get(position))
-                .is_some_and(|had| {
-                    scene
-                        .image()
-                        .into_iter()
-                        .chain(scene.pending())
-                        .any(|image| {
-                            image.generation.job != Some(job)
-                                && !had.contains(&image.generation.id.to_string())
-                        })
-                });
+                .is_some_and(|had| drawn_since(scene, job, had));
             if left {
                 step(&mut cx, &mut done, total)?;
                 continue;
@@ -1829,6 +1836,67 @@ impl Bardo {
         };
         self.video_style(&project)
             .is_ok_and(|style| style != StyleChoice::from_code(&payload.style))
+    }
+
+    /// The paid calls a retry of the image job `job` would still make:
+    /// the portraits and scenes it has not drawn and would not leave to
+    /// another job, and the portraits those scenes still need. `None` when
+    /// it is no image job or nothing of it is left to pay for.
+    pub(crate) fn images_left(&self, job: &Job) -> Option<(VideoProjectId, Vec<PlannedCall>)> {
+        if job.kind() != JobKind::SceneImages {
+            return None;
+        }
+        let payload: ImagesPayload = serde_json::from_str(job.payload()).ok()?;
+        let project = VideoProjectId::from(payload.project.parse::<uuid::Uuid>().ok()?);
+        let plan = self.scene_plans.scene_plan(project).ok()??;
+        // A new plan replaced the job's, or the narration left it behind:
+        // run again, the job draws nothing.
+        if plan.id.to_string() != payload.plan || self.scenes_current(&plan).is_err() {
+            return None;
+        }
+        let state: ImagesState = job
+            .external_handle()
+            .and_then(|saved| serde_json::from_str(saved).ok())
+            .unwrap_or_default();
+        let portraits: Vec<usize> = payload
+            .portraits
+            .iter()
+            .copied()
+            .filter(|&member| {
+                plan.cast_member(member).is_ok_and(|cast| {
+                    !cast.is_described_only()
+                        && !cast
+                            .portrait()
+                            .is_some_and(|portrait| portrait.generation.job == Some(job.id()))
+                })
+            })
+            .collect();
+        let scenes: Vec<usize> = payload
+            .scenes
+            .iter()
+            .enumerate()
+            .filter(|&(position, &index)| {
+                let left = |scene: &bardo_domain::Scene| {
+                    payload
+                        .had
+                        .as_ref()
+                        .and_then(|had| had.get(position))
+                        .is_some_and(|had| drawn_since(scene, job.id(), had))
+                };
+                !state.drawn.contains(&index)
+                    && plan
+                        .scene(index)
+                        .is_ok_and(|scene| !drawn_by(scene, job.id()) && !left(scene))
+            })
+            .map(|(_, &index)| index)
+            .collect();
+        let first = plan
+            .missing_portraits(&scenes, StyleChoice::from_code(&payload.style))
+            .into_iter()
+            .filter(|member| !portraits.contains(member))
+            .count();
+        let images = portraits.len() + first + scenes.len();
+        (images > 0).then(|| (project, vec![images_call(images)]))
     }
 
     /// Whether `job` is an image job of a project where another scene
@@ -3711,6 +3779,77 @@ pub(crate) mod tests {
         let plan = app.scenes(project.id).unwrap().plan.unwrap();
         assert_eq!(plan.scenes()[2].image(), theirs.scenes()[2].image());
         assert_eq!(plan.scenes()[2].pending(), None);
+    }
+
+    #[test]
+    fn a_retry_asks_again_about_the_images_it_still_has_to_pay_for() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        h.images.decline("signal");
+        let id = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        h.images.accept_all();
+
+        // The video's cap is lower now than what it has cost: the retry
+        // is asked about like a new job, for the one scene left to draw.
+        app.set_spend_cap(project.id, "0.01").unwrap();
+        let asked = h.images.prompts().len();
+        let refused = app.retry_job(id).unwrap_err();
+        let crate::jobs::JobActionError::OverBudget(estimate) = refused else {
+            panic!("{refused:?}");
+        };
+        let one = app.estimate(&[images_call(1)]).unwrap().total();
+        assert_eq!(estimate.total(), one);
+        assert_eq!(
+            estimate.cap.unwrap().cap,
+            bardo_domain::Money::from_cents(1)
+        );
+        let job = app.jobs().into_iter().find(|job| job.id() == id).unwrap();
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(h.images.prompts().len(), asked, "drawn before the answer");
+        // The question on screen follows what changes while it waits.
+        assert_eq!(app.retry_question(id).unwrap().total(), one);
+        app.set_spend_cap(project.id, "50").unwrap();
+        assert!(app.retry_question(id).is_none(), "under the cap now");
+        assert_eq!(h.images.prompts().len(), asked, "asking draws nothing");
+        app.set_spend_cap(project.id, "0.01").unwrap();
+
+        app.retry_job_with(id, BudgetConsent::Confirmed).unwrap();
+        assert_eq!(done(&app, id).state(), JobState::Done);
+        assert_eq!(h.images.prompts().len(), asked + 1);
+        assert!(
+            app.retry_question(id).is_none(),
+            "a job that ran asks nothing"
+        );
+    }
+
+    #[test]
+    fn a_retry_with_nothing_left_to_pay_for_asks_nothing() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        h.images.decline("signal");
+        let id = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        h.images.accept_all();
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 2, BudgetConsent::Ask)
+                .unwrap(),
+        );
+
+        // Another job drew the scene since: the retry pays for nothing,
+        // so a cap already passed is no reason to ask.
+        app.set_spend_cap(project.id, "0.01").unwrap();
+        let asked = h.images.prompts().len();
+        app.retry_job(id).unwrap();
+        assert_eq!(done(&app, id).state(), JobState::Done);
+        assert_eq!(h.images.prompts().len(), asked);
     }
 
     #[test]

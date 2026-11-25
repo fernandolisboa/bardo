@@ -170,6 +170,11 @@ pub enum JobActionError {
     /// discard them, which its stage asks about first: it starts there.
     #[error("the job starts from its stage, which asks first")]
     AsksFirst,
+    /// An image or clip job whose scenes still to pay for would reach a
+    /// budget or pass the video's cap, or have no price: the estimate to
+    /// ask about before it is run again (#268).
+    #[error("the rest of the job needs a go-ahead on its cost")]
+    OverBudget(Box<crate::SpendEstimate>),
     #[error(transparent)]
     NotAllowed(#[from] InvalidJobTransition),
     #[error(transparent)]

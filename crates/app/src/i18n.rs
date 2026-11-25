@@ -348,6 +348,17 @@ pub enum Text {
     SpendCapInvalid,
     /// Placeholder: `{cap}`.
     SpendCapOver,
+    /// Marks the cap as the default of the video's format.
+    SpendCapDefault,
+    /// Goes back to the default cap. Placeholder: `{cap}`.
+    SpendCapUseDefault,
+    /// Offers the default cap to a video from before it. Placeholder:
+    /// `{cap}`.
+    SpendCapOffer,
+    /// Placeholder: `{cap}`.
+    SpendCapOfferAccept,
+    SpendCapOfferDecline,
+    SpendCapKept,
     CapReachedTitle,
     /// Placeholders: `{spent}`, `{cap}`, `{amount}`, `{rest}`.
     CapReachedLine,
@@ -1092,6 +1103,11 @@ pub enum Text {
     BudgetReachedTitle,
     /// Placeholders: `{provider}`, `{spent}`, `{budget}`, `{amount}`.
     BudgetReachedLine,
+    /// The question's title when nothing is reached and a price is
+    /// unknown.
+    PriceUnknownTitle,
+    /// A model no rate covers. Placeholders: `{provider}`, `{model}`.
+    PriceUnknownLine,
     BudgetQuestion,
     BudgetConfirm,
     BudgetCancel,
@@ -2132,6 +2148,9 @@ pub enum Text {
     /// or while its own cancelled run is still stopping.
     JobSameWork,
     JobAsksFirst,
+    /// An image or clip job retried where the question about its cost
+    /// cannot be asked.
+    JobOverBudget,
     SettingsPublishingTab,
     AgentTitle,
     AgentQuestion,
@@ -3023,6 +3042,12 @@ impl Text {
             Text::SpendCapSaved => "projects.cap.saved",
             Text::SpendCapInvalid => "projects.cap.invalid",
             Text::SpendCapOver => "projects.cap.over",
+            Text::SpendCapDefault => "projects.cap.default",
+            Text::SpendCapUseDefault => "projects.cap.use_default",
+            Text::SpendCapOffer => "projects.cap.offer",
+            Text::SpendCapOfferAccept => "projects.cap.offer_accept",
+            Text::SpendCapOfferDecline => "projects.cap.offer_decline",
+            Text::SpendCapKept => "projects.cap.kept",
             Text::CapReachedTitle => "budget.cap_title",
             Text::CapReachedLine => "budget.cap_line",
             Text::ClipsEconomy => "scenes.clip.economy",
@@ -3900,6 +3925,8 @@ impl Text {
             Text::ProjectSpent => "estimate.project_spent",
             Text::BudgetReachedTitle => "budget.reached_title",
             Text::BudgetReachedLine => "budget.reached_line",
+            Text::PriceUnknownTitle => "budget.unknown_title",
+            Text::PriceUnknownLine => "budget.unknown_line",
             Text::BudgetQuestion => "budget.question",
             Text::BudgetConfirm => "budget.confirm",
             Text::BudgetCancel => "budget.cancel",
@@ -4905,6 +4932,7 @@ impl Text {
             Text::JobScenesBusy => "job.error.scenes_busy",
             Text::JobSameWork => "job.error.same_work",
             Text::JobAsksFirst => "job.error.asks_first",
+            Text::JobOverBudget => "job.error.over_budget",
             Text::SettingsPublishingTab => "settings.publishing_tab",
             Text::AgentTitle => "agent.title",
             Text::AgentQuestion => "agent.question",
@@ -5868,6 +5896,12 @@ mod tests {
             Text::SpendCapSaved,
             Text::SpendCapInvalid,
             Text::SpendCapOver,
+            Text::SpendCapDefault,
+            Text::SpendCapUseDefault,
+            Text::SpendCapOffer,
+            Text::SpendCapOfferAccept,
+            Text::SpendCapOfferDecline,
+            Text::SpendCapKept,
             Text::CapReachedTitle,
             Text::CapReachedLine,
             Text::ClipsEconomy,
@@ -6393,6 +6427,8 @@ mod tests {
             Text::ProjectSpent,
             Text::BudgetReachedTitle,
             Text::BudgetReachedLine,
+            Text::PriceUnknownTitle,
+            Text::PriceUnknownLine,
             Text::BudgetQuestion,
             Text::BudgetConfirm,
             Text::BudgetCancel,
@@ -7772,6 +7808,7 @@ mod tests {
             Text::JobScenesBusy,
             Text::JobSameWork,
             Text::JobAsksFirst,
+            Text::JobOverBudget,
             Text::SettingsPublishingTab,
             Text::AgentTitle,
             Text::AgentQuestion,
@@ -8343,6 +8380,13 @@ mod tests {
                         ("amount", "$2"),
                     ][..],
                 ),
+                (
+                    Text::PriceUnknownLine,
+                    &[("provider", "Kling"), ("model", "kling-9")][..],
+                ),
+                (Text::SpendCapUseDefault, &[("cap", "$5")][..]),
+                (Text::SpendCapOffer, &[("cap", "$5")][..]),
+                (Text::SpendCapOfferAccept, &[("cap", "$5")][..]),
                 (
                     Text::CapReachedLine,
                     &[

@@ -1491,6 +1491,62 @@ impl Bardo {
             })
     }
 
+    /// The paid calls a retry of the clip job `job` would still make: one
+    /// for each scene it would send, at the order's model and the length
+    /// the scene takes now. A scene with a request out, or one that may be
+    /// out, is asked about and not paid for again. `None` when it is no
+    /// clip job or nothing of it is left to pay for.
+    pub(crate) fn clips_left(&self, job: &Job) -> Option<(VideoProjectId, Vec<PlannedCall>)> {
+        let payload = clip_payload(job)?;
+        let project = VideoProjectId::from(payload.project.parse::<uuid::Uuid>().ok()?);
+        let plan = self.scene_plans.scene_plan(project).ok()??;
+        // A new plan replaced the job's, or the narration left it behind:
+        // run again, the job sends nothing.
+        if plan.id.to_string() != payload.plan || self.scenes_current(&plan).is_err() {
+            return None;
+        }
+        let state: ClipsState = job
+            .external_handle()
+            .and_then(|saved| serde_json::from_str(saved).ok())
+            .unwrap_or_default();
+        let models = self.clip_models();
+        let calls: Vec<PlannedCall> = payload
+            .scenes
+            .iter()
+            .filter_map(|order| {
+                let scene = plan.scene(order.scene).ok()?;
+                scene.image()?;
+                let out = state
+                    .scenes
+                    .iter()
+                    .find(|run| run.scene == order.scene)
+                    .is_some_and(|run| run.request.is_some() || run.sent_at.is_some());
+                let left = order
+                    .had
+                    .as_ref()
+                    .is_some_and(|had| animated_since(scene, job.id(), had));
+                if out
+                    || left
+                    || state.delivered.contains(&order.scene)
+                    || animated_by(scene, job.id())
+                {
+                    return None;
+                }
+                let provider: Provider = order.provider.parse().ok()?;
+                let model = models.iter().find(|model| {
+                    model.id.provider() == provider && model.id.model() == order.model
+                })?;
+                let length = model.durations.fit(scene.duration(), payload.stretch());
+                Some(
+                    PlannedCall::new(provider, CostPurpose::SceneClip, 1)
+                        .with_model(&order.model)
+                        .with_video_seconds(length.seconds),
+                )
+            })
+            .collect();
+        (!calls.is_empty()).then_some((project, calls))
+    }
+
     /// Whether a clip job of the project is running or waiting.
     pub(crate) fn clips_busy(&self, project: VideoProjectId) -> bool {
         self.clip_jobs(project)
@@ -4275,6 +4331,53 @@ mod tests {
     }
 
     #[test]
+    fn a_retry_asks_again_about_the_clips_it_still_has_to_pay_for() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.fail("launch pad");
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        h.clips.succeed_all();
+
+        // The video's cap is lower now than what it has cost: the retry
+        // is asked about like a new job, for the one scene left to send.
+        app.set_spend_cap(project.id, "0.01").unwrap();
+        let view = app.scenes(project.id).unwrap().clips;
+        let refused = app.retry_job(id).unwrap_err();
+        let crate::jobs::JobActionError::OverBudget(estimate) = refused else {
+            panic!("{refused:?}");
+        };
+        let one = app.estimate(&clip_calls(&view.scenes, &[0])).unwrap();
+        assert_eq!(estimate.total(), one.total());
+        assert!(estimate.total() > Money::ZERO);
+        assert_eq!(estimate.cap.unwrap().cap, Money::from_cents(1));
+        assert_eq!(h.clips.submissions().len(), 3, "sent before the answer");
+
+        app.retry_job_with(id, BudgetConsent::Confirmed).unwrap();
+        assert_eq!(done(&app, id).state(), JobState::Done);
+        assert_eq!(h.clips.submissions().len(), 4);
+    }
+
+    #[test]
+    fn a_retry_that_only_waits_for_clips_already_sent_asks_nothing() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        done(&app, id);
+
+        // Every scene has its clip: run again, the job pays for nothing.
+        app.set_spend_cap(project.id, "0.01").unwrap();
+        let job = app.jobs().into_iter().find(|job| job.id() == id).unwrap();
+        assert!(app.clips_left(&job).is_none());
+    }
+
+    #[test]
     fn a_failed_clip_shows_on_its_scene_and_a_retry_submits_only_it() {
         let h = Harness::new();
         let app = h.start();
@@ -4365,6 +4468,50 @@ mod tests {
         assert_eq!(h.clips.staged.lock().unwrap().len(), 1, "stopped at once");
         let plan = plan_of(&app, &project);
         assert!(plan.scenes().iter().all(|s| s.clip_failure().is_none()));
+    }
+
+    #[test]
+    fn clips_of_a_model_without_a_rate_ask_before_anything_is_sent() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        h.clips
+            .nameless
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        channel_uses(&app, &project, Some(model("nameless/one")));
+        // No cap and no budget: only the unknown price asks.
+        app.set_spend_cap(project.id, "").unwrap();
+
+        let error = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap_err();
+        let SceneError::OverBudget(estimate) = error else {
+            panic!("expected the question, got {error:?}");
+        };
+        assert_eq!(
+            estimate.unpriced,
+            [(Provider::Higgsfield, "nameless/one".to_owned())]
+        );
+        assert_eq!(estimate.cap, None);
+        assert_eq!(estimate.over_budget().count(), 0);
+        assert!(h.clips.submissions().is_empty());
+
+        // One clip asks the same, and "generate anyway" sends it.
+        assert!(matches!(
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Ask),
+            Err(SceneError::OverBudget(_))
+        ));
+        done(
+            &app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+                .unwrap(),
+        );
+        assert_eq!(h.clips.submissions().len(), 1);
     }
 
     #[test]

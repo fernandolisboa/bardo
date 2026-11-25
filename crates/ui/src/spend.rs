@@ -111,9 +111,28 @@ pub(crate) fn cap_line(bardo: &Bardo, estimate: &SpendEstimate) -> Option<AnyEle
     })
 }
 
+/// The models of the estimate that no rate covers, one line each: what
+/// they cost is not known.
+pub(crate) fn unknown_lines(bardo: &Bardo, estimate: &SpendEstimate) -> Vec<SharedString> {
+    estimate
+        .unpriced
+        .iter()
+        .map(|(provider, model)| {
+            SharedString::from(bardo.text_with(
+                Text::PriceUnknownLine,
+                &[
+                    ("provider", &bardo.text(Text::ProviderName(*provider))),
+                    ("model", model),
+                ],
+            ))
+        })
+        .collect()
+}
+
 /// Asks before starting a job that would reach a budget or pass its
-/// video's cap: the budgets it reaches and the cap, then "generate anyway"
-/// and "cancel".
+/// video's cap, or that calls a model without a rate: the budgets it
+/// reaches, the cap and the models whose price is unknown, then "generate
+/// anyway" and "cancel".
 pub(crate) fn budget_question(
     id: impl Into<SharedString>,
     bardo: &Bardo,
@@ -130,9 +149,14 @@ pub(crate) fn budget_question(
         .filter(|provider| provider.level == Some(BudgetLevel::Reached))
         .map(|provider| div().text_sm().child(over_line(bardo, provider)));
     let cap = cap_line(bardo, estimate);
+    let unknown = unknown_lines(bardo, estimate)
+        .into_iter()
+        .map(|line| div().text_sm().child(line));
     let title = match (estimate.over_budget().next(), estimate.cap) {
+        (Some(_), _) => Text::BudgetReachedTitle,
         (None, Some(_)) => Text::CapReachedTitle,
-        _ => Text::BudgetReachedTitle,
+        (None, None) if estimate.is_partial() => Text::PriceUnknownTitle,
+        (None, None) => Text::BudgetReachedTitle,
     };
     kit::card(cx)
         .p_3()
@@ -141,6 +165,7 @@ pub(crate) fn budget_question(
         .child(kit::notice(Tone::Danger, tr(bardo, title), cx).font_semibold())
         .children(lines)
         .children(cap)
+        .children(unknown)
         .child(div().text_sm().child(tr(bardo, Text::BudgetQuestion)))
         .child(
             h_flex()

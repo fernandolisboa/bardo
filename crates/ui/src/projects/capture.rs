@@ -41,7 +41,7 @@ use crate::appearance::look;
 use crate::guide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
-use crate::spend::{budget_question, cap_line, estimate_note, over_line};
+use crate::spend::{budget_question, cap_line, estimate_note, over_line, unknown_lines};
 
 /// Importing a capture: the file being chosen or read, the one read with
 /// what it would cost, and the user's answers on its card.
@@ -2434,8 +2434,13 @@ impl ProjectsScreen {
                         .filter(|provider| provider.level == Some(BudgetLevel::Reached))
                         .map(|provider| div().text_sm().child(over_line(bardo, provider))),
                 )
-                // And so is the video's cap.
+                // And so are the video's cap and a model without a price.
                 .children(cap_line(bardo, estimate))
+                .children(
+                    unknown_lines(bardo, estimate)
+                        .into_iter()
+                        .map(|line| div().text_sm().child(line)),
+                )
                 .child(div().text_sm().child(tr(bardo, Text::TakeCapQuestion)))
                 .child(
                     h_flex()
