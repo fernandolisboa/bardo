@@ -774,7 +774,10 @@ impl ClipJob<'_> {
             .had
             .as_ref()
             .is_some_and(|had| animated_since(scene, self.job, had));
-        if left && !unanswered {
+        // Nor is a clip made for a scene that became a composed one since
+        // (#278): it shows the product's own image, which is never
+        // animated, and the drawing it still holds is not shown.
+        if (left || scene.is_composed()) && !unanswered {
             return Ok(Step::Left);
         }
         // A scene handed over and not sent (the provider was busy, the
@@ -1516,6 +1519,10 @@ impl Bardo {
             .filter_map(|order| {
                 let scene = plan.scene(order.scene).ok()?;
                 scene.image()?;
+                // A scene composed since is left alone when run again.
+                if scene.is_composed() {
+                    return None;
+                }
                 let out = state
                     .scenes
                     .iter()
@@ -1548,6 +1555,14 @@ impl Bardo {
     }
 
     /// Whether a clip job of the project is running or waiting.
+    /// Whether a clip job of `project` is running or queued, or was
+    /// cancelled while its handler still collects what it paid for.
+    pub(crate) fn clips_running(&self, project: VideoProjectId) -> bool {
+        self.clip_jobs(project)
+            .iter()
+            .any(|(job, _)| job.state().is_active() || self.jobs.runs_here(job.id()))
+    }
+
     pub(crate) fn clips_busy(&self, project: VideoProjectId) -> bool {
         self.clip_jobs(project)
             .iter()

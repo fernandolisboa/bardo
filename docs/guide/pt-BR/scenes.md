@@ -31,6 +31,26 @@ As cenas aparecem em ordem, cada uma com o tempo, a imagem e como está: **A ger
 
 A cena escolhida mostra o trecho da narração que ela cobre, a imagem e o **prompt de imagem**. **Editar prompt** muda o que o próximo desenho mostra (até 4.000 caracteres); uma cena cujo prompt você mudou ganha a marca **Editado**. **Detalhes da geração** diz qual modelo de IA desenhou a imagem, com quantos tokens e qual versão do modelo de prompts.
 
+<a id="ad"></a>
+## As cenas de um anúncio
+
+As cenas de um [anúncio](brief.md) são planejadas a partir do modelo **Plano de cenas de anúncio** ([Modelos](templates.md)): uma cena por frase, de cerca de 2 a 4 segundos cada, a primeira mostrando o gancho e a última sendo o cartão final, sobre a chamada para ação. Cada cena de um anúncio tem um **tipo**:
+
+| Tipo | O que mostra | Quem faz |
+| --- | --- | --- |
+| **Desenhada** | Uma imagem feita a partir do prompt da cena, como as cenas de qualquer vídeo | O modelo de imagem |
+| **Produto em uso** | O produto sendo usado, a partir do prompt da cena | O modelo de imagem |
+| **Foto do produto** | Uma das imagens do próprio produto, como ela é | O Bardo, de graça |
+| **Cartão final** | A última imagem do anúncio, sobre a chamada para ação | O Bardo, de graça, a partir de uma imagem do produto; o modelo de imagem quando o produto não tem nenhuma |
+
+Os tipos que um plano pode usar dependem das [imagens](products.md#pictures) do produto: uma foto do produto exige uma imagem, e o produto em uso exige uma **Foto**, porque uma **Tela** só é mostrada como ela é. Um produto sem imagem recebe cenas desenhadas e um cartão final desenhado. O Claude é avisado de quais tipos pode usar e, por número, de quais imagens o produto tem; um tipo que o produto não permite volta como cena desenhada, e uma foto do produto que cita uma imagem que o produto não tem mostra a primeira. Quando o produto tem imagem, o plano é pedido de modo que o produto esteja na tela quando a narração citar o nome dele, com pelo menos uma foto do produto.
+
+O próprio Bardo compõe a foto do produto, no seu computador, assim que o plano é salvo: a imagem do produto, inteira, como um cartão de cantos arredondados sobre um fundo liso numa cor tirada da imagem, 1080 × 1920 num vídeo vertical e 1920 × 1080 num vídeo largo. A imagem é redimensionada para caber e nunca é esticada, cortada nem redesenhada, e fica onde nem o movimento do corte nem uma legenda a cobre. Compor não custa nada e não exige chave, e a imagem do produto nunca vai para um modelo de imagem ou de vídeo a partir de uma foto do produto. Uma imagem composta nunca é animada ([Clipes](clips.md#animate)), nunca serve de referência para desenhar outra cena, não é oferecida como cenário de uma tomada atuada e, no editor, [só recebe zoom](editor.md#motion).
+
+**Tipo de cena**, na cena escolhida, muda o que ela é, entre os tipos que o produto permite; **Cartão final** só aparece na última cena. Uma cena que vira foto do produto é composta na hora, e **Imagem do produto** escolhe qual das imagens do produto ela mostra, numeradas como no produto. Quando essa imagem é pequena para o quadro, a cena avisa: ampliada, ela pode ficar sem nitidez. Uma cena que volta a ser **Desenhada** retoma o desenho que tinha; se nunca teve um, nada é desenhado até você pedir em **Gerar N imagens**, que mostra o custo antes. Quando o vídeo muda de formato, as imagens compostas deixam de servir e aparecem como **A compor**: **Compor fotos do produto** (ou **Compor imagem**, na cena) faz essas imagens de novo, de graça, e **Gerar N imagens** as faz junto com os desenhos. Uma cena cuja imagem foi removida do produto avisa e fica com a imagem que tem; quando essa imagem precisa ser feita de novo, a cena falha até você escolher outra imagem ou outro tipo para ela. Um render no outro formato (um anúncio longo publicado numa rede 9:16, ou o contrário) mostra a imagem composta inteira, com faixas.
+
+A [estimativa](projects.md#mode) do vídeo conta as cenas compostas como gratuitas. Antes de o anúncio ter um plano, ele é estimado com uma cena a cada 3 segundos, das quais duas fotos do produto e o cartão final são gratuitos quando o produto tem imagem.
+
 <a id="redraw"></a>
 ## Desenhar de novo
 

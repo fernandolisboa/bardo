@@ -153,6 +153,13 @@ pub const LINE_RULES: LineRules = LineRules {
 /// The longest a caption's text gets once the user edits it.
 pub const MAX_CAPTION_CHARS: usize = 200;
 
+/// The share of the frame's height, from its bottom, that burned-in
+/// captions cover in any style, as Bardo makes them ([`LINE_RULES`]):
+/// from where the highest style sits, up over two lines of its text in a
+/// vertical frame and one in a wide one. A picture composed by Bardo
+/// keeps what matters above it.
+pub const CAPTION_BAND: f64 = 0.38;
+
 /// One caption: its text and when it shows, in narration-file time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caption {

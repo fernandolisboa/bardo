@@ -1,10 +1,10 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    CastMember, CastRecord, GenerationId, JobFailureKind, NarrationId, Place, PlaceRecord,
-    PortraitsUsed, ProfileId, RepositoryError, Scene, SceneClip, SceneImage, ScenePlan,
-    ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, StretchLimit,
-    VideoProjectId,
+    AspectRatio, CastMember, CastRecord, ComposedShot, GenerationId, JobFailureKind, NarrationId,
+    Place, PlaceRecord, PortraitsUsed, ProductImageId, ProfileId, RepositoryError, Scene,
+    SceneClip, SceneImage, SceneKind, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository,
+    ScenePrompt, SceneRecord, StretchLimit, VideoProjectId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
@@ -57,6 +57,27 @@ struct SceneRow {
     place: Option<i64>,
     image_portraits: Option<String>,
     pending_portraits: Option<String>,
+    kind: String,
+    product_image: Option<String>,
+    /// The composed picture's file, product image and frame shape.
+    shot: (Option<String>, Option<String>, Option<String>),
+}
+
+/// The picture composed for a scene, as stored: its three columns are set
+/// together.
+fn composed_shot(
+    (file, image, aspect): (Option<String>, Option<String>, Option<String>),
+) -> Result<Option<ComposedShot>, RepositoryError> {
+    match (file, image, aspect) {
+        (Some(file), Some(image), Some(aspect)) => Ok(Some(ComposedShot {
+            file,
+            image: ProductImageId::from(uuid(&image)?),
+            aspect: aspect.parse::<AspectRatio>().map_err(boxed)?,
+        })),
+        // Half a composed picture is no picture: the scene waits to be
+        // composed again, for free, and the rest of the plan still loads.
+        _ => Ok(None),
+    }
 }
 
 /// A scene's cast members as stored: positions separated by commas.
@@ -200,6 +221,16 @@ impl SceneRow {
         .with_portraits(
             parse_portraits_used(self.image_portraits.as_deref()),
             parse_portraits_used(self.pending_portraits.as_deref()),
+        )
+        // A kind this version does not know is a drawn scene.
+        .with_kind(
+            SceneKind::from_code(&self.kind).unwrap_or_default(),
+            self.product_image
+                .as_deref()
+                .map(uuid)
+                .transpose()?
+                .map(ProductImageId::from),
+            composed_shot(self.shot)?,
         ))
     }
 }
@@ -211,7 +242,8 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                  image_generation_id, pending_file, pending_generation_id, failure,
                  motion_prompt, clip_provider, clip_model, clip_failure, position,
                  cast_members, planned_motion_prompt, place, image_portraits,
-                 pending_portraits
+                 pending_portraits, kind, product_image_id, shot_file, shot_image_id,
+                 shot_aspect
              FROM scene WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -235,6 +267,9 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                     place: row.get(17)?,
                     image_portraits: row.get(18)?,
                     pending_portraits: row.get(19)?,
+                    kind: row.get(20)?,
+                    product_image: row.get(21)?,
+                    shot: (row.get(22)?, row.get(23)?, row.get(24)?),
                 },
                 row.get::<_, i64>(14)?,
             ))
@@ -446,9 +481,10 @@ fn insert_scene(
         "INSERT INTO scene (plan_id, position, start_ms, end_ms, text, generated_prompt,
              prompt, image_file, image_generation_id, pending_file, pending_generation_id,
              failure, motion_prompt, clip_provider, clip_model, clip_failure, cast_members,
-             planned_motion_prompt, place, image_portraits, pending_portraits)
+             planned_motion_prompt, place, image_portraits, pending_portraits, kind,
+             product_image_id, shot_file, shot_image_id, shot_aspect)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-             ?18, ?19, ?20, ?21)",
+             ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
         params![
             plan,
             position(index)?,
@@ -471,6 +507,11 @@ fn insert_scene(
             scene.place().map(position).transpose()?,
             portraits_used(scene.image_portraits()),
             portraits_used(scene.pending_portraits()),
+            scene.kind().code(),
+            scene.product_image().map(|image| image.to_string()),
+            scene.shot().map(|shot| shot.file.as_str()),
+            scene.shot().map(|shot| shot.image.to_string()),
+            scene.shot().map(|shot| shot.aspect.code()),
         ],
     )
     .map_err(boxed)?;
@@ -604,7 +645,9 @@ impl ScenePlanRepository for Database {
                 "UPDATE scene SET prompt = ?3, image_file = ?4, image_generation_id = ?5,
                      pending_file = ?6, pending_generation_id = ?7, failure = ?8,
                      motion_prompt = ?9, clip_provider = ?10, clip_model = ?11,
-                     clip_failure = ?12, image_portraits = ?13, pending_portraits = ?14
+                     clip_failure = ?12, image_portraits = ?13, pending_portraits = ?14,
+                     kind = ?15, product_image_id = ?16, shot_file = ?17,
+                     shot_image_id = ?18, shot_aspect = ?19
                  WHERE plan_id = ?1 AND position = ?2",
                 params![
                     id,
@@ -621,6 +664,11 @@ impl ScenePlanRepository for Database {
                     scene.clip_failure().map(|kind| kind.code()),
                     portraits_used(scene.image_portraits()),
                     portraits_used(scene.pending_portraits()),
+                    scene.kind().code(),
+                    scene.product_image().map(|image| image.to_string()),
+                    scene.shot().map(|shot| shot.file.as_str()),
+                    scene.shot().map(|shot| shot.image.to_string()),
+                    scene.shot().map(|shot| shot.aspect.code()),
                 ],
             )
             .map_err(boxed)?;
@@ -807,7 +855,7 @@ mod tests {
                     prompt: "The engineer watches a probe leave Earth.".into(),
                     cast: vec![0],
                     motion: "Slow push in on the engineer.".into(),
-                    place: None,
+                    ..SceneDraft::default()
                 },
                 SceneDraft {
                     first_sentence: 1,
@@ -915,7 +963,12 @@ mod tests {
             // then migrated.
             let mut conn = s.db.conn();
             conn.execute_batch(
-                "DROP TABLE claims_check_statement; DROP TABLE claims_check;
+                "ALTER TABLE scene DROP COLUMN shot_aspect;
+                 ALTER TABLE scene DROP COLUMN shot_image_id;
+                 ALTER TABLE scene DROP COLUMN shot_file;
+                 ALTER TABLE scene DROP COLUMN product_image_id;
+                 ALTER TABLE scene DROP COLUMN kind;
+                 DROP TABLE claims_check_statement; DROP TABLE claims_check;
                  DROP TABLE ad_brief_claim; DROP TABLE ad_brief;
                  DROP TABLE ad_angle_claim; DROP TABLE ad_angle;
                  DROP INDEX video_project_product;
@@ -1046,6 +1099,7 @@ mod tests {
             generation(&s, Provider::Claude, "{\"scenes\": []}"),
             &s.narration,
             PlanDraft {
+                product: None,
                 cast: Vec::new(),
                 places: vec![PlaceDraft {
                     name: "the control room".into(),
@@ -1102,6 +1156,117 @@ mod tests {
         assert!(
             s.db.save_place(&plan, 0).is_err(),
             "the replaced plan is gone"
+        );
+    }
+
+    #[test]
+    fn an_ads_scene_kinds_and_composed_pictures_round_trip() {
+        use bardo_domain::{ProductImageKind, ProductPictures};
+        let s = setup();
+        let (screen, photo) = (ProductImageId::new(), ProductImageId::new());
+        let pictures = ProductPictures::new(vec![
+            (screen, ProductImageKind::Screen),
+            (photo, ProductImageKind::Photo),
+        ]);
+        let mut plan = ScenePlan::from_draft(
+            generation(&s, Provider::Claude, "{\"scenes\": []}"),
+            &s.narration,
+            PlanDraft {
+                product: Some(pictures.clone()),
+                cast: Vec::new(),
+                places: Vec::new(),
+                scenes: vec![
+                    SceneDraft {
+                        first_sentence: 0,
+                        prompt: "The app's first screen.".into(),
+                        kind: "product_shot".into(),
+                        product_image: Some(1),
+                        ..SceneDraft::default()
+                    },
+                    SceneDraft {
+                        first_sentence: 1,
+                        prompt: "The product over the call to action.".into(),
+                        kind: "end_card".into(),
+                        ..SceneDraft::default()
+                    },
+                ],
+            },
+            time(1_800_000_011),
+        )
+        .unwrap();
+        assert_eq!(plan.scenes()[0].kind(), SceneKind::ProductShot);
+        assert_eq!(plan.scenes()[0].product_image(), Some(photo));
+        assert_eq!(plan.scenes()[1].kind(), SceneKind::EndCard);
+        assert_eq!(plan.scenes()[1].product_image(), Some(screen));
+        s.db.save_scene_plan(&plan).unwrap();
+        assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));
+
+        // Its composed picture is saved with the scene alone.
+        let shot = ComposedShot {
+            file: "shot-0.png".into(),
+            image: photo,
+            aspect: AspectRatio::Vertical,
+        };
+        plan.scene_mut(0, time(1_800_000_020))
+            .unwrap()
+            .add_shot(shot.clone());
+        s.db.save_scene(&plan, 0).unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored, plan);
+        assert_eq!(stored.scenes()[0].shot(), Some(&shot));
+        assert_eq!(stored.scenes()[0].picture(), Some("shot-0.png"));
+        assert_eq!(stored.scenes()[1].shot(), None);
+
+        // A drawn scene again keeps neither the image nor the picture.
+        plan.set_scene_kind(0, SceneKind::Drawn, None, &pictures, time(1_800_000_030))
+            .unwrap();
+        s.db.save_scene(&plan, 0).unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored, plan);
+        assert_eq!(stored.scenes()[0].kind(), SceneKind::Drawn);
+        assert_eq!(stored.scenes()[0].shot(), None);
+
+        // A kind this version does not know is a drawn scene, and half a
+        // composed picture is no picture.
+        s.db.conn()
+            .execute("UPDATE scene SET kind = 'hero' WHERE position = 1", [])
+            .unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored.scenes()[1].kind(), SceneKind::Drawn);
+        s.db.conn()
+            .execute(
+                "UPDATE scene SET kind = 'end_card', shot_file = 'x.png' WHERE position = 1",
+                [],
+            )
+            .unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored.scenes()[1].kind(), SceneKind::EndCard);
+        assert_eq!(stored.scenes()[1].shot(), None);
+    }
+
+    #[test]
+    fn a_plan_of_no_ad_is_stored_as_drawn_scenes() {
+        let s = setup();
+        let plan = plan(&s);
+        s.db.save_scene_plan(&plan).unwrap();
+        let kinds: Vec<String> = {
+            let conn = s.db.conn();
+            let mut statement = conn
+                .prepare("SELECT kind FROM scene ORDER BY position")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert!(!kinds.is_empty() && kinds.iter().all(|kind| kind == "drawn"));
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert!(
+            stored
+                .scenes()
+                .iter()
+                .all(|scene| scene.kind() == SceneKind::Drawn && scene.product_image().is_none())
         );
     }
 

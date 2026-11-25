@@ -969,7 +969,9 @@ impl Bardo {
         Ok(())
     }
 
-    /// The scene images a take's set can be, in scene order.
+    /// The scene images a take's set can be, in scene order. A scene Bardo
+    /// composed from a product image (#278) is never one: its picture goes
+    /// to no model.
     pub fn set_scenes(&self, project: VideoProjectId) -> Result<Vec<SetScene>, CaptureError> {
         let Some(plan) = self.scene_plans.scene_plan(project)? else {
             return Ok(Vec::new());
@@ -979,7 +981,7 @@ impl Bardo {
             .iter()
             .enumerate()
             .filter_map(|(index, scene)| {
-                let image = scene.image()?;
+                let image = scene.image().filter(|_| !scene.is_composed())?;
                 self.files.exists(project, &image.file).then(|| SetScene {
                     number: index + 1,
                     file: image.file.clone(),

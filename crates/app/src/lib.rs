@@ -4,6 +4,7 @@
 mod about;
 mod ad_angles;
 mod ad_briefs;
+mod ad_scenes;
 mod ads;
 mod agent;
 mod appearance;
@@ -106,6 +107,7 @@ pub use ad_angles::{
     AngleClaim,
 };
 pub use ad_briefs::{BriefClaimRow, BriefError, BriefStanding, BriefView};
+pub use ad_scenes::{KindChanged, SceneKinds, ShotImage};
 pub use agent::{AgentError, AgentStatus, AgentWork};
 pub use appearance::{EditorPalette, Palette, Rgb, Rgba, TrackColors, UiFont, palette};
 pub use backup::{
@@ -921,6 +923,8 @@ impl Bardo {
             media: Arc::clone(&providers.media),
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
+            products: Arc::clone(&products),
+            composer: Arc::new(bardo_media::ProductShots),
         };
         let plan_book = plans::PlanBook::load(
             profile.id,

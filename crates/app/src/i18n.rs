@@ -8,6 +8,7 @@ use std::time::Duration;
 use crate::{AdAnglesMissing, Destination, GuideGroup, Pillar, Stage, UploadBlock};
 
 use bardo_domain::ProductionMode;
+use bardo_domain::SceneKind;
 use bardo_domain::VideoLength;
 use bardo_domain::{AdAngleFieldError, AdFramework, BriefFieldError, BriefNotReady};
 use bardo_domain::{
@@ -2842,6 +2843,27 @@ pub enum Text {
     ScriptClaimsPendingOutdatedHint,
     /// The chip of a check that found no statement at all.
     ScriptClaimsNothingStated,
+    /// A scene cannot be of the kind asked for (#278).
+    SceneKindNotAllowed,
+    SceneKindLabel,
+    SceneKindHint,
+    SceneProductImage,
+    SceneComposed,
+    SceneImageTooSmall,
+    ComposeScene,
+    /// Placeholders: `{n}`.
+    ComposeScenes,
+    SceneNotComposed,
+    SceneClipComposed,
+    EditorMotionComposed,
+    /// What a scene of an ad is (#278).
+    SceneKindName(SceneKind),
+    /// A scene card whose composed picture is still to be made (#278).
+    SceneCardToCompose,
+    /// Where a composed picture comes from (#278).
+    EditorSourceComposed,
+    /// A composed scene whose product image was removed (#278).
+    SceneImageRemoved,
 }
 
 impl Text {
@@ -5890,6 +5912,26 @@ impl Text {
             Text::ScriptWrittenCheckStopped => "script.claims.written_stopped",
             Text::ScriptClaimsPendingOutdatedHint => "script.claims.pending_outdated_hint",
             Text::ScriptClaimsNothingStated => "script.claims.nothing_stated",
+            Text::SceneKindNotAllowed => "scenes.error.kind_not_allowed",
+            Text::SceneKindLabel => "scenes.kind.label",
+            Text::SceneKindHint => "scenes.kind.hint",
+            Text::SceneProductImage => "scenes.kind.image",
+            Text::SceneComposed => "scenes.kind.composed",
+            Text::SceneImageTooSmall => "scenes.kind.too_small",
+            Text::ComposeScene => "scenes.kind.compose",
+            Text::ComposeScenes => "scenes.kind.compose_missing",
+            Text::SceneNotComposed => "scenes.kind.not_composed",
+            Text::SceneClipComposed => "scenes.kind.no_clip",
+            Text::EditorMotionComposed => "editor.motion.composed",
+            Text::SceneKindName(value) => match value {
+                SceneKind::Drawn => "scenes.kind.name.drawn",
+                SceneKind::ProductInUse => "scenes.kind.name.product_in_use",
+                SceneKind::ProductShot => "scenes.kind.name.product_shot",
+                SceneKind::EndCard => "scenes.kind.name.end_card",
+            },
+            Text::SceneCardToCompose => "scenes.card.to_compose",
+            Text::EditorSourceComposed => "editor.inspector.source_composed",
+            Text::SceneImageRemoved => "scenes.kind.image_removed",
         };
         Cow::Borrowed(key)
     }
@@ -8054,6 +8096,21 @@ mod tests {
         texts.push(Text::ScriptWrittenCheckStopped);
         texts.push(Text::ScriptClaimsPendingOutdatedHint);
         texts.push(Text::ScriptClaimsNothingStated);
+        texts.push(Text::SceneKindNotAllowed);
+        texts.push(Text::SceneKindLabel);
+        texts.push(Text::SceneKindHint);
+        texts.push(Text::SceneProductImage);
+        texts.push(Text::SceneComposed);
+        texts.push(Text::SceneImageTooSmall);
+        texts.push(Text::ComposeScene);
+        texts.push(Text::ComposeScenes);
+        texts.push(Text::SceneNotComposed);
+        texts.push(Text::SceneClipComposed);
+        texts.push(Text::EditorMotionComposed);
+        texts.extend(SceneKind::ALL.map(Text::SceneKindName));
+        texts.push(Text::SceneCardToCompose);
+        texts.push(Text::EditorSourceComposed);
+        texts.push(Text::SceneImageRemoved);
         texts.extend(Stage::ALL.map(Text::StageName));
         texts.extend(Stage::ALL.map(Text::StageAfter));
         texts.push(Text::RenderNoCut);

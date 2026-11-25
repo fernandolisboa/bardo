@@ -52,16 +52,17 @@ use bardo_domain::{
     GenerationId, ImageFormat, ImageGenerator, ImageRequest, ImageShape, Job, JobFailure,
     JobFailureKind, JobId, JobKind, Narration, NarrationId, NarrationRepository, NoPendingClip,
     NoPendingImage, NoSuchCastMember, NoSuchPlace, NoSuchScene, OtherShot, OtherText, PlaceDraft,
-    PlanDraft, PortraitsUsed, ProfileId, Progress, ProjectFiles, Provider, ReferenceImage,
-    RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError, SceneImage, ScenePlan,
-    ScenePlanId, ScenePlanRepository, ScenePlanSize, ScenePrompt, SceneSetting, SecretStore,
-    StyleChoice, TemplateKind, TemplateUsed, TemplateVariable, TemplateVersion, TemplateVersionId,
-    TextEffort, TextFormat, TextGenerator, TextRequest, VideoProject, VideoProjectId,
-    scene_image_prompt, sentences,
+    PlanDraft, PortraitsUsed, ProductId, ProductRepository, ProfileId, Progress, ProjectFiles,
+    Provider, ReferenceImage, RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError,
+    SceneImage, SceneKindError, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePlanSize,
+    ScenePrompt, SceneSetting, SecretStore, ShotComposer, StyleChoice, TemplateKind, TemplateUsed,
+    TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator,
+    TextRequest, VideoProject, VideoProjectId, scene_image_prompt, sentences,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
 
+use crate::ad_scenes::{AdPlan, AdScenes};
 use crate::clips::{ClipsView, SceneClipView};
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobActionError, JobContext, JobHandler, Kept};
@@ -133,6 +134,11 @@ pub enum SceneError {
     /// The chosen video model is not one the providers offer.
     #[error("the video model is not offered")]
     ClipModelNotOffered,
+    /// The scene cannot be of that kind (#278): the project is no ad, the
+    /// product's images do not allow it, or only the last scene is the
+    /// end card.
+    #[error(transparent)]
+    Kind(#[from] SceneKindError),
     #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
@@ -169,6 +175,8 @@ impl SceneError {
             SceneError::NoImageToAnimate => Text::SceneNoImageToAnimate,
             SceneError::NothingToAnimate => Text::ScenesNothingToAnimate,
             SceneError::ClipModelNotOffered => Text::SceneClipModelNotOffered,
+            SceneError::Kind(SceneKindError::NoSuchScene(_)) => Text::SceneNotFound,
+            SceneError::Kind(_) => Text::SceneKindNotAllowed,
             SceneError::Template(error) => error.message(),
             SceneError::Repository(_) => Text::ScenesNotLoaded,
         }
@@ -239,6 +247,12 @@ pub struct ScenesView {
     /// What drawing those again would cost, missing portraits included;
     /// `None` when there is none.
     pub old_portraits_estimate: Option<SpendEstimate>,
+    /// For an ad (#278): the kinds its scenes may be and the product
+    /// images a composed scene may show. Nothing for any other project.
+    pub kinds: crate::SceneKinds,
+    /// The composed scenes that wait for their picture in the video's
+    /// frame: Bardo makes those for free.
+    pub missing_shots: Vec<usize>,
 }
 
 /// Claude's call that plans the scenes of a narration of `size`. What the
@@ -249,17 +263,27 @@ pub(crate) fn sized_plan_call(size: ScenePlanSize) -> PlannedCall {
         .with_output_tokens(size.output_tokens_usually())
 }
 
-/// Claude's call that plans the scenes of `narration` from `rendered`.
-fn plan_call(rendered: &RenderedPrompt, narration: &Narration) -> PlannedCall {
-    sized_plan_call(ScenePlanSize::of(narration))
-        .with_prompt(&rendered.instructions, &rendered.prompt)
+/// The size of the plan of `narration`: an ad's has a scene for every
+/// sentence (#278).
+fn plan_size(narration: &Narration, ad: bool) -> ScenePlanSize {
+    if ad {
+        ScenePlanSize::of_ad(narration)
+    } else {
+        ScenePlanSize::of(narration)
+    }
+}
+
+/// Claude's call that plans the scenes of `narration` from `rendered`,
+/// as an ad's when `ad`.
+fn plan_call(rendered: &RenderedPrompt, narration: &Narration, ad: bool) -> PlannedCall {
+    sized_plan_call(plan_size(narration, ad)).with_prompt(&rendered.instructions, &rendered.prompt)
 }
 
 /// Whether a plan of `narration` is too large to ask for: its room passes
 /// what Claude can be asked to leave for one answer. A plan cut at the
 /// model's limit is paid for and lost.
-fn too_long_to_plan(narration: &Narration) -> bool {
-    ScenePlanSize::of(narration).answer_tokens_at_most() > bardo_ai::claude::longest_answer()
+fn too_long_to_plan(narration: &Narration, ad: bool) -> bool {
+    plan_size(narration, ad).answer_tokens_at_most() > bardo_ai::claude::longest_answer()
 }
 
 /// Nano Banana's calls that draw `images` images, portraits included.
@@ -297,7 +321,7 @@ impl ScenesView {
 /// be written before the scenes; Bardo keeps it in the plan's provenance.
 /// The fields a template may not mention say what they are for, so a
 /// template written before them still gets an answer Bardo can use.
-const PLAN_SCHEMA: &str = r#"{
+pub(crate) const PLAN_SCHEMA: &str = r#"{
   "type": "object",
   "properties": {
     "story": {
@@ -379,6 +403,15 @@ struct PlannedScene {
     /// Negative for a scene in a place of its own.
     #[serde(default)]
     place: Option<i64>,
+    /// What the scene is, in an ad's plan (#278).
+    #[serde(default)]
+    kind: String,
+    /// The product image a product shot or an end card shows, by its
+    /// position; negative for none. Read as any JSON value: one that is no
+    /// position (a fraction, a huge number, text) shows the first image
+    /// rather than losing a paid answer.
+    #[serde(default)]
+    product_image: Option<serde_json::Value>,
 }
 
 /// The scene plan job's payload: the rendered prompt, where it came from,
@@ -391,6 +424,11 @@ struct PlanPayload {
     template_number: u32,
     instructions: String,
     prompt: String,
+    /// For an ad's plan (#278): its product's images as the request
+    /// numbered them, and the frame its product shots are composed for.
+    /// Absent for every other plan, whose scenes are all drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ad: Option<AdPlan>,
 }
 
 /// The image job's payload: the plan and which of its scenes to draw.
@@ -420,6 +458,13 @@ struct ImagesPayload {
     /// from before this was kept: nothing is known, and nothing is left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     had: Option<Vec<Vec<String>>>,
+    /// Composed scenes whose picture Bardo makes from a product image
+    /// (#278): free, and made before anything is drawn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    shots: Vec<usize>,
+    /// The product those pictures are composed from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    product: Option<String>,
 }
 
 /// What an image job has delivered, saved as the job's external handle.
@@ -673,6 +718,10 @@ pub(crate) struct SceneHandler {
     pub(crate) media: Arc<dyn MediaEngine>,
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) costs: CostBook,
+    /// The images of an ad's product, which its product shots show.
+    pub(crate) products: Arc<dyn ProductRepository>,
+    /// Composes product shots on the computer (#278).
+    pub(crate) composer: Arc<dyn ShotComposer>,
 }
 
 impl JobHandler for SceneHandler {
@@ -725,7 +774,7 @@ impl SceneHandler {
         // Asked before the job was queued, and again here: a job queued
         // before the question existed, or tried again from the queue, did
         // not pass it.
-        if too_long_to_plan(&narration) {
+        if too_long_to_plan(&narration, payload.ad.is_some()) {
             return Err(JobFailure::unexpected(
                 "the narration is too long to plan its scenes in one answer",
             ));
@@ -764,6 +813,7 @@ impl SceneHandler {
         generated: GeneratedText,
     ) -> Result<(), JobFailure> {
         let project: VideoProjectId = id(&payload.project)?;
+        let ad = payload.ad.clone();
         let not_usable = |detail: String| {
             JobFailure::new(
                 JobFailureKind::UnexpectedAnswer,
@@ -802,6 +852,11 @@ impl SceneHandler {
                         .collect(),
                     motion: scene.motion,
                     place: scene.place.and_then(|place| usize::try_from(place).ok()),
+                    kind: scene.kind,
+                    product_image: scene
+                        .product_image
+                        .and_then(|image| image.as_u64())
+                        .and_then(|image| usize::try_from(image).ok()),
                 })
             })
             .collect();
@@ -827,6 +882,9 @@ impl SceneHandler {
             cast,
             places,
             scenes,
+            // Only an ad's scenes have kinds, read against the images the
+            // request listed.
+            product: ad.as_ref().map(AdPlan::pictures),
         };
         let plan = ScenePlan::from_draft(generation, narration, draft, now)
             .map_err(|error| not_usable(error.to_string()))?;
@@ -835,6 +893,21 @@ impl SceneHandler {
         // (open in a viewer) only costs disk space.
         for file in current.iter().flat_map(ScenePlan::files) {
             crate::proxies::remove_media(self.files.as_ref(), project, file);
+        }
+        // An ad's product shots are composed at once: they are free. One
+        // that cannot be made is marked on its scene and does not undo
+        // the plan, which is paid for.
+        if let Some(ad) = ad
+            && let (Ok(product), Ok(aspect)) = (
+                id::<ProductId>(&ad.product),
+                ad.aspect.parse::<AspectRatio>(),
+            )
+            && let Err(failure) = self.compose_missing(project, plan.id, aspect, product)
+        {
+            tracing::warn!(
+                "could not compose the plan's product shots: {}",
+                failure.detail
+            );
         }
         Ok(())
     }
@@ -852,7 +925,7 @@ impl SceneHandler {
         cx: &mut JobContext,
     ) -> Result<Option<GeneratedText>, JobFailure> {
         let job = cx.id();
-        let size = ScenePlanSize::of(narration);
+        let size = plan_size(narration, payload.ad.is_some());
         let request = TextRequest {
             effort: TextEffort::Careful,
             answer_tokens: Some(size.answer_tokens_at_most()),
@@ -860,7 +933,7 @@ impl SceneHandler {
             prompt: payload.prompt.clone(),
             images: Vec::new(),
             format: TextFormat::Json {
-                schema: PLAN_SCHEMA.to_owned(),
+                schema: crate::ad_scenes::plan_schema(PLAN_SCHEMA, payload.ad.as_ref()),
             },
         };
         // One that was lost is recorded as a plan of this length, as it was
@@ -905,7 +978,7 @@ impl SceneHandler {
     }
 
     /// The saved plan, if it is still `plan`.
-    fn saved_plan(
+    pub(crate) fn saved_plan(
         &self,
         project: VideoProjectId,
         plan: ScenePlanId,
@@ -949,7 +1022,7 @@ impl SceneHandler {
             .map_err(|_| unexpected(format!("unknown frame shape {}", payload.aspect)))?;
         let style = StyleChoice::from_code(&payload.style);
         // Portraits drawn on the way to a scene are counted as they come.
-        let mut total = payload.portraits.len() + payload.scenes.len();
+        let mut total = payload.portraits.len() + payload.shots.len() + payload.scenes.len();
         let mut failed: Vec<JobFailure> = Vec::new();
         // The scenes left undrawn for lack of a portrait, by scene number,
         // under the people whose portrait is missing.
@@ -1013,6 +1086,25 @@ impl SceneHandler {
             }
             step(&mut cx, &mut done, total)?;
         }
+        // Product shots first: they are free and need no key (#278).
+        let product = payload
+            .product
+            .as_deref()
+            .map(id::<ProductId>)
+            .transpose()?;
+        for &index in &payload.shots {
+            if cx.as_ref().is_some_and(|cx| cx.should_stop()) {
+                return Ok(());
+            }
+            if let Some(product) = product {
+                match self.compose_shot(project, plan_id, index, aspect, product) {
+                    Ok(()) => {}
+                    Err(failure) if failure.kind == JobFailureKind::Files => failed.push(failure),
+                    Err(failure) => return Err(failure),
+                }
+            }
+            step(&mut cx, &mut done, total)?;
+        }
         for (position, &index) in payload.scenes.iter().enumerate() {
             // A new plan replaced this one: its scenes are gone.
             let Some(plan) = self.saved_plan(project, plan_id)? else {
@@ -1022,6 +1114,12 @@ impl SceneHandler {
                 continue;
             };
             if state.drawn.contains(&index) {
+                continue;
+            }
+            // The scene became a composed one since the job was started:
+            // a drawing would be paid for and never shown.
+            if scene.is_composed() {
+                step(&mut cx, &mut done, total)?;
                 continue;
             }
             // Saved by a run cut before it noted so, or by a job from
@@ -1485,7 +1583,7 @@ impl Bardo {
             .cloned()
     }
 
-    fn scenes_idle(&self, project: VideoProjectId) -> Result<(), SceneError> {
+    pub(crate) fn scenes_idle(&self, project: VideoProjectId) -> Result<(), SceneError> {
         if self.scenes_busy(project) {
             return Err(SceneError::Busy);
         }
@@ -1583,15 +1681,22 @@ impl Bardo {
         let project = self.scenes_project(project)?;
         let narration = self.narrations.narration(project.id)?;
         let plan = self.scene_plans.scene_plan(project.id)?;
-        let template = self.current_template(TemplateKind::ImagePrompt)?;
-        let too_long = narration.as_ref().is_some_and(too_long_to_plan);
+        let template = self.scene_plan_template(&project)?;
+        let too_long = narration
+            .as_ref()
+            .is_some_and(|narration| too_long_to_plan(narration, project.is_ad()));
         let plan_estimate = match &narration {
             Some(narration) if !too_long => {
-                let rendered = self.render_plan(&project, narration, &template)?;
-                Some(self.estimate(&[plan_call(&rendered, narration)])?)
+                let (rendered, ad) = self.render_plan(&project, narration, &template)?;
+                Some(self.estimate(&[plan_call(&rendered, narration, ad.is_some())])?)
             }
             _ => None,
         };
+        let aspect = self.video_format(&project)?.aspect();
+        let missing_shots = plan
+            .as_ref()
+            .map_or_else(Vec::new, |plan| plan.missing_shots(aspect));
+        let kinds = self.scene_kinds(project.id)?;
         let style = self.video_style(&project)?;
         let missing = plan.as_ref().map_or(0, |plan| {
             let missing = plan.missing_images();
@@ -1659,17 +1764,33 @@ impl Bardo {
             restyle_estimate,
             old_portraits,
             old_portraits_estimate,
+            kinds,
+            missing_shots,
         })
     }
 
-    /// The image prompt template filled with the project's facts and its
-    /// narration's sentences.
+    /// The template a project's scenes are planned from: the ad scene
+    /// plan for an ad (#278), the storyboard plan for every other project.
+    fn scene_plan_template(&self, project: &VideoProject) -> Result<TemplateVersion, SceneError> {
+        Ok(self.current_template(if project.is_ad() {
+            TemplateKind::AdScenePlan
+        } else {
+            TemplateKind::ImagePrompt
+        })?)
+    }
+
+    /// The project's scene plan template filled with its facts and its
+    /// narration's sentences, as the request sends it, and for an ad what
+    /// the request tells of its product. An ad's request carries the
+    /// kinds its scenes may be, its product's images and the rules of
+    /// every ad whatever the template says; what the user typed or a page
+    /// said goes in as data.
     fn render_plan(
         &self,
         project: &VideoProject,
         narration: &Narration,
         template: &TemplateVersion,
-    ) -> Result<RenderedPrompt, SceneError> {
+    ) -> Result<(RenderedPrompt, Option<AdScenes>), SceneError> {
         let mut values = self.script_values(project).map_err(|error| match error {
             ScriptError::Repository(error) => SceneError::Repository(error),
             _ => SceneError::ProjectNotFound,
@@ -1678,9 +1799,35 @@ impl Bardo {
             TemplateVariable::NarrationSentences,
             sentence_lines(narration),
         );
-        template.body.render(&values).map_err(|missing| {
-            // Every image prompt variable has a value above.
+        let ad = match project.is_ad() {
+            true => self.ad_scenes(project)?,
+            false => None,
+        };
+        if project.is_ad() {
+            for typed in [
+                TemplateVariable::ChannelName,
+                TemplateVariable::ChannelNiche,
+                TemplateVariable::AestheticNotes,
+                TemplateVariable::ThemeTitle,
+                TemplateVariable::ThemeAngle,
+                TemplateVariable::NarrationSentences,
+            ] {
+                if let Some(value) = values.get_mut(&typed) {
+                    *value = crate::ads::as_data(value);
+                }
+            }
+            values.extend(match &ad {
+                Some(ad) => ad.values(),
+                None => crate::ad_scenes::unset_values(),
+            });
+        }
+        let rendered = template.body.render(&values).map_err(|missing| {
+            // Every variable of the template has a value above.
             SceneError::Repository(RepositoryError(Box::new(missing)))
+        })?;
+        Ok(match ad {
+            Some(ad) => (ad.request(&template.body, rendered), Some(ad)),
+            None => (rendered, None),
         })
     }
 
@@ -1711,7 +1858,7 @@ impl Bardo {
             .narrations
             .narration(project.id)?
             .ok_or(SceneError::NoNarration)?;
-        if too_long_to_plan(&narration) {
+        if too_long_to_plan(&narration, project.is_ad()) {
             return Err(SceneError::NarrationTooLong);
         }
         self.scenes_idle(project.id)?;
@@ -1730,9 +1877,17 @@ impl Bardo {
             return Err(SceneError::WouldDiscardImages(images));
         }
         self.require_key(Provider::Claude)?;
-        let template = self.current_template(TemplateKind::ImagePrompt)?;
-        let rendered = self.render_plan(&project, &narration, &template)?;
-        let call = plan_call(&rendered, &narration);
+        let template = self.scene_plan_template(&project)?;
+        let (rendered, ad) = self.render_plan(&project, &narration, &template)?;
+        let call = plan_call(&rendered, &narration, ad.is_some());
+        let ad = match ad {
+            Some(ad) => Some(AdPlan::of(
+                ad.product,
+                &ad.images,
+                self.video_format(&project)?.aspect(),
+            )),
+            None => None,
+        };
         let payload = to_json(&PlanPayload {
             project: project.id.to_string(),
             narration: narration.id.to_string(),
@@ -1740,6 +1895,7 @@ impl Bardo {
             template_number: template.number,
             instructions: rendered.instructions,
             prompt: rendered.prompt,
+            ad,
         });
         // The same plan was asked for and answered, and is not the
         // project's plan (its job was cancelled as the answer arrived, or
@@ -1884,9 +2040,9 @@ impl Bardo {
                         .is_some_and(|had| drawn_since(scene, job.id(), had))
                 };
                 !state.drawn.contains(&index)
-                    && plan
-                        .scene(index)
-                        .is_ok_and(|scene| !drawn_by(scene, job.id()) && !left(scene))
+                    && plan.scene(index).is_ok_and(|scene| {
+                        !scene.is_composed() && !drawn_by(scene, job.id()) && !left(scene)
+                    })
             })
             .map(|(_, &index)| index)
             .collect();
@@ -1921,20 +2077,60 @@ impl Bardo {
         })
     }
 
+    /// Starts a job that composes the pictures of the composed scenes
+    /// `shots` of an ad's plan (#278). Free: no key, no budget, and the
+    /// plan need not be on the narration.
+    pub(crate) fn compose_scenes(
+        &self,
+        plan: &ScenePlan,
+        project: &VideoProject,
+        shots: Vec<usize>,
+    ) -> Result<JobId, SceneError> {
+        self.scenes_idle(plan.project)?;
+        let payload = ImagesPayload {
+            project: plan.project.to_string(),
+            plan: plan.id.to_string(),
+            had: Some(Vec::new()),
+            scenes: Vec::new(),
+            aspect: self.video_format(project)?.aspect().code().to_owned(),
+            portraits: Vec::new(),
+            style: self.video_style(project)?.code().to_owned(),
+            shots,
+            product: project.product.map(|product| product.to_string()),
+        };
+        let job = Job::new(self.profile.id, JobKind::SceneImages, to_json(&payload));
+        Ok(self.jobs.enqueue(job)?)
+    }
+
+    /// Starts a job that draws `scenes` and `portraits` and composes
+    /// `shots`. A composed scene is never drawn: it is left out of
+    /// `scenes`. Only drawing needs the key, the budget and the plan on
+    /// its narration.
     fn draw_scenes(
         &self,
         plan: &ScenePlan,
         scenes: Vec<usize>,
         portraits: Vec<usize>,
+        shots: Vec<usize>,
         consent: BudgetConsent,
     ) -> Result<JobId, SceneError> {
-        self.scenes_idle(plan.project)?;
-        self.scenes_current(plan)?;
-        self.require_key(Provider::Gemini)?;
         let project = self
             .themes
             .project(plan.project)?
             .ok_or(SceneError::ProjectNotFound)?;
+        let scenes: Vec<usize> = scenes
+            .into_iter()
+            .filter(|&index| !plan.scene(index).is_ok_and(|scene| scene.is_composed()))
+            .collect();
+        if scenes.is_empty() && portraits.is_empty() {
+            if shots.is_empty() {
+                return Err(SceneError::NothingToGenerate);
+            }
+            return self.compose_scenes(plan, &project, shots);
+        }
+        self.scenes_idle(plan.project)?;
+        self.scenes_current(plan)?;
+        self.require_key(Provider::Gemini)?;
         let style = self.video_style(&project)?;
         let first = plan
             .missing_portraits(&scenes, style)
@@ -1967,13 +2163,19 @@ impl Bardo {
             aspect: self.video_format(&project)?.aspect().code().to_owned(),
             portraits,
             style: style.code().to_owned(),
+            product: project
+                .product
+                .filter(|_| !shots.is_empty())
+                .map(|product| product.to_string()),
+            shots,
         };
         let job = Job::new(self.profile.id, JobKind::SceneImages, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
     }
 
-    /// Starts a job that draws every scene without an image. Past
-    /// Gemini's budget it needs `consent`.
+    /// Starts a job that draws every scene without an image, and composes
+    /// the picture of every composed scene that waits for one. Past
+    /// Gemini's budget it needs `consent`; composing is free.
     pub fn generate_scene_images(
         &self,
         project: VideoProjectId,
@@ -1981,10 +2183,24 @@ impl Bardo {
     ) -> Result<JobId, SceneError> {
         let plan = self.own_plan(project)?;
         let missing = plan.missing_images();
-        if missing.is_empty() {
+        let aspect = self.video_format(&self.scenes_project(project)?)?.aspect();
+        let shots = plan.missing_shots(aspect);
+        if missing.is_empty() && shots.is_empty() {
             return Err(SceneError::NothingToGenerate);
         }
-        self.draw_scenes(&plan, missing, Vec::new(), consent)
+        self.draw_scenes(&plan, missing, Vec::new(), shots, consent)
+    }
+
+    /// Starts a job that composes every picture an ad's composed scenes
+    /// wait for (#278), and draws nothing: free, with no key asked.
+    pub fn compose_missing_shots(&self, project: VideoProjectId) -> Result<JobId, SceneError> {
+        let plan = self.own_plan(project)?;
+        let project = self.scenes_project(project)?;
+        let shots = plan.missing_shots(self.video_format(&project)?.aspect());
+        if shots.is_empty() {
+            return Err(SceneError::NothingToGenerate);
+        }
+        self.compose_scenes(&plan, &project, shots)
     }
 
     /// Starts a job that draws again every scene whose image was drawn in
@@ -2002,7 +2218,7 @@ impl Bardo {
         if restyled.is_empty() {
             return Err(SceneError::NothingToGenerate);
         }
-        self.draw_scenes(&plan, restyled, Vec::new(), consent)
+        self.draw_scenes(&plan, restyled, Vec::new(), Vec::new(), consent)
     }
 
     /// Starts a job that draws again every scene whose image shows a
@@ -2019,7 +2235,7 @@ impl Bardo {
         if old.is_empty() {
             return Err(SceneError::NothingToGenerate);
         }
-        self.draw_scenes(&plan, old, Vec::new(), consent)
+        self.draw_scenes(&plan, old, Vec::new(), Vec::new(), consent)
     }
 
     /// Starts a job that draws scene `index` again. Its current image stays
@@ -2031,8 +2247,11 @@ impl Bardo {
         consent: BudgetConsent,
     ) -> Result<JobId, SceneError> {
         let plan = self.own_plan(project)?;
-        plan.scene(index)?;
-        self.draw_scenes(&plan, vec![index], Vec::new(), consent)
+        // A composed scene's picture is made again by composing it, free.
+        if plan.scene(index)?.is_composed() {
+            return self.draw_scenes(&plan, Vec::new(), Vec::new(), vec![index], consent);
+        }
+        self.draw_scenes(&plan, vec![index], Vec::new(), Vec::new(), consent)
     }
 
     /// Starts a job that draws cast member `member`'s portrait again. It
@@ -2050,7 +2269,7 @@ impl Bardo {
         if plan.cast_member(member)?.is_described_only() {
             return Err(SceneError::NothingToGenerate);
         }
-        self.draw_scenes(&plan, Vec::new(), vec![member], consent)
+        self.draw_scenes(&plan, Vec::new(), vec![member], Vec::new(), consent)
     }
 
     /// Replaces cast member `member`'s description with the user's. Its
@@ -2164,6 +2383,17 @@ impl Bardo {
     /// Where a scene image is on disk, for the screen to show it.
     pub fn scene_image_path(&self, image: &SceneImage) -> PathBuf {
         self.files.path(image.generation.project, &image.file)
+    }
+
+    /// Where the picture `scene` of `project` shows is on disk: the one
+    /// Bardo composed for a composed scene (#278), else its drawn image.
+    /// `None` while it has none.
+    pub fn scene_picture_path(
+        &self,
+        project: VideoProjectId,
+        scene: &bardo_domain::Scene,
+    ) -> Option<PathBuf> {
+        scene.picture().map(|file| self.files.path(project, file))
     }
 }
 
@@ -2758,6 +2988,7 @@ pub(crate) mod tests {
             template_number: 1,
             instructions: "Plan the scenes.".into(),
             prompt: "Every sentence.".into(),
+            ad: None,
         };
         let job = Job::new(app.profile.id, JobKind::ScenePlan, to_json(&payload));
         let job = wait_done(&app, app.jobs.enqueue(job).unwrap());
@@ -2778,7 +3009,7 @@ pub(crate) mod tests {
         let project = h.narrated_project(&app);
         let template = app.current_template(TemplateKind::ImagePrompt).unwrap();
         let with_output = |narration: &Narration, tokens: u64| {
-            let rendered = app.render_plan(&project, narration, &template).unwrap();
+            let (rendered, _) = app.render_plan(&project, narration, &template).unwrap();
             let call = PlannedCall::new(Provider::Claude, CostPurpose::ScenePlan, 1)
                 .with_prompt(&rendered.instructions, &rendered.prompt)
                 .with_output_tokens(tokens);

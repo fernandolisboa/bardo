@@ -9,9 +9,10 @@
 //! video player until the editor has its own.
 
 use bardo_app::bardo_domain::{
-    AnimatedScenes, CastMember, ClipModel, ClipModelRef, Job, JobState, Scene, SceneClip,
-    SceneImage, TemplateKind, VideoProjectId,
+    AnimatedScenes, CastMember, ClipModel, ClipModelRef, Job, JobState, ProductImageId, Scene,
+    SceneClip, SceneImage, SceneKind, TemplateKind, VideoProjectId,
 };
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use bardo_app::{
@@ -25,8 +26,8 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex,
-    v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Selectable as _, Sizable as _,
+    StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, ObjectFit, SharedString, Window, div, img, px};
@@ -49,6 +50,8 @@ pub(super) enum SceneAction {
         discard_images: bool,
     },
     DrawMissing,
+    /// Compose the pictures an ad's composed scenes wait for (#278).
+    ComposeMissing,
     Redraw(usize),
     /// Draw a cast member's portrait again.
     RedrawPortrait(usize),
@@ -139,6 +142,7 @@ impl ProjectsScreen {
         let result = match action {
             SceneAction::Plan { discard_images } => bardo.plan_scenes(id, discard_images, consent),
             SceneAction::DrawMissing => bardo.generate_scene_images(id, consent),
+            SceneAction::ComposeMissing => bardo.compose_missing_shots(id),
             SceneAction::Redraw(index) => bardo.regenerate_scene_image(id, index, consent),
             SceneAction::RedrawPortrait(member) => bardo.redraw_cast_portrait(id, member, consent),
             SceneAction::RedrawRestyled => bardo.redraw_restyled_scenes(id, consent),
@@ -477,6 +481,22 @@ impl ProjectsScreen {
             }))
             .into_any_element()
         });
+        // Only composed pictures are missing: making them is free, so
+        // the button asks for no key and shows no cost.
+        let shots = view.missing_shots.len();
+        // Shown beside drawing too, so composing never waits on a key.
+        let compose_button = (shots > 0 && !busy).then(|| {
+            Button::new("compose-scene-shots")
+                .small()
+                .outline()
+                .label(SharedString::from(
+                    bardo.text_with(Text::ComposeScenes, &[("n", &shots.to_string())]),
+                ))
+                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.run_scene(SceneAction::ComposeMissing, BudgetConsent::Ask, window, cx);
+                }))
+                .into_any_element()
+        });
         let draw_button = (missing > 0 && !busy).then(|| {
             let button = self.paid(Button::new("generate-scene-images").small(), cx);
             if plans_first || stale {
@@ -518,6 +538,7 @@ impl ProjectsScreen {
         let actions = plan_button
             .into_iter()
             .chain(draw_button)
+            .chain(compose_button)
             .chain(Some(
                 guide::info(bardo, "scenes-info", hint, guide::refs::SCENES_PLAN)
                     .into_any_element(),
@@ -1083,12 +1104,16 @@ impl ProjectsScreen {
                     })),
                 );
                 tile.selected = selected == Some(index);
-                tile.picture = scene.image().map(|image| {
-                    img(bardo.scene_image_path(image))
-                        .size_full()
-                        .object_fit(ObjectFit::Cover)
-                        .into_any_element()
-                });
+                // A composed picture is shown whole: its product is the
+                // point of it.
+                let fit = if scene.is_composed() {
+                    ObjectFit::Contain
+                } else {
+                    ObjectFit::Cover
+                };
+                tile.picture = bardo
+                    .scene_picture_path(view.project.id, scene)
+                    .map(|path| framed(path, fit).into_any_element());
                 tile.number = Some(SharedString::from((index + 1).to_string()));
                 tile.time = Some(SharedString::from(format!(
                     "{}–{}",
@@ -1098,19 +1123,25 @@ impl ProjectsScreen {
                 tile.text = Some(SharedString::from(scene.text.clone()));
                 // A scene with nothing left to do may still show an older
                 // face: said on its card.
-                tile.status = scene_chip(bardo, state, cx).or_else(|| {
+                tile.status = scene_chip(bardo, state, scene.is_composed(), cx).or_else(|| {
                     view.old_portraits.contains(&index).then(|| {
                         kit::status(Tone::Warning, tr(bardo, Text::SceneCardOldPortrait), cx)
                             .into_any_element()
                     })
                 });
-                tile.marks = mark(Lucide::Image, scene.image().is_some())
+                tile.marks = mark(Lucide::Image, scene.picture().is_some())
                     .into_iter()
-                    .chain(mark(Lucide::Film, scene.clip().is_some()))
+                    .chain(mark(
+                        Lucide::Film,
+                        scene.clip().is_some() && !scene.is_composed(),
+                    ))
                     .collect();
                 tile.attention = state == SceneState::Review;
                 tile.failed = state == SceneState::Failed;
-                tile.detail = Some(SharedString::from(scene.prompt().as_str().to_owned()));
+                // A composed scene draws nothing: the prompt it kept from
+                // before is not what it shows.
+                tile.detail = (!scene.is_composed())
+                    .then(|| SharedString::from(scene.prompt().as_str().to_owned()));
                 tile.facts = vec![
                     Fact {
                         label: tr(bardo, Text::SceneColumnImage),
@@ -1122,22 +1153,25 @@ impl ProjectsScreen {
                                 cx,
                             )
                             .into_any_element(),
-                            image_state => state_chip(bardo, image_state, cx),
+                            image_state => state_chip(bardo, image_state, scene.is_composed(), cx),
                         },
                         numeric: false,
                     },
                     Fact {
                         label: tr(bardo, Text::SceneColumnClip),
                         value: match clip_states[index] {
+                            // A composed picture is never animated.
+                            _ if scene.is_composed() => dash(),
                             // Nothing to animate yet: the image column says why.
                             SceneState::ToDraw => dash(),
-                            clip_state => state_chip(bardo, clip_state, cx),
+                            clip_state => state_chip(bardo, clip_state, false, cx),
                         },
                         numeric: false,
                     },
                     Fact {
                         label: tr(bardo, Text::SceneColumnModel),
                         value: clip
+                            .filter(|_| !scene.is_composed())
                             .and_then(|clip| clip.model.as_ref())
                             .map_or_else(dash, |model| {
                                 plain(SharedString::from(model.name.clone()))
@@ -1146,9 +1180,12 @@ impl ProjectsScreen {
                     },
                     Fact {
                         label: tr(bardo, Text::SceneColumnCost),
-                        value: clip.and_then(|clip| clip.price).map_or_else(dash, |price| {
-                            plain(SharedString::from(bardo.money(price)))
-                        }),
+                        value: clip
+                            .filter(|_| !scene.is_composed())
+                            .and_then(|clip| clip.price)
+                            .map_or_else(dash, |price| {
+                                plain(SharedString::from(bardo.money(price)))
+                            }),
                         numeric: true,
                     },
                 ];
@@ -1218,9 +1255,16 @@ impl ProjectsScreen {
                 .filter(|_| scene.can_animate())
                 .map(|clip| self.render_scene_clip(index, scene, clip, open, cx));
             let bardo = self.bardo.read(cx);
+            // A composed picture is never animated: said instead of
+            // asking for an image it does not wait for.
+            let no_clip = if scene.is_composed() {
+                Text::SceneClipComposed
+            } else {
+                Text::SceneNoImage
+            };
             (
-                std::iter::once(scene_picture(bardo, scene.image(), cx))
-                    .chain(clip.or_else(|| Some(muted(cx, tr(bardo, Text::SceneNoImage)))))
+                std::iter::once(shown_picture(bardo, view.project.id, scene, cx))
+                    .chain(clip.or_else(|| Some(muted(cx, tr(bardo, no_clip)))))
                     .collect(),
                 0,
             )
@@ -1261,10 +1305,12 @@ impl ProjectsScreen {
             )
             .into_any_element();
 
-        // Provenance: the image and the clip.
+        // Provenance: the image and the clip. A composed picture came from
+        // no model, whatever drawing or clip the scene kept from before.
         let models = &view.clips.models;
         let lines: Vec<SharedString> = scene
             .image()
+            .filter(|_| !scene.is_composed())
             .map(|image| {
                 let generation = &image.generation;
                 let usage = generation.usage;
@@ -1281,7 +1327,12 @@ impl ProjectsScreen {
                 ))
             })
             .into_iter()
-            .chain(scene.clip().map(|clip| clip_record(bardo, models, clip)))
+            .chain(
+                scene
+                    .clip()
+                    .filter(|_| !scene.is_composed())
+                    .map(|clip| clip_record(bardo, models, clip)),
+            )
             .collect();
         let footer = (!lines.is_empty()).then(|| {
             kit::details(
@@ -1312,6 +1363,10 @@ impl ProjectsScreen {
         busy: bool,
         cx: &mut Context<Self>,
     ) -> (Vec<AnyElement>, usize) {
+        let kind = self.render_scene_kind(index, scene, busy, cx);
+        if scene.is_composed() {
+            return self.composed_scene_body(index, scene, kind, busy, cx);
+        }
         let editor = (open == Some(ScenePromptField::Image))
             .then(|| self.render_prompt_editor(index, None, cx));
         let bardo = self.bardo.read(cx);
@@ -1490,6 +1545,7 @@ impl ProjectsScreen {
         let body = failure
             .into_iter()
             .chain(Some(picture))
+            .chain(kind)
             .chain(Some(
                 v_flex()
                     .gap_1()
@@ -1501,6 +1557,170 @@ impl ProjectsScreen {
             .chain(redraw)
             .chain(place)
             .chain(cast)
+            .collect();
+        (body, media)
+    }
+
+    /// What a scene of an ad is (#278): the kinds its product's images
+    /// allow, and for a composed scene which of the product's images it
+    /// shows, with a warning when that one is small for the frame. `None`
+    /// for a project that is no ad: its scenes have no kind.
+    fn render_scene_kind(
+        &self,
+        index: usize,
+        scene: &Scene,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let view = self.scenes.as_ref()?;
+        let kinds = &view.kinds;
+        if kinds.allowed.is_empty() {
+            return None;
+        }
+        let bardo = self.bardo.read(cx);
+        let scenes = view.plan.as_ref().map_or(0, |plan| plan.scenes().len());
+        // A clip job saving a scene meanwhile would be written over.
+        let locked = busy || view.is_animating();
+        let current = scene.kind();
+        let set = move |kind: SceneKind, image: Option<ProductImageId>| {
+            move |this: &mut Self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>| {
+                this.scene_action(window, cx, |bardo, id| {
+                    bardo.set_scene_kind(id, index, kind, image)
+                });
+            }
+        };
+        let choices = h_flex().flex_wrap().gap_1().children(
+            SceneKind::ALL
+                .into_iter()
+                .filter(|kind| kinds.offers(*kind, index, scenes) || *kind == current)
+                .map(|kind| {
+                    Button::new(("scene-kind", index * 10 + kind as usize))
+                        .xsmall()
+                        .outline()
+                        .label(tr(bardo, Text::SceneKindName(kind)))
+                        .selected(kind == current)
+                        .disabled(locked && kind != current)
+                        .on_click(cx.listener(set(kind, None)))
+                }),
+        );
+        let label = h_flex()
+            .gap_1()
+            .items_center()
+            .child(field_label(tr(bardo, Text::SceneKindLabel)))
+            .child(guide::info(
+                bardo,
+                ("scene-kind-info", index),
+                tr(bardo, Text::SceneKindHint),
+                guide::refs::SCENES_AD,
+            ));
+        // Which of the product's images a composed scene shows.
+        let shown = scene.product_image().filter(|_| scene.is_composed());
+        let images =
+            shown.map(|shown| {
+                v_flex()
+                    .gap_1()
+                    .child(field_label(tr(bardo, Text::SceneProductImage)))
+                    .child(h_flex().flex_wrap().gap_1().children(
+                        kinds.images.iter().enumerate().map(|(n, image)| {
+                            let name = format!(
+                                "{} · {}",
+                                n + 1,
+                                bardo.text(Text::ProductImageKindName(image.kind))
+                            );
+                            Button::new(("scene-product-image", index * 10 + n))
+                                .xsmall()
+                                .outline()
+                                .label(SharedString::from(name))
+                                .selected(image.id == shown)
+                                .disabled(locked && image.id != shown)
+                                .on_click(cx.listener(set(current, Some(image.id))))
+                        }),
+                    ))
+            });
+        let too_small = shown
+            .filter(|shown| kinds.too_small(*shown))
+            .map(|_| kit::notice(Tone::Warning, tr(bardo, Text::SceneImageTooSmall), cx).text_xs());
+        let removed = shown
+            .filter(|shown| !kinds.images.iter().any(|image| image.id == *shown))
+            .map(|_| kit::notice(Tone::Warning, tr(bardo, Text::SceneImageRemoved), cx).text_xs());
+        Some(
+            v_flex()
+                .gap_1()
+                .child(label)
+                .child(choices)
+                .children(images)
+                .children(too_small)
+                .children(removed)
+                .into_any_element(),
+        )
+    }
+
+    /// The Scenes stage of the inspector for a scene Bardo composes from
+    /// a product image (#278): the picture, its kind and image, and what
+    /// composing is. It has no prompt to edit, no place and no people:
+    /// nothing of it is drawn.
+    fn composed_scene_body(
+        &self,
+        index: usize,
+        scene: &Scene,
+        kind: Option<AnyElement>,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> (Vec<AnyElement>, usize) {
+        let bardo = self.bardo.read(cx);
+        let failure = scene.failure().map(|kind| {
+            kit::notice(
+                Tone::Danger,
+                format!(
+                    "{} {}",
+                    bardo.text(Text::SceneFailed),
+                    bardo.text(Text::JobFailureKindName(kind))
+                ),
+                cx,
+            )
+            .text_xs()
+            .into_any_element()
+        });
+        let project = self.scenes.as_ref().map(|view| view.project.id);
+        let waits = self
+            .scenes
+            .as_ref()
+            .is_some_and(|view| view.missing_shots.contains(&index));
+        let picture = match project {
+            Some(project) => shown_picture(bardo, project, scene, cx),
+            None => picture_frame(bardo, None, ObjectFit::Contain, cx),
+        };
+        // Its picture waits to be composed (the video changed shape, or
+        // composing failed): made here, for free.
+        let compose = (waits && !busy).then(|| {
+            v_flex()
+                .gap_1()
+                .items_start()
+                .child(
+                    Button::new(("compose-scene", index))
+                        .outline()
+                        .small()
+                        .label(tr(bardo, Text::ComposeScene))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.run_scene(
+                                SceneAction::Redraw(index),
+                                BudgetConsent::Ask,
+                                window,
+                                cx,
+                            );
+                        })),
+                )
+                .child(muted(cx, tr(bardo, Text::SceneNotComposed)))
+                .into_any_element()
+        });
+        let note = muted(cx, tr(bardo, Text::SceneComposed));
+        let media = usize::from(failure.is_some());
+        let body = failure
+            .into_iter()
+            .chain(Some(picture))
+            .chain(compose)
+            .chain(kind)
+            .chain(Some(note))
             .collect();
         (body, media)
     }
@@ -2338,6 +2558,42 @@ impl ProjectsScreen {
 
 /// A scene's image filling a 16:9 box, or the box saying there is none.
 fn scene_picture(bardo: &Bardo, image: Option<&SceneImage>, cx: &App) -> AnyElement {
+    picture_frame(
+        bardo,
+        image.map(|image| bardo.scene_image_path(image)),
+        ObjectFit::Cover,
+        cx,
+    )
+}
+
+/// The picture a scene shows: the one Bardo composed, whole, for a
+/// composed scene (#278), else its drawn image.
+fn shown_picture(bardo: &Bardo, project: VideoProjectId, scene: &Scene, cx: &App) -> AnyElement {
+    let fit = if scene.is_composed() {
+        ObjectFit::Contain
+    } else {
+        ObjectFit::Cover
+    };
+    picture_frame(bardo, bardo.scene_picture_path(project, scene), fit, cx)
+}
+
+/// The picture at `path` in a 16:9 frame. Shown whole (`Contain`), it
+/// takes the frame's shape itself: an image element otherwise takes its
+/// picture's own shape, and a tall picture would grow past the frame and
+/// be cut instead of fitted.
+fn framed(path: PathBuf, fit: ObjectFit) -> gpui_kit::Img {
+    let whole = matches!(fit, ObjectFit::Contain);
+    let picture = img(path).size_full().object_fit(fit);
+    if whole {
+        picture.aspect_ratio(16. / 9.)
+    } else {
+        picture
+    }
+}
+
+/// A picture of a scene in the inspector's frame, or the frame saying
+/// there is none yet.
+fn picture_frame(bardo: &Bardo, path: Option<PathBuf>, fit: ObjectFit, cx: &App) -> AnyElement {
     let t = look(cx).tokens;
     // Never shrunk: in an inspector taller than its panel, the picture
     // would give all its height to the text under it.
@@ -2348,14 +2604,8 @@ fn scene_picture(bardo: &Bardo, image: Option<&SceneImage>, cx: &App) -> AnyElem
         .rounded(t.radius)
         .overflow_hidden()
         .bg(t.sunken);
-    match image {
-        Some(image) => frame
-            .child(
-                img(bardo.scene_image_path(image))
-                    .size_full()
-                    .object_fit(ObjectFit::Cover),
-            )
-            .into_any_element(),
+    match path {
+        Some(path) => frame.child(framed(path, fit)).into_any_element(),
         None => frame
             .flex()
             .items_center()
@@ -2368,17 +2618,23 @@ fn scene_picture(bardo: &Bardo, image: Option<&SceneImage>, cx: &App) -> AnyElem
     }
 }
 
-/// A scene card's state chip; a scene with nothing left shows none.
 /// A scene's state at a stage as a chip, "Ready" when nothing is left.
-fn state_chip(bardo: &Bardo, state: SceneState, cx: &App) -> AnyElement {
-    scene_chip(bardo, state, cx).unwrap_or_else(|| {
+fn state_chip(bardo: &Bardo, state: SceneState, composed: bool, cx: &App) -> AnyElement {
+    scene_chip(bardo, state, composed, cx).unwrap_or_else(|| {
         kit::status(Tone::Success, tr(bardo, Text::SceneStateDone), cx).into_any_element()
     })
 }
 
-fn scene_chip(bardo: &Bardo, state: SceneState, cx: &App) -> Option<AnyElement> {
+/// A scene's state as a chip, `None` when nothing is left. The picture
+/// of a `composed` scene is composed, not drawn (#278).
+fn scene_chip(bardo: &Bardo, state: SceneState, composed: bool, cx: &App) -> Option<AnyElement> {
     let (tone, icon, text): (Tone, Icon, Text) = match state {
         SceneState::Done => return None,
+        SceneState::ToDraw if composed => (
+            Tone::Neutral,
+            Icon::new(Lucide::Image),
+            Text::SceneCardToCompose,
+        ),
         SceneState::ToDraw => (
             Tone::Neutral,
             Icon::new(Lucide::Image),

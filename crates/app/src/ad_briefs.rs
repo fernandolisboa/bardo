@@ -131,9 +131,9 @@ fn one_line(text: &str) -> String {
 }
 
 /// What a template says of a product that is a concept.
-const IS_CONCEPT: &str = "This product is a concept: an idea that does not exist yet.";
+pub(crate) const IS_CONCEPT: &str = "This product is a concept: an idea that does not exist yet.";
 /// What a template says of any other product.
-const NO_CONCEPT: &str = "This product exists: it is not a concept.";
+pub(crate) const NO_CONCEPT: &str = "This product exists: it is not a concept.";
 /// What the claims variable says when the video uses none.
 const NO_CLAIMS: &str = "none";
 

@@ -1129,6 +1129,7 @@ missing_kling_key = "Save a Kling key under Settings to animate scenes with Klin
 no_image_to_animate = "Generate this scene's image first; the clip animates it."
 nothing_to_animate = "Every scene with an image already has a clip or one on the way."
 clip_model_not_offered = "That video model is no longer offered. Pick another one."
+kind_not_allowed = "This scene cannot be of that kind: the product's images do not allow it, or it is not the last scene."
 
 [provenance]
 provider = "Provider"
@@ -1174,6 +1175,7 @@ look_prompt = "Look prompt"
 take_prompt = "Take prompt"
 ad_angles = "Ad angles"
 ad_script = "Ad script"
+ad_scene_plan = "Ad scene plan"
 
 [templates.variable]
 channel_name = "The channel's name."
@@ -1217,6 +1219,8 @@ offer = "What the viewer gets, as the Brief stage has it (\"not set\" when empty
 call_to_action = "What the viewer is asked to do, in your words, from the Brief stage."
 must_say = "What every ad for the product must say, from the product's brief."
 never_say = "What no ad for the product may say, from the product's brief."
+product_images = "The product's images, numbered from 0, one per line: whether each is a photo or a screen, and its size (\"none\" when the product has no image)."
+scene_kinds = "The kinds a scene of this ad may be, one per line, by what the product's images allow: a product shot needs an image, the product in use a photo."
 
 [templates.error]
 not_saved = "Could not save the template. Try again."
@@ -1632,6 +1636,7 @@ audio = "Audio"
 source_in = "Source in"
 remove = "Remove from the cut"
 shortcuts = "S split · T transition · [ and ] trim to the playhead · Alt+← and Alt+→ move · Delete remove"
+source_composed = "Composed from the product's own image"
 
 [editor.captions]
 text = "Text"
@@ -1685,6 +1690,7 @@ everywhere = "Use on every still"
 vary = "Vary every still"
 hint = "A slow zoom or pan over the picture as framed, for as long as the clip shows."
 clip = "This clip has motion of its own. Motion plays on stills."
+composed = "A picture composed from a product image only zooms, so the product stays whole in the frame and clear of the captions."
 
 [editor.tool]
 select = "Select (V)"
@@ -1949,6 +1955,7 @@ failed = "Failed"
 to_draw = "To draw"
 to_animate = "To animate"
 animating = "Animating"
+to_compose = "To compose"
 
 [scenes.inspector]
 image_prompt = "Image prompt"
@@ -3100,7 +3107,7 @@ body = "Each scene in order, with its time, its image and where it stands: to dr
 
 [tour.scenes.scene]
 title = "A scene"
-body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows."
+body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images."
 
 [tour.scenes.redraw]
 title = "Draw again"
@@ -4603,3 +4610,21 @@ not_checked = "The script was not checked against the brief's claims as it reads
 [tour.script.claims]
 title = "The claims check"
 body = "For an ad, Claude lists what the script states about the product. A statement that no claim of the brief backs is marked here, and you decide what to do with the sentence. After an edit, save it and check again."
+
+[scenes.kind]
+label = "Scene kind"
+hint = "What this scene of the ad shows. A drawn scene and the product in use are drawn by the image model. A product shot shows one of the product's own images as it is: Bardo composes it for free and it never goes to a model. So does the end card when the product has an image; when it has none, the end card is drawn. Only the kinds the product's images allow are offered."
+image = "Product image"
+composed = "Composed by Bardo from the product's own image. Free, and it never goes to a model."
+too_small = "This image is small for the frame: enlarged, it may look soft. A larger image of the product keeps it sharp."
+compose = "Compose picture"
+compose_missing = "Compose product shots ({n})"
+not_composed = "Not composed yet. Composing is free."
+no_clip = "A picture composed from the product's image is not animated: the cut shows it whole, still or with a slow zoom."
+image_removed = "The image this scene shows was removed from the product. Its picture stays until it has to be made again: pick another image or kind for it."
+
+[scenes.kind.name]
+drawn = "Drawn"
+product_in_use = "Product in use"
+product_shot = "Product shot"
+end_card = "End card"

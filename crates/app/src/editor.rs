@@ -52,7 +52,7 @@ use std::time::{Duration, Instant, SystemTime};
 use bardo_domain::{
     AspectRatio, AudioLane, CaptionHighlight, CaptionSpan, CaptionStyle, DuckEnvelope, Ducking,
     Edge, Edit, EditError, FPS, Framing, Generation, History, ItemRef, Job, JobKind, JobState,
-    LaneMix, MediaAsset, MediaAssetId, MediaKind, Motion, MotionDefault, MotionPattern,
+    LaneMix, MediaAsset, MediaAssetId, MediaKind, Motion, MotionDefault, MotionKind, MotionPattern,
     MotionStrength, MotionView, Narration, NarrationId, NarrationRepository, PerformedClip,
     PerformedPlace, PerformedSync, Picture, PlayedTransition, ProjectFiles, RepositoryError, Scene,
     ScenePlanId, ScenePlanRepository, Shift, ThemeRepository, Timeline, TimelineRepository, Track,
@@ -188,6 +188,9 @@ pub struct ClipView {
     /// one: provider and model for the inspector.
     pub image: Option<Generation>,
     pub clip: Option<Generation>,
+    /// Whether it shows a picture Bardo composed from a product image
+    /// (#278): it only zooms, so a pan asked for plays as a zoom in.
+    pub composed: bool,
     /// Set when it is a clip the cut plays slower than it was made, to
     /// last as long as its scene (#260).
     pub slowed: Option<SlowedClip>,
@@ -829,6 +832,9 @@ impl Editor {
             }
             EditAction::SetAspect(aspect) => (Edit::SetAspect(aspect), None),
             EditAction::SetFraming { index, framing } => {
+                // A composed picture is always shown whole (#278).
+                let composed = self.view.clips.get(index).is_some_and(|clip| clip.composed);
+                let framing = if composed { Framing::Fit } else { framing };
                 (Edit::SetFraming { index, framing }, None)
             }
             EditAction::Place { asset, track } => {
@@ -875,7 +881,20 @@ impl Editor {
                 }
                 (timeline.transition_everywhere(transition), None)
             }
-            EditAction::SetMotion { index, motion } => (Edit::SetMotion { index, motion }, None),
+            EditAction::SetMotion { index, motion } => {
+                // A composed picture only zooms (#278): a pan asked for
+                // it is the zoom in it would play as.
+                let composed = self.view.clips.get(index).is_some_and(|clip| clip.composed);
+                let motion = motion.map(|motion| {
+                    let pans = !matches!(motion.kind, MotionKind::ZoomIn | MotionKind::ZoomOut);
+                    if composed && pans {
+                        motion.with_kind(MotionKind::ZoomIn)
+                    } else {
+                        motion
+                    }
+                });
+                (Edit::SetMotion { index, motion }, None)
+            }
             EditAction::MotionEverywhere(motion) => (timeline.motion_everywhere(motion), None),
             EditAction::VaryMotion(strength) => (
                 timeline.motion_pattern(MotionDefault::new(MotionPattern::Varied, strength)),
@@ -1511,7 +1530,11 @@ pub(crate) fn project_cut(
             }
         }
     };
-    (timeline, found)
+    // A scene Bardo composed from a product image is shown whole and only
+    // zooms (#278), whatever the channel's pattern or a saved cut says: a
+    // pan would carry the product out of the frame or under the captions,
+    // and a window of another shape would cut it.
+    (timeline.with_composed_whole(plan), found)
 }
 
 /// What a cut knows of a project's performed clips (#193).
@@ -1630,8 +1653,8 @@ impl Bardo {
         let has = |name: &str| self.files.exists(project.id, name);
         let thumbnail = |scene: &Scene| {
             scene
-                .image()
-                .map(|image| self.files.path(project.id, &image.file))
+                .picture()
+                .map(|file| self.files.path(project.id, file))
         };
 
         // A generated track waiting for review is not in the media bin yet;
@@ -1712,8 +1735,11 @@ impl Bardo {
                         .source
                         .file()
                         .map(|file| self.files.path(project.id, file)),
+                    // A composed picture came from no model.
                     image: scene
+                        .filter(|scene| !scene.is_composed())
                         .and_then(|scene| scene.image().map(|image| image.generation.clone())),
+                    composed: scene.is_some_and(Scene::is_composed),
                     clip: scene
                         .filter(|_| is_clip)
                         .and_then(|scene| scene.clip().map(|clip| clip.generation.clone())),

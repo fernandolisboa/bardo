@@ -18,8 +18,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    ClipModelRef, Generation, GenerationId, JobFailureKind, Narration, NarrationId, ProfileId,
-    RepositoryError, StretchLimit, StyleChoice, VideoProjectId, spoken_words,
+    AspectRatio, ClipModelRef, ComposedShot, Generation, GenerationId, JobFailureKind, KindChange,
+    Narration, NarrationId, ProductImageId, ProductPictures, ProfileId, RepositoryError, SceneKind,
+    SceneKindError, StretchLimit, StyleChoice, VideoProjectId, spoken_words,
 };
 
 uuid_id!(
@@ -686,6 +687,13 @@ pub struct Scene {
     image_portraits: Option<PortraitsUsed>,
     /// The portraits `pending` was drawn with.
     pending_portraits: Option<PortraitsUsed>,
+    /// What the scene is, in an ad's plan (#278); a drawn scene in every
+    /// other.
+    kind: SceneKind,
+    /// The product image a composed scene shows.
+    product_image: Option<ProductImageId>,
+    /// The picture Bardo composed for it, while it is a composed scene.
+    shot: Option<ComposedShot>,
 }
 
 /// Every stored field of a scene, for adapters that rebuild one.
@@ -727,6 +735,9 @@ impl Scene {
             place: None,
             image_portraits: None,
             pending_portraits: None,
+            kind: SceneKind::Drawn,
+            product_image: None,
+            shot: None,
         }
     }
 
@@ -784,6 +795,89 @@ impl Scene {
             place: None,
             image_portraits: None,
             pending_portraits: None,
+            kind: SceneKind::Drawn,
+            product_image: None,
+            shot: None,
+        }
+    }
+
+    /// The scene of an ad's plan with its kind, the product image it
+    /// shows and the picture composed for it, as an adapter rebuilds it.
+    /// A composed picture is kept only while the scene is composed.
+    pub fn with_kind(
+        mut self,
+        kind: SceneKind,
+        product_image: Option<ProductImageId>,
+        shot: Option<ComposedShot>,
+    ) -> Self {
+        self.kind = kind;
+        self.product_image = product_image;
+        self.shot = shot.filter(|_| self.is_composed());
+        self
+    }
+
+    /// What the scene is: a drawn scene, unless an ad's plan says
+    /// otherwise.
+    pub fn kind(&self) -> SceneKind {
+        self.kind
+    }
+
+    /// The product image a composed scene shows.
+    pub fn product_image(&self) -> Option<ProductImageId> {
+        self.product_image
+    }
+
+    /// Whether Bardo composes the scene's picture from a product image
+    /// instead of having it drawn: a product shot, and an end card of a
+    /// product that has an image. Such a picture is free, is never
+    /// animated and is never a reference for another scene.
+    pub fn is_composed(&self) -> bool {
+        matches!(self.kind, SceneKind::ProductShot | SceneKind::EndCard)
+            && self.product_image.is_some()
+    }
+
+    /// The picture composed for it.
+    pub fn shot(&self) -> Option<&ComposedShot> {
+        self.shot.as_ref()
+    }
+
+    /// Whether a composed scene still waits for its picture in `aspect`:
+    /// it has none, or the one it has shows another image or was made
+    /// for another shape.
+    pub fn needs_shot(&self, aspect: AspectRatio) -> bool {
+        self.is_composed()
+            && !self
+                .shot
+                .as_ref()
+                .is_some_and(|shot| Some(shot.image) == self.product_image && shot.aspect == aspect)
+    }
+
+    /// Makes `shot` the scene's composed picture. Returns the picture
+    /// that is no longer used, whose file can go: the one replaced (unless
+    /// it is the same file), or `shot` itself when the scene is no longer
+    /// composed and takes none.
+    pub fn add_shot(&mut self, shot: ComposedShot) -> Option<ComposedShot> {
+        if !self.is_composed() {
+            return Some(shot);
+        }
+        self.failure = None;
+        self.shot
+            .replace(shot)
+            .filter(|old| self.shot.as_ref().is_some_and(|new| new.file != old.file))
+    }
+
+    /// The still picture the scene shows, by its file in the project
+    /// folder: for a composed scene the picture composed from the image
+    /// it shows (none while another image's picture waits to be
+    /// replaced), the drawn image for every other.
+    pub fn picture(&self) -> Option<&str> {
+        match self.is_composed() {
+            true => self
+                .shot
+                .as_ref()
+                .filter(|shot| Some(shot.image) == self.product_image)
+                .map(|shot| shot.file.as_str()),
+            false => self.image.as_ref().map(|image| image.file.as_str()),
         }
     }
 
@@ -995,9 +1089,10 @@ impl Scene {
         self.clip.take()
     }
 
-    /// Whether a clip can be made: it needs the image to start from.
+    /// Whether a clip can be made: it needs the image to start from, and
+    /// a picture Bardo composed is never animated.
     pub fn can_animate(&self) -> bool {
-        self.image.is_some()
+        self.image.is_some() && !self.is_composed()
     }
 
     /// Every image and clip file the scene holds.
@@ -1012,6 +1107,7 @@ impl Scene {
                     .chain(&self.pending_clip)
                     .map(|clip| clip.file.as_str()),
             )
+            .chain(self.shot.iter().map(|shot| shot.file.as_str()))
     }
 }
 
@@ -1026,6 +1122,12 @@ pub struct SceneDraft {
     pub cast: Vec<usize>,
     pub motion: String,
     pub place: Option<usize>,
+    /// What the scene is, by a [`SceneKind`]'s code; only an ad's plan
+    /// reads it.
+    pub kind: String,
+    /// For a product shot or an end card: which of the product's images
+    /// it shows, by its position from 0.
+    pub product_image: Option<usize>,
 }
 
 /// A whole plan as the planner proposed it.
@@ -1034,6 +1136,10 @@ pub struct PlanDraft {
     pub cast: Vec<CastDraft>,
     pub places: Vec<PlaceDraft>,
     pub scenes: Vec<SceneDraft>,
+    /// For an ad's plan: its product's images, which decide the kinds
+    /// its scenes may be. `None` for every other plan, whose scenes are
+    /// all drawn whatever the answer says.
+    pub product: Option<ProductPictures>,
 }
 
 /// The planner's answer has no usable scene.
@@ -1106,6 +1212,37 @@ struct PlannedStart {
     cast: Vec<usize>,
     motion: Option<ScenePrompt>,
     place: Option<usize>,
+    kind: String,
+    product_image: Option<usize>,
+}
+
+/// What a scene of an ad's plan is, from what the planner asked for: a
+/// kind Bardo does not know, or one the product's images do not allow, is
+/// a drawn scene; only the `last` scene is the end card; and a composed
+/// scene naming an image the product does not have shows its first.
+fn planned_kind(
+    kind: &str,
+    image: Option<usize>,
+    last: bool,
+    pictures: &ProductPictures,
+) -> (SceneKind, Option<ProductImageId>) {
+    let kind = SceneKind::from_code(kind)
+        .filter(|kind| pictures.allows(*kind))
+        .unwrap_or_default();
+    let kind = match kind {
+        SceneKind::EndCard if !last && pictures.allows(SceneKind::ProductShot) => {
+            SceneKind::ProductShot
+        }
+        SceneKind::EndCard if !last => SceneKind::Drawn,
+        kind => kind,
+    };
+    let image = match kind {
+        SceneKind::ProductShot | SceneKind::EndCard => image
+            .and_then(|position| pictures.at(position))
+            .or_else(|| pictures.first()),
+        SceneKind::Drawn | SceneKind::ProductInUse => None,
+    };
+    (kind, image)
 }
 
 impl ScenePlan {
@@ -1128,6 +1265,7 @@ impl ScenePlan {
             cast,
             places,
             scenes: mut drafts,
+            product,
         } = draft;
         let sentences = sentences(narration);
         drafts.sort_by_key(|draft| draft.first_sentence);
@@ -1146,6 +1284,8 @@ impl ScenePlan {
                     cast: draft.cast,
                     motion: ScenePrompt::new(&draft.motion).ok(),
                     place: draft.place,
+                    kind: draft.kind,
+                    product_image: draft.product_image,
                 });
             }
         }
@@ -1219,6 +1359,15 @@ impl ScenePlan {
             .map(|(index, start)| {
                 let next = starts.get(index + 1).map(|next| next.first);
                 let last = &sentences[next.unwrap_or(sentences.len()) - 1];
+                let (kind, product_image) = match &product {
+                    Some(pictures) => planned_kind(
+                        &start.kind,
+                        start.product_image,
+                        index + 1 == starts.len(),
+                        pictures,
+                    ),
+                    None => (SceneKind::Drawn, None),
+                };
                 Scene::planned(
                     if index == 0 {
                         Duration::ZERO
@@ -1232,6 +1381,7 @@ impl ScenePlan {
                 .with_cast(start.cast.clone())
                 .with_planned_motion(start.motion.clone())
                 .with_place(start.place)
+                .with_kind(kind, product_image, None)
             })
             .collect();
         Ok(Self {
@@ -1262,6 +1412,7 @@ impl ScenePlan {
                 cast,
                 places: Vec::new(),
                 scenes: drafts,
+                product: None,
             },
             now,
         )
@@ -1315,6 +1466,10 @@ impl ScenePlan {
     /// else takes the place out of its image.
     pub fn scene_place(&self, index: usize) -> Option<usize> {
         let scene = self.scenes.get(index)?;
+        // A picture composed from a product image happens nowhere.
+        if scene.is_composed() {
+            return None;
+        }
         let place = self.places.get(scene.place?)?;
         let named = || names(scene.prompt.as_str(), place.called());
         (!scene.is_edited() || named()).then_some(scene.place?)
@@ -1356,8 +1511,11 @@ impl ScenePlan {
                         .is_some_and(|setting| image.generation.prompt.contains(setting))
                 })
         };
-        let before = index
-            .checked_sub(1)
+        // A composed scene is no shot to continue from: the one before it
+        // is.
+        let before = (0..index)
+            .rev()
+            .find(|&before| !self.scenes[before].is_composed())
             .filter(|&before| same_place(before))
             .map(|before| (before, OtherShot::Before));
         let anchor = (0..self.scenes.len())
@@ -1383,7 +1541,12 @@ impl ScenePlan {
     /// as an older portrait did, or without one (#269): beside the portrait
     /// it would pull the next image back to the face being replaced.
     pub fn shot_in(&self, index: usize, style: StyleChoice) -> Option<&SceneImage> {
-        let scene = self.scenes.get(index)?;
+        // A composed scene shows a product image, never a drawing: whatever
+        // drawn image it still holds is no reference for another scene.
+        let scene = self
+            .scenes
+            .get(index)
+            .filter(|scene| !scene.is_composed())?;
         let fits = |image: &SceneImage, portraits: Option<&PortraitsUsed>| {
             style.drew(&image.generation.prompt)
                 && !self.shows_old_portrait(index, image, portraits)
@@ -1426,7 +1589,8 @@ impl ScenePlan {
     /// only those the prompt still names, so writing a person out of a
     /// scene takes them out of its image.
     pub fn scene_cast(&self, index: usize) -> Vec<usize> {
-        self.scenes.get(index).map_or_else(Vec::new, |scene| {
+        let drawn = self.scenes.get(index).filter(|scene| !scene.is_composed());
+        drawn.map_or_else(Vec::new, |scene| {
             let prompt = scene.prompt.as_str().to_lowercase();
             scene
                 .cast
@@ -1527,10 +1691,12 @@ impl ScenePlan {
                 let old = |image: &SceneImage, portraits: Option<&PortraitsUsed>| {
                     self.shows_old_portrait(*index, image, portraits)
                 };
-                scene
-                    .image
-                    .as_ref()
-                    .is_some_and(|image| old(image, scene.image_portraits.as_ref()))
+                // A composed scene does not show the drawing it holds.
+                !scene.is_composed()
+                    && scene
+                        .image
+                        .as_ref()
+                        .is_some_and(|image| old(image, scene.image_portraits.as_ref()))
                     && !scene
                         .pending
                         .as_ref()
@@ -1550,7 +1716,9 @@ impl ScenePlan {
             .iter()
             .enumerate()
             .filter(|(_, scene)| {
-                scene.image.as_ref().is_some_and(|image| !drew(image))
+                // A composed scene does not show the drawing it holds.
+                !scene.is_composed()
+                    && scene.image.as_ref().is_some_and(|image| !drew(image))
                     && !scene.pending.as_ref().is_some_and(drew)
             })
             .map(|(index, _)| index)
@@ -1695,11 +1863,76 @@ impl ScenePlan {
         }
     }
 
-    /// Scenes without an image, which a new image job draws.
+    /// Scenes without an image, which a new image job draws. A composed
+    /// scene is never drawn.
     pub fn missing_images(&self) -> Vec<usize> {
         (0..self.scenes.len())
-            .filter(|&index| self.scenes[index].image.is_none())
+            .filter(|&index| {
+                let scene = &self.scenes[index];
+                scene.image.is_none() && !scene.is_composed()
+            })
             .collect()
+    }
+
+    /// Composed scenes that wait for their picture in `aspect`, which
+    /// Bardo makes for free.
+    pub fn missing_shots(&self, aspect: AspectRatio) -> Vec<usize> {
+        (0..self.scenes.len())
+            .filter(|&index| self.scenes[index].needs_shot(aspect))
+            .collect()
+    }
+
+    /// Makes scene `index` of an ad's plan a scene of `kind`, within what
+    /// the product's `pictures` allow; a composed scene shows `image`,
+    /// else the image it showed before, else the product's first. The
+    /// drawn image and the clip of a scene that becomes composed are kept
+    /// unused, so going back costs nothing.
+    pub fn set_scene_kind(
+        &mut self,
+        index: usize,
+        kind: SceneKind,
+        image: Option<ProductImageId>,
+        pictures: &ProductPictures,
+        now: SystemTime,
+    ) -> Result<KindChange, SceneKindError> {
+        let last = index + 1 == self.scenes.len();
+        let scene = self
+            .scenes
+            .get_mut(index)
+            .ok_or(SceneKindError::NoSuchScene(index))?;
+        if !pictures.allows(kind) {
+            return Err(SceneKindError::NotAllowed(kind));
+        }
+        if kind == SceneKind::EndCard && !last {
+            return Err(SceneKindError::NotLast);
+        }
+        let image = match kind {
+            SceneKind::ProductShot | SceneKind::EndCard => match image {
+                Some(image) if !pictures.has(image) => return Err(SceneKindError::NoSuchImage),
+                Some(image) => Some(image),
+                None => scene
+                    .product_image
+                    .filter(|image| pictures.has(*image))
+                    .or_else(|| pictures.first()),
+            },
+            SceneKind::Drawn | SceneKind::ProductInUse => None,
+        };
+        if scene.kind == kind && scene.product_image == image {
+            return Ok(KindChange::Same);
+        }
+        scene.kind = kind;
+        scene.product_image = image;
+        // A failure was about making the picture it showed before: a
+        // drawing that failed, or a picture that could not be composed.
+        scene.failure = None;
+        self.updated_at = now;
+        Ok(match scene.is_composed() {
+            true => KindChange::Compose,
+            false => KindChange::Drawn {
+                needs_image: scene.image.is_none(),
+                dropped: scene.shot.take(),
+            },
+        })
     }
 
     /// Scenes a clip can be made for that have none, accepted or waiting:
@@ -2156,6 +2389,8 @@ mod tests {
             cast,
             motion: "Slow push in.".into(),
             place: None,
+            kind: String::new(),
+            product_image: None,
         }
     }
 
@@ -2600,6 +2835,7 @@ mod tests {
             generation(n, Provider::Claude, "{}"),
             n,
             PlanDraft {
+                product: None,
                 cast: Vec::new(),
                 places: vec![
                     somewhere(
@@ -2682,6 +2918,7 @@ mod tests {
             generation(&n, Provider::Claude, "{}"),
             &n,
             PlanDraft {
+                product: None,
                 cast: Vec::new(),
                 places: (0..MAX_PLACES + 2)
                     .map(|index| somewhere(&format!("room {index}"), "A room."))
@@ -2715,6 +2952,7 @@ mod tests {
             generation(&n, Provider::Claude, "{}"),
             &n,
             PlanDraft {
+                product: None,
                 cast: Vec::new(),
                 places: (0..=last)
                     .map(|index| somewhere(&format!("room {index}"), "A room."))
@@ -2917,6 +3155,7 @@ mod tests {
             generation(&n, Provider::Claude, "{}"),
             &n,
             PlanDraft {
+                product: None,
                 cast: vec![member("the chef", "A man in his fifties.")],
                 places: vec![somewhere("the kitchen", "A small tiled kitchen at night.")],
                 scenes: vec![SceneDraft {
@@ -3036,6 +3275,7 @@ mod tests {
             generation(n, Provider::Claude, "{}"),
             n,
             PlanDraft {
+                product: None,
                 cast: vec![member("the probe", "A small silver probe with one dish.")],
                 places: vec![somewhere(
                     "the hangar",
@@ -3318,6 +3558,7 @@ mod tests {
             generation(&n, Provider::Claude, "{}"),
             &n,
             PlanDraft {
+                product: None,
                 cast: vec![member("the chef", "A man in his fifties.")],
                 places: vec![somewhere("the kitchen", "A small tiled kitchen at night.")],
                 scenes: vec![
@@ -3468,5 +3709,460 @@ mod tests {
         assert!(plan.in_another_style(manga).is_empty());
         assert_eq!(plan.reference_shots(3, manga), [(0, OtherShot::SamePlace)]);
         assert_eq!(plan.in_another_style(notes), [0, 1]);
+    }
+
+    /// The pictures of a product with `kinds` of images, in order.
+    fn pictures(kinds: &[crate::ProductImageKind]) -> ProductPictures {
+        ProductPictures::new(
+            kinds
+                .iter()
+                .map(|kind| (ProductImageId::new(), *kind))
+                .collect(),
+        )
+    }
+
+    fn kinded(first_sentence: usize, kind: &str, image: Option<usize>) -> SceneDraft {
+        SceneDraft {
+            first_sentence,
+            prompt: format!("Scene {first_sentence}."),
+            kind: kind.into(),
+            product_image: image,
+            ..SceneDraft::default()
+        }
+    }
+
+    /// An ad's plan of `drafts` for a product with `pictures`.
+    fn ad_plan(n: &Narration, pictures: &ProductPictures, drafts: Vec<SceneDraft>) -> ScenePlan {
+        ScenePlan::from_draft(
+            generation(n, Provider::Claude, "{}"),
+            n,
+            PlanDraft {
+                scenes: drafts,
+                product: Some(pictures.clone()),
+                ..PlanDraft::default()
+            },
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap()
+    }
+
+    fn kinds(plan: &ScenePlan) -> Vec<(SceneKind, Option<ProductImageId>)> {
+        plan.scenes()
+            .iter()
+            .map(|scene| (scene.kind(), scene.product_image()))
+            .collect()
+    }
+
+    fn shot(image: ProductImageId, file: &str) -> ComposedShot {
+        ComposedShot {
+            file: file.into(),
+            image,
+            aspect: AspectRatio::Vertical,
+        }
+    }
+
+    #[test]
+    fn an_ads_plan_keeps_the_kinds_its_product_allows() {
+        use crate::ProductImageKind::{Photo, Screen};
+        let n = narration(STORY, 0);
+        let both = pictures(&[Screen, Photo]);
+        let plan = ad_plan(
+            &n,
+            &both,
+            vec![
+                kinded(0, "product_in_use", None),
+                kinded(1, "product_shot", Some(1)),
+                kinded(2, "hero", None),
+                kinded(3, "end_card", None),
+            ],
+        );
+        assert_eq!(
+            kinds(&plan),
+            [
+                (SceneKind::ProductInUse, None),
+                (SceneKind::ProductShot, both.at(1)),
+                (SceneKind::Drawn, None),
+                (SceneKind::EndCard, both.first()),
+            ],
+            "a kind Bardo does not know is a drawn scene"
+        );
+        assert!(plan.scenes()[1].is_composed() && plan.scenes()[3].is_composed());
+        assert!(
+            !plan.scenes()[0].is_composed(),
+            "the product in use is drawn"
+        );
+
+        // A product shot naming an image the product does not have shows
+        // its first, and an end card before the last scene is a product
+        // shot.
+        let plan = ad_plan(
+            &n,
+            &both,
+            vec![
+                kinded(0, "end_card", Some(1)),
+                kinded(1, "product_shot", Some(7)),
+                kinded(2, "drawn", Some(0)),
+            ],
+        );
+        assert_eq!(
+            kinds(&plan),
+            [
+                (SceneKind::ProductShot, both.at(1)),
+                (SceneKind::ProductShot, both.first()),
+                (SceneKind::Drawn, None),
+            ]
+        );
+
+        // Screens only: the product is never drawn in use.
+        let screens = pictures(&[Screen]);
+        let plan = ad_plan(
+            &n,
+            &screens,
+            vec![
+                kinded(0, "product_in_use", None),
+                kinded(1, "product_shot", None),
+            ],
+        );
+        assert_eq!(
+            kinds(&plan),
+            [
+                (SceneKind::Drawn, None),
+                (SceneKind::ProductShot, screens.first())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_product_without_an_image_gets_drawn_scenes_and_a_drawn_end_card() {
+        let n = narration(STORY, 0);
+        let plan = ad_plan(
+            &n,
+            &ProductPictures::default(),
+            vec![
+                kinded(0, "product_shot", Some(0)),
+                kinded(1, "product_in_use", None),
+                kinded(2, "end_card", Some(0)),
+            ],
+        );
+        assert_eq!(
+            kinds(&plan),
+            [
+                (SceneKind::Drawn, None),
+                (SceneKind::Drawn, None),
+                (SceneKind::EndCard, None),
+            ]
+        );
+        assert!(plan.scenes().iter().all(|scene| !scene.is_composed()));
+        assert_eq!(plan.missing_images(), [0, 1, 2], "every one is drawn");
+        assert!(plan.missing_shots(AspectRatio::Vertical).is_empty());
+    }
+
+    #[test]
+    fn a_plan_that_is_no_ads_has_drawn_scenes_whatever_the_answer_says() {
+        let n = narration(STORY, 0);
+        let plan = plan(
+            &n,
+            vec![
+                kinded(0, "product_shot", Some(0)),
+                kinded(1, "end_card", None),
+            ],
+        );
+        assert_eq!(
+            kinds(&plan),
+            [(SceneKind::Drawn, None), (SceneKind::Drawn, None)]
+        );
+        assert_eq!(plan.missing_images(), [0, 1]);
+    }
+
+    #[test]
+    fn a_composed_scene_is_neither_drawn_nor_animated_and_shows_its_own_picture() {
+        let n = narration(STORY, 0);
+        let photo = pictures(&[crate::ProductImageKind::Photo]);
+        let image_id = photo.first().unwrap();
+        let mut plan = ad_plan(
+            &n,
+            &photo,
+            vec![kinded(0, "drawn", None), kinded(1, "product_shot", None)],
+        );
+        assert_eq!(plan.missing_images(), [0]);
+        assert_eq!(plan.missing_shots(AspectRatio::Vertical), [1]);
+        assert_eq!(plan.scenes()[1].picture(), None);
+
+        let scene = plan.scene_mut(1, SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(scene.add_shot(shot(image_id, "shot-a.png")), None);
+        assert_eq!(scene.picture(), Some("shot-a.png"));
+        assert!(!scene.can_animate());
+        assert!(scene.files().any(|file| file == "shot-a.png"));
+        assert!(plan.missing_shots(AspectRatio::Vertical).is_empty());
+        assert_eq!(
+            plan.missing_shots(AspectRatio::Landscape),
+            [1],
+            "made for another shape"
+        );
+        assert!(plan.missing_clips().is_empty());
+
+        // Composed again under another name, the first file can go; under
+        // the same name nothing does.
+        let scene = plan.scene_mut(1, SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(
+            scene.add_shot(shot(image_id, "shot-b.png")),
+            Some(shot(image_id, "shot-a.png"))
+        );
+        assert_eq!(scene.add_shot(shot(image_id, "shot-b.png")), None);
+
+        // A drawn scene takes no composed picture.
+        let drawn = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(
+            drawn.add_shot(shot(image_id, "stray.png")),
+            Some(shot(image_id, "stray.png"))
+        );
+        assert_eq!(drawn.picture(), None);
+        draw(&mut plan, &n, 0);
+        assert_eq!(plan.scenes()[0].picture(), Some("scene-0.png"));
+        assert!(plan.scenes()[0].can_animate());
+    }
+
+    #[test]
+    fn a_composed_scene_is_not_among_the_scenes_to_draw_again() {
+        let n = narration(STORY, 0);
+        let mut plan = storyboard(&n);
+        let photo = pictures(&[crate::ProductImageKind::Photo]);
+        for index in 0..2 {
+            draw(&mut plan, &n, index);
+        }
+        let style = StyleChoice::Catalog(crate::VisualStyle::ALL[0]);
+        assert_eq!(plan.in_another_style(style), [0, 1]);
+        plan.set_scene_kind(
+            1,
+            SceneKind::ProductShot,
+            None,
+            &photo,
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(
+            plan.in_another_style(style),
+            [0],
+            "its drawing is not shown, so it is not drawn again in the new style"
+        );
+        assert!(!plan.with_old_portraits().contains(&1));
+    }
+
+    #[test]
+    fn a_composed_scene_is_no_reference_for_another() {
+        let n = narration(STORY, 0);
+        let mut plan = storyboard(&n);
+        let photo = pictures(&[crate::ProductImageKind::Photo]);
+        // The street scene was drawn, then made a product shot: it keeps
+        // the drawing, which no other scene is drawn from.
+        draw(&mut plan, &n, 1);
+        plan.set_scene_kind(
+            1,
+            SceneKind::ProductShot,
+            None,
+            &photo,
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert!(plan.scenes()[1].image().is_some());
+        assert_eq!(plan.scene_place(1), None, "it happens nowhere");
+        assert!(plan.shot_in(1, StyleChoice::FromNotes).is_none());
+        assert!(
+            plan.reference_shots(0, StyleChoice::FromNotes).is_empty(),
+            "not even for the look"
+        );
+        // The look reference is the first drawn picture.
+        draw(&mut plan, &n, 3);
+        assert_eq!(
+            plan.reference_shots(2, StyleChoice::FromNotes),
+            [(3, OtherShot::Look)]
+        );
+
+        // A scene continues from the drawn scene before it, over a
+        // composed one in between.
+        let mut plan = storyboard(&n);
+        plan.scenes[1].place = Some(0);
+        plan.scenes[2].place = Some(0);
+        for index in 0..3 {
+            draw(&mut plan, &n, index);
+        }
+        assert_eq!(
+            plan.reference_shots(3, StyleChoice::FromNotes),
+            [(0, OtherShot::SamePlace), (2, OtherShot::Before)]
+        );
+        plan.set_scene_kind(
+            2,
+            SceneKind::ProductShot,
+            None,
+            &photo,
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(
+            plan.reference_shots(3, StyleChoice::FromNotes),
+            [(0, OtherShot::SamePlace), (1, OtherShot::Before)],
+            "the composed scene is skipped as the shot before"
+        );
+        assert!(plan.scene_cast(2).is_empty());
+    }
+
+    #[test]
+    fn a_scenes_kind_changes_within_what_the_product_allows() {
+        use crate::ProductImageKind::{Photo, Screen};
+        let n = narration(STORY, 0);
+        let both = pictures(&[Screen, Photo]);
+        let later = SystemTime::UNIX_EPOCH + Duration::from_secs(9);
+        let mut plan = ad_plan(
+            &n,
+            &both,
+            vec![
+                kinded(0, "drawn", None),
+                kinded(1, "drawn", None),
+                kinded(2, "drawn", None),
+            ],
+        );
+        draw(&mut plan, &n, 0);
+
+        // To a product shot: composed at once, from the first image unless
+        // another is named, and the drawing is kept.
+        assert_eq!(
+            plan.set_scene_kind(0, SceneKind::ProductShot, None, &both, later),
+            Ok(KindChange::Compose)
+        );
+        assert_eq!(plan.updated_at, later);
+        assert_eq!(plan.scenes()[0].product_image(), both.first());
+        assert!(plan.scenes()[0].image().is_some());
+        assert_eq!(
+            plan.set_scene_kind(0, SceneKind::ProductShot, None, &both, later),
+            Ok(KindChange::Same)
+        );
+        assert_eq!(
+            plan.set_scene_kind(0, SceneKind::ProductShot, both.at(1), &both, later),
+            Ok(KindChange::Compose),
+            "another image is another picture"
+        );
+        assert_eq!(
+            plan.scenes()[0].picture(),
+            None,
+            "no picture of another image stands in for it"
+        );
+        plan.scene_mut(0, later)
+            .unwrap()
+            .add_shot(shot(both.at(1).unwrap(), "shot.png"));
+        assert_eq!(plan.scenes()[0].picture(), Some("shot.png"));
+        // A picture that could not be composed is not held against the
+        // drawing it goes back to.
+        plan.scene_mut(0, later)
+            .unwrap()
+            .fail(JobFailureKind::Files);
+
+        // Away from it: the drawing it kept is there, so nothing is paid,
+        // and the composed picture goes.
+        assert_eq!(
+            plan.set_scene_kind(0, SceneKind::ProductInUse, None, &both, later),
+            Ok(KindChange::Drawn {
+                needs_image: false,
+                dropped: Some(shot(both.at(1).unwrap(), "shot.png")),
+            })
+        );
+        assert_eq!(plan.scenes()[0].picture(), Some("scene-0.png"));
+        assert_eq!(plan.scenes()[0].shot(), None);
+        assert_eq!(plan.scenes()[0].failure(), None);
+
+        // A scene that was never drawn needs a drawing, which is the
+        // user's to ask for.
+        plan.set_scene_kind(1, SceneKind::ProductShot, None, &both, later)
+            .unwrap();
+        assert_eq!(
+            plan.set_scene_kind(1, SceneKind::Drawn, None, &both, later),
+            Ok(KindChange::Drawn {
+                needs_image: true,
+                dropped: None,
+            })
+        );
+        assert_eq!(plan.missing_images(), [1, 2]);
+
+        // What is not allowed changes nothing.
+        let before = plan.clone();
+        let screens = pictures(&[Screen]);
+        assert_eq!(
+            plan.set_scene_kind(1, SceneKind::ProductInUse, None, &screens, later),
+            Err(SceneKindError::NotAllowed(SceneKind::ProductInUse))
+        );
+        assert_eq!(
+            plan.set_scene_kind(
+                1,
+                SceneKind::ProductShot,
+                None,
+                &ProductPictures::default(),
+                later
+            ),
+            Err(SceneKindError::NotAllowed(SceneKind::ProductShot))
+        );
+        assert_eq!(
+            plan.set_scene_kind(1, SceneKind::EndCard, None, &both, later),
+            Err(SceneKindError::NotLast)
+        );
+        assert_eq!(
+            plan.set_scene_kind(
+                1,
+                SceneKind::ProductShot,
+                Some(ProductImageId::new()),
+                &both,
+                later
+            ),
+            Err(SceneKindError::NoSuchImage)
+        );
+        assert_eq!(
+            plan.set_scene_kind(9, SceneKind::Drawn, None, &both, later),
+            Err(SceneKindError::NoSuchScene(9))
+        );
+        assert_eq!(plan, before);
+
+        // The last scene can be the end card: composed when the product
+        // has an image, drawn when it has none.
+        assert_eq!(
+            plan.set_scene_kind(2, SceneKind::EndCard, None, &both, later),
+            Ok(KindChange::Compose)
+        );
+        let mut bare = ad_plan(
+            &n,
+            &ProductPictures::default(),
+            vec![kinded(0, "drawn", None)],
+        );
+        assert_eq!(
+            bare.set_scene_kind(
+                0,
+                SceneKind::EndCard,
+                None,
+                &ProductPictures::default(),
+                later
+            ),
+            Ok(KindChange::Drawn {
+                needs_image: true,
+                dropped: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_fitted_plan_keeps_its_kinds_and_composed_pictures() {
+        let n = narration(STORY, 0);
+        let photo = pictures(&[crate::ProductImageKind::Photo]);
+        let mut plan = ad_plan(
+            &n,
+            &photo,
+            vec![kinded(0, "drawn", None), kinded(1, "product_shot", None)],
+        );
+        plan.scene_mut(1, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .add_shot(shot(photo.first().unwrap(), "shot.png"));
+        let again = Narration {
+            id: NarrationId::new(),
+            ..narration(STORY, 500)
+        };
+        let fitted = plan.fitted_to(&again, SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(kinds(&fitted), kinds(&plan));
+        assert_eq!(fitted.scenes()[1].picture(), Some("shot.png"));
     }
 }

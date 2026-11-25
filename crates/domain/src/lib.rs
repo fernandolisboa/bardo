@@ -89,6 +89,7 @@ mod post_insights;
 mod preflight;
 mod product;
 mod product_sheet;
+mod product_shot;
 mod production;
 mod profile;
 mod provider_key;
@@ -100,6 +101,7 @@ mod repository;
 mod research;
 mod runner;
 mod scene;
+mod scene_kind;
 mod scene_plan_size;
 mod schedule;
 mod script;
@@ -147,8 +149,9 @@ pub use byteplus::{
     BytePlusFieldError, is_bucket_name,
 };
 pub use caption::{
-    Caption, CaptionHighlight, CaptionStyle, Captions, LINE_RULES, LineRules, MAX_CAPTION_CHARS,
-    SavedCaptions, UnknownCaptionHighlight, UnknownCaptionStyle, caption_lines, caption_text,
+    CAPTION_BAND, Caption, CaptionHighlight, CaptionStyle, Captions, LINE_RULES, LineRules,
+    MAX_CAPTION_CHARS, SavedCaptions, UnknownCaptionHighlight, UnknownCaptionStyle, caption_lines,
+    caption_text,
 };
 pub use capture::{
     BoundaryError, BoundaryMove, CAPTURE_EXTENSIONS, Capture, CaptureConfirmation, CaptureId,
@@ -312,9 +315,13 @@ pub use product_sheet::{
     ClaimState, Objection, ProductSheet, RestrictedCategory, SheetClaimError, SheetFieldError,
     SheetSource, SheetTaken, SheetText, WrittenClaim, WrittenSheet, WrittenSource,
 };
+pub use product_shot::{
+    SHOT_SHORT_SIDE, ShotArea, ShotComposer, ShotError, ShotLayout, shot_frame, shot_room,
+};
 pub use production::{
-    AnimatedScenes, HOOK_LENGTH, NARRATION_CHARS_PER_SECOND, ProductionMode, TYPICAL_SCENE,
-    UnknownProductionMode, typical_length, typical_scenes,
+    AnimatedScenes, HOOK_LENGTH, NARRATION_CHARS_PER_SECOND, ProductionMode, TYPICAL_AD_SCENE,
+    TYPICAL_PRODUCT_SHOTS, TYPICAL_SCENE, UnknownProductionMode, ad_scenes_on, typical_ad_scenes,
+    typical_length, typical_scenes,
 };
 pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage, UserProfile};
 pub use provider_key::{
@@ -354,6 +361,7 @@ pub use scene::{
     ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, SceneSetting,
     Sentence, scene_image_prompt, sentences,
 };
+pub use scene_kind::{ComposedShot, KindChange, ProductPictures, SceneKind, SceneKindError};
 pub use scene_plan_size::ScenePlanSize;
 pub use schedule::{
     DateOrder, LocalTime, Rfc3339, SCHEDULE_GRACE, ScheduleProblem, Zone, check_publish_time,
