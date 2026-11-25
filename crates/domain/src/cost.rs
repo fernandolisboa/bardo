@@ -157,6 +157,14 @@ pub enum Meter {
     AudioSeconds,
     /// Posts made (X bills each post it creates).
     Posts,
+    /// Web searches a model ran while it researched (#274).
+    Searches,
+    /// Tokens sent that the provider wrote to its prompt cache, priced
+    /// above plain input: a research keeps each page it read there.
+    CacheWriteTokens,
+    /// Tokens sent that the provider read back from its prompt cache,
+    /// priced far below plain input.
+    CacheReadTokens,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -164,7 +172,7 @@ pub enum Meter {
 pub struct UnknownMeter(pub String);
 
 impl Meter {
-    pub const ALL: [Meter; 7] = [
+    pub const ALL: [Meter; 10] = [
         Meter::InputTokens,
         Meter::OutputTokens,
         Meter::ImageTokens,
@@ -172,6 +180,9 @@ impl Meter {
         Meter::VideoSeconds,
         Meter::AudioSeconds,
         Meter::Posts,
+        Meter::Searches,
+        Meter::CacheWriteTokens,
+        Meter::CacheReadTokens,
     ];
 
     /// Stable identifier for storage and the rate file. Never change one.
@@ -184,16 +195,23 @@ impl Meter {
             Meter::VideoSeconds => "video_seconds",
             Meter::AudioSeconds => "audio_seconds",
             Meter::Posts => "posts",
+            Meter::Searches => "searches",
+            Meter::CacheWriteTokens => "cache_write_tokens",
+            Meter::CacheReadTokens => "cache_read_tokens",
         }
     }
 
     /// How many units a price is for, as providers publish them: tokens
-    /// per million, characters per thousand, video per second, audio per
-    /// hour, posts one by one.
+    /// per million, characters and searches per thousand, video per
+    /// second, audio per hour, posts one by one.
     pub fn units_per_price(self) -> u64 {
         match self {
-            Meter::InputTokens | Meter::OutputTokens | Meter::ImageTokens => 1_000_000,
-            Meter::Characters => 1_000,
+            Meter::InputTokens
+            | Meter::OutputTokens
+            | Meter::ImageTokens
+            | Meter::CacheWriteTokens
+            | Meter::CacheReadTokens => 1_000_000,
+            Meter::Characters | Meter::Searches => 1_000,
             Meter::VideoSeconds | Meter::Posts => 1,
             Meter::AudioSeconds => 3_600,
         }
@@ -221,6 +239,9 @@ pub struct Metered {
     pub video_seconds: u64,
     pub audio_seconds: u64,
     pub posts: u64,
+    pub searches: u64,
+    pub cache_write_tokens: u64,
+    pub cache_read_tokens: u64,
 }
 
 impl Metered {
@@ -261,6 +282,9 @@ impl Metered {
             Meter::VideoSeconds => self.video_seconds,
             Meter::AudioSeconds => self.audio_seconds,
             Meter::Posts => self.posts,
+            Meter::Searches => self.searches,
+            Meter::CacheWriteTokens => self.cache_write_tokens,
+            Meter::CacheReadTokens => self.cache_read_tokens,
         }
     }
 
@@ -273,15 +297,22 @@ impl Metered {
             Meter::VideoSeconds => self.video_seconds = value,
             Meter::AudioSeconds => self.audio_seconds = value,
             Meter::Posts => self.posts = value,
+            Meter::Searches => self.searches = value,
+            Meter::CacheWriteTokens => self.cache_write_tokens = value,
+            Meter::CacheReadTokens => self.cache_read_tokens = value,
         }
     }
 
     /// The tokens in and out, as provenance records them: drawn images
-    /// count as output.
+    /// count as output, and tokens that went through the provider's cache
+    /// were sent all the same.
     pub fn tokens(&self) -> TokenUsage {
         TokenUsage {
-            input_tokens: self.input_tokens,
-            output_tokens: self.output_tokens + self.image_tokens,
+            input_tokens: self
+                .input_tokens
+                .saturating_add(self.cache_write_tokens)
+                .saturating_add(self.cache_read_tokens),
+            output_tokens: self.output_tokens.saturating_add(self.image_tokens),
         }
     }
 
@@ -533,6 +564,12 @@ pub enum CostPurpose {
     /// A take model making a capture's few-second test take at its
     /// cheapest tier (#243).
     TakeTest,
+    /// Claude reading a product's page and the web about it (#274). Paid
+    /// per run and under no channel: every video of the product reuses it.
+    ProductResearch,
+    /// Claude writing a product's sheet from its brief and the research
+    /// notes (#274).
+    ProductSheet,
 }
 
 /// The rate-table model of a post X bills without a link in its text.
@@ -583,7 +620,7 @@ fn holds_link(text: &str) -> bool {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 25] = [
+    pub const ALL: [CostPurpose; 27] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -609,6 +646,8 @@ impl CostPurpose {
         CostPurpose::TakeDraft,
         CostPurpose::TakeFinal,
         CostPurpose::TakeTest,
+        CostPurpose::ProductResearch,
+        CostPurpose::ProductSheet,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -639,6 +678,8 @@ impl CostPurpose {
             CostPurpose::TakeDraft => "take_draft",
             CostPurpose::TakeFinal => "take_final",
             CostPurpose::TakeTest => "take_test",
+            CostPurpose::ProductResearch => "product_research",
+            CostPurpose::ProductSheet => "product_sheet",
         }
     }
 }
@@ -1417,5 +1458,19 @@ mod tests {
         );
         assert_eq!(spend.unpriced, [(Provider::Gemini, "img".to_owned())]);
         assert_eq!(Spend::of(&[]), Spend::default());
+    }
+
+    #[test]
+    fn tokens_are_summed_without_passing_the_largest_count() {
+        let used = Metered {
+            input_tokens: u64::MAX - 5,
+            cache_write_tokens: 10,
+            cache_read_tokens: 10,
+            output_tokens: u64::MAX,
+            image_tokens: 1,
+            ..Metered::default()
+        };
+        assert_eq!(used.tokens().input_tokens, u64::MAX);
+        assert_eq!(used.tokens().output_tokens, u64::MAX);
     }
 }

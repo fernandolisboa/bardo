@@ -8,7 +8,8 @@ use super::Kept;
 use crate::Bardo;
 
 /// What a text job works on: one text of a project, the ideas of a
-/// channel, the look of a persona or one take of a capture. Two jobs with
+/// channel, the look of a persona, one take of a capture or the sheet of a
+/// product. Two jobs with
 /// the same `Work` would pay for the same thing and save over each other,
 /// so one is not started, or queued again, while another is at work
 /// ([`Bardo::work_busy`]).
@@ -36,6 +37,9 @@ pub(crate) enum Work {
         capture: String,
         position: u32,
     },
+    /// The product's sheet: researched on the web, or written from the
+    /// brief.
+    Sheet(String),
 }
 
 /// The fields the payloads of these jobs name what they work on with.
@@ -51,6 +55,8 @@ struct WorksOn {
     capture: Option<String>,
     #[serde(default)]
     position: Option<u32>,
+    #[serde(default)]
+    product: Option<String>,
 }
 
 impl Work {
@@ -71,6 +77,7 @@ impl Work {
                 | JobKind::PersonaLook
                 | JobKind::TakePrompt
                 | JobKind::PerformedTake
+                | JobKind::ProductResearch
         ) {
             return None;
         }
@@ -94,6 +101,7 @@ impl Work {
                 capture: on.capture?,
                 position: on.position?,
             },
+            JobKind::ProductResearch => Self::Sheet(on.product?),
             _ => return None,
         })
     }
@@ -192,6 +200,13 @@ mod tests {
             });
             assert_eq!(work(kind, payload), Some(take.clone()));
         }
+        assert_eq!(
+            work(
+                JobKind::ProductResearch,
+                serde_json::json!({"product": "d", "source": "research"})
+            ),
+            Some(Work::Sheet("d".into()))
+        );
     }
 
     #[test]

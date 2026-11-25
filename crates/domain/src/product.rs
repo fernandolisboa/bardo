@@ -9,7 +9,8 @@ use std::time::SystemTime;
 
 use crate::persona::numbered_copy;
 use crate::{
-    ImageFormat, ProfileId, RepositoryError, image_declares_transparency, image_dimensions,
+    ImageFormat, ProductSheet, ProfileId, RepositoryError, image_declares_transparency,
+    image_dimensions,
 };
 
 uuid_id!(
@@ -766,6 +767,11 @@ pub trait ProductRepository: Send + Sync {
     /// The product's images, in the order they were added.
     fn images(&self, product: ProductId) -> Result<Vec<ProductImage>, RepositoryError>;
 
+    /// How many images the product has, without reading them.
+    fn image_count(&self, product: ProductId) -> Result<usize, RepositoryError> {
+        Ok(self.images(product)?.len())
+    }
+
     /// Adds the image after the product's others. Returns `false`, and
     /// adds nothing, when the product already holds
     /// [`MAX_PRODUCT_IMAGES`].
@@ -794,6 +800,13 @@ pub trait ProductRepository: Send + Sync {
 
     /// Removes the product's logo. Returns whether it had one.
     fn remove_logo(&self, product: ProductId) -> Result<bool, RepositoryError>;
+
+    /// The product's sheet, when it has one.
+    fn sheet(&self, product: ProductId) -> Result<Option<ProductSheet>, RepositoryError>;
+
+    /// Saves the sheet whole, in place of the product's earlier one: its
+    /// text, its claims in their order and the pages it was read from.
+    fn save_sheet(&self, sheet: &ProductSheet) -> Result<(), RepositoryError>;
 }
 
 impl<T: ProductRepository + ?Sized> ProductRepository for Arc<T> {
@@ -819,6 +832,10 @@ impl<T: ProductRepository + ?Sized> ProductRepository for Arc<T> {
 
     fn images(&self, product: ProductId) -> Result<Vec<ProductImage>, RepositoryError> {
         (**self).images(product)
+    }
+
+    fn image_count(&self, product: ProductId) -> Result<usize, RepositoryError> {
+        (**self).image_count(product)
     }
 
     fn add_image(&self, image: &ProductImage) -> Result<bool, RepositoryError> {
@@ -852,6 +869,14 @@ impl<T: ProductRepository + ?Sized> ProductRepository for Arc<T> {
 
     fn remove_logo(&self, product: ProductId) -> Result<bool, RepositoryError> {
         (**self).remove_logo(product)
+    }
+
+    fn sheet(&self, product: ProductId) -> Result<Option<ProductSheet>, RepositoryError> {
+        (**self).sheet(product)
+    }
+
+    fn save_sheet(&self, sheet: &ProductSheet) -> Result<(), RepositoryError> {
+        (**self).save_sheet(sheet)
     }
 }
 

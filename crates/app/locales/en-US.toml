@@ -349,6 +349,7 @@ thumbnail_image = "Thumbnail background"
 chapters = "Chapters"
 localization = "Version in another language"
 persona_look = "Persona look"
+product_research = "Product research"
 take_analysis = "Take analysis"
 control_video = "Control video"
 take_prompt = "Take prompt"
@@ -1452,6 +1453,9 @@ characters = "Characters"
 video_seconds = "Video seconds"
 audio_seconds = "Audio seconds"
 posts = "Posts"
+searches = "Web searches"
+cache_write_tokens = "Cache write tokens"
+cache_read_tokens = "Cache read tokens"
 
 [meter.unit]
 input_tokens = "per million tokens"
@@ -1461,6 +1465,9 @@ characters = "per thousand characters"
 video_seconds = "per second of video"
 audio_seconds = "per hour of audio"
 posts = "per post"
+searches = "per thousand searches"
+cache_write_tokens = "per million tokens"
+cache_read_tokens = "per million tokens"
 
 [costs]
 overview = "Overview"
@@ -3162,6 +3169,21 @@ body = "An optional PNG logo for the ad's end card. Like the images, it stays in
 title = "Save and tidy up"
 body = "Save the brief, duplicate it for a variant, archive a product you no longer advertise, or delete one no project uses."
 
+[tour.products-sheet]
+name = "Products tour, part 2: the sheet"
+
+[tour.products-sheet.sheet]
+title = "Brief and sheet"
+body = "The brief is what you write. The sheet is what Bardo knows beyond it: who buys, what holds them back, the alternatives and the claims an ad may make. Switch between the two here."
+
+[tour.products-sheet.research]
+title = "Fill the sheet"
+body = "Research the product on the web, starting from its link, or write the sheet from the brief alone. Each shows what it costs before it starts, and you can also fill the sheet by hand."
+
+[tour.products-sheet.claims]
+title = "Claims"
+body = "Everything a model found waits here with its source. Confirm what is true, reject the rest, and tick Sensitive where a claim needs care. An ad uses only confirmed claims."
+
 [tour.templates]
 name = "Templates tour"
 
@@ -4190,3 +4212,152 @@ too_small = "It is {width}×{height} px: too small. An image needs 600 px on eac
 too_large = "It is {width}×{height} px; each side can be at most 6,000 px."
 shape = "It is {width}×{height} px: too narrow or too wide. An image's long side can be at most 3 times its short side; a logo's, 10 times."
 file_too_large = "The file has {mb} MB; the most is 10 MB."
+
+[product.tab]
+brief = "Brief"
+sheet = "Sheet"
+
+[sheet]
+title = "Product sheet"
+hint = "What Bardo knows about the product beyond your brief. You review it here: an ad uses only the claims you confirmed."
+info = "A research reads the product's page and what is public about its market, within fixed limits. A second call turns its notes into this sheet. Whatever a model wrote waits for your review."
+save_first = "Save the product to start its sheet."
+brief_unsaved = "The brief has changes you have not saved. A research or a sheet from the brief works from the saved one."
+not_loaded = "The sheet could not be read."
+busy_note = "The sheet can be edited again when the run ends."
+save = "Save the sheet"
+saved = "Sheet saved."
+
+[sheet.fill]
+title = "Fill the sheet"
+research = "Research on the web"
+research_again = "Research again"
+research_hint = "Claude reads the product's page first, then searches: at most {searches} searches and {fetches} pages. What it finds is added to the sheet, and nothing you reviewed changes."
+no_link = "The brief has no link, so the research searches by the product's name."
+research_cost = "Costs at most {amount}, with every search and page at its limit."
+research_usual = "A research usually costs about {amount}."
+from_brief = "Write from my brief"
+from_brief_hint = "One call and no web: Claude organizes what your brief and images already say."
+from_brief_cost = "Costs about {amount}."
+by_hand = "Fill in by hand"
+by_hand_hint = "No call and no cost: the sheet starts with the facts of your brief."
+fix_first = "The run did not start: the sheet's text is saved first, and it could not be. Fix what is marked in the sheet below."
+
+[sheet.job]
+researching = "Researching on the web…"
+writing = "Writing the sheet…"
+stopped = "The run was stopped."
+stopping = "Stopped. Finishing what was already sent…"
+failed = "The run did not finish. Jobs shows why; retrying it there keeps a research that was already done."
+lost = "The request was sent and no answer came back, so Claude may have billed it. Costs counts it as an estimate. Bardo does not send it again by itself."
+declined = "Claude declined: {reason}"
+done = "Done. Claims waiting for your review: {n}."
+left_out = "The sheet is full, so the run left claims out: {n}. A sheet holds at most 80 claims, not counting the rejected ones. Reject the ones you do not want before the next run."
+
+[sheet.restricted]
+notice = "This product is in a category networks restrict: {category}. Each network has its own rules for it, so check them before you publish. Bardo does not block the product."
+health = "Health and medicines"
+finance = "Financial products"
+alcohol = "Alcohol"
+gambling = "Gambling"
+weight_loss = "Weight loss"
+adult = "Adult"
+political = "Political"
+
+[sheet.about]
+title = "About the product"
+summary = "Summary"
+category = "Category"
+restricted = "Restricted category"
+restricted_hint = "Networks have their own ad rules for health and medicines, financial products, alcohol, gambling, weight loss, adult and political content. Pick the one this product is in, or None."
+restricted_none = "None"
+looks = "How it looks"
+
+[sheet.segments]
+title = "Who it is for"
+name = "Group of buyers"
+wants = "What they want"
+holds_back = "What holds them back"
+add = "Add a group"
+
+[sheet.objections]
+title = "Objections and answers"
+objection = "Objection"
+answer = "Answer"
+add = "Add an objection"
+
+[sheet.alternatives]
+title = "Alternatives"
+name = "Alternative"
+differs = "How the product differs"
+add = "Add an alternative"
+
+[sheet.rows]
+remove = "Remove"
+empty = "Nothing here yet."
+
+[sheet.claims]
+title = "Claims"
+hint = "What an ad may say about the product. The facts of your brief and the claims you add here start confirmed. Whatever a model wrote waits for you to confirm or reject it."
+waiting = "Waiting for you ({n})"
+confirmed = "Confirmed ({n})"
+rejected = "Rejected ({n})"
+none = "No claims yet."
+confirm = "Confirm"
+reject = "Reject"
+bring_back = "Bring back"
+edit = "Edit"
+save = "Save"
+cancel = "Cancel"
+sensitive = "Sensitive"
+sensitive_hint = "A sensitive claim has a number, a superlative, a promise about health, money or results, a guarantee, a deadline or a named competitor. It can be confirmed and used; each one a video uses is listed again before the video is published."
+confirmed_at = "Confirmed {when}"
+edited_at = "Edited {when}"
+open_source = "Open the page"
+add = "Add a claim"
+add_placeholder = "One statement, in your own words"
+
+[sheet.claims.source]
+typed = "Typed by you"
+brief = "Claude's reading of your brief, with no page behind it"
+page = "The product's page"
+web = "Web page"
+
+[sheet.sources]
+title = "Pages read"
+researched_at = "Last research: {when}"
+none = "No research has read the web for this product yet."
+
+[sheet.error]
+none = "The product has no sheet yet."
+missing_key = "Add your Claude key in Settings to research the product or write its sheet."
+busy = "The sheet is being filled, or a cancelled run is still stopping. It can be changed when the run ends."
+not_saved = "The sheet could not be saved."
+
+[sheet.claims.kind]
+benefit = "Benefit"
+feature = "Feature"
+proof = "Proof"
+offer = "Offer"
+comparison = "Comparison"
+
+[sheet.error.field]
+summary_too_long = "Keep the summary within 1,500 characters."
+category_too_long = "Keep the category within 80 characters."
+looks_too_long = "Keep the description of the look within 800 characters."
+too_many_segments = "A sheet holds at most 8 groups of buyers."
+segment = "Each group needs a name of at most 120 characters, and each of its other parts fits 400."
+too_many_objections = "A sheet holds at most 12 objections."
+objection = "Each objection needs its text, and each part fits 400 characters."
+too_many_alternatives = "A sheet holds at most 12 alternatives."
+alternative = "Each alternative needs a name of at most 120 characters, and how the product differs fits 400."
+
+[sheet.error.claim]
+text_required = "Write the claim."
+text_too_long = "A claim is one statement of at most 300 characters."
+not_found = "Only a claim that waits can be confirmed."
+already_rejected = "This claim is already rejected."
+not_rejected = "Only a rejected claim can be brought back."
+known = "The sheet already has a claim that says this."
+too_many = "A sheet holds at most 80 claims, not counting the rejected ones. Reject one you do not want to make room."
+gone = "This claim is no longer on the sheet."

@@ -1,6 +1,6 @@
 # Built-in prices of the models Bardo calls, in US dollars, as text so they
-# stay exact: per million tokens, per thousand characters, per second of
-# video, or per hour of audio.
+# stay exact: per million tokens, per thousand characters, per thousand
+# web searches, per second of video, or per hour of audio.
 #
 # Checked on 2026-10-02 against each provider's published API prices. The
 # user can change any of them, or add models, on the costs screen; a price
@@ -8,14 +8,20 @@
 #
 # Layout: [provider."model"] with one price per meter (input_tokens,
 # output_tokens, image_tokens, characters, video_seconds, audio_seconds,
-# posts; audio is priced per hour, posts one by one). A model covers
+# posts, searches, cache_write_tokens, cache_read_tokens; audio is priced
+# per hour, posts one by one). A model covers
 # every model whose name starts with it, so `jev` covers `jev-1.13.0`, and
 # an empty model covers all of the provider's models.
 
-# Anthropic, standard API prices.
+# Anthropic, standard API prices. A web research asks for the prompt
+# cache (five-minute writes) and for web searches, checked on 2026-11-25;
+# pages it fetches cost only their tokens.
 [claude."claude-opus-5-5"]
 input_tokens = "4.00"
 output_tokens = "20.00"
+cache_write_tokens = "5.00"
+cache_read_tokens = "0.20"
+searches = "10.00"
 
 # ElevenLabs bills credits from the plan; this is the pay-as-you-go API
 # price of Multilingual v2 and v3.

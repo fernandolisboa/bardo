@@ -143,6 +143,12 @@ pub enum JobKind {
     /// Measures the face in a persona's look on the computer (#243), for
     /// the preflight check that compares its framing with the takes'.
     LookFraming,
+    /// Researches a product (docs/spec/marketing-videos.md): Claude reads
+    /// the product's page and what is public about its market and writes
+    /// notes, then turns the notes and the brief into a product sheet whose
+    /// claims wait for review. Or writes the sheet from the brief alone.
+    /// The notes are kept, so a resumed job does not research twice.
+    ProductResearch,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -171,7 +177,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 34] = [
+    pub const ALL: [JobKind; 35] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -206,6 +212,7 @@ impl JobKind {
         JobKind::PerformedTake,
         JobKind::StagingCleanup,
         JobKind::LookFraming,
+        JobKind::ProductResearch,
     ];
 
     /// Stable name stored in the database.
@@ -245,6 +252,7 @@ impl JobKind {
             JobKind::PerformedTake => "performed_take",
             JobKind::StagingCleanup => "staging_cleanup",
             JobKind::LookFraming => "look_framing",
+            JobKind::ProductResearch => "product_research",
         }
     }
 }

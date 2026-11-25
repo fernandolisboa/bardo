@@ -26,6 +26,7 @@ mod performance;
 mod persona_look;
 mod personas;
 mod privacy;
+mod product_sheet;
 mod products;
 mod projects;
 mod research;

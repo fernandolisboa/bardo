@@ -32,7 +32,7 @@ const DEFAULT_RATES: &str = include_str!("../data/rates.toml");
 const ESTIMATE_SAMPLES: usize = 5;
 
 /// About four characters make a token in the languages Bardo writes.
-const CHARS_PER_TOKEN: u64 = 4;
+pub(crate) const CHARS_PER_TOKEN: u64 = 4;
 
 /// Parses a rate file: `[provider."model"]` tables of `meter = "price"`.
 fn parse_rates(text: &str) -> Result<Vec<Rate>, String> {
@@ -209,6 +209,10 @@ pub(crate) struct PlannedCall {
     /// Output tokens, when known before the job (a take model billed by
     /// its video's tokens, a scene plan sized from its narration).
     pub(crate) output_tokens: Option<u64>,
+    /// The most one call can use, when its request sets limits (a web
+    /// research): estimates then show this in place of what such calls
+    /// usually use.
+    pub(crate) ceiling: Option<Metered>,
 }
 
 impl PlannedCall {
@@ -235,6 +239,7 @@ impl PlannedCall {
             video_seconds: None,
             audio_seconds: None,
             output_tokens: None,
+            ceiling: None,
         }
     }
 
@@ -263,6 +268,13 @@ impl PlannedCall {
 
     pub(crate) fn with_output_tokens(mut self, tokens: u64) -> Self {
         self.output_tokens = Some(tokens);
+        self
+    }
+
+    /// Estimates the call at `most`, the most its request allows. What a
+    /// lost answer is recorded as stays what such calls usually use.
+    pub(crate) fn with_ceiling(mut self, most: Metered) -> Self {
+        self.ceiling = Some(most);
         self
     }
 
@@ -374,6 +386,21 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         CostPurpose::TakeDraft | CostPurpose::TakeFinal => Metered::video_seconds(30),
         // Five seconds at most.
         CostPurpose::TakeTest => Metered::video_seconds(5),
+        // A product page and a few searches: the instructions, the brief
+        // and the pictures in, about 60,000 tokens of pages and results
+        // held in the provider's cache and read again at each of some ten
+        // steps, and the notes with the thought between steps out. The
+        // first real research replaces this.
+        CostPurpose::ProductResearch => Metered {
+            input_tokens: 3_000,
+            output_tokens: 5_000,
+            searches: 5,
+            cache_write_tokens: 60_000,
+            cache_read_tokens: 250_000,
+            ..Metered::default()
+        },
+        // The brief and the notes in, the sheet as JSON out.
+        CostPurpose::ProductSheet => tokens(9_000, 4_000),
         CostPurpose::PersonaLook => match provider {
             Provider::Claude => tokens(700, 400),
             _ => Metered {
@@ -419,6 +446,12 @@ struct InFlight {
     video_seconds: u64,
     #[serde(default)]
     audio_seconds: u64,
+    #[serde(default)]
+    searches: u64,
+    #[serde(default)]
+    cache_write_tokens: u64,
+    #[serde(default)]
+    cache_read_tokens: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     channel: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -435,6 +468,9 @@ impl InFlight {
             video_seconds: self.video_seconds,
             audio_seconds: self.audio_seconds,
             posts: 0,
+            searches: self.searches,
+            cache_write_tokens: self.cache_write_tokens,
+            cache_read_tokens: self.cache_read_tokens,
         }
     }
 }
@@ -621,6 +657,9 @@ impl CostBook {
             characters: usage.characters,
             video_seconds: usage.video_seconds,
             audio_seconds: usage.audio_seconds,
+            searches: usage.searches,
+            cache_write_tokens: usage.cache_write_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
             channel: channel.map(|id| id.to_string()),
             project: project.map(|id| id.to_string()),
         };
@@ -841,6 +880,15 @@ impl CostBook {
         Ok(Spend::of(&records))
     }
 
+    /// What `call` is estimated at: its ceiling when it has one, else
+    /// what such calls usually use.
+    fn planned(&self, call: &PlannedCall, rates: &RateTable) -> Result<Metered, RepositoryError> {
+        match call.ceiling {
+            Some(most) => Ok(most.times(call.calls)),
+            None => self.typical_at(call, rates),
+        }
+    }
+
     /// What `calls` would spend together, and whether some call has no
     /// rate (so the amount is short).
     pub(crate) fn price(&self, calls: &[PlannedCall]) -> Result<(Money, bool), RepositoryError> {
@@ -848,7 +896,7 @@ impl CostBook {
         let mut total = Money::ZERO;
         let mut partial = false;
         for call in calls.iter().filter(|call| call.calls > 0) {
-            match rates.price(call.provider, &call.model, &self.typical_at(call, &rates)?) {
+            match rates.price(call.provider, &call.model, &self.planned(call, &rates)?) {
                 Some(amount) => total = total.saturating_add(amount),
                 None => partial = true,
             }
@@ -865,7 +913,7 @@ impl CostBook {
         let mut providers: Vec<ProviderEstimate> = Vec::new();
         let mut unpriced: Vec<(Provider, String)> = Vec::new();
         for call in calls.iter().filter(|call| call.calls > 0) {
-            let amount = rates.price(call.provider, &call.model, &self.typical_at(call, &rates)?);
+            let amount = rates.price(call.provider, &call.model, &self.planned(call, &rates)?);
             let model = (call.provider, call.model.to_string());
             if amount.is_none() && !unpriced.contains(&model) {
                 unpriced.push(model);
@@ -1841,7 +1889,7 @@ pub(crate) mod tests {
                 usage: Metered::characters(77),
             };
             *h.speech.failure.lock().unwrap() = Some(ProviderFailure {
-                billed: Some(billed.clone()),
+                billed: Some(Box::new(billed.clone())),
                 ..ProviderFailure::new(
                     ProviderFailureKind::Unexpected,
                     "the timings do not line up",

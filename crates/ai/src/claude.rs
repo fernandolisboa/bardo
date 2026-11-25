@@ -28,7 +28,7 @@ use bardo_domain::{
 use base64::Engine as _;
 use serde_json::{Value, json};
 
-use crate::claude_stream::{self, StreamEnd, StreamedAnswer};
+use crate::claude_stream::{self, ExtraUsage, StreamEnd, StreamedAnswer};
 use crate::http::{
     GIVEN_UP_UNSENT, HttpRequest, HttpResponse, StreamedResponse, Transport, UreqTransport,
 };
@@ -180,6 +180,8 @@ fn parse_whole(response: &HttpResponse) -> Result<StreamedAnswer, ProviderFailur
         .collect();
     let mut usage = TokenUsage::default();
     claude_stream::read_usage(&body["usage"], &mut usage);
+    let mut extra = ExtraUsage::default();
+    claude_stream::read_extra_usage(&body["usage"], &mut extra);
     Ok(StreamedAnswer {
         model: Some(body["model"].as_str().unwrap_or_default().to_owned()),
         began: true,
@@ -187,6 +189,8 @@ fn parse_whole(response: &HttpResponse) -> Result<StreamedAnswer, ProviderFailur
         stop_reason: body["stop_reason"].as_str().map(str::to_owned),
         stop_details: body["stop_details"].clone(),
         usage,
+        extra,
+        content: body["content"].as_array().cloned().unwrap_or_default(),
         end: StreamEnd::Complete,
     })
 }
@@ -197,59 +201,22 @@ fn parse_whole(response: &HttpResponse) -> Result<StreamedAnswer, ProviderFailur
 /// usable or not. A refusal says it when Claude bills it. A stream that
 /// stopped before the answer's end is a lost answer.
 pub fn read_answer(answer: StreamedAnswer) -> Result<GeneratedText, ProviderFailure> {
-    match &answer.end {
-        StreamEnd::Complete => {}
-        // Nothing was generated: the same as the error's HTTP status.
-        StreamEnd::Failed { kind, message } if !answer.started() => {
-            return Err(if kind == TIMEOUT_ERROR {
-                timed_out(message)
-            } else {
-                ProviderFailure::new(stream_error_kind(kind), message.clone())
-            });
-        }
-        StreamEnd::Failed { kind, message } => {
-            return Err(stopped_midway(&format!("{kind}: {message}")));
-        }
-        // Claude took the request (the stream opened) and then nothing
-        // readable came. A path that holds the answer back looks the same
-        // as one that lost it, and the answer may be written and billed all
-        // the same.
-        StreamEnd::Broken(detail) if !answer.started() => {
-            return Err(ProviderFailure::new(
-                ProviderFailureKind::AnswerLost,
-                format!(
-                    "Claude took the request and no answer arrived, so it may have written and billed one ({detail})"
-                ),
-            ));
-        }
-        StreamEnd::Broken(detail) => return Err(stopped_midway(detail)),
-    }
+    arrived_whole(&answer)?;
     let model = answer
         .model
+        .clone()
         .filter(|model| !model.is_empty())
         .unwrap_or_else(|| MODEL.to_owned());
     let usage = answer.usage;
     let failed = |failure: ProviderFailure| failure.billed(model.clone(), usage.into());
     match answer.stop_reason.as_deref() {
         Some("refusal") => {
-            let details = &answer.stop_details;
-            let reason = details["explanation"]
-                .as_str()
-                .or(details["category"].as_str())
-                .unwrap_or("no reason given");
-            let declined = ProviderFailure::new(
-                ProviderFailureKind::Declined,
-                format!("Claude declined the request: {reason}"),
-            );
-            // A refusal before anything was written is billed only for
-            // some reasons; its usage is reported either way. One that
-            // comes midway bills the input and what was written.
-            let wrote = usage.output_tokens > 0 || !answer.text.is_empty();
-            let billed = wrote
-                || details["category"]
-                    .as_str()
-                    .is_some_and(|category| BILLED_REFUSALS.contains(&category));
-            return Err(if billed { failed(declined) } else { declined });
+            let declined = declined(&answer);
+            return Err(if refusal_is_billed(&answer) {
+                failed(declined)
+            } else {
+                declined
+            });
         }
         Some("max_tokens") => {
             return Err(failed(unexpected("the answer was cut at the token limit")));
@@ -277,6 +244,57 @@ pub fn read_answer(answer: StreamedAnswer) -> Result<GeneratedText, ProviderFail
         model,
         usage,
     })
+}
+
+/// Whether the answer arrived to its end, whatever it then says. A stream
+/// that stopped before the answer's end is a lost answer; an error in the
+/// place of the answer is the failure its HTTP status would be.
+pub(crate) fn arrived_whole(answer: &StreamedAnswer) -> Result<(), ProviderFailure> {
+    match &answer.end {
+        StreamEnd::Complete => Ok(()),
+        // Nothing was generated: the same as the error's HTTP status.
+        StreamEnd::Failed { kind, message } if !answer.started() => Err(if kind == TIMEOUT_ERROR {
+            timed_out(message)
+        } else {
+            ProviderFailure::new(stream_error_kind(kind), message.clone())
+        }),
+        StreamEnd::Failed { kind, message } => Err(stopped_midway(&format!("{kind}: {message}"))),
+        // Claude took the request (the stream opened) and then nothing
+        // readable came. A path that holds the answer back looks the same
+        // as one that lost it, and the answer may be written and billed all
+        // the same.
+        StreamEnd::Broken(detail) if !answer.started() => Err(ProviderFailure::new(
+            ProviderFailureKind::AnswerLost,
+            format!(
+                "Claude took the request and no answer arrived, so it may have written and billed one ({detail})"
+            ),
+        )),
+        StreamEnd::Broken(detail) => Err(stopped_midway(detail)),
+    }
+}
+
+/// The failure of a request Claude declined, with the reason it gives.
+pub(crate) fn declined(answer: &StreamedAnswer) -> ProviderFailure {
+    let details = &answer.stop_details;
+    let reason = details["explanation"]
+        .as_str()
+        .or(details["category"].as_str())
+        .unwrap_or("no reason given");
+    ProviderFailure::new(
+        ProviderFailureKind::Declined,
+        format!("Claude declined the request: {reason}"),
+    )
+}
+
+/// Whether a refusal is billed. One before anything was written is billed
+/// only for some reasons; its usage is reported either way. One that comes
+/// midway bills the input and what was written.
+pub(crate) fn refusal_is_billed(answer: &StreamedAnswer) -> bool {
+    let wrote = answer.usage.output_tokens > 0 || !answer.text.is_empty();
+    wrote
+        || answer.stop_details["category"]
+            .as_str()
+            .is_some_and(|category| BILLED_REFUSALS.contains(&category))
 }
 
 /// A stream that stopped after Claude began to answer: a lost answer. It
@@ -362,7 +380,7 @@ fn given_up(answer: &StreamedAnswer) -> ProviderFailure {
     }
 }
 
-fn unexpected(detail: impl Into<String>) -> ProviderFailure {
+pub(crate) fn unexpected(detail: impl Into<String>) -> ProviderFailure {
     ProviderFailure::new(ProviderFailureKind::Unexpected, detail)
 }
 
@@ -381,7 +399,7 @@ fn is_timeout(response: &HttpResponse) -> bool {
 
 /// The message of a request Claude calls invalid, by its status or by an
 /// error in the place of the answer.
-fn bad_request(answered: &Answered) -> Option<String> {
+pub(crate) fn bad_request(answered: &Answered) -> Option<String> {
     match answered {
         Answered::Refused(response) if response.status == 400 => Some(error_message(response)),
         Answered::Answer(answer) if !answer.started() => match &answer.end {
@@ -395,9 +413,9 @@ fn bad_request(answered: &Answered) -> Option<String> {
 }
 
 /// How a request was answered.
-enum Answered {
+pub(crate) enum Answered {
     /// Claude took the request; the answer as far as it got.
-    Answer(StreamedAnswer),
+    Answer(Box<StreamedAnswer>),
     /// An error status, with its body.
     Refused(HttpResponse),
 }
@@ -507,15 +525,6 @@ impl<T: Transport> ClaudeTextGenerator<T> {
         &self.transport
     }
 
-    /// Sends the request and reads its answer as it arrives. It goes
-    /// again, after a wait, only when Claude says nothing was started: a
-    /// rate limit or an overload, by the status or by an error in the
-    /// place of the answer, and never when the answer's `x-should-retry`
-    /// header says not to. An error status that is not Claude speaking is
-    /// a lost answer, as for every paid call; so is Claude's own word that
-    /// it ran out of time, or a failure it asks not to be sent again. Once
-    /// `stop` asks, nothing more is sent, and an answer on its way is
-    /// given up where it is.
     fn send(
         &self,
         key: &ApiKey,
@@ -524,114 +533,130 @@ impl<T: Transport> ClaudeTextGenerator<T> {
         stop: &Stop,
     ) -> Result<Answered, ProviderFailure> {
         let http = message_request(key, request, with_fallback)?;
-        let mut retry = 0;
-        loop {
-            if stop.asked() {
-                return Err(not_sent());
-            }
-            // Billed for what it writes, read or not: a request that left
-            // and got no answer is a lost answer, never sent again by
-            // itself.
-            let StreamedResponse {
-                status,
-                headers,
-                body,
-            } = self
-                .transport
-                .send_streamed_until(&http, stop)
-                .map_err(unanswered)?;
-            let mut body = BufReader::new(body);
-            // What the answer's headers ask of a client that sends again.
-            let asked = HttpResponse {
-                status,
-                headers: headers.clone(),
-                body: String::new(),
-            };
-            let may_resend = asked.header("x-should-retry") != Some("false");
-            let (answered, wait) = if (200..=299).contains(&status) {
-                let answer = match comes_whole(&mut body) {
-                    // A server that does not stream hands the answer over
-                    // whole.
-                    Ok(true) => match parse_whole(&buffered(status, headers, body)) {
-                        Ok(answer) => answer,
-                        // Cut by the stop, not by the server.
-                        Err(_) if stop.asked() => {
-                            StreamedAnswer::unstarted(StreamEnd::Broken("given up".to_owned()))
-                        }
-                        Err(failure) => return Err(failure),
-                    },
-                    Ok(false) => claude_stream::read(body),
-                    Err(error) => StreamedAnswer::unstarted(StreamEnd::Broken(error.to_string())),
-                };
-                // Only an answer that broke off is given up. One that
-                // arrived whole all the same is an answer: it is paid for,
-                // and the caller decides what to do with it. And an error
-                // Claude sent in its place still says what it says.
-                if stop.asked() && matches!(answer.end, StreamEnd::Broken(_)) {
-                    return Err(given_up(&answer));
-                }
-                let wait = (comes_back_shortly(&answer) && may_resend).then(|| {
-                    let mut busy = asked;
-                    busy.status = 529;
-                    self.backoff.delay(retry, &busy)
-                });
-                (Answered::Answer(answer), wait)
-            } else {
-                let response = buffered(status, headers, body);
-                // Claude worked on the request until its time ran out.
-                if status >= 500 && is_timeout(&response) {
-                    return Err(timed_out(&error_message(&response)));
-                }
-                let wait = match PaidAnswer::of(status, response.body.as_bytes(), own_words) {
-                    PaidAnswer::Lost => return Err(lost_upstream(status)),
-                    // Claude failed and says not to send the request again:
-                    // not an outage to send it again after.
-                    _ if status >= 500 && !may_resend => {
-                        return Err(ProviderFailure::new(
-                            ProviderFailureKind::AnswerLost,
-                            format!(
-                                "Claude failed and asks not to be sent the request again, so it may have written and billed part of an answer (HTTP {status}: {})",
-                                error_message(&response)
-                            ),
-                        ));
-                    }
-                    PaidAnswer::StartedNothing if may_resend => {
-                        Some(self.backoff.delay(retry, &response))
-                    }
-                    PaidAnswer::StartedNothing | PaidAnswer::Told => None,
-                };
-                (Answered::Refused(response), wait)
-            };
-            match wait {
-                Some(wait) if retry < self.backoff.retries => {
-                    if !self.pause(wait, stop) {
-                        return Err(not_sent_again());
-                    }
-                    retry += 1;
-                }
-                _ => return Ok(answered),
-            }
-        }
+        send_paid(&self.transport, &self.backoff, &self.sleep, &http, stop)
     }
+}
 
-    /// Waits before sending again, in short steps when somebody may stop
-    /// the wait. False once `stop` asked.
-    fn pause(&self, wait: Duration, stop: &Stop) -> bool {
-        if !stop.may_ask() {
-            (self.sleep)(wait);
-            return true;
+/// Sends a paid request to the Messages API and reads its answer as it
+/// arrives. It goes again, after a wait, only when Claude says nothing was
+/// started: a rate limit or an overload, by the status or by an error in
+/// the place of the answer, and never when the answer's `x-should-retry`
+/// header says not to. An error status that is not Claude speaking is a
+/// lost answer, as for every paid call; so is Claude's own word that it
+/// ran out of time, or a failure it asks not to be sent again. Once `stop`
+/// asks, nothing more is sent, and an answer on its way is given up where
+/// it is.
+pub(crate) fn send_paid<T: Transport>(
+    transport: &T,
+    backoff: &Backoff,
+    sleep: &Sleeper,
+    http: &HttpRequest,
+    stop: &Stop,
+) -> Result<Answered, ProviderFailure> {
+    let mut retry = 0;
+    loop {
+        if stop.asked() {
+            return Err(not_sent());
         }
-        let mut left = wait;
-        while !left.is_zero() {
-            if stop.asked() {
-                return false;
+        // Billed for what it writes, read or not: a request that left
+        // and got no answer is a lost answer, never sent again by
+        // itself.
+        let StreamedResponse {
+            status,
+            headers,
+            body,
+        } = transport
+            .send_streamed_until(http, stop)
+            .map_err(unanswered)?;
+        let mut body = BufReader::new(body);
+        // What the answer's headers ask of a client that sends again.
+        let asked = HttpResponse {
+            status,
+            headers: headers.clone(),
+            body: String::new(),
+        };
+        let may_resend = asked.header("x-should-retry") != Some("false");
+        let (answered, wait) = if (200..=299).contains(&status) {
+            let answer = match comes_whole(&mut body) {
+                // A server that does not stream hands the answer over
+                // whole.
+                Ok(true) => match parse_whole(&buffered(status, headers, body)) {
+                    Ok(answer) => answer,
+                    // Cut by the stop, not by the server.
+                    Err(_) if stop.asked() => {
+                        StreamedAnswer::unstarted(StreamEnd::Broken("given up".to_owned()))
+                    }
+                    Err(failure) => return Err(failure),
+                },
+                Ok(false) => claude_stream::read(body),
+                Err(error) => StreamedAnswer::unstarted(StreamEnd::Broken(error.to_string())),
+            };
+            // Only an answer that broke off is given up. One that
+            // arrived whole all the same is an answer: it is paid for,
+            // and the caller decides what to do with it. And an error
+            // Claude sent in its place still says what it says.
+            if stop.asked() && matches!(answer.end, StreamEnd::Broken(_)) {
+                return Err(given_up(&answer));
             }
-            let step = left.min(STOP_POLL);
-            (self.sleep)(step);
-            left -= step;
+            let wait = (comes_back_shortly(&answer) && may_resend).then(|| {
+                let mut busy = asked;
+                busy.status = 529;
+                backoff.delay(retry, &busy)
+            });
+            (Answered::Answer(Box::new(answer)), wait)
+        } else {
+            let response = buffered(status, headers, body);
+            // Claude worked on the request until its time ran out.
+            if status >= 500 && is_timeout(&response) {
+                return Err(timed_out(&error_message(&response)));
+            }
+            let wait = match PaidAnswer::of(status, response.body.as_bytes(), own_words) {
+                PaidAnswer::Lost => return Err(lost_upstream(status)),
+                // Claude failed and says not to send the request again:
+                // not an outage to send it again after.
+                _ if status >= 500 && !may_resend => {
+                    return Err(ProviderFailure::new(
+                        ProviderFailureKind::AnswerLost,
+                        format!(
+                            "Claude failed and asks not to be sent the request again, so it may have written and billed part of an answer (HTTP {status}: {})",
+                            error_message(&response)
+                        ),
+                    ));
+                }
+                PaidAnswer::StartedNothing if may_resend => Some(backoff.delay(retry, &response)),
+                PaidAnswer::StartedNothing | PaidAnswer::Told => None,
+            };
+            (Answered::Refused(response), wait)
+        };
+        match wait {
+            Some(wait) if retry < backoff.retries => {
+                if !pause(sleep, wait, stop) {
+                    return Err(not_sent_again());
+                }
+                retry += 1;
+            }
+            _ => return Ok(answered),
         }
-        !stop.asked()
     }
+}
+
+/// Waits before sending again, in short steps when somebody may stop the
+/// wait. False once `stop` asked.
+fn pause(sleep: &Sleeper, wait: Duration, stop: &Stop) -> bool {
+    if !stop.may_ask() {
+        sleep(wait);
+        return true;
+    }
+    let mut left = wait;
+    while !left.is_zero() {
+        if stop.asked() {
+            return false;
+        }
+        let step = left.min(STOP_POLL);
+        sleep(step);
+        left -= step;
+    }
+    !stop.asked()
 }
 
 impl<T: Transport> TextGenerator for ClaudeTextGenerator<T> {
@@ -657,7 +682,7 @@ impl<T: Transport> TextGenerator for ClaudeTextGenerator<T> {
             ));
         }
         let response = match answered {
-            Answered::Answer(answer) => return read_answer(answer),
+            Answered::Answer(answer) => return read_answer(*answer),
             Answered::Refused(response) => response,
         };
         Err(failure(Provider::Claude, &response))

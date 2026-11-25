@@ -40,7 +40,7 @@ A clip request the provider took and that then ended without a clip (failed, can
 
 A scene plan or image job is not queued again while another scene job of its project is queued, running or still stopping: the two would pay for the same work. And an older scene plan job is not queued again once a newer scene job of the project came after it, since it could replace the plan made since: retry the newer job, or plan again from the [Scenes](scenes.md) stage, which asks first.
 
-The other jobs in which Claude writes a text (a script, chapters, a thumbnail, a music prompt, metadata, ideas, a version, a persona's look, a take prompt) wait for each other too: one is not queued again while another job works on the same thing, or while its own cancelled run is still stopping. A take's test, draft and final count as work on that take, together with its prompt. The stage does not start a new one in those moments either. Wait for it to end, then try again.
+The other jobs in which Claude writes a text (a script, chapters, a thumbnail, a music prompt, metadata, ideas, a version, a persona's look, a take prompt, a product's sheet) wait for each other too: one is not queued again while another job works on the same thing, or while its own cancelled run is still stopping. A take's test, draft and final count as work on that take, together with its prompt. The stage does not start a new one in those moments either. Wait for it to end, then try again.
 
 <a id="restart"></a>
 ## Closing Bardo mid-job

@@ -1458,8 +1458,9 @@ impl Bardo {
         self.personas.save(&persona).map_err(|_| failed)
     }
 
-    /// A product of the same name here keeps its id, images and logo; its
-    /// brief and whether it is archived come from the file.
+    /// A product of the same name here keeps its id, images, logo and
+    /// sheet; its brief and whether it is archived come from the file, and
+    /// the facts the file brought join the sheet as a saved brief's do.
     fn bring_product(&self, entry: &ProductEntry) -> Result<(), Text> {
         let failed = Text::SettingsFileItemFailed;
         let brief = entry.brief().ok_or(Text::SettingsFileItemNotRead)?;
@@ -1480,7 +1481,9 @@ impl Bardo {
                 ..Product::new(self.profile.id, brief)
             },
         };
-        self.products.save(&product).map_err(|_| failed)
+        self.products.save(&product).map_err(|_| failed)?;
+        self.take_brief_facts(&product);
+        Ok(())
     }
 
     /// Brings the channel and its accounts in, and the sign-ins of

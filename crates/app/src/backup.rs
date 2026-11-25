@@ -835,7 +835,18 @@ mod tests {
 
     /// Reviews the Reel to go at `due`.
     fn schedule(s: &Setup, due: SystemTime) -> JobId {
+        schedule_with(s, |_| due)
+    }
+
+    /// Reviews the Reel to go `delay` after the review is read: a time
+    /// taken before it is already past on a machine slow enough.
+    fn schedule_in(s: &Setup, delay: Duration) -> JobId {
+        schedule_with(s, |now| now + delay)
+    }
+
+    fn schedule_with(s: &Setup, due: impl FnOnce(SystemTime) -> SystemTime) -> JobId {
         let review = review(s);
+        let due = due(SystemTime::now());
         s.app
             .start_upload(
                 &review,
@@ -1028,7 +1039,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let s = on_disk(ready(), dir.path());
         s.h.reels.stall_publish.store(true, Ordering::SeqCst);
-        let id = schedule(&s, SystemTime::now() + Duration::from_millis(300));
+        let id = schedule_in(&s, Duration::from_secs(1));
         wait_until("publishing", || s.h.reels.stalled.load(Ordering::SeqCst));
         assert!(upload(&s).upload().unwrap().claimed_at.is_some());
         let backup = dir.path().join("backup.zip");

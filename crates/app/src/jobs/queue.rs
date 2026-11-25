@@ -171,8 +171,9 @@ pub enum JobActionError {
     #[error("the job starts from its stage, which asks first")]
     AsksFirst,
     /// An image or clip job whose scenes still to pay for would reach a
-    /// budget or pass the video's cap, or have no price: the estimate to
-    /// ask about before it is run again (#268).
+    /// budget or pass the video's cap, or have no price, or a product's
+    /// sheet job whose calls left would: the estimate to ask about before
+    /// it is run again (#268).
     #[error("the rest of the job needs a go-ahead on its cost")]
     OverBudget(Box<crate::SpendEstimate>),
     #[error(transparent)]

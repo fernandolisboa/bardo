@@ -61,6 +61,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) music: MusicHandler,
     pub(crate) thumbnails: ThumbnailHandler,
     pub(crate) looks: PersonaLookHandler,
+    pub(crate) sheets: crate::product_sheets::ProductSheetHandler,
     pub(crate) chapters: ChaptersHandler,
     pub(crate) renders: RenderHandler,
     pub(crate) metadata: MetadataHandler,
@@ -98,6 +99,7 @@ pub(crate) fn built_in_handlers(
         music,
         thumbnails,
         looks,
+        sheets,
         chapters,
         renders,
         metadata,
@@ -137,6 +139,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Thumbnail, Arc::clone(&thumbnails) as _);
     handlers.insert(JobKind::ThumbnailImage, thumbnails);
     handlers.insert(JobKind::PersonaLook, Arc::new(looks));
+    handlers.insert(JobKind::ProductResearch, Arc::new(sheets));
     handlers.insert(JobKind::Chapters, Arc::new(chapters));
     handlers.insert(JobKind::Render, Arc::new(renders));
     handlers.insert(JobKind::Metadata, Arc::new(metadata));
@@ -262,7 +265,8 @@ impl Bardo {
     /// Queues a failed or cancelled job again; it resumes from its last
     /// checkpoint. An image or clip job with scenes still to pay for asks
     /// first when those would reach a budget or pass the video's cap, or
-    /// have no price (`JobActionError::OverBudget`).
+    /// have no price (`JobActionError::OverBudget`); so does a product's
+    /// sheet job with a call still to pay for.
     pub fn retry_job(&self, id: JobId) -> Result<(), JobActionError> {
         self.retry_job_with(id, BudgetConsent::Ask)
     }
@@ -323,8 +327,10 @@ impl Bardo {
 
     /// What to ask before `job` is run again: the estimate of the images
     /// or clips it still has to pay for, when that reaches a budget,
-    /// passes the video's cap or has no price. What the job already
-    /// delivered or sent is not counted again: it is in what the video has
+    /// passes the video's cap or has no price, or of the research and the
+    /// sheet a product's sheet job still has to pay for. What the job
+    /// already delivered or sent is not counted again: it is in what the
+    /// video has
     /// cost. The first start's answer does not carry over: the cap, the
     /// budgets and the spend may all have changed since.
     fn retry_over_budget(
@@ -337,6 +343,11 @@ impl Bardo {
         }) else {
             return Ok(None);
         };
+        // A product's sheet job belongs to no video: what it still has to
+        // pay for is checked against the provider's budget alone.
+        if let Some(calls) = self.sheet_calls_left(&job) {
+            return Ok(self.check_budget(&calls, consent)?.err());
+        }
         let Some((project, calls)) = self.images_left(&job).or_else(|| self.clips_left(&job))
         else {
             return Ok(None);

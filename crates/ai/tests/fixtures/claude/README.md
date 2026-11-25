@@ -42,3 +42,23 @@ Lost and failed answers (ADR-0030):
   place of the API's answer.
 - `messages-no-text.http`: synthetic, a finished answer with an empty
   thinking block and no text, with its usage.
+
+Research on the web (`ClaudeWebResearcher`, ADR-0037), written from the
+documented shapes of the web search and web fetch tools as of November
+2026: a `server_tool_use` block whose input streams as `input_json_delta`,
+a result block that arrives whole in its `content_block_start`, citations
+as `citations_delta`, and a usage with `iterations`, the tokens through
+the prompt cache and `server_tool_use` counts. No real key was used;
+re-record with one when a research misbehaves.
+
+- `research-whole.http`: a fetch of the product page, a search with three
+  results, then the notes in two text blocks, the second with a citation.
+- `research-paused.http`, `research-resumed.http`: a turn the API pauses
+  (`pause_turn`) with a fetch called and not yet run, and the answer to
+  its continuation, which opens with that fetch's result.
+- `research-paused-again.http`: a continuation that pauses again.
+- `research-tool-error.http`: a fetch that fails and a search refused for
+  passing `max_uses`, both as error objects inside a successful answer.
+- `research-refusal.http`: a refusal after the first search, with its
+  usage.
+- `research-max-tokens.http`: notes cut at the token limit.

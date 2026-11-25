@@ -819,8 +819,8 @@ fn an_answer_cut_at_the_limit_is_unexpected_and_says_what_it_billed() {
     assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
     // Claude bills every token of an answer it cuts.
     assert_eq!(
-        failure.billed,
-        Some(BilledUse {
+        failure.billed.as_deref(),
+        Some(&BilledUse {
             model: "claude-opus-5-5".into(),
             usage: Metered {
                 input_tokens: 412,

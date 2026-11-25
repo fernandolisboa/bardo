@@ -1,7 +1,7 @@
 use bardo_domain::{
     MAX_PRODUCT_IMAGES, Product, ProductBrief, ProductDraft, ProductId, ProductImage,
     ProductImageId, ProductImageKind, ProductKind, ProductLogo, ProductOwnership, ProductPicture,
-    ProductRepository, ProfileId, RepositoryError,
+    ProductRepository, ProductSheet, ProfileId, RepositoryError,
 };
 use rusqlite::{OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -226,6 +226,18 @@ impl ProductRepository for Database {
         rows.into_iter().map(ImageRow::into_image).collect()
     }
 
+    fn image_count(&self, product: ProductId) -> Result<usize, RepositoryError> {
+        let count: i64 = self
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM product_image WHERE product_id = ?1",
+                [product.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(boxed)?;
+        Ok(usize::try_from(count).unwrap_or_default())
+    }
+
     fn add_image(&self, image: &ProductImage) -> Result<bool, RepositoryError> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(boxed)?;
@@ -384,6 +396,14 @@ impl ProductRepository for Database {
             .map_err(boxed)?;
         Ok(removed > 0)
     }
+
+    fn sheet(&self, product: ProductId) -> Result<Option<ProductSheet>, RepositoryError> {
+        self.read_product_sheet(product)
+    }
+
+    fn save_sheet(&self, sheet: &ProductSheet) -> Result<(), RepositoryError> {
+        self.write_product_sheet(sheet)
+    }
 }
 
 #[cfg(test)]
@@ -507,6 +527,7 @@ mod tests {
             db.images(saved.id).unwrap(),
             [first.clone(), second.clone()]
         );
+        assert_eq!(db.image_count(saved.id).unwrap(), 2);
 
         assert!(
             db.set_image_kind(saved.id, first.id, ProductImageKind::Screen)

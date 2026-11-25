@@ -40,7 +40,7 @@ Um pedido de clipe que o provedor aceitou e que depois terminou sem clipe (falho
 
 Uma tarefa de plano de cenas ou de imagens não volta para a fila enquanto outra tarefa de cenas do mesmo projeto está na fila, em execução ou ainda parando: as duas pagariam pelo mesmo trabalho. E uma tarefa de plano de cenas mais antiga não volta para a fila depois que uma tarefa de cenas mais nova do projeto veio depois dela, porque poderia substituir o plano feito depois: tente de novo a tarefa mais nova, ou planeje de novo pela etapa [Cenas](scenes.md), que pergunta antes.
 
-As outras tarefas em que o Claude escreve um texto (um roteiro, capítulos, uma miniatura, um prompt de música, metadados, ideias, uma versão, a aparência de uma persona, um prompt de tomada) também esperam umas pelas outras: uma delas não volta para a fila enquanto outra tarefa trabalha na mesma coisa, ou enquanto a própria execução cancelada ainda está parando. O teste, o rascunho e a versão final de uma tomada contam como trabalho nessa tomada, junto com o prompt dela. A etapa também não inicia uma nova nesses instantes. Espere terminar e tente de novo.
+As outras tarefas em que o Claude escreve um texto (um roteiro, capítulos, uma miniatura, um prompt de música, metadados, ideias, uma versão, a aparência de uma persona, um prompt de tomada, a ficha de um produto) também esperam umas pelas outras: uma delas não volta para a fila enquanto outra tarefa trabalha na mesma coisa, ou enquanto a própria execução cancelada ainda está parando. O teste, o rascunho e a versão final de uma tomada contam como trabalho nessa tomada, junto com o prompt dela. A etapa também não inicia uma nova nesses instantes. Espere terminar e tente de novo.
 
 <a id="restart"></a>
 ## Fechar o Bardo no meio de uma tarefa

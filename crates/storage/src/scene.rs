@@ -915,7 +915,13 @@ mod tests {
             // then migrated.
             let mut conn = s.db.conn();
             conn.execute_batch(
-                "ALTER TABLE video_project DROP COLUMN spend_cap_kind;
+                "DROP TABLE product_claim; DROP TABLE product_sheet_source;
+                 DROP TABLE product_sheet_alternative; DROP TABLE product_sheet_objection;
+                 DROP TABLE product_sheet_segment; DROP TABLE product_sheet;
+                 ALTER TABLE cost_record DROP COLUMN cache_read_tokens;
+                 ALTER TABLE cost_record DROP COLUMN cache_write_tokens;
+                 ALTER TABLE cost_record DROP COLUMN searches;
+                 ALTER TABLE video_project DROP COLUMN spend_cap_kind;
                  ALTER TABLE scene_cast DROP COLUMN described_only;
                  ALTER TABLE scene DROP COLUMN pending_portraits;
                  ALTER TABLE scene DROP COLUMN image_portraits;

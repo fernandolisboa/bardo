@@ -84,6 +84,7 @@ mod plan;
 mod post_insights;
 mod preflight;
 mod product;
+mod product_sheet;
 mod production;
 mod profile;
 mod provider_key;
@@ -115,6 +116,7 @@ mod upload;
 mod visual_style;
 mod voice;
 mod voice_sample;
+mod web_research;
 mod youtube_policy;
 
 pub use agent_task::{AgentTask, AgentTaskError};
@@ -288,6 +290,11 @@ pub use product::{
     ProductImage, ProductImageError, ProductImageId, ProductImageKind, ProductInUse, ProductKind,
     ProductLogo, ProductOwnership, ProductPicture, ProductRepository, split_facts,
 };
+pub use product_sheet::{
+    Alternative, AudienceSegment, Claim, ClaimError, ClaimId, ClaimKind, ClaimRecord, ClaimSource,
+    ClaimState, Objection, ProductSheet, RestrictedCategory, SheetClaimError, SheetFieldError,
+    SheetSource, SheetTaken, SheetText, WrittenClaim, WrittenSheet, WrittenSource,
+};
 pub use production::{
     AnimatedScenes, HOOK_LENGTH, NARRATION_CHARS_PER_SECOND, ProductionMode, TYPICAL_SCENE,
     UnknownProductionMode, typical_length, typical_scenes,
@@ -407,6 +414,7 @@ pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoicePrevie
 pub use voice_sample::{
     InvalidSampleText, SampleSource, SampleText, VoiceSampleStore, VoiceSampleStoreError,
 };
+pub use web_research::{PageRead, ResearchLimits, ResearchNotes, ResearchRequest, WebResearcher};
 pub use youtube_policy::{
     Forgotten, KEEP_AT_MOST, PRIVACY_POLICY_VERSION, PrivacyConsent, REFRESH_AFTER, UPKEEP_EVERY,
     YouTubeDataStore, YouTubeRetention, authorization_current, confirmed_at, keep_since,

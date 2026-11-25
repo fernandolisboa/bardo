@@ -2209,6 +2209,8 @@ pub(crate) mod tests {
         pub(crate) agent_task: Arc<bardo_storage::MemoryAgentTask>,
         pub(crate) files: Arc<MemoryProjectFiles>,
         pub(crate) text: Arc<FakeTextGenerator>,
+        /// Research on the web.
+        pub(crate) researcher: Arc<crate::product_sheets::testing::FakeResearcher>,
         pub(crate) images: Arc<FakeImages>,
         /// The video's music.
         pub(crate) music: Arc<crate::testing::FakeMusic>,
@@ -2265,6 +2267,7 @@ pub(crate) mod tests {
                 audio: Arc::default(),
                 files,
                 text: Arc::default(),
+                researcher: Arc::default(),
                 images: Arc::default(),
                 music: Arc::default(),
                 clips: Arc::default(),
@@ -2408,6 +2411,7 @@ pub(crate) mod tests {
                 market_data: Arc::new(FakeMarketData::default()),
                 video_stats: Arc::clone(&self.stats) as _,
                 text: Arc::clone(&self.text) as _,
+                researcher: Arc::clone(&self.researcher) as _,
                 decisions: vec![Arc::clone(&self.decisions) as _],
                 voices: Arc::new(FakeVoiceLibrary::default()),
                 speech: Arc::clone(&self.speech) as _,
