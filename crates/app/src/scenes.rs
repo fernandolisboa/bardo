@@ -39,9 +39,9 @@ use bardo_domain::{
     NoSuchPlace, NoSuchScene, OtherShot, PlaceDraft, PlanDraft, ProfileId, Progress, ProjectFiles,
     Provider, ReferenceImage, RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError,
     SceneImage, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt, SceneSetting,
-    SecretStore, TemplateKind, TemplateUsed, TemplateVariable, TemplateVersion, TemplateVersionId,
-    TextEffort, TextFormat, TextGenerator, TextRequest, VideoProject, VideoProjectId,
-    scene_image_prompt, sentences,
+    SecretStore, StyleChoice, TemplateKind, TemplateUsed, TemplateVariable, TemplateVersion,
+    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, VideoProject,
+    VideoProjectId, scene_image_prompt, sentences,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
@@ -170,6 +170,15 @@ pub struct ScenesView {
     pub clips: ClipsView,
     /// For a version: the scenes it carried and where they stand.
     pub version: Option<crate::VersionScenes>,
+    /// The style the video's next images are drawn in (#259): the
+    /// project's own, else its channel's.
+    pub style: StyleChoice,
+    /// The scenes whose image was drawn in another style. They stay until
+    /// the user draws them again.
+    pub restyled: Vec<usize>,
+    /// What drawing those again would cost, their people's portraits
+    /// included; `None` when there is none.
+    pub restyle_estimate: Option<SpendEstimate>,
 }
 
 /// Claude's call that plans scenes from `rendered`.
@@ -179,7 +188,7 @@ fn plan_call(rendered: &RenderedPrompt) -> PlannedCall {
 }
 
 /// Nano Banana's calls that draw `images` images, portraits included.
-fn images_call(images: usize) -> PlannedCall {
+pub(crate) fn images_call(images: usize) -> PlannedCall {
     PlannedCall::new(Provider::Gemini, CostPurpose::SceneImage, images as u64)
 }
 
@@ -189,7 +198,7 @@ impl ScenesView {
     pub fn missing_images(&self) -> usize {
         self.plan.as_ref().map_or(0, |plan| {
             let missing = plan.missing_images();
-            missing.len() + plan.missing_portraits(&missing).len()
+            missing.len() + plan.missing_portraits(&missing, self.style).len()
         })
     }
 
@@ -324,6 +333,10 @@ struct ImagesPayload {
     /// before any scene (#246).
     #[serde(default)]
     portraits: Vec<usize>,
+    /// The video's visual style when the job was started, by its code
+    /// (#259); jobs from before styles took the look from the notes.
+    #[serde(default)]
+    style: String,
 }
 
 fn landscape() -> String {
@@ -690,6 +703,7 @@ impl SceneHandler {
             .aspect
             .parse()
             .map_err(|_| unexpected(format!("unknown frame shape {}", payload.aspect)))?;
+        let style = StyleChoice::from_code(&payload.style);
         // Portraits drawn on the way to a scene are counted as they come.
         let mut total = payload.portraits.len() + payload.scenes.len();
         let mut failed: Vec<JobFailure> = Vec::new();
@@ -729,7 +743,7 @@ impl SceneHandler {
                     Some(key) => key,
                     None => key.insert(self.key(Provider::Gemini)?),
                 };
-                self.draw_portrait(key, project, plan_id, member, job, &mut failed)?;
+                self.draw_portrait(key, project, plan_id, (member, style), job, &mut failed)?;
             }
             step(&mut cx, &mut done, total)?;
         }
@@ -756,12 +770,13 @@ impl SceneHandler {
                 Some(key) => key,
                 None => key.insert(self.key(Provider::Gemini)?),
             };
-            // The people it shows get their portrait first.
-            for member in plan.missing_portraits(&[index]) {
+            // The people it shows get their portrait first, in the video's
+            // style.
+            for member in plan.missing_portraits(&[index], style) {
                 if !tried.contains(&member) {
                     tried.push(member);
                     total += 1;
-                    self.draw_portrait(key, project, plan_id, member, job, &mut failed)?;
+                    self.draw_portrait(key, project, plan_id, (member, style), job, &mut failed)?;
                 }
             }
             let Some(plan) = self.saved_plan(project, plan_id)? else {
@@ -776,11 +791,12 @@ impl SceneHandler {
                 .filter_map(|member| plan.cast_member(member).ok())
                 .collect();
             let mut references = References::default();
-            // A portrait that will not read is described instead.
+            // A portrait that will not read, or one in another style that
+            // could not be drawn again, is described instead.
             let referenced: Vec<bool> = shown
                 .iter()
                 .map(|member| {
-                    member.portrait().is_some_and(|portrait| {
+                    member.portrait_in(style).is_some_and(|portrait| {
                         references.add(
                             self.files.as_ref(),
                             self.media.as_ref(),
@@ -793,20 +809,17 @@ impl SceneHandler {
             // Then the other scenes it belongs with; one whose image will
             // not read is left out.
             let shots: Vec<OtherShot> = plan
-                .reference_shots(index)
+                .reference_shots(index, style)
                 .into_iter()
                 .filter(|(other, _)| {
-                    plan.scene(*other)
-                        .ok()
-                        .and_then(|other| other.image())
-                        .is_some_and(|image| {
-                            references.add(
-                                self.files.as_ref(),
-                                self.media.as_ref(),
-                                project,
-                                &image.file,
-                            )
-                        })
+                    plan.shot_in(*other, style).is_some_and(|image| {
+                        references.add(
+                            self.files.as_ref(),
+                            self.media.as_ref(),
+                            project,
+                            &image.file,
+                        )
+                    })
                 })
                 .map(|(_, shot)| shot)
                 .collect();
@@ -815,6 +828,7 @@ impl SceneHandler {
                     .scene_place(index)
                     .and_then(|place| plan.place(place).ok()),
                 shots: &shots,
+                style,
             };
             let references = references.images;
             let prompt = scene_image_prompt(scene.prompt().as_str(), &shown, &referenced, setting);
@@ -911,16 +925,16 @@ impl SceneHandler {
         }
     }
 
-    /// Draws cast member `member`'s portrait and puts it in place of the
-    /// current one. A failure about the portrait is recorded on the member
-    /// and in `failed`, and the scenes are drawn without it; any other
-    /// failure stops the job.
+    /// Draws cast member `member`'s portrait in `style` and puts it in
+    /// place of the current one. A failure about the portrait is recorded
+    /// on the member and in `failed`, and the scenes are drawn without it;
+    /// any other failure stops the job.
     fn draw_portrait(
         &self,
         key: &ApiKey,
         project: VideoProjectId,
         plan_id: ScenePlanId,
-        member: usize,
+        (member, style): (usize, StyleChoice),
         job: JobId,
         failed: &mut Vec<JobFailure>,
     ) -> Result<(), JobFailure> {
@@ -932,7 +946,7 @@ impl SceneHandler {
         };
         let name = cast.name.clone();
         let description = cast.description().clone();
-        let prompt = cast.portrait_prompt();
+        let prompt = cast.portrait_prompt(style);
         let request = ImageRequest {
             prompt: prompt.clone(),
             shape: ImageShape::Portrait,
@@ -1084,10 +1098,21 @@ impl Bardo {
             }
             None => None,
         };
+        let style = self.video_style(&project)?;
         let missing = plan.as_ref().map_or(0, |plan| {
             let missing = plan.missing_images();
-            missing.len() + plan.missing_portraits(&missing).len()
+            missing.len() + plan.missing_portraits(&missing, style).len()
         });
+        let restyled = plan
+            .as_ref()
+            .map_or_else(Vec::new, |plan| plan.in_another_style(style));
+        let restyle_estimate = match (&plan, restyled.len()) {
+            (Some(plan), scenes @ 1..) => {
+                let portraits = plan.missing_portraits(&restyled, style).len();
+                Some(self.estimate(&[images_call(scenes + portraits)])?)
+            }
+            _ => None,
+        };
         let clips = self.clips_view(&project, plan.as_ref())?;
         let version = self.version_scenes(project.id, plan.as_ref(), narration.as_ref())?;
         Ok(ScenesView {
@@ -1104,7 +1129,7 @@ impl Bardo {
             image_estimates: match &plan {
                 Some(plan) => (0..plan.scenes().len())
                     .map(|index| {
-                        let portraits = plan.missing_portraits(&[index]).len();
+                        let portraits = plan.missing_portraits(&[index], style).len();
                         self.estimate(&[images_call(1 + portraits)])
                     })
                     .collect::<Result<_, _>>()?,
@@ -1115,6 +1140,9 @@ impl Bardo {
             template,
             plan_estimate,
             project,
+            style,
+            restyled,
+            restyle_estimate,
         })
     }
 
@@ -1213,6 +1241,30 @@ impl Bardo {
         Ok(plan)
     }
 
+    /// Whether `job` is an image job started when its video had another
+    /// visual style (#259). Run again, it would draw in the style it
+    /// carries: images the Scenes stage counts as in another style at
+    /// once, and portraits drawn over the current ones, with no estimate
+    /// shown. The user draws those scenes from the stage instead.
+    pub(crate) fn restyled_images(&self, job: JobId) -> bool {
+        let jobs = self.jobs();
+        let Some(payload) = jobs
+            .iter()
+            .find(|candidate| candidate.id() == job && candidate.kind() == JobKind::SceneImages)
+            .and_then(|job| parse::<ImagesPayload>(job.payload()).ok())
+        else {
+            return false;
+        };
+        let Ok(Some(project)) = id::<VideoProjectId>(&payload.project)
+            .map_err(|_| ())
+            .and_then(|project| self.themes.project(project).map_err(|_| ()))
+        else {
+            return false;
+        };
+        self.video_style(&project)
+            .is_ok_and(|style| style != StyleChoice::from_code(&payload.style))
+    }
+
     fn draw_scenes(
         &self,
         plan: &ScenePlan,
@@ -1222,8 +1274,13 @@ impl Bardo {
     ) -> Result<JobId, SceneError> {
         self.scenes_idle(plan.project)?;
         self.require_key(Provider::Gemini)?;
+        let project = self
+            .themes
+            .project(plan.project)?
+            .ok_or(SceneError::ProjectNotFound)?;
+        let style = self.video_style(&project)?;
         let first = plan
-            .missing_portraits(&scenes)
+            .missing_portraits(&scenes, style)
             .into_iter()
             .filter(|member| !portraits.contains(member))
             .count();
@@ -1232,16 +1289,13 @@ impl Bardo {
             images_call(portraits.len() + first + scenes.len()),
             consent,
         )?;
-        let project = self
-            .themes
-            .project(plan.project)?
-            .ok_or(SceneError::ProjectNotFound)?;
         let payload = ImagesPayload {
             project: plan.project.to_string(),
             plan: plan.id.to_string(),
             scenes,
             aspect: self.video_format(&project)?.aspect().code().to_owned(),
             portraits,
+            style: style.code().to_owned(),
         };
         let job = Job::new(self.profile.id, JobKind::SceneImages, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
@@ -1260,6 +1314,24 @@ impl Bardo {
             return Err(SceneError::NothingToGenerate);
         }
         self.draw_scenes(&plan, missing, Vec::new(), consent)
+    }
+
+    /// Starts a job that draws again every scene whose image was drawn in
+    /// another style than the video's (#259). Each current image stays
+    /// until the user accepts the new one. Past Gemini's budget it needs
+    /// `consent`.
+    pub fn redraw_restyled_scenes(
+        &self,
+        project: VideoProjectId,
+        consent: BudgetConsent,
+    ) -> Result<JobId, SceneError> {
+        let plan = self.own_plan(project)?;
+        let project = self.scenes_project(project)?;
+        let restyled = plan.in_another_style(self.video_style(&project)?);
+        if restyled.is_empty() {
+            return Err(SceneError::NothingToGenerate);
+        }
+        self.draw_scenes(&plan, restyled, Vec::new(), consent)
     }
 
     /// Starts a job that draws scene `index` again. Its current image stays
@@ -1803,7 +1875,7 @@ pub(crate) mod tests {
     }
 
     /// The plan of `plan_answer` with a chef in the first and last scenes.
-    fn cast_answer() -> String {
+    pub(crate) fn cast_answer() -> String {
         serde_json::json!({
             "cast": [
                 {"name": "the chef", "description": "A man in his fifties, brown skin, grey beard, white apron"},
@@ -1820,7 +1892,7 @@ pub(crate) mod tests {
         .to_string()
     }
 
-    fn cast_project(h: &Harness, app: &Bardo) -> VideoProject {
+    pub(crate) fn cast_project(h: &Harness, app: &Bardo) -> VideoProject {
         let project = h.narrated_project(app);
         h.answer(cast_answer());
         done(

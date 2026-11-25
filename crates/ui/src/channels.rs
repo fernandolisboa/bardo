@@ -6,8 +6,8 @@
 use bardo_app::bardo_domain::{
     CaptionHighlight, CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModel,
     ClipModelRef, ContentLanguage, Country, MotionDefault, MotionPattern, MotionStrength,
-    PersonaId, ProductionMode, TakeModel, ThumbnailLook, Transition, TransitionKind, VideoFormat,
-    frame_time,
+    PersonaId, ProductionMode, StyleChoice, TakeModel, ThumbnailLook, Transition, TransitionKind,
+    VideoFormat, frame_time,
 };
 use std::rc::Rc;
 
@@ -176,6 +176,18 @@ fn production_choices(bardo: &Bardo) -> SearchableVec<Choice<ProductionMode>> {
     }))
 }
 
+/// The channel's notes first, then the catalog in its own order.
+fn style_choices(bardo: &Bardo) -> SearchableVec<Choice<StyleChoice>> {
+    SearchableVec::new(
+        StyleChoice::all()
+            .map(|value| Choice {
+                value,
+                title: tr(bardo, Text::VisualStyleName(value)),
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
 fn transition_choices(bardo: &Bardo) -> SearchableVec<Choice<TransitionKind>> {
     SearchableVec::new(TransitionKind::ALL.map(|value| Choice {
         value,
@@ -270,6 +282,7 @@ pub struct ChannelsScreen {
     thumbnail_look: ChoiceSelect<ThumbnailLook>,
     format: ChoiceSelect<VideoFormat>,
     production: ChoiceSelect<ProductionMode>,
+    style: ChoiceSelect<StyleChoice>,
     transition: ChoiceSelect<TransitionKind>,
     transition_length: ChoiceSelect<u32>,
     motion: ChoiceSelect<MotionPattern>,
@@ -353,6 +366,12 @@ impl ChannelsScreen {
             let selected = index_of(&ProductionMode::ALL, &defaults.production);
             SelectState::new(productions, selected, window, cx)
         });
+        let styles = style_choices(bardo.read(cx));
+        let style = cx.new(|cx| {
+            let all: Vec<StyleChoice> = StyleChoice::all().collect();
+            let selected = index_of(&all, &defaults.style);
+            SelectState::new(styles, selected, window, cx).searchable(true)
+        });
         let transition = cx.new(|cx| {
             let selected = index_of(&TransitionKind::ALL, &defaults.transition.kind);
             SelectState::new(transitions, selected, window, cx)
@@ -412,6 +431,7 @@ impl ChannelsScreen {
             thumbnail_look,
             format,
             production,
+            style,
             transition,
             transition_length,
             motion,
@@ -458,6 +478,7 @@ impl ChannelsScreen {
         let lengths = transition_length_choices(bardo);
         let formats = format_choices(bardo);
         let productions = production_choices(bardo);
+        let styles = style_choices(bardo);
         let motions = motion_choices(bardo);
         let strengths = motion_strength_choices(bardo);
 
@@ -525,6 +546,13 @@ impl ChannelsScreen {
         self.production.update(cx, |select, cx| {
             let selected = select.selected_value().copied();
             select.set_items(productions, window, cx);
+            if let Some(value) = selected {
+                select.set_selected_value(&value, window, cx);
+            }
+        });
+        self.style.update(cx, |select, cx| {
+            let selected = select.selected_value().copied();
+            select.set_items(styles, window, cx);
             if let Some(value) = selected {
                 select.set_selected_value(&value, window, cx);
             }
@@ -637,6 +665,9 @@ impl ChannelsScreen {
         self.production.update(cx, |select, cx| {
             select.set_selected_value(&draft.production, window, cx)
         });
+        self.style.update(cx, |select, cx| {
+            select.set_selected_value(&draft.style, window, cx)
+        });
         self.transition.update(cx, |select, cx| {
             select.set_selected_value(&draft.transition.kind, window, cx)
         });
@@ -728,6 +759,12 @@ impl ChannelsScreen {
             ),
             production: self
                 .production
+                .read(cx)
+                .selected_value()
+                .copied()
+                .unwrap_or_default(),
+            style: self
+                .style
                 .read(cx)
                 .selected_value()
                 .copied()
@@ -909,6 +946,15 @@ impl ChannelsScreen {
                             Text::ChannelAestheticNotes,
                             Textarea::new(&self.aesthetic_notes).into_any_element(),
                             error_for(AESTHETIC_NOTES_ERRORS),
+                        ))
+                        .child(explained(
+                            "channel-style-info",
+                            Text::ChannelStyle,
+                            Text::ChannelStyleHint,
+                            guide::refs::CHANNELS_STYLE,
+                            Select::new(&self.style)
+                                .search_placeholder(tr(bardo, Text::ChannelStyle))
+                                .into_any_element(),
                         ))
                         .into_any_element(),
                 ))

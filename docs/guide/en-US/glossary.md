@@ -84,6 +84,8 @@ The words Bardo uses, in plain terms.
 
 **Place**: a place more than one scene happens in, described once in the scene plan so every scene there is drawn the same ([The same place from scene to scene](scenes.md#same-place)).
 
+**Visual style**: how a video's pictures are drawn (photorealistic, anime, manga, watercolor, clay and so on), picked per channel and changeable per project. Bardo adds it to every scene image, portrait and thumbnail background ([Visual style](channels.md#style)).
+
 **Scene**: a stretch of the narration with one image, and optionally a clip.
 
 **Clip**: a short video a video model makes from a scene's image. Optional.

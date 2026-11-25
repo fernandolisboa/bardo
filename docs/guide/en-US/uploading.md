@@ -41,7 +41,7 @@ A long video's YouTube post has a **Thumbnail** card in the inspector: the pictu
 
 - **Write with Claude** writes the thumbnail's text (a short hook that adds to the title) and a prompt for its background, from the Thumbnail [template](templates.md). The button shows what the call costs.
 - **Text** is drawn in big letters, up to 40 characters; leave it empty for the picture alone. Pick its **Text position** (top or bottom, left, middle or right) and its **Look**: Bold (white with a black outline), Yellow (yellow with a black outline) or Banner (white on a dark band). Each channel has a default look in its [form](channels.md#defaults).
-- **Background** is a strip of pictures: the project's scene images, free, and every background drawn so far. **Draw a background** has the channel's image model draw one from the **Background prompt**, after showing its cost; drawing again adds to the strip and never replaces the picture in use.
+- **Background** is a strip of pictures: the project's scene images, free, and every background drawn so far. **Draw a background** has the channel's image model draw one from the **Background prompt**, in the video's [visual style](projects.md#style), after showing its cost; drawing again adds to the strip and never replaces the picture in use. A background prompt written before the style changed may still name the earlier look: write it again first.
 - **Save thumbnail** makes the picture, off to the side so Bardo stays responsive, and shows it. Changes after that mark it **Changed since it was saved** until you save again.
 
 The saved picture goes with the YouTube upload (see [the review](#review)) and into the YouTube folder of an [export](exporting.md#folder).

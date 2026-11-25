@@ -51,6 +51,8 @@ pub(super) enum SceneAction {
     Redraw(usize),
     /// Draw a cast member's portrait again.
     RedrawPortrait(usize),
+    /// Draw again every scene drawn in another style than the video's.
+    RedrawRestyled,
     AnimateMissing,
     Animate(usize),
 }
@@ -123,6 +125,7 @@ impl ProjectsScreen {
             SceneAction::DrawMissing => bardo.generate_scene_images(id, consent),
             SceneAction::Redraw(index) => bardo.regenerate_scene_image(id, index, consent),
             SceneAction::RedrawPortrait(member) => bardo.redraw_cast_portrait(id, member, consent),
+            SceneAction::RedrawRestyled => bardo.redraw_restyled_scenes(id, consent),
             SceneAction::AnimateMissing => bardo.generate_missing_clips(id, consent),
             SceneAction::Animate(index) => bardo.generate_scene_clip(id, index, consent),
         };
@@ -669,6 +672,72 @@ impl ProjectsScreen {
         Some(kit::anchor(TourAnchor::Control(Control::ScenesPlace), card).into_any_element())
     }
 
+    /// The scenes whose image is in another style than the video's (#259):
+    /// how many, why it matters behind the ⓘ, and one button that draws
+    /// them again, with what it costs.
+    fn render_restyled(&self, view: &ScenesView, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if view.restyled.is_empty() {
+            return None;
+        }
+        let bardo = self.bardo.read(cx);
+        let busy = view.is_busy() || view.is_animating();
+        let style = bardo.text(Text::VisualStyleName(view.style));
+        let estimate = view
+            .restyle_estimate
+            .as_ref()
+            .filter(|_| !busy)
+            .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx));
+        let card = kit::card(cx)
+            .px_3()
+            .py_2()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .gap_2()
+            .items_center()
+            .border_color(cx.theme().warning)
+            .child(
+                h_flex()
+                    .flex_1()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        div()
+                            .font_medium()
+                            .child(SharedString::from(bardo.text_with(
+                                Text::ScenesRestyled,
+                                &[("n", &view.restyled.len().to_string())],
+                            ))),
+                    )
+                    .child(guide::info(
+                        bardo,
+                        "scenes-restyled-info",
+                        SharedString::from(
+                            bardo.text_with(Text::ScenesRestyledHint, &[("style", &style)]),
+                        ),
+                        guide::refs::SCENES_STYLE,
+                    )),
+            )
+            .children(estimate)
+            .when(!busy, |card| {
+                card.child(
+                    Button::new("redraw-restyled-scenes")
+                        .outline()
+                        .small()
+                        .label(tr(bardo, Text::RedrawRestyled))
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.run_scene(
+                                SceneAction::RedrawRestyled,
+                                BudgetConsent::Ask,
+                                window,
+                                cx,
+                            )
+                        })),
+                )
+            });
+        Some(card.into_any_element())
+    }
+
     /// What happened to the scenes: an error, the job, why nothing can be
     /// planned yet, and the questions before discarding images or going
     /// past a budget.
@@ -740,6 +809,7 @@ impl ProjectsScreen {
             kit::notice(Tone::Info, tr(bardo, Text::ScenesNoNarration), cx).into_any_element()
         });
         let place = self.render_place_scenes(view, cx);
+        let restyled = self.render_restyled(view, cx);
         let bardo = self.bardo.read(cx);
         self.scenes_error
             .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element())
@@ -747,6 +817,7 @@ impl ProjectsScreen {
             .chain(job)
             .chain(no_narration)
             .chain(place)
+            .chain(restyled)
             .chain(confirm)
             .chain(ask)
             .collect()

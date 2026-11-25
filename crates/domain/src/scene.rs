@@ -19,7 +19,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::{
     ClipModelRef, Generation, GenerationId, JobFailureKind, Narration, NarrationId, ProfileId,
-    RepositoryError, VideoProjectId,
+    RepositoryError, StyleChoice, VideoProjectId,
 };
 
 uuid_id!(
@@ -258,18 +258,38 @@ impl CastMember {
         self.failure = Some(kind);
     }
 
-    /// What the image model draws the reference portrait from.
-    pub fn portrait_prompt(&self) -> String {
-        format!(
+    /// The portrait, when it was drawn in `style`: a portrait in another
+    /// look would pull the scenes drawn with it back to that look.
+    pub fn portrait_in(&self, style: StyleChoice) -> Option<&SceneImage> {
+        self.portrait
+            .as_ref()
+            .filter(|portrait| style.drew(&portrait.generation.prompt))
+    }
+
+    /// What the image model draws the reference portrait from, in the
+    /// video's `style`. A style may ask for hard shadows, haze, a set or an
+    /// angle, and the portrait is what every scene with the person is
+    /// drawn from, so after the style it says again what a portrait keeps.
+    pub fn portrait_prompt(&self, style: StyleChoice) -> String {
+        let portrait = style.applied(&format!(
             "A reference portrait of one character of a video, {name}: {description}\n\n\
              Exactly one person, from the waist up, the whole head in frame, facing the \
              camera with a neutral expression, against a plain, evenly lit background. \
              Nothing covers the face. No other people, no text, logos or watermarks.",
             name = self.name,
             description = self.description.as_str(),
-        )
+        ));
+        match style {
+            StyleChoice::FromNotes => portrait,
+            StyleChoice::Catalog(_) => format!("{portrait} {PORTRAIT_IN_A_STYLE}"),
+        }
     }
 }
+
+/// What a portrait drawn in a catalog style ends with.
+const PORTRAIT_IN_A_STYLE: &str = "In this portrait the style decides only the medium, the line, \
+    the texture and the palette: keep the framing, the neutral expression and the plain, evenly \
+    lit background asked for above, with the whole face clearly lit.";
 
 /// The prompt an image of a scene is drawn from: the scene's prompt, who
 /// each cast member it shows is, where it happens, and what each other
@@ -325,6 +345,10 @@ pub fn scene_image_prompt(
     if let Some(place) = setting.place {
         text.push_str("\n\n");
         text.push_str(&place.setting());
+    }
+    if let Some(style) = setting.style.line() {
+        text.push_str("\n\n");
+        text.push_str(&style);
     }
     if !setting.shots.is_empty() {
         text.push_str(if with.is_empty() {
@@ -515,6 +539,9 @@ pub struct SceneSetting<'a> {
     pub place: Option<&'a Place>,
     /// What each other scene sent as a reference is to this one.
     pub shots: &'a [OtherShot],
+    /// The video's visual style (#259), added after the people and the
+    /// place.
+    pub style: StyleChoice,
 }
 
 /// A clip made from a scene's image: the file in the project folder, its
@@ -1151,9 +1178,12 @@ impl ScenePlan {
     ///
     /// An image shows a place only when it was drawn from the place as it
     /// is described now: once the user describes a place again, the images
-    /// of how it was no longer hold the next ones to it.
-    pub fn reference_shots(&self, index: usize) -> Vec<(usize, OtherShot)> {
-        let drawn = |other: usize| other != index && self.scenes[other].image.is_some();
+    /// of how it was no longer hold the next ones to it. And only images
+    /// drawn in the video's `style` count (#259): one drawn in another
+    /// look would pull this scene back to it (see [`ScenePlan::shot_in`]).
+    pub fn reference_shots(&self, index: usize, style: StyleChoice) -> Vec<(usize, OtherShot)> {
+        let in_style = |other: usize| self.shot_in(other, style);
+        let drawn = |other: usize| other != index && in_style(other).is_some();
         if index >= self.scenes.len() {
             return Vec::new();
         }
@@ -1165,7 +1195,7 @@ impl ScenePlan {
             place.is_some()
                 && other != index
                 && self.scene_place(other) == place
-                && self.scenes[other].image.as_ref().is_some_and(|image| {
+                && in_style(other).is_some_and(|image| {
                     setting
                         .as_deref()
                         .is_some_and(|setting| image.generation.prompt.contains(setting))
@@ -1187,6 +1217,22 @@ impl ScenePlan {
             .map(|look| (look, OtherShot::Look))
             .into_iter()
             .collect()
+    }
+
+    /// Scene `index`'s image as other scenes drawn in `style` see it: the
+    /// image it uses when that was drawn in the style, else the one that
+    /// waits for review when that was. A video drawn again in a new style
+    /// has every new image waiting beside one of the old look, and those
+    /// new images are what hold it together from scene to scene until the
+    /// user accepts them.
+    pub fn shot_in(&self, index: usize, style: StyleChoice) -> Option<&SceneImage> {
+        let scene = self.scenes.get(index)?;
+        let drew = |image: &&SceneImage| style.drew(&image.generation.prompt);
+        scene
+            .image
+            .as_ref()
+            .filter(drew)
+            .or_else(|| scene.pending.as_ref().filter(drew))
     }
 
     /// The recurring characters the scenes show.
@@ -1230,18 +1276,36 @@ impl ScenePlan {
         })
     }
 
-    /// Cast members without a portrait that drawing `scenes` would draw
-    /// first, each once.
-    pub fn missing_portraits(&self, scenes: &[usize]) -> Vec<usize> {
+    /// Cast members without a portrait in the video's `style` that drawing
+    /// `scenes` would draw first, each once: the ones with none, and the
+    /// ones whose portrait was drawn in another style.
+    pub fn missing_portraits(&self, scenes: &[usize], style: StyleChoice) -> Vec<usize> {
         let mut missing: Vec<usize> = Vec::new();
         for &scene in scenes {
             for member in self.scene_cast(scene) {
-                if self.cast[member].portrait.is_none() && !missing.contains(&member) {
+                if self.cast[member].portrait_in(style).is_none() && !missing.contains(&member) {
                     missing.push(member);
                 }
             }
         }
         missing
+    }
+
+    /// The scenes whose image was drawn in another style than `style`,
+    /// the video's: they stay as they are until the user draws them again.
+    /// One with a new image in `style` waiting for review is not counted:
+    /// it was drawn again already.
+    pub fn in_another_style(&self, style: StyleChoice) -> Vec<usize> {
+        let drew = |image: &SceneImage| style.drew(&image.generation.prompt);
+        self.scenes
+            .iter()
+            .enumerate()
+            .filter(|(_, scene)| {
+                scene.image.as_ref().is_some_and(|image| !drew(image))
+                    && !scene.pending.as_ref().is_some_and(drew)
+            })
+            .map(|(index, _)| index)
+            .collect()
     }
 
     /// The scenes drawn with cast member `member`.
@@ -1756,7 +1820,10 @@ mod tests {
         assert_eq!(plan.scenes()[1].cast(), [1, 0], "in the scene's order");
         assert!(plan.scenes()[2].cast().is_empty());
         assert_eq!(plan.scenes_with(0), [0, 1]);
-        assert_eq!(plan.missing_portraits(&[2, 1, 0]), [1, 0]);
+        assert_eq!(
+            plan.missing_portraits(&[2, 1, 0], StyleChoice::FromNotes),
+            [1, 0]
+        );
         assert_eq!(
             plan.scenes()[0].planned_motion().map(ScenePrompt::as_str),
             Some("Slow push in.")
@@ -1810,7 +1877,10 @@ mod tests {
         assert_eq!(chef.failure(), None, "a success clears the failure");
         let replaced = chef.set_portrait(image(&n, "chef-2.png")).unwrap();
         assert_eq!(replaced.file, "chef-1.png");
-        assert_eq!(plan.missing_portraits(&[0]), Vec::<usize>::new());
+        assert_eq!(
+            plan.missing_portraits(&[0], StyleChoice::FromNotes),
+            Vec::<usize>::new()
+        );
         assert_eq!(plan.files().collect::<Vec<_>>(), ["chef-2.png"]);
 
         let chef = plan.cast_mut(0, SystemTime::UNIX_EPOCH).unwrap();
@@ -1822,7 +1892,11 @@ mod tests {
         assert_eq!(dropped.unwrap().file, "chef-2.png");
         assert!(chef.is_edited());
         assert_eq!(chef.generated_description().as_str(), "A man, brown skin.");
-        assert_eq!(plan.missing_portraits(&[0]), [0], "drawn again next time");
+        assert_eq!(
+            plan.missing_portraits(&[0], StyleChoice::FromNotes),
+            [0],
+            "drawn again next time"
+        );
         assert_eq!(plan.cast_member(3), Err(NoSuchCastMember(3)));
     }
 
@@ -1845,7 +1919,10 @@ mod tests {
         let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
         scene.edit_prompt(ScenePrompt::new("An empty kitchen.").unwrap());
         assert!(plan.scene_cast(0).is_empty());
-        assert_eq!(plan.missing_portraits(&[0]), Vec::<usize>::new());
+        assert_eq!(
+            plan.missing_portraits(&[0], StyleChoice::FromNotes),
+            Vec::<usize>::new()
+        );
 
         let ana = plan.cast_mut(1, SystemTime::UNIX_EPOCH).unwrap();
         ana.fail(JobFailureKind::Declined);
@@ -1884,7 +1961,7 @@ mod tests {
         );
         assert!(
             plan.cast()[0]
-                .portrait_prompt()
+                .portrait_prompt(StyleChoice::FromNotes)
                 .contains("the chef: A man in his fifties")
         );
     }
@@ -1938,6 +2015,11 @@ mod tests {
     /// Gives scene `index` an image drawn from its prompt and its place as
     /// they are now.
     fn draw(plan: &mut ScenePlan, n: &Narration, index: usize) {
+        draw_in(plan, n, index, StyleChoice::FromNotes);
+    }
+
+    /// The same, drawn in `style`.
+    fn draw_in(plan: &mut ScenePlan, n: &Narration, index: usize, style: StyleChoice) {
         let mut image = image(n, &format!("scene-{index}.png"));
         image.generation.prompt = scene_image_prompt(
             plan.scenes()[index].prompt().as_str(),
@@ -1948,6 +2030,7 @@ mod tests {
                     .scene_place(index)
                     .and_then(|place| plan.place(place).ok()),
                 shots: &[],
+                style,
             },
         );
         plan.scene_mut(index, SystemTime::UNIX_EPOCH)
@@ -2049,23 +2132,30 @@ mod tests {
         let n = narration(STORY, 0);
         let mut plan = storyboard(&n);
         for index in 0..4 {
-            assert!(plan.reference_shots(index).is_empty(), "nothing is drawn");
+            assert!(
+                plan.reference_shots(index, StyleChoice::FromNotes)
+                    .is_empty(),
+                "nothing is drawn"
+            );
         }
 
         draw(&mut plan, &n, 0);
-        assert!(plan.reference_shots(0).is_empty(), "never itself");
+        assert!(
+            plan.reference_shots(0, StyleChoice::FromNotes).is_empty(),
+            "never itself"
+        );
         assert_eq!(
-            plan.reference_shots(1),
+            plan.reference_shots(1, StyleChoice::FromNotes),
             [(0, OtherShot::Look)],
             "a new place takes only the video's look"
         );
         assert_eq!(
-            plan.reference_shots(2),
+            plan.reference_shots(2, StyleChoice::FromNotes),
             [(0, OtherShot::Look)],
             "and so does a scene with no place"
         );
         assert_eq!(
-            plan.reference_shots(3),
+            plan.reference_shots(3, StyleChoice::FromNotes),
             [(0, OtherShot::SamePlace)],
             "back in the kitchen"
         );
@@ -2081,7 +2171,7 @@ mod tests {
         plan.scenes.insert(2, street);
         draw(&mut plan, &n, 1);
         assert_eq!(
-            plan.reference_shots(2),
+            plan.reference_shots(2, StyleChoice::FromNotes),
             [(1, OtherShot::Before)],
             "the scene before is also the place's first"
         );
@@ -2095,16 +2185,16 @@ mod tests {
         .with_place(Some(1));
         plan.scenes.insert(3, third);
         assert_eq!(
-            plan.reference_shots(3),
+            plan.reference_shots(3, StyleChoice::FromNotes),
             [(1, OtherShot::SamePlace), (2, OtherShot::Before)],
             "the place, then what it continues from"
         );
         assert_eq!(
-            plan.reference_shots(1),
+            plan.reference_shots(1, StyleChoice::FromNotes),
             [(2, OtherShot::SamePlace)],
             "drawn again, the first of a place follows the others"
         );
-        assert!(plan.reference_shots(99).is_empty());
+        assert!(plan.reference_shots(99, StyleChoice::FromNotes).is_empty());
     }
 
     #[test]
@@ -2112,9 +2202,15 @@ mod tests {
         let n = narration(STORY, 0);
         let mut plan = plan(&n, vec![draft(0, "A."), draft(1, "B."), draft(2, "C.")]);
         draw(&mut plan, &n, 1);
-        assert_eq!(plan.reference_shots(0), [(1, OtherShot::Look)]);
-        assert!(plan.reference_shots(1).is_empty());
-        assert_eq!(plan.reference_shots(2), [(1, OtherShot::Look)]);
+        assert_eq!(
+            plan.reference_shots(0, StyleChoice::FromNotes),
+            [(1, OtherShot::Look)]
+        );
+        assert!(plan.reference_shots(1, StyleChoice::FromNotes).is_empty());
+        assert_eq!(
+            plan.reference_shots(2, StyleChoice::FromNotes),
+            [(1, OtherShot::Look)]
+        );
     }
 
     #[test]
@@ -2130,7 +2226,7 @@ mod tests {
         scene.edit_prompt(ScenePrompt::new("A train leaving the city.").unwrap());
         assert_eq!(plan.scene_place(3), None, "written somewhere else");
         assert_eq!(
-            plan.reference_shots(3),
+            plan.reference_shots(3, StyleChoice::FromNotes),
             [(0, OtherShot::Look)],
             "so the kitchen is no longer its place"
         );
@@ -2153,26 +2249,35 @@ mod tests {
         let n = narration(STORY, 0);
         let mut plan = storyboard(&n);
         draw(&mut plan, &n, 0);
-        assert_eq!(plan.reference_shots(3), [(0, OtherShot::SamePlace)]);
+        assert_eq!(
+            plan.reference_shots(3, StyleChoice::FromNotes),
+            [(0, OtherShot::SamePlace)]
+        );
 
         let noon = ScenePrompt::new("A wide farmhouse kitchen at noon.").unwrap();
         plan.place_mut(0, SystemTime::UNIX_EPOCH)
             .unwrap()
             .edit_description(noon);
         assert_eq!(
-            plan.reference_shots(3),
+            plan.reference_shots(3, StyleChoice::FromNotes),
             [(0, OtherShot::Look)],
             "the old kitchen only lends its look"
         );
         // Drawn again from the new description, it only counts once the
         // user took the new image.
         draw(&mut plan, &n, 0);
-        assert_eq!(plan.reference_shots(3), [(0, OtherShot::Look)]);
+        assert_eq!(
+            plan.reference_shots(3, StyleChoice::FromNotes),
+            [(0, OtherShot::Look)]
+        );
         plan.scene_mut(0, SystemTime::UNIX_EPOCH)
             .unwrap()
             .accept_image()
             .unwrap();
-        assert_eq!(plan.reference_shots(3), [(0, OtherShot::SamePlace)]);
+        assert_eq!(
+            plan.reference_shots(3, StyleChoice::FromNotes),
+            [(0, OtherShot::SamePlace)]
+        );
     }
 
     #[test]
@@ -2222,6 +2327,7 @@ mod tests {
             SceneSetting {
                 place: kitchen,
                 shots: &[],
+                ..SceneSetting::default()
             },
         );
         assert!(
@@ -2238,6 +2344,7 @@ mod tests {
             SceneSetting {
                 place: kitchen,
                 shots: &[OtherShot::SamePlace, OtherShot::Before],
+                ..SceneSetting::default()
             },
         );
         assert!(prompt.contains("Reference 1: the chef, A man in his fifties."));
@@ -2257,6 +2364,7 @@ mod tests {
             SceneSetting {
                 place: None,
                 shots: &[OtherShot::Look],
+                ..SceneSetting::default()
             },
         );
         assert!(look.contains("\n\nThe reference images are other shots of the same video"));
@@ -2292,5 +2400,164 @@ mod tests {
         };
         assert!(plan.is_stale(Some(&again)));
         assert!(plan.is_stale(None));
+    }
+
+    #[test]
+    fn the_style_goes_after_the_people_and_the_place_and_before_the_other_shots() {
+        let n = narration(STORY, 0);
+        let plan = ScenePlan::from_draft(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            PlanDraft {
+                cast: vec![member("the chef", "A man in his fifties.")],
+                places: vec![somewhere("the kitchen", "A small tiled kitchen at night.")],
+                scenes: vec![
+                    SceneDraft {
+                        cast: vec![0],
+                        ..placed(0, "The chef plates a dish in the kitchen.", Some(0))
+                    },
+                    SceneDraft {
+                        cast: vec![0],
+                        ..placed(1, "The chef tastes it in the kitchen.", Some(0))
+                    },
+                ],
+            },
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let shown: Vec<&CastMember> = plan.cast().iter().collect();
+        let manga = StyleChoice::Catalog(crate::VisualStyle::Manga);
+        let setting = SceneSetting {
+            place: plan.place(0).ok(),
+            shots: &[OtherShot::Before],
+            style: manga,
+        };
+        let prompt = scene_image_prompt("The chef plates a dish.", &shown, &[true], setting);
+        let line = manga.line().unwrap();
+        let style = prompt
+            .find(&line)
+            .expect("the style's text is in the prompt");
+        assert!(prompt.find("The scene happens in the kitchen").unwrap() < style);
+        assert!(style < prompt.find("The reference images after those").unwrap());
+        assert!(manga.drew(&prompt));
+
+        // With no style chosen the prompt is what it was before styles.
+        let plain = scene_image_prompt(
+            "The chef plates a dish.",
+            &shown,
+            &[true],
+            SceneSetting {
+                style: StyleChoice::FromNotes,
+                ..setting
+            },
+        );
+        assert_eq!(plain, prompt.replace(&format!("\n\n{line}"), ""));
+        assert!(StyleChoice::FromNotes.drew(&plain));
+    }
+
+    #[test]
+    fn a_portrait_is_drawn_in_the_videos_style() {
+        let n = narration(STORY, 0);
+        let mut plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            vec![member("the chef", "A man, brown skin.")],
+            vec![cast_draft(0, "The chef cooks.", vec![0])],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let notes = StyleChoice::FromNotes;
+        let clay = StyleChoice::Catalog(crate::VisualStyle::ClayStopMotion);
+        let anime = StyleChoice::Catalog(crate::VisualStyle::Anime);
+        let chef = plan.cast_member(0).unwrap();
+        let plain = chef.portrait_prompt(notes);
+        assert!(plain.ends_with("no text, logos or watermarks."));
+        let styled = chef.portrait_prompt(clay);
+        let rest = styled
+            .strip_prefix(&clay.applied(&plain))
+            .expect("the portrait, then the style");
+        assert!(
+            rest.starts_with(" In this portrait the style decides only the medium")
+                && rest.ends_with("with the whole face clearly lit."),
+            "{rest}"
+        );
+        assert!(clay.drew(&styled));
+
+        // A portrait from before the style was chosen is drawn again
+        // first, and is no reference until then.
+        let mut portrait = image(&n, "chef-1.png");
+        portrait.generation.prompt = plain;
+        plan.cast_mut(0, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .set_portrait(portrait);
+        assert!(plan.missing_portraits(&[0], notes).is_empty());
+        assert_eq!(plan.missing_portraits(&[0], clay), [0]);
+        assert!(plan.cast_member(0).unwrap().portrait_in(clay).is_none());
+        assert!(
+            plan.cast_member(0).unwrap().portrait().is_some(),
+            "it stays"
+        );
+
+        let mut portrait = image(&n, "chef-2.png");
+        portrait.generation.prompt = plan.cast_member(0).unwrap().portrait_prompt(clay);
+        plan.cast_mut(0, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .set_portrait(portrait);
+        assert!(plan.missing_portraits(&[0], clay).is_empty());
+        assert_eq!(plan.missing_portraits(&[0], anime), [0], "another style");
+        assert_eq!(plan.missing_portraits(&[0], notes), [0], "and back to none");
+    }
+
+    #[test]
+    fn an_image_in_another_style_holds_nothing_to_it() {
+        let n = narration(STORY, 0);
+        let mut plan = storyboard(&n);
+        let notes = StyleChoice::FromNotes;
+        let manga = StyleChoice::Catalog(crate::VisualStyle::Manga);
+        draw(&mut plan, &n, 0);
+        draw(&mut plan, &n, 1);
+        assert_eq!(plan.reference_shots(3, notes), [(0, OtherShot::SamePlace)]);
+        assert!(plan.in_another_style(notes).is_empty());
+
+        // The video takes a style: what was drawn stays, and is no
+        // reference for what is drawn next.
+        assert_eq!(plan.in_another_style(manga), [0, 1]);
+        for index in 0..4 {
+            assert!(plan.reference_shots(index, manga).is_empty(), "{index}");
+        }
+
+        // The street is drawn in it: the look of the video is its image,
+        // not the kitchen's from before.
+        draw_in(&mut plan, &n, 1, manga);
+        assert_eq!(plan.in_another_style(manga), [0], "drawn again, to review");
+        let waiting = plan.scenes()[1].pending().unwrap().file.clone();
+        assert_eq!(plan.shot_in(1, manga).unwrap().file, waiting);
+        assert_eq!(
+            plan.reference_shots(3, manga),
+            [(1, OtherShot::Look)],
+            "the new image holds the next ones before it is accepted"
+        );
+        assert_eq!(
+            plan.shot_in(1, notes),
+            plan.scenes()[1].image(),
+            "and the one in use still is the notes' image"
+        );
+        plan.scene_mut(1, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .accept_image()
+            .unwrap();
+        assert_eq!(plan.in_another_style(manga), [0]);
+        assert_eq!(plan.reference_shots(3, manga), [(1, OtherShot::Look)]);
+        assert_eq!(plan.reference_shots(2, manga), [(1, OtherShot::Look)]);
+
+        // Then the kitchen: the next scene there holds to it.
+        draw_in(&mut plan, &n, 0, manga);
+        plan.scene_mut(0, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .accept_image()
+            .unwrap();
+        assert!(plan.in_another_style(manga).is_empty());
+        assert_eq!(plan.reference_shots(3, manga), [(0, OtherShot::SamePlace)]);
+        assert_eq!(plan.in_another_style(notes), [0, 1]);
     }
 }

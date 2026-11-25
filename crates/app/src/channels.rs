@@ -206,6 +206,7 @@ mod tests {
             motion: Default::default(),
             thumbnail_look: Default::default(),
             production: Default::default(),
+            style: Default::default(),
         }
     }
 

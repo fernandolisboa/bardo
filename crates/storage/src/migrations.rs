@@ -64,6 +64,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0060_production_mode.sql"),
     include_str!("../migrations/0061_video_length.sql"),
     include_str!("../migrations/0062_scene_place.sql"),
+    include_str!("../migrations/0063_visual_style.sql"),
 ];
 
 /// The schema version this build migrates every database to (SQLite's
