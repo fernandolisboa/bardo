@@ -303,16 +303,16 @@ impl ChaptersHandler {
                 schema: CHAPTERS_SCHEMA.to_owned(),
             },
         };
-        let generated = self.text.generate(&key, &request).map_err(|failure| {
-            // An answer that was lost or cut may still have been billed.
-            self.costs.record_failed_for_project(
-                &failure,
-                &PlannedCall::text(CostPurpose::Chapters, &request),
-                Some(job),
-                project,
-            );
-            JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-        })?;
+        let paid_call = PlannedCall::text(CostPurpose::Chapters, &request);
+        let generated = {
+            let _paying = self.costs.paying_for_project(job, &paid_call, project)?;
+            self.text.generate(&key, &request).map_err(|failure| {
+                // An answer that was lost or cut may still have been billed.
+                self.costs
+                    .record_failed_for_project(&failure, &paid_call, Some(job), project);
+                JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
+            })
+        }?;
         self.costs.record_for_project(
             PaidCall {
                 provider: Provider::Claude,
@@ -1101,6 +1101,7 @@ mod tests {
                 owner: app.profile().id,
                 costs: Arc::clone(&h.db) as _,
                 themes: Arc::clone(&h.db) as _,
+                in_flight: std::sync::Arc::default(),
             },
         };
         let asked = h.text.requests().len();

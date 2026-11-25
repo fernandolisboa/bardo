@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -176,6 +176,8 @@ pub struct JobContext {
     attempt: u32,
     checkpoint: Option<String>,
     external_handle: Option<String>,
+    /// A paid call an earlier run sent and never had the answer to.
+    paid_call: Option<String>,
     /// Set by `defer`: the attempt ends waiting, not done.
     deferred: Option<SystemTime>,
     stop: Arc<StopSignal>,
@@ -207,6 +209,17 @@ impl JobContext {
     /// that work instead of submitting it again.
     pub fn external_handle(&self) -> Option<&str> {
         self.external_handle.as_deref()
+    }
+
+    /// A paid call an earlier run of the job sent and was cut short before
+    /// its answer came (by a close or a crash): see `PaidCallLog`.
+    pub fn paid_call(&self) -> Option<&str> {
+        self.paid_call.as_deref()
+    }
+
+    /// Where the code that makes a paid call for this queue's jobs notes it.
+    pub(crate) fn paid_call_log(&self) -> PaidCallLog {
+        PaidCallLog(Arc::downgrade(&self.shared))
     }
 
     /// True once the job is cancelled or the app is closing.
@@ -380,8 +393,20 @@ impl Shared {
         id: JobId,
         apply: impl FnOnce(&mut Job) -> Result<(), InvalidJobTransition>,
     ) -> Result<(), RepositoryError> {
+        self.save_resume_unless(id, false, apply)
+    }
+
+    /// `save_resume`, refused as well while the queue is closing when
+    /// `not_while_closing`: for a save that starts something the closing
+    /// queue would not see the end of.
+    fn save_resume_unless(
+        &self,
+        id: JobId,
+        not_while_closing: bool,
+        apply: impl FnOnce(&mut Job) -> Result<(), InvalidJobTransition>,
+    ) -> Result<(), RepositoryError> {
         let mut state = self.state();
-        if state.closed || state.lost.contains(&id) {
+        if state.closed || state.lost.contains(&id) || (not_while_closing && state.closing) {
             return Err(SaveNotKept.into());
         }
         let job = state.job_mut(id).ok_or(SaveNotKept)?;
@@ -510,6 +535,28 @@ impl Shared {
         self.changed();
         self.wake.notify_all();
         Ok(new_state)
+    }
+}
+
+/// Notes on a running job the paid call its run sends, before it goes,
+/// and clears it once the answer came (ADR-0030). Reached by job id, from
+/// the code that makes the call. A run cut short in between leaves the
+/// note, and the next run sees it (`JobContext::paid_call`).
+#[derive(Clone)]
+pub(crate) struct PaidCallLog(Weak<Shared>);
+
+impl PaidCallLog {
+    /// Saves `call` (`None` clears it) on `job`, whose run must be this
+    /// queue's. `Err` when it was not saved: the run lost the job or the
+    /// queue closed (`SaveNotKept`), or storage failed.
+    ///
+    /// A call is not noted, so not sent, once the queue started closing or
+    /// the job was cancelled: its answer would come to nobody. Clearing a
+    /// note is kept then, as any save of a stopping run is.
+    pub(crate) fn note(&self, job: JobId, call: Option<String>) -> Result<(), RepositoryError> {
+        let shared = self.0.upgrade().ok_or(SaveNotKept)?;
+        let sending = call.is_some();
+        shared.save_resume_unless(job, sending, |stored| stored.record_paid_call(call))
     }
 }
 
@@ -1069,6 +1116,7 @@ fn spawn_worker(shared: &Arc<Shared>, job: &Job, stop: Arc<StopSignal>) -> std::
         attempt: job.attempts(),
         checkpoint: job.checkpoint().map(str::to_owned),
         external_handle: job.external_handle().map(str::to_owned),
+        paid_call: job.paid_call().map(str::to_owned),
         deferred: None,
         stop,
         shared: Arc::clone(shared),

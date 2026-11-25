@@ -676,17 +676,16 @@ impl ThemeHandler {
 
         let key = self.key(Provider::Claude)?;
         let request = proposal_request(&payload.brief, niche, &avoid);
-        let generated = self.text.generate(&key, &request).map_err(|failure| {
-            // An answer that was lost or cut may still have been billed.
-            self.costs.record_failed(
-                &failure,
-                &PlannedCall::text(CostPurpose::ThemeIdeas, &request),
-                Some(job),
-                Some(channel),
-                None,
-            );
-            provider_failure("Claude", failure)
-        })?;
+        let paid_call = PlannedCall::text(CostPurpose::ThemeIdeas, &request);
+        let generated = {
+            let _paying = self.costs.paying(job, &paid_call, Some(channel), None)?;
+            self.text.generate(&key, &request).map_err(|failure| {
+                // An answer that was lost or cut may still have been billed.
+                self.costs
+                    .record_failed(&failure, &paid_call, Some(job), Some(channel), None);
+                provider_failure("Claude", failure)
+            })
+        }?;
         self.costs.record(
             PaidCall {
                 provider: Provider::Claude,
@@ -771,17 +770,23 @@ impl ThemeHandler {
                         .map_err(unexpected)?;
                 }
             }
-            let decisions = engine.decide(&key, &state, &questions).map_err(|failure| {
-                // An answer that was lost may still have been billed.
-                self.costs.record_failed(
-                    &failure,
-                    &PlannedCall::new(provider, CostPurpose::ThemeRanking, 1),
-                    Some(cx.id()),
-                    Some(channel),
-                    None,
-                );
-                provider_failure("decision engine", failure)
-            })?;
+            let paid_call = PlannedCall::new(provider, CostPurpose::ThemeRanking, 1);
+            let decisions = {
+                let _paying = self
+                    .costs
+                    .paying(cx.id(), &paid_call, Some(channel), None)?;
+                engine.decide(&key, &state, &questions).map_err(|failure| {
+                    // An answer that was lost may still have been billed.
+                    self.costs.record_failed(
+                        &failure,
+                        &paid_call,
+                        Some(cx.id()),
+                        Some(channel),
+                        None,
+                    );
+                    provider_failure("decision engine", failure)
+                })
+            }?;
             self.costs.record(
                 PaidCall {
                     provider,

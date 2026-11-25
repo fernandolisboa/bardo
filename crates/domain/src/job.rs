@@ -600,6 +600,7 @@ pub struct JobRecord {
     pub attempts: u32,
     pub checkpoint: Option<String>,
     pub external_handle: Option<String>,
+    pub paid_call: Option<String>,
     pub failure: Option<JobFailure>,
     pub retry_at: Option<SystemTime>,
     pub run_at: Option<SystemTime>,
@@ -622,6 +623,10 @@ pub struct Job {
     attempts: u32,
     checkpoint: Option<String>,
     external_handle: Option<String>,
+    /// A paid call the run sent and has no answer to yet, in the app's own
+    /// format (ADR-0030): a run cut short then, by a close or a crash,
+    /// leaves it, and the next run fails the job instead of paying again.
+    paid_call: Option<String>,
     failure: Option<JobFailure>,
     retry_at: Option<SystemTime>,
     run_at: Option<SystemTime>,
@@ -641,6 +646,7 @@ impl Job {
             attempts: 0,
             checkpoint: None,
             external_handle: None,
+            paid_call: None,
             failure: None,
             retry_at: None,
             run_at: None,
@@ -685,6 +691,7 @@ impl Job {
             attempts: record.attempts,
             checkpoint: record.checkpoint,
             external_handle: record.external_handle,
+            paid_call: record.paid_call,
             failure: record.failure,
             retry_at: record.retry_at,
             run_at: record.run_at,
@@ -729,6 +736,12 @@ impl Job {
     /// polls it instead of submitting (and paying) again.
     pub fn external_handle(&self) -> Option<&str> {
         self.external_handle.as_deref()
+    }
+
+    /// A paid call a run sent and had no answer to when it was cut short
+    /// (`record_paid_call`).
+    pub fn paid_call(&self) -> Option<&str> {
+        self.paid_call.as_deref()
     }
 
     /// The last failed attempt: the final error of a failed job, or why a
@@ -827,8 +840,29 @@ impl Job {
         Ok(())
     }
 
+    /// Notes the paid call the run sends now (`Some`), or that its answer
+    /// came (`None`). Only a running job notes a call: one cancelled (or
+    /// queued again by hand) meanwhile sends nothing new. A note is cleared
+    /// for those too, as their run's checkpoint is kept: the call it was
+    /// waiting on answered.
+    pub fn record_paid_call(&mut self, call: Option<String>) -> Result<(), InvalidJobTransition> {
+        let allowed = match call {
+            Some(_) => self.state == JobState::Running,
+            None => matches!(
+                self.state,
+                JobState::Running | JobState::Cancelled | JobState::Queued
+            ),
+        };
+        if !allowed {
+            return Err(self.invalid("note a paid call of"));
+        }
+        self.paid_call = call;
+        Ok(())
+    }
+
     pub fn complete(&mut self) -> Result<(), InvalidJobTransition> {
         self.expect_running("complete")?;
+        self.paid_call = None;
         self.state = JobState::Done;
         self.progress = Progress::DONE;
         self.failure = None;
@@ -845,6 +879,8 @@ impl Job {
         policy: &RetryPolicy,
     ) -> Result<(), InvalidJobTransition> {
         self.expect_running("fail")?;
+        // The run answered for its call, whatever it was.
+        self.paid_call = None;
         if failure.kind.is_transient() && self.attempts < policy.max_attempts {
             self.state = JobState::Queued;
             self.retry_at = Some(now + policy.delay_after(self.attempts));
@@ -893,11 +929,13 @@ impl Job {
 
     /// Queues a failed or cancelled job again with a fresh set of attempts,
     /// to start now. Checkpoint and external handle stay, so it resumes
-    /// where it stopped.
+    /// where it stopped. A paid call left without an answer does not: the
+    /// user asks for it again.
     pub fn retry(&mut self) -> Result<(), InvalidJobTransition> {
         if !self.can_retry() {
             return Err(self.invalid("retry"));
         }
+        self.paid_call = None;
         self.state = JobState::Queued;
         self.attempts = 0;
         self.failure = None;
@@ -943,6 +981,7 @@ impl From<&Job> for JobRecord {
             attempts: job.attempts,
             checkpoint: job.checkpoint.clone(),
             external_handle: job.external_handle.clone(),
+            paid_call: job.paid_call.clone(),
             failure: job.failure.clone(),
             retry_at: job.retry_at,
             run_at: job.run_at,
@@ -1486,6 +1525,50 @@ mod tests {
             .unwrap();
         job.fail_attempt(transient(), now(), &policy()).unwrap();
         assert_eq!(Job::restore(JobRecord::from(&job)), Ok(job));
+    }
+
+    #[test]
+    fn a_paid_call_left_by_a_cut_short_run_stays_until_the_job_ends_or_is_retried() {
+        let mut job = running();
+        job.record_paid_call(Some("script".into())).unwrap();
+        job.interrupt().unwrap();
+        assert_eq!(job.paid_call(), Some("script"), "the next run must see it");
+        let restored = Job::restore(JobRecord::from(&job)).unwrap();
+        assert_eq!(restored.paid_call(), Some("script"));
+
+        job.start(now()).unwrap();
+        job.fail_attempt(
+            JobFailure::new(JobFailureKind::AnswerLost, "closed"),
+            now(),
+            &policy(),
+        )
+        .unwrap();
+        assert_eq!(job.paid_call(), None, "the failure answers for it");
+
+        let mut cancelled = running();
+        cancelled.record_paid_call(Some("plan".into())).unwrap();
+        cancelled.cancel().unwrap();
+        assert!(
+            cancelled.record_paid_call(Some("plan 2".into())).is_err(),
+            "a cancelled job sends nothing new"
+        );
+        assert_eq!(cancelled.paid_call(), Some("plan"));
+        cancelled.retry().unwrap();
+        assert_eq!(cancelled.paid_call(), None, "a retry asks again");
+
+        let mut answered = running();
+        answered.record_paid_call(Some("plan".into())).unwrap();
+        answered.cancel().unwrap();
+        answered.record_paid_call(None).unwrap();
+        assert_eq!(answered.paid_call(), None, "its call answered meanwhile");
+
+        let mut done = running();
+        done.record_paid_call(Some("image".into())).unwrap();
+        done.record_paid_call(None).unwrap();
+        done.record_paid_call(Some("image 2".into())).unwrap();
+        done.complete().unwrap();
+        assert_eq!(done.paid_call(), None);
+        assert!(done.record_paid_call(Some("late".into())).is_err());
     }
 
     #[test]

@@ -617,16 +617,17 @@ impl SceneHandler {
                 schema: PLAN_SCHEMA.to_owned(),
             },
         };
-        let generated = self.text.generate(&key, &request).map_err(|failure| {
+        // One that was lost is recorded as a plan of this length, as it was
+        // estimated: what other plans took says little.
+        let paid_call = sized_plan_call(size).with_prompt(&request.instructions, &request.prompt);
+        let generated = {
+            let _paying = self.costs.paying_for_project(job, &paid_call, project)?;
+            self.text.generate(&key, &request)
+        };
+        let generated = generated.map_err(|failure| {
             // An answer that was lost or cut may still have been billed.
-            // One that was lost is recorded as a plan of this length, as
-            // it was estimated: what other plans took says little.
-            self.costs.record_failed_for_project(
-                &failure,
-                &sized_plan_call(size).with_prompt(&request.instructions, &request.prompt),
-                Some(job),
-                project,
-            );
+            self.costs
+                .record_failed_for_project(&failure, &paid_call, Some(job), project);
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })?;
         self.costs.record_for_project(
@@ -879,7 +880,13 @@ impl SceneHandler {
                 shape: aspect.into(),
                 references,
             };
-            match self.images.generate(key, &request) {
+            let generated = {
+                let _paying = self
+                    .costs
+                    .paying_for_project(job, &images_call(1), project)?;
+                self.images.generate(key, &request)
+            };
+            match generated {
                 Ok(image) => {
                     self.costs.record_for_project(
                         PaidCall {
@@ -1001,7 +1008,13 @@ impl SceneHandler {
             shape: ImageShape::Portrait,
             references: Vec::new(),
         };
-        match self.images.generate(key, &request) {
+        let generated = {
+            let _paying = self
+                .costs
+                .paying_for_project(job, &images_call(1), project)?;
+            self.images.generate(key, &request)
+        };
+        match generated {
             Ok(image) => {
                 self.costs.record_for_project(
                     PaidCall {

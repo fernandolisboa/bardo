@@ -250,20 +250,24 @@ impl MusicHandler {
                     return Ok(());
                 }
                 let key = self.key()?;
-                let composed = self.music.compose(&key, &request).map_err(|failure| {
-                    // A track whose answer was lost may still have been
-                    // composed and billed, by its length.
-                    self.costs.record_failed_for_project(
-                        &failure,
-                        &music_call(self.music.provider(), request.length),
-                        Some(job),
-                        project,
-                    );
-                    JobFailure::new(
-                        failure.kind.into(),
-                        format!("{}: {}", self.music.provider().code(), failure.detail),
-                    )
-                })?;
+                let paid_call = music_call(self.music.provider(), request.length);
+                let composed = {
+                    let _paying = self.costs.paying_for_project(job, &paid_call, project)?;
+                    self.music.compose(&key, &request).map_err(|failure| {
+                        // A track whose answer was lost may still have been
+                        // composed and billed, by its length.
+                        self.costs.record_failed_for_project(
+                            &failure,
+                            &paid_call,
+                            Some(job),
+                            project,
+                        );
+                        JobFailure::new(
+                            failure.kind.into(),
+                            format!("{}: {}", self.music.provider().code(), failure.detail),
+                        )
+                    })
+                }?;
                 self.costs.record_for_project(
                     PaidCall {
                         provider: self.music.provider(),
@@ -907,6 +911,7 @@ mod tests {
                 owner: app.profile().id,
                 costs: Arc::clone(&h.db) as _,
                 themes: Arc::clone(&h.db) as _,
+                in_flight: std::sync::Arc::default(),
             },
         };
         let id = MediaAssetId::new();

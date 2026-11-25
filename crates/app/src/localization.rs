@@ -477,14 +477,14 @@ impl LocalizationHandler {
                 schema: ADAPTATION_SCHEMA.to_owned(),
             },
         };
-        self.text.generate(&key, &request).map_err(|failure| {
-            self.costs.record_failed(
-                &failure,
-                &PlannedCall::text(CostPurpose::Script, &request),
-                Some(job),
-                channel,
-                project,
-            );
+        let paid_call = PlannedCall::text(CostPurpose::Script, &request);
+        let generated = {
+            let _paying = self.costs.paying(job, &paid_call, channel, project)?;
+            self.text.generate(&key, &request)
+        };
+        generated.map_err(|failure| {
+            self.costs
+                .record_failed(&failure, &paid_call, Some(job), channel, project);
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })
     }
@@ -1635,7 +1635,11 @@ mod tests {
             files: Arc::clone(&h.files) as _,
             text: Arc::clone(&h.text) as _,
             secrets: Arc::clone(&h.secrets) as _,
-            costs: app.cost_book.clone(),
+            // Run here, outside the queue: no job runs to note a call on.
+            costs: crate::costs::CostBook {
+                in_flight: Arc::default(),
+                ..app.cost_book.clone()
+            },
         }
     }
 

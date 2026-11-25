@@ -196,16 +196,16 @@ impl ScriptHandler {
             images: Vec::new(),
             format: TextFormat::Prose,
         };
+        let call = PlannedCall::text(CostPurpose::Script, &request);
+        let paying = self.costs.paying_for_project(job, &call, project)?;
         let generated = self.text.generate(&key, &request).map_err(|failure| {
             // An answer that was lost or cut may still have been billed.
-            self.costs.record_failed_for_project(
-                &failure,
-                &PlannedCall::text(CostPurpose::Script, &request),
-                Some(job),
-                project,
-            );
+            self.costs
+                .record_failed_for_project(&failure, &call, Some(job), project);
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-        })?;
+        });
+        drop(paying);
+        let generated = generated?;
         self.costs.record_for_project(
             PaidCall {
                 provider: Provider::Claude,
@@ -1006,6 +1006,7 @@ mod tests {
                 owner: app.profile().id,
                 costs: Arc::clone(&first.db) as _,
                 themes: Arc::clone(&first.db) as _,
+                in_flight: std::sync::Arc::default(),
             },
         };
         handler.generate(&payload, id).unwrap();
