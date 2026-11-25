@@ -187,6 +187,16 @@ impl CostRepository for Database {
         Ok(())
     }
 
+    fn move_cost(&self, id: CostRecordId, project: VideoProjectId) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "UPDATE cost_record SET project_id = ?2 WHERE id = ?1",
+                params![id.to_string(), project.to_string()],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
     fn costs_between(
         &self,
         owner: ProfileId,
@@ -379,6 +389,36 @@ mod tests {
             job: Some(JobId::new()),
             at,
         }
+    }
+
+    #[test]
+    fn a_record_moves_to_a_project_as_it_is() {
+        let (db, owner) = database();
+        let paid = CostRecord {
+            project: None,
+            ..record(
+                owner,
+                CostPurpose::Script,
+                Cost::Reported(Money::from_cents(42)),
+                at(1_790_916_201),
+            )
+        };
+        db.record_cost(&paid).unwrap();
+        let project = VideoProjectId::new();
+        assert!(db.project_costs(project).unwrap().is_empty());
+
+        db.move_cost(paid.id, project).unwrap();
+        // The same record, at the time it was paid.
+        assert_eq!(
+            db.project_costs(project).unwrap(),
+            [CostRecord {
+                project: Some(project),
+                ..paid
+            }]
+        );
+        // One that is not there moves nothing.
+        db.move_cost(CostRecordId::new(), project).unwrap();
+        assert_eq!(db.project_costs(project).unwrap().len(), 1);
     }
 
     #[test]

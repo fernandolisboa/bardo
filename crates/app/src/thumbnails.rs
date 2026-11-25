@@ -29,7 +29,7 @@ use bardo_media::ffmpeg::{MediaError, ThumbnailSpec};
 use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
-use crate::jobs::{JobContext, JobHandler};
+use crate::jobs::{JobContext, JobHandler, Work};
 use crate::{Bardo, KeyState, ScriptError, TemplateError, Text};
 
 #[derive(Debug, thiserror::Error)]
@@ -633,11 +633,10 @@ impl Bardo {
         })
     }
 
+    /// Whether the thumbnail is being written or drawn, or a job of it
+    /// that was cancelled is still stopping.
     fn thumbnail_busy(&self, project: VideoProjectId) -> bool {
-        [JobKind::Thumbnail, JobKind::ThumbnailImage]
-            .into_iter()
-            .filter_map(|kind| self.latest_job_of(kind, project))
-            .any(|job| job.state().is_active())
+        self.work_busy(&Work::Thumbnail(project.to_string()))
     }
 
     /// Starts a job in which Claude writes the thumbnail's text and the
@@ -1272,5 +1271,43 @@ pub(crate) mod tests {
         let drawn_before = h.images.prompts().len();
         handler.draw(drawn.payload(), drawn.id()).unwrap();
         assert_eq!(h.images.prompts().len(), drawn_before, "drawn once");
+    }
+
+    #[test]
+    fn a_cancelled_thumbnail_job_that_still_stops_keeps_it_busy_and_its_answer_is_saved() {
+        use crate::testing::arriving;
+
+        let h = Harness::new();
+        let app = h.start();
+        let project = project(&app);
+        let asked = h.text.requests().len();
+        h.answer(answer("Lost", "A probe"));
+        let id = arriving::cancelled(&app, &h.text, || {
+            app.write_thumbnail(project.id, BudgetConsent::Ask).unwrap()
+        });
+
+        // Nothing is written or drawn beside the request still out, from
+        // the stage or from Jobs.
+        assert!(matches!(
+            app.write_thumbnail(project.id, BudgetConsent::Ask),
+            Err(ThumbnailError::Busy)
+        ));
+        assert!(matches!(
+            app.draw_thumbnail_background(project.id, BudgetConsent::Ask),
+            Err(ThumbnailError::Busy)
+        ));
+        arriving::retry_refused(&app, id);
+
+        // The answer arrives whole: it is paid for, and this is the text
+        // the job was started to write.
+        arriving::lands(&app, &h.text, id);
+        assert_eq!(
+            app.thumbnail(project.id).unwrap().thumbnail.design.text,
+            "Lost"
+        );
+
+        // Run again, the job finds its text: Claude is not asked twice.
+        assert_eq!(arriving::retried(&app, id).state(), JobState::Done);
+        assert_eq!(h.text.requests().len(), asked + 1);
     }
 }

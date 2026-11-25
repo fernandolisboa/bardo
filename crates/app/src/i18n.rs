@@ -2144,6 +2144,9 @@ pub enum Text {
     /// A narration or scene job retried while scenes of its project are
     /// being made, or a cancelled scene job is still stopping.
     JobScenesBusy,
+    /// A text job retried while another job is at work on the same thing,
+    /// or while its own cancelled run is still stopping.
+    JobSameWork,
     JobAsksFirst,
     /// An image or clip job retried where the question about its cost
     /// cannot be asked.
@@ -4927,6 +4930,7 @@ impl Text {
             Text::JobTakeFromItsPage => "job.error.take_from_page",
             Text::JobNarrationBusy => "job.error.narration_busy",
             Text::JobScenesBusy => "job.error.scenes_busy",
+            Text::JobSameWork => "job.error.same_work",
             Text::JobAsksFirst => "job.error.asks_first",
             Text::JobOverBudget => "job.error.over_budget",
             Text::SettingsPublishingTab => "settings.publishing_tab",
@@ -7802,6 +7806,7 @@ mod tests {
             Text::JobTakeFromItsPage,
             Text::JobNarrationBusy,
             Text::JobScenesBusy,
+            Text::JobSameWork,
             Text::JobAsksFirst,
             Text::JobOverBudget,
             Text::SettingsPublishingTab,

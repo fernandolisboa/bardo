@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::decision_engines::DecisionEngines;
-use crate::jobs::{JobContext, JobHandler};
+use crate::jobs::{JobContext, JobHandler, Work};
 use crate::{Bardo, Catalog, KeyState, Text};
 
 /// Ideas one suggestion run asks for.
@@ -910,10 +910,10 @@ impl Bardo {
     }
 
     fn ensure_idle(&self, channel: ChannelId) -> Result<(), ThemeError> {
-        match self.latest_theme_job(channel) {
-            Some(job) if job.state().is_active() => Err(ThemeError::Busy),
-            _ => Ok(()),
+        if self.work_busy(&Work::Themes(channel.to_string())) {
+            return Err(ThemeError::Busy);
         }
+        Ok(())
     }
 
     fn ensure_key(&self, provider: Provider) -> Result<(), ThemeError> {
@@ -2382,5 +2382,39 @@ mod tests {
         let view = app.themes(channel.id, None).unwrap();
         assert_eq!(view.themes.len(), SUGGESTIONS_PER_RUN);
         assert_eq!(view.unranked, 0);
+    }
+
+    #[test]
+    fn a_cancelled_suggestion_job_that_still_stops_keeps_the_ideas_busy_and_its_answer_is_saved() {
+        use crate::testing::arriving;
+
+        let h = Harness::new();
+        let app = h.start_with_keys();
+        let channel = channel(&app, "space history");
+        let id = arriving::cancelled(&app, &h.text, || {
+            app.suggest_themes(channel.id, channel.details.niche(), BudgetConsent::Ask)
+                .unwrap()
+        });
+
+        // No second request beside the one still out, from the stage or
+        // from Jobs.
+        assert!(matches!(
+            app.suggest_themes(channel.id, channel.details.niche(), BudgetConsent::Ask),
+            Err(ThemeError::Busy)
+        ));
+        arriving::retry_refused(&app, id);
+
+        // The answer arrives whole: the ideas are paid for and add to the
+        // channel's, not yet ranked, since the job was told to stop.
+        arriving::lands(&app, &h.text, id);
+        let view = app.themes(channel.id, None).unwrap();
+        assert_eq!(view.themes.len(), SUGGESTIONS_PER_RUN);
+        assert_eq!(view.unranked, SUGGESTIONS_PER_RUN);
+
+        // Run again, the job ranks them: Claude is not asked twice.
+        assert_eq!(arriving::retried(&app, id).state(), JobState::Done);
+        assert_eq!(h.text.requests().len(), 1);
+        let view = app.themes(channel.id, None).unwrap();
+        assert_eq!((view.themes.len(), view.unranked), (SUGGESTIONS_PER_RUN, 0));
     }
 }

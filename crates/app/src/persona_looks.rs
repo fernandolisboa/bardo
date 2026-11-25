@@ -31,7 +31,7 @@ use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
-use crate::jobs::{JobContext, JobHandler};
+use crate::jobs::{JobContext, JobHandler, Work};
 use crate::scenes::{id, to_json, unexpected};
 use crate::{Bardo, KeyState, TemplateError, Text};
 
@@ -590,10 +590,7 @@ impl Bardo {
     ) -> Result<JobId, LookError> {
         let found = self.look_persona(persona)?;
         let description = look_description(description).map_err(LookError::Description)?;
-        if self
-            .persona_look_job(persona)
-            .is_some_and(|job| job.state().is_active())
-        {
+        if self.work_busy(&Work::Look(persona.to_string())) {
             return Err(LookError::Busy);
         }
         for provider in [Provider::Claude, Provider::Gemini] {
@@ -1198,5 +1195,41 @@ mod tests {
         assert!(export.photo_left_out);
         let export = app.export_persona_to(copy.id, &file).unwrap();
         assert!(!export.photo_left_out);
+    }
+
+    #[test]
+    fn a_cancelled_look_job_that_still_stops_keeps_the_look_busy_and_its_prompt_is_kept() {
+        use crate::testing::arriving;
+
+        let h = Harness::new();
+        let app = h.start();
+        let persona = narrator(&app);
+        h.answer(answer("", "A keeper", false));
+        let id = arriving::cancelled(&app, &h.text, || {
+            app.draw_look(persona, DESCRIPTION, BudgetConsent::Ask)
+                .unwrap()
+        });
+
+        // No second request beside the one still out, from the persona or
+        // from Jobs.
+        assert!(matches!(
+            app.draw_look(persona, DESCRIPTION, BudgetConsent::Ask),
+            Err(LookError::Busy)
+        ));
+        arriving::retry_refused(&app, id);
+
+        // The answer arrives whole: the prompt is paid for and kept on the
+        // job, and nothing is drawn from it, since the job was told to
+        // stop.
+        arriving::lands(&app, &h.text, id);
+        assert!(h.images.requests.lock().unwrap().is_empty());
+        assert_eq!(app.persona_look(persona).unwrap().pending, None);
+
+        // Run again, the job draws from the prompt it kept: Claude is not
+        // asked twice.
+        assert_eq!(arriving::retried(&app, id).state(), JobState::Done);
+        assert_eq!(h.text.requests().len(), 1);
+        let drawn = app.persona_look(persona).unwrap().pending.unwrap();
+        assert_eq!(drawn.drawing.unwrap().prompt, "A keeper");
     }
 }

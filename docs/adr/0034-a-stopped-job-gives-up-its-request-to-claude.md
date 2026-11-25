@@ -5,6 +5,7 @@
 - Issue: #295
 - Builds on: ADR-0030 (a paid call is sent once, a lost answer is recorded, and a call in flight is noted on its job) and ADR-0031 (Claude's answers are streamed)
 - Amends: ADR-0031 (its consequence "cancelling a plan job does not stop its request" no longer holds)
+- Amended by: ADR-0036 (the other text jobs keep their stage busy while they stop, and a version or a take prompt keeps its paid answer)
 
 ## Context
 
@@ -38,7 +39,7 @@ Anthropic does not document what a closed connection does to a streamed request:
 - Cancelling a text job ends its request within moments in Bardo, and at the next byte on the wire. Whether Claude stops writing there is for a real-key check to show (#233).
 - A cancelled request for text is in Costs as an estimate, where before it was missing.
 - Closing Bardo does not give a request up in the moment before the process ends; what happens to a call in flight then is ADR-0030's.
-- The other text jobs (a script, a localization, chapters, thumbnails, themes, persona looks, music prompts, metadata, take prompts) give their request up on a cancel too. Their stages still read as free the moment the job is cancelled, and an answer that arrives whole as they are cancelled is still saved as before: with the request given up within moments both windows are short, and closing them is left to #309.
+- The other text jobs (a script, a localization, chapters, thumbnails, themes, persona looks, music prompts, metadata, take prompts) give their request up on a cancel too. Their stages still read as free the moment the job is cancelled, and an answer that arrives whole as they are cancelled is still saved as before: with the request given up within moments both windows are short. ADR-0036 closes the first and decides the second for each job.
 - When this process loses a job to another runner, its request is given up and recorded as an estimate here, and the runner that took the job finds the call's note and records it once more. It takes a process that slept past its lease, or one that could not renew its leases for as long as a lease lasts (storage out of reach): then no other runner need be there, and the job is taken up again here, finds the note and fails once.
 - The answer kept by a cancelled or failed job is used only while that job is the project's latest scene job and the same plan is asked for. Otherwise planning starts a new job and a new request.
 - A cancel that lands in the instant between the answer's arrival and the plan being saved does not stop the plan from being applied.
