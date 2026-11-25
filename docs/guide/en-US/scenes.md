@@ -31,6 +31,26 @@ The scenes appear in order, each with its time, its image and where it stands: *
 
 The picked scene shows the narration it covers, its image and its **image prompt**. **Edit prompt** changes what the next drawing shows (up to 4,000 characters); a scene whose prompt you changed is marked **Edited**. **Generation details** says which model drew the image, with how many tokens and which template version.
 
+<a id="ad"></a>
+## The scenes of an ad
+
+The scenes of an [ad](brief.md) are planned from the **Ad scene plan** template ([Templates](templates.md)) instead: a scene for every sentence, of about 2 to 4 seconds each, the first one showing the hook and the last one being the end card, over the call to action. Each scene of an ad has a **kind**:
+
+| Kind | What it shows | Who makes it |
+| --- | --- | --- |
+| **Drawn** | A picture from the scene's prompt, like the scenes of any video | The image model |
+| **Product in use** | The product being used, from the scene's prompt | The image model |
+| **Product shot** | One of the product's own images, as it is | Bardo, for free |
+| **End card** | The ad's last picture, over the call to action | Bardo, for free, from a product image; the image model when the product has none |
+
+Which kinds a plan may use follows the product's [images](products.md#pictures): a product shot needs an image, and the product in use needs a **Photo**, since a **Screen** is only ever shown as it is. A product with no image gets drawn scenes and a drawn end card. Claude is told which kinds it may use and, by number, which images the product has; a kind the product does not allow comes back as a drawn scene, and a product shot that names an image the product does not have shows its first one. When the product has an image, the plan is asked to have the product on screen by the time the narration names it, with at least one product shot.
+
+Bardo composes a product shot itself, on your computer, as soon as the plan is saved: the product's image, whole, as a card with rounded corners over a plain backdrop in a color taken from the image, 1080 × 1920 for a vertical video and 1920 × 1080 for a wide one. The image is scaled to fit and never stretched, cut or redrawn, and it sits where neither the cut's motion nor a caption covers it. Composing costs nothing and needs no key, and the product's image never goes to an image or video model from a product shot. A composed picture is never animated ([Clips](clips.md#animate)), is never a reference for drawing another scene, is not offered as the set of a performed take, and in the editor it [only zooms](editor.md#motion).
+
+**Scene kind** in the picked scene changes what it is, among the kinds the product allows; **End card** is offered on the last scene only. A scene made a product shot is composed at once, and **Product image** picks which of the product's images it shows, numbered as on the product. When that image is small for the frame, the scene says so: enlarged, it may look soft. A scene made **Drawn** again goes back to the drawing it had; when it never had one, nothing is drawn until you ask with **Generate N images**, which shows the cost first. When the video changes shape, the composed pictures no longer fit and read **To compose**: **Compose product shots** (or **Compose picture** on the scene) makes them again, for free, and **Generate N images** makes them along with the drawings. A scene whose image was removed from the product says so and keeps the picture it has; when that picture has to be made again, the scene fails until you pick another image or kind for it. A render in the other shape (a long ad posted to a 9:16 network, or the other way round) shows a composed picture whole, with bars.
+
+The video's [estimate](projects.md#mode) counts composed scenes as free. Before an ad has a plan, it is estimated with a scene about every 3 seconds, of which two product shots and the end card are free when the product has an image.
+
 <a id="redraw"></a>
 ## Drawing again
 

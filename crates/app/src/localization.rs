@@ -427,6 +427,9 @@ fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> Scen
                 }),
                 None,
             )
+            // An ad's scene keeps what it is, and a composed one its
+            // picture (#278): the file is copied with the others.
+            .with_kind(scene.kind(), scene.product_image(), scene.shot().cloned())
         })
         .collect();
     ScenePlan::restore(ScenePlanRecord {

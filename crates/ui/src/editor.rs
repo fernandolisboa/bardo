@@ -2238,7 +2238,9 @@ impl EditorScreen {
         let bardo = self.bardo.read(cx);
         let editor = self.editor.as_ref()?;
         let item = editor.view().timeline.as_ref()?.video().get(index)?;
-        if editor.view().clips.get(index)?.media == ClipMedia::Missing {
+        let clip = editor.view().clips.get(index)?;
+        // A composed picture is always shown whole (#278).
+        if clip.media == ClipMedia::Missing || clip.composed {
             return None;
         }
         let vertical = editor.aspect() == AspectRatio::Vertical;
@@ -2602,18 +2604,30 @@ impl EditorScreen {
                     }))
                 })
         };
+        // A picture composed from a product image only zooms (#278): a
+        // pan would carry the product out of the frame, so none is
+        // offered.
+        let composed = editor.view().clips.get(index)?.composed;
         let kinds = h_flex()
             .flex_wrap()
             .gap_1()
             .child(chip(0, tr(bardo, Text::MotionNone), None, set.is_none()))
-            .children(MotionKind::ALL.into_iter().enumerate().map(|(n, kind)| {
-                chip(
-                    n + 1,
-                    tr(bardo, Text::MotionName(kind)),
-                    Some(Motion::new(kind, strength)),
-                    set.map(|motion| motion.kind) == Some(kind),
-                )
-            }));
+            .children(
+                MotionKind::ALL
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, kind)| {
+                        !composed || matches!(kind, MotionKind::ZoomIn | MotionKind::ZoomOut)
+                    })
+                    .map(|(n, kind)| {
+                        chip(
+                            n + 1,
+                            tr(bardo, Text::MotionName(kind)),
+                            Some(Motion::new(kind, strength)),
+                            set.map(|motion| motion.kind) == Some(kind),
+                        )
+                    }),
+            );
         let strengths = h_flex()
             .gap_1()
             .children(
@@ -2659,6 +2673,9 @@ impl EditorScreen {
                 .child(label(tr(bardo, Text::EditorMotionStrength), TEXT_3))
                 .child(strengths)
                 .child(hint(tr(bardo, Text::EditorMotionHint)))
+                .when(composed, |section| {
+                    section.child(hint(tr(bardo, Text::EditorMotionComposed)))
+                })
                 .child(h_flex().flex_wrap().gap_1().child(everywhere).child(vary))
                 .tour_anchor(
                     TourAnchor::Control(Control::EditorMotion),
@@ -2987,6 +3004,12 @@ fn provenance_lines(bardo: &Bardo, clip: &ClipView) -> Vec<String> {
     }
     match &clip.image {
         Some(image) => lines.push(source(Text::EditorSourceImage, image)),
+        // A composed picture came from no model: it is never animated,
+        // so nothing follows.
+        None if clip.composed && clip.file.is_some() => {
+            lines.push(bardo.text(Text::EditorSourceComposed).into_owned());
+            return lines;
+        }
         None => lines.push(bardo.text(Text::EditorSourceNone).into_owned()),
     }
     match &clip.clip {

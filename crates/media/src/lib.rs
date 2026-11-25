@@ -2,7 +2,8 @@
 //! length of audio the user brings, and audio playback, without ffmpeg;
 //! probing, frames, waveforms, proxies, preview and render through the
 //! bundled ffmpeg (ADR-0007); the control videos' frames drawn on the
-//! processor (`control`).
+//! processor (`control`); product shots composed from a product's own
+//! image, on the processor too (`product_shot`).
 
 pub mod audio;
 pub mod control;
@@ -11,6 +12,7 @@ pub mod ffmpeg;
 pub mod mp3;
 mod pcm;
 mod playback;
+mod product_shot;
 
 pub use audio::{AudioFormat, AudioInfo, ProbeError};
 pub use engine::{BundledFfmpeg, MediaEngine};
@@ -18,3 +20,4 @@ pub use pcm::{Chunk, PcmStream};
 pub use playback::{
     AudioOutput, DeviceAudio, PcmClock, PcmSource, Playback, PlaybackError, StreamPlayback,
 };
+pub use product_shot::ProductShots;

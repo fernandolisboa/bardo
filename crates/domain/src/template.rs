@@ -51,10 +51,15 @@ pub enum TemplateKind {
     /// the product, the approved angle and the claims the video uses
     /// (#276). Every other project is written from `Script`.
     AdScript,
+    /// The scene plan of an ad project (#278): the storyboard plan, with
+    /// what each scene is (drawn, the product in use, a product shot or
+    /// the end card) and which product image a product shot shows. Every
+    /// other project is planned from `ImagePrompt`.
+    AdScenePlan,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 11] = [
+    pub const ALL: [TemplateKind; 12] = [
         TemplateKind::Script,
         TemplateKind::ImagePrompt,
         TemplateKind::MusicPrompt,
@@ -66,6 +71,7 @@ impl TemplateKind {
         TemplateKind::TakePrompt,
         TemplateKind::AdAngles,
         TemplateKind::AdScript,
+        TemplateKind::AdScenePlan,
     ];
 
     /// Stable name stored in the database.
@@ -82,6 +88,7 @@ impl TemplateKind {
             TemplateKind::TakePrompt => "take_prompt",
             TemplateKind::AdAngles => "ad_angles",
             TemplateKind::AdScript => "ad_script",
+            TemplateKind::AdScenePlan => "ad_scene_plan",
         }
     }
 
@@ -206,6 +213,22 @@ impl TemplateKind {
                 TemplateVariable::NeverSay,
                 TemplateVariable::TargetLength,
             ],
+            TemplateKind::AdScenePlan => &[
+                TemplateVariable::ChannelName,
+                TemplateVariable::ChannelNiche,
+                TemplateVariable::AestheticNotes,
+                TemplateVariable::VisualStyle,
+                TemplateVariable::Language,
+                TemplateVariable::Product,
+                TemplateVariable::ProductConcept,
+                TemplateVariable::ProductImages,
+                TemplateVariable::SceneKinds,
+                TemplateVariable::ThemeTitle,
+                TemplateVariable::ThemeAngle,
+                TemplateVariable::CallToAction,
+                TemplateVariable::NarrationSentences,
+                TemplateVariable::FrameShape,
+            ],
         }
     }
 }
@@ -323,10 +346,16 @@ pub enum TemplateVariable {
     MustSay,
     /// What no ad for the product may say.
     NeverSay,
+    /// The images of an ad's product, numbered from 0: what each one is
+    /// (a photo or a screen) and its shape.
+    ProductImages,
+    /// The kinds the scenes of an ad may be, by what its product's images
+    /// allow.
+    SceneKinds,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 41] = [
+    pub const ALL: [TemplateVariable; 43] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -368,6 +397,8 @@ impl TemplateVariable {
         TemplateVariable::CallToAction,
         TemplateVariable::MustSay,
         TemplateVariable::NeverSay,
+        TemplateVariable::ProductImages,
+        TemplateVariable::SceneKinds,
     ];
 
     /// The name written between the braces.
@@ -414,6 +445,8 @@ impl TemplateVariable {
             TemplateVariable::CallToAction => "call_to_action",
             TemplateVariable::MustSay => "must_say",
             TemplateVariable::NeverSay => "never_say",
+            TemplateVariable::ProductImages => "product_images",
+            TemplateVariable::SceneKinds => "scene_kinds",
         }
     }
 

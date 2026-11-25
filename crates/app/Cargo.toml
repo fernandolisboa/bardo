@@ -35,6 +35,10 @@ uuid.workspace = true
 zeroize.workspace = true
 zip.workspace = true
 
+[dev-dependencies]
+# Real product images, and reading the pictures composed from them (issue #278).
+image = { version = "0.25", default-features = false, features = ["png"] }
+
 # The Windows version in an exported diagnostic (issue #140).
 [target.'cfg(windows)'.dependencies]
 windows-version.workspace = true

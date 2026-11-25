@@ -68,3 +68,19 @@ opt-level = 3
 
 [profile.dev.package.tiny-skia-path]
 opt-level = 3
+
+# Product shots (#278) read and scale pictures of up to 6000 px a side.
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+
+[profile.dev.package.image-webp]
+opt-level = 3
+
+[profile.dev.package.fdeflate]
+opt-level = 3

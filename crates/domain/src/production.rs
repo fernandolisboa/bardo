@@ -12,7 +12,7 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::{ClipModelRef, Provider, VideoFormat};
+use crate::{ClipModelRef, Narration, Provider, VideoFormat};
 
 /// How long the hook runs: the scenes that start within it are animated
 /// in [`ProductionMode::AnimatedHook`].
@@ -157,9 +157,170 @@ pub fn typical_scenes(length: Duration) -> Vec<(Duration, Duration)> {
     scenes
 }
 
+/// How long a scene of an ad not planned yet is counted as: an ad's plan
+/// has a scene per sentence, of 2 to 4 seconds each (#278).
+pub const TYPICAL_AD_SCENE: Duration = Duration::from_secs(3);
+
+/// How many scenes of an ad not planned yet are counted as product
+/// shots, when its product has an image.
+pub const TYPICAL_PRODUCT_SHOTS: usize = 2;
+
+/// The scenes a plan of an ad `length` long would about have, as (start,
+/// length, composed), one every [`TYPICAL_AD_SCENE`]; the last one takes
+/// the rest. A composed scene is one Bardo makes from the product's own
+/// image, for free: when the product has an image, the end card (the
+/// last scene) and [`TYPICAL_PRODUCT_SHOTS`] scenes before it, which
+/// leave the first scenes, the hook, drawn. A product with no image has
+/// only drawn scenes.
+pub fn typical_ad_scenes(length: Duration, has_image: bool) -> Vec<(Duration, Duration, bool)> {
+    let mut scenes: Vec<(Duration, Duration, bool)> = Vec::new();
+    let mut start = Duration::ZERO;
+    while start < length {
+        let left = length - start;
+        // A remainder shorter than half a scene joins the one before.
+        let take = if left < TYPICAL_AD_SCENE + TYPICAL_AD_SCENE / 2 {
+            left
+        } else {
+            TYPICAL_AD_SCENE
+        };
+        scenes.push((start, take, false));
+        start += take;
+    }
+    if has_image {
+        compose_typical(&mut scenes);
+    }
+    scenes
+}
+
+/// The scenes a plan of an ad on `narration` would about have, as in
+/// [`typical_ad_scenes`]: its plan has a scene for each sentence, so one
+/// starts at each sentence (the first at the start) and lasts until the
+/// next, the last one until the narration ends.
+pub fn ad_scenes_on(narration: &Narration, has_image: bool) -> Vec<(Duration, Duration, bool)> {
+    let starts: Vec<Duration> = crate::sentences(narration)
+        .iter()
+        .enumerate()
+        .map(|(index, sentence)| match index {
+            0 => Duration::ZERO,
+            _ => sentence.start,
+        })
+        .collect();
+    let mut scenes: Vec<(Duration, Duration, bool)> = starts
+        .iter()
+        .enumerate()
+        .map(|(index, &start)| {
+            let end = starts
+                .get(index + 1)
+                .copied()
+                .unwrap_or(narration.duration)
+                .max(start);
+            (start, end - start, false)
+        })
+        .collect();
+    if has_image {
+        compose_typical(&mut scenes);
+    }
+    scenes
+}
+
+/// Marks the scenes counted as composed: the end card (the last scene)
+/// and [`TYPICAL_PRODUCT_SHOTS`] before it. The first scene always stays
+/// drawn: it shows the hook.
+fn compose_typical(scenes: &mut [(Duration, Duration, bool)]) {
+    let count = scenes.len();
+    let composed = (TYPICAL_PRODUCT_SHOTS + 1).min(count.saturating_sub(1));
+    for scene in scenes.iter_mut().skip(count - composed) {
+        scene.2 = true;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_ad_with_a_narration_counts_a_scene_for_every_sentence() {
+        use crate::{
+            Alignment, CharTiming, NarrationId, ProfileId, ScriptText, VideoProjectId, WordTimings,
+        };
+        let ms = Duration::from_millis;
+        // Every character 100 ms long, and 500 ms of quiet at the end.
+        let text = "Tired desk. Meet the lamp. Turn it. Get yours.";
+        let alignment = Alignment {
+            chars: text
+                .chars()
+                .enumerate()
+                .map(|(n, c)| CharTiming {
+                    text: c.to_string(),
+                    start: ms(n as u64 * 100),
+                    end: ms(n as u64 * 100 + 100),
+                })
+                .collect(),
+        };
+        let narration = Narration {
+            id: NarrationId::new(),
+            project: VideoProjectId::new(),
+            owner: ProfileId::new(),
+            text: ScriptText::new(text).unwrap(),
+            source: crate::NarrationSource::Imported {
+                file_name: "take.wav".into(),
+                aligner: Provider::ElevenLabs,
+                model: "forced_alignment".into(),
+            },
+            audio_file: "narration.wav".into(),
+            duration: alignment.end() + ms(500),
+            words: WordTimings::from_alignment(text, &alignment),
+            generated_at: std::time::SystemTime::UNIX_EPOCH,
+            job: None,
+        };
+        // Sentences start at characters 0, 12, 27 and 36; the text has 46.
+        assert_eq!(
+            ad_scenes_on(&narration, true),
+            [
+                (ms(0), ms(1_200), false),
+                (ms(1_200), ms(1_500), true),
+                (ms(2_700), ms(900), true),
+                (ms(3_600), ms(1_500), true),
+            ]
+        );
+        assert!(ad_scenes_on(&narration, false).iter().all(|scene| !scene.2));
+    }
+
+    #[test]
+    fn an_ad_not_planned_yet_counts_a_scene_every_three_seconds() {
+        let secs = Duration::from_secs;
+        // A product with no image: every scene is drawn.
+        let drawn = typical_ad_scenes(secs(15), false);
+        assert_eq!(drawn.len(), 5);
+        assert!(drawn.iter().all(|scene| !scene.2));
+        assert_eq!(drawn[4], (secs(12), secs(3), false));
+        // With an image: two product shots and the end card are free.
+        let with_image = typical_ad_scenes(secs(15), true);
+        assert_eq!(
+            with_image.iter().map(|scene| scene.2).collect::<Vec<_>>(),
+            [false, false, true, true, true]
+        );
+        let half_minute = typical_ad_scenes(secs(30), true);
+        assert_eq!(half_minute.len(), 10);
+        assert_eq!(half_minute.iter().filter(|scene| scene.2).count(), 3);
+        assert!(!half_minute[0].2, "the hook is drawn");
+        // The scenes cover the whole length, and a short rest joins the
+        // last one.
+        let odd = typical_ad_scenes(secs(16), true);
+        assert_eq!(odd.len(), 5);
+        assert_eq!(odd[4], (secs(12), secs(4), true));
+        // Very short: the hook stays drawn.
+        let two = typical_ad_scenes(secs(6), true);
+        assert_eq!(
+            two.iter().map(|scene| scene.2).collect::<Vec<_>>(),
+            [false, true]
+        );
+        assert_eq!(
+            typical_ad_scenes(secs(3), true),
+            [(secs(0), secs(3), false)]
+        );
+        assert!(typical_ad_scenes(Duration::ZERO, true).is_empty());
+    }
 
     #[test]
     fn codes_round_trip() {

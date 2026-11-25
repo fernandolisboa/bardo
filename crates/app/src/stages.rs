@@ -326,8 +326,17 @@ pub fn project_stages(
     } else if scenes.stale {
         StageStatus::new(Stage::Scenes, StageState::Attention, StageNote::ScenesStale)
     } else {
-        let to_review = count(|scene| scene.pending().is_some());
-        let drawn = count(|scene| scene.image().is_some());
+        // A scene Bardo composes from a product image (#278) shows that
+        // picture, whatever drawing it still holds, once it is composed
+        // for the video's shape.
+        let to_review = count(|scene| scene.pending().is_some() && !scene.is_composed());
+        let drawn = scene_list
+            .iter()
+            .enumerate()
+            .filter(|(index, scene)| {
+                scene.picture().is_some() && !scenes.missing_shots.contains(index)
+            })
+            .count();
         if to_review > 0 {
             StageStatus::new(
                 Stage::Scenes,
@@ -353,13 +362,17 @@ pub fn project_stages(
     } else if scenes.clips.scenes.iter().any(|clip| clip.is_busy()) {
         StageStatus::working(Stage::Clips)
     } else {
-        let to_review = count(|scene| scene.pending_clip().is_some());
-        let animated = count(|scene| scene.clip().is_some());
+        // A composed scene is never animated: it is owed no clip, and one
+        // it still holds from before is not shown.
+        let to_review = count(|scene| scene.pending_clip().is_some() && !scene.is_composed());
+        let animated = count(|scene| scene.clip().is_some() && !scene.is_composed());
         // Scenes the production mode leaves still are not owed a clip.
         let mode = scenes.clips.mode;
         let total = scene_list
             .iter()
-            .filter(|scene| mode.animates(scene.start) || scene.clip().is_some())
+            .filter(|scene| {
+                !scene.is_composed() && (mode.animates(scene.start) || scene.clip().is_some())
+            })
             .count();
         if to_review > 0 {
             StageStatus::new(
@@ -566,6 +579,19 @@ pub fn scene_states(scenes: &ScenesView, stage: Stage) -> Vec<SceneState> {
         .iter()
         .enumerate()
         .map(|(index, scene)| {
+            // A scene Bardo composes (#278) is done once it has its
+            // picture in the video's shape, at either stage: it is never
+            // drawn or animated.
+            if scene.is_composed() {
+                let composed = scene.picture().is_some() && !scenes.missing_shots.contains(&index);
+                return if composed {
+                    SceneState::Done
+                } else if scene.failure().is_some() && stage != Stage::Clips {
+                    SceneState::Failed
+                } else {
+                    SceneState::ToDraw
+                };
+            }
             if stage == Stage::Clips {
                 let busy = scenes
                     .clips

@@ -30,9 +30,9 @@ use std::time::{Duration, SystemTime};
 
 use crate::{
     AspectRatio, AudioLane, CaptionHighlight, CaptionStyle, Captions, DuckEnvelope, Edge, Framing,
-    MediaAsset, MediaKind, Mix, Motion, MotionDefault, Narration, NarrationId, PlayedTransition,
-    ProfileId, RepositoryError, SavedCaptions, Scene, ScenePlan, ScenePlanId, Transition,
-    VideoProjectId,
+    MediaAsset, MediaKind, Mix, Motion, MotionDefault, MotionKind, Narration, NarrationId,
+    PlayedTransition, ProfileId, RepositoryError, SavedCaptions, Scene, ScenePlan, ScenePlanId,
+    Transition, VideoProjectId,
 };
 
 /// The timeline's frame rate.
@@ -96,8 +96,16 @@ pub enum VideoSource {
 
 impl VideoSource {
     /// What `scene` shows: its clip, or its still image when it has no clip
-    /// or its clip animates an image the scene no longer shows.
+    /// or its clip animates an image the scene no longer shows. A scene
+    /// Bardo composes from a product image (#278) shows that picture and
+    /// nothing else, whatever drawn image or clip it still holds.
     pub fn of(scene: &Scene) -> VideoSource {
+        if scene.is_composed() {
+            return match scene.picture() {
+                Some(file) => VideoSource::Still(file.to_owned()),
+                None => VideoSource::Missing,
+            };
+        }
         match (scene.clip(), scene.image()) {
             (Some(clip), _) if !scene.is_clip_stale() => {
                 let length = clip.played_over(scene.duration());
@@ -411,6 +419,32 @@ impl Timeline {
         for (position, item) in self.video.iter_mut().enumerate() {
             if item.scene().is_some() {
                 item.motion = default.at(position);
+            }
+        }
+        self
+    }
+
+    /// This timeline with every composed scene of `plan` (#278) shown
+    /// whole and moving by a zoom only. A composed picture keeps the
+    /// product inside what a zoom shows ([`crate::shot_room`]), but a pan
+    /// would carry it out of the frame or under the captions, and a
+    /// window of another shape would cut it: a pan becomes a zoom in of
+    /// the same strength, and the picture is fitted to the frame, which
+    /// a picture composed in the frame's own shape fills exactly.
+    pub fn with_composed_whole(mut self, plan: &ScenePlan) -> Timeline {
+        for item in &mut self.video {
+            let composed = item
+                .scene()
+                .and_then(|scene| plan.scenes().get(scene))
+                .is_some_and(Scene::is_composed);
+            if composed {
+                item.framing = Framing::Fit;
+            }
+            let panned = item.motion.filter(|motion| {
+                composed && !matches!(motion.kind, MotionKind::ZoomIn | MotionKind::ZoomOut)
+            });
+            if let Some(motion) = panned {
+                item.motion = Some(motion.with_kind(MotionKind::ZoomIn));
             }
         }
         self
@@ -2039,6 +2073,123 @@ pub(crate) mod tests {
         assert_eq!(
             Timeline::restore(&saved, &plan, &narration, &[music, footage]),
             None
+        );
+    }
+
+    /// A plan of three drawn scenes whose second is a product shot.
+    fn plan_with_a_product_shot() -> ScenePlan {
+        let mut scenes = vec![scene(0, 1_000), scene(1_000, 2_000), scene(2_000, 3_000)];
+        for (index, scene) in scenes.iter_mut().enumerate() {
+            scene.image = Some(image(&format!("scene-{index}.png")));
+        }
+        scenes[1].clip = Some(SceneClip {
+            file: "scene-1.mp4".into(),
+            seconds: 5,
+            stretch: None,
+            source_image: scenes[1].image.as_ref().unwrap().generation.id,
+            generation: generation(),
+        });
+        let mut plan = plan(scenes);
+        let product = crate::ProductImageId::new();
+        let pictures =
+            crate::ProductPictures::new(vec![(product, crate::ProductImageKind::Screen)]);
+        plan.set_scene_kind(
+            1,
+            crate::SceneKind::ProductShot,
+            None,
+            &pictures,
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        plan
+    }
+
+    #[test]
+    fn a_composed_scene_shows_its_composed_picture_and_nothing_else() {
+        let mut plan = plan_with_a_product_shot();
+        let narration = narration(3_000);
+        // Not composed yet: no picture, whatever drawing and clip it holds.
+        let cut = Timeline::rough_cut(&plan, &narration, AspectRatio::Vertical);
+        assert_eq!(cut.video()[1].source, VideoSource::Missing);
+        assert_eq!(cut.video()[0].source.file(), Some("scene-0.png"));
+
+        let product = plan.scenes()[1].product_image().unwrap();
+        plan.scene_mut(1, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .add_shot(crate::ComposedShot {
+                file: "shot-1.png".into(),
+                image: product,
+                aspect: AspectRatio::Vertical,
+            });
+        let cut = Timeline::rough_cut(&plan, &narration, AspectRatio::Vertical);
+        assert_eq!(
+            cut.video()[1].source,
+            VideoSource::Still("shot-1.png".into())
+        );
+        assert!(cut.files().contains(&"shot-1.png"));
+        assert!(!cut.files().contains(&"scene-1.mp4"));
+    }
+
+    #[test]
+    fn a_composed_scene_is_shown_whole_and_never_pans() {
+        let plan = plan_with_a_product_shot();
+        let narration = narration(3_000);
+        let strong = crate::MotionStrength::Strong;
+        let kinds = |timeline: &Timeline| -> Vec<_> {
+            timeline
+                .video()
+                .iter()
+                .map(|item| item.motion.map(|motion| (motion.kind, motion.strength)))
+                .collect()
+        };
+        // The varied pattern pans the second scene.
+        let varied = Timeline::rough_cut(&plan, &narration, AspectRatio::Vertical).with_motion(
+            crate::MotionDefault::new(crate::MotionPattern::Varied, strong),
+        );
+        assert_eq!(
+            varied.video()[1].motion.map(|m| m.kind),
+            Some(MotionKind::PanRight)
+        );
+        assert_eq!(
+            kinds(&varied.with_composed_whole(&plan)),
+            [
+                Some((MotionKind::ZoomIn, strong)),
+                Some((MotionKind::ZoomIn, strong)),
+                Some((MotionKind::ZoomOut, strong)),
+            ],
+            "the pan became a zoom of the same strength, the drawn scenes kept theirs"
+        );
+        // A zoom out stays, and so does a still scene.
+        for pattern in [
+            crate::MotionPattern::Same(MotionKind::ZoomOut),
+            crate::MotionPattern::None,
+        ] {
+            let cut = Timeline::rough_cut(&plan, &narration, AspectRatio::Vertical)
+                .with_motion(crate::MotionDefault::new(pattern, strong));
+            assert_eq!(kinds(&cut.clone().with_composed_whole(&plan)), kinds(&cut));
+        }
+        // Framed whole in a frame of any shape; a drawn scene keeps its
+        // window.
+        let cut = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape)
+            .with_composed_whole(&plan)
+            .with_aspect(AspectRatio::Vertical);
+        let framings: Vec<_> = cut
+            .video()
+            .iter()
+            .map(|item| item.framing_in(AspectRatio::Vertical))
+            .collect();
+        assert_eq!(framings, [Framing::FILL, Framing::Fit, Framing::FILL]);
+        // A drawn scene pans as it did.
+        let panned = Timeline::rough_cut(&plan, &narration, AspectRatio::Vertical).with_motion(
+            crate::MotionDefault::new(crate::MotionPattern::Same(MotionKind::PanUp), strong),
+        );
+        assert_eq!(
+            kinds(&panned.with_composed_whole(&plan)),
+            [
+                Some((MotionKind::PanUp, strong)),
+                Some((MotionKind::ZoomIn, strong)),
+                Some((MotionKind::PanUp, strong)),
+            ]
         );
     }
 }

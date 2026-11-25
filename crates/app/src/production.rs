@@ -17,8 +17,8 @@ use std::time::Duration;
 
 use bardo_domain::{
     ClipModel, CostPurpose, Money, ProductionMode, Provider, RepositoryError, ScenePlanSize,
-    SpendCap, StretchLimit, VideoLength, VideoProject, VideoProjectId, default_spend_cap,
-    typical_length, typical_scenes,
+    SpendCap, StretchLimit, VideoLength, VideoProject, VideoProjectId, ad_scenes_on,
+    default_spend_cap, typical_ad_scenes, typical_length, typical_scenes,
 };
 
 use crate::costs::{BudgetConsent, CapReached, PlannedCall, SpendEstimate};
@@ -283,12 +283,16 @@ impl Bardo {
                     .map(|(index, scene)| PlannedScene {
                         start: scene.start,
                         length: scene.duration(),
-                        needs_image: scene.image().is_none(),
+                        // A scene Bardo composes from a product image
+                        // (#278) is free: nothing is drawn or animated
+                        // for it.
+                        needs_image: scene.image().is_none() && !scene.is_composed(),
                         // A clip waiting for review is already paid for,
                         // and so is one a provider is making.
                         needs_clip: scene.clip().is_none()
                             && scene.pending_clip().is_none()
-                            && !being_made.contains(&index),
+                            && !being_made.contains(&index)
+                            && !scene.is_composed(),
                         own_model: scene.clip_model().cloned(),
                     })
                     .collect();
@@ -299,17 +303,39 @@ impl Bardo {
             None => {
                 // Sized as the Scenes stage sizes it, from the narration or
                 // from the length it will about have.
-                calls.push(crate::scenes::sized_plan_call(match &narration {
-                    Some(narration) => ScenePlanSize::of(narration),
-                    None => ScenePlanSize::about(length),
-                }));
-                let scenes = typical_scenes(length)
+                calls.push(crate::scenes::sized_plan_call(
+                    match (&narration, project.is_ad()) {
+                        (Some(narration), false) => ScenePlanSize::of(narration),
+                        (Some(narration), true) => ScenePlanSize::of_ad(narration),
+                        (None, false) => ScenePlanSize::about(length),
+                        (None, true) => ScenePlanSize::about_ad(length),
+                    },
+                ));
+                // An ad has a scene about every 3 seconds, of which its
+                // product shots and its end card are composed from the
+                // product's own image, when it has one: those are free.
+                // Once its narration exists, its plan will have a scene
+                // for each of its sentences.
+                let typical: Vec<(Duration, Duration, bool)> = match project.product {
+                    Some(product) => {
+                        let has_image = self.products.image_count(product)? > 0;
+                        match &narration {
+                            Some(narration) => ad_scenes_on(narration, has_image),
+                            None => typical_ad_scenes(length, has_image),
+                        }
+                    }
+                    None => typical_scenes(length)
+                        .into_iter()
+                        .map(|(start, length)| (start, length, false))
+                        .collect(),
+                };
+                let scenes = typical
                     .into_iter()
-                    .map(|(start, length)| PlannedScene {
+                    .map(|(start, length, composed)| PlannedScene {
                         start,
                         length,
-                        needs_image: true,
-                        needs_clip: true,
+                        needs_image: !composed,
+                        needs_clip: !composed,
                         own_model: None,
                     })
                     .collect();

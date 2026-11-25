@@ -788,7 +788,7 @@ pub const SCENES: Tour = {
     const TOOLBAR: WhenMissing = WhenMissing::LightPart(TourAnchor::Toolbar);
     Tour {
         id: TourId::Scenes,
-        version: 6,
+        version: 7,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "plan", control(Control::ScenesPlan))

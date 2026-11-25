@@ -1129,6 +1129,7 @@ missing_kling_key = "Salve uma chave do Kling em Configurações para animar cen
 no_image_to_animate = "Gere a imagem desta cena primeiro; o clipe a anima."
 nothing_to_animate = "Todas as cenas com imagem já têm clipe ou um a caminho."
 clip_model_not_offered = "Esse modelo de vídeo não é mais oferecido. Escolha outro."
+kind_not_allowed = "Esta cena não pode ser desse tipo: as imagens do produto não permitem, ou ela não é a última cena."
 
 [provenance]
 provider = "Provedor"
@@ -1174,6 +1175,7 @@ look_prompt = "Prompt de aparência"
 take_prompt = "Prompt da tomada"
 ad_angles = "Ângulos de anúncio"
 ad_script = "Roteiro de anúncio"
+ad_scene_plan = "Plano de cenas de anúncio"
 
 [templates.variable]
 channel_name = "O nome do canal."
@@ -1217,6 +1219,8 @@ offer = "O que o espectador ganha, como está na etapa Briefing (\"not set\" qua
 call_to_action = "O que se pede ao espectador, nas suas palavras, vindo da etapa Briefing."
 must_say = "O que todo anúncio do produto precisa dizer, vindo do briefing do produto."
 never_say = "O que nenhum anúncio do produto pode dizer, vindo do briefing do produto."
+product_images = "As imagens do produto, numeradas a partir de 0, uma por linha: se cada uma é uma foto ou uma tela, e o tamanho (\"none\" quando o produto não tem imagem)."
+scene_kinds = "Os tipos que uma cena deste anúncio pode ter, um por linha, conforme as imagens do produto: uma foto do produto precisa de uma imagem, o produto em uso precisa de uma foto."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."
@@ -1632,6 +1636,7 @@ audio = "Áudio"
 source_in = "Início na fonte"
 remove = "Remover do corte"
 shortcuts = "S divide · T transição · [ e ] aparam até o cursor · Alt+← e Alt+→ movem · Delete remove"
+source_composed = "Composta a partir da imagem do próprio produto"
 
 [editor.captions]
 text = "Texto"
@@ -1685,6 +1690,7 @@ everywhere = "Usar em todas as imagens"
 vary = "Variar em todas as imagens"
 hint = "Um zoom ou pan lento sobre a imagem como está enquadrada, enquanto o clipe aparece."
 clip = "Este clipe já tem movimento próprio. O movimento vale para imagens paradas."
+composed = "Uma imagem composta a partir de uma imagem do produto só recebe zoom, para o produto ficar inteiro no quadro e livre das legendas."
 
 [editor.tool]
 select = "Selecionar (V)"
@@ -1949,6 +1955,7 @@ failed = "Falhou"
 to_draw = "A gerar"
 to_animate = "A animar"
 animating = "Animando"
+to_compose = "A compor"
 
 [scenes.inspector]
 image_prompt = "Prompt da imagem"
@@ -3100,7 +3107,7 @@ body = "Cada cena em ordem, com o tempo, a imagem e como está: para desenhar, p
 
 [tour.scenes.scene]
 title = "Uma cena"
-body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato de cada pessoa dela, a não ser de quem você escolheu desenhar sem retrato, e uma desenhada com um retrato mais antigo fica marcada. Edite o prompt para mudar o que o próximo desenho mostra."
+body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato de cada pessoa dela, a não ser de quem você escolheu desenhar sem retrato, e uma desenhada com um retrato mais antigo fica marcada. Edite o prompt para mudar o que o próximo desenho mostra. Num anúncio, Tipo de cena diz o que a cena é: desenhada, ou uma foto do produto que o Bardo compõe de graça a partir de uma das imagens do próprio produto."
 
 [tour.scenes.redraw]
 title = "Desenhe de novo"
@@ -4603,3 +4610,21 @@ not_checked = "O roteiro, como está agora, ainda não foi conferido com as afir
 [tour.script.claims]
 title = "A checagem de afirmações"
 body = "Em um anúncio, o Claude lista o que o roteiro diz sobre o produto. O que nenhuma afirmação do briefing sustenta fica marcado aqui, e você decide o que fazer com a frase. Depois de editar, salve e confira de novo."
+
+[scenes.kind]
+label = "Tipo de cena"
+hint = "O que esta cena do anúncio mostra. Uma cena desenhada e o produto em uso são desenhados pelo modelo de imagem. Uma foto do produto mostra uma das imagens do próprio produto como ela é: o Bardo compõe essa cena de graça e ela nunca vai para um modelo. O cartão final também, quando o produto tem imagem; quando não tem, o cartão final é desenhado. Só aparecem os tipos que as imagens do produto permitem."
+image = "Imagem do produto"
+composed = "Composta pelo Bardo a partir da imagem do próprio produto. De graça, e ela nunca vai para um modelo."
+too_small = "Esta imagem é pequena para o quadro: ampliada, ela pode ficar sem nitidez. Uma imagem maior do produto resolve."
+compose = "Compor imagem"
+compose_missing = "Compor fotos do produto ({n})"
+not_composed = "Ainda não composta. Compor é de graça."
+no_clip = "Uma imagem composta a partir da imagem do produto não é animada: o corte mostra a imagem inteira, parada ou com um zoom lento."
+image_removed = "A imagem que esta cena mostra foi removida do produto. A imagem composta fica até precisar ser feita de novo: escolha outra imagem ou outro tipo para ela."
+
+[scenes.kind.name]
+drawn = "Desenhada"
+product_in_use = "Produto em uso"
+product_shot = "Foto do produto"
+end_card = "Cartão final"

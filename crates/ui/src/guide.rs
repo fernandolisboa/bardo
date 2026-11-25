@@ -176,6 +176,7 @@ pub mod refs {
     pub const SCENES_FIT: GuideRef = at("scenes", "fit");
     pub const SCENES_REPLAN: GuideRef = at("scenes", "replan");
     pub const SCENES_PLACE: GuideRef = at("scenes", "place");
+    pub const SCENES_AD: GuideRef = at("scenes", "ad");
     pub const CLIPS_ANIMATE: GuideRef = at("clips", "animate");
     pub const CLIPS_REVIEW: GuideRef = at("clips", "review");
     pub const CLIPS_STRETCH: GuideRef = at("clips", "stretch");
@@ -244,7 +245,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 116] = [
+    pub const ALL: [GuideRef; 117] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -290,6 +291,7 @@ pub mod refs {
         CAPTURE_REMOVE,
         SCENES_PLAN,
         SCENES_REDRAW,
+        SCENES_AD,
         SCENES_CAST,
         SCENES_SAME_PLACE,
         SCENES_STYLE,

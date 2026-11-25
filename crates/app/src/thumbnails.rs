@@ -582,6 +582,9 @@ impl Bardo {
             .map(|plan| {
                 plan.scenes()
                     .iter()
+                    // A composed scene (#278) does not show the drawing it
+                    // may still hold.
+                    .filter(|scene| !scene.is_composed())
                     .filter_map(|scene| scene.image())
                     .map(|image| ThumbnailBackground {
                         file: image.file.clone(),

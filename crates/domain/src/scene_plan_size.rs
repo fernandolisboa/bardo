@@ -16,7 +16,7 @@
 
 use std::time::Duration;
 
-use crate::{Narration, TYPICAL_SCENE, sentences};
+use crate::{Narration, TYPICAL_AD_SCENE, TYPICAL_SCENE, sentences};
 
 /// The fastest the default template asks scenes to change.
 const FASTEST_SCENE: Duration = Duration::from_secs(4);
@@ -38,6 +38,8 @@ const THOUGHT_USUALLY: u64 = 10_000;
 pub struct ScenePlanSize {
     sentences: u64,
     duration: Duration,
+    /// An ad's plan: a scene for every sentence, whatever their pace.
+    a_scene_a_sentence: bool,
 }
 
 impl ScenePlanSize {
@@ -45,6 +47,27 @@ impl ScenePlanSize {
         Self {
             sentences: sentences as u64,
             duration,
+            a_scene_a_sentence: false,
+        }
+    }
+
+    /// The size of the plan of an ad's `narration` (#278): an ad's plan
+    /// has a scene for every sentence.
+    pub fn of_ad(narration: &Narration) -> Self {
+        Self {
+            a_scene_a_sentence: true,
+            ..Self::of(narration)
+        }
+    }
+
+    /// The size for the narration of an ad that is not made yet and will
+    /// last about `duration`: a scene every [`TYPICAL_AD_SCENE`].
+    pub fn about_ad(duration: Duration) -> Self {
+        let scenes = duration.as_millis().div_ceil(TYPICAL_AD_SCENE.as_millis());
+        Self {
+            sentences: u64::try_from(scenes).unwrap_or(u64::MAX),
+            duration,
+            a_scene_a_sentence: true,
         }
     }
 
@@ -59,12 +82,16 @@ impl ScenePlanSize {
         Self {
             sentences: u64::MAX,
             duration,
+            a_scene_a_sentence: false,
         }
     }
 
     /// Scenes at `pace` each. A scene starts at a sentence, so there are
     /// never more scenes than sentences, and a plan has at least one.
     fn scenes(self, pace: Duration) -> u64 {
+        if self.a_scene_a_sentence {
+            return self.sentences.max(1);
+        }
         let by_time = self.duration.as_millis().div_ceil(pace.as_millis());
         let by_time = u64::try_from(by_time).unwrap_or(u64::MAX);
         by_time.min(self.sentences).max(1)
@@ -121,6 +148,30 @@ mod tests {
         // Long sentences: a scene starts at a sentence.
         assert_eq!(minutes(1, 6).scenes_at_most(), 6);
         assert_eq!(minutes(1, 6).scenes_usually(), 6);
+    }
+
+    #[test]
+    fn an_ads_plan_has_a_scene_for_every_sentence() {
+        // Ten sentences in thirty seconds: three seconds each, faster
+        // than any other plan changes scenes.
+        let ad = ScenePlanSize {
+            a_scene_a_sentence: true,
+            ..ScenePlanSize::new(10, Duration::from_secs(30))
+        };
+        assert_eq!(ad.scenes_at_most(), 10);
+        assert_eq!(ad.scenes_usually(), 10);
+        assert_eq!(
+            ScenePlanSize::new(10, Duration::from_secs(30)).scenes_usually(),
+            5
+        );
+        // Before its narration: a scene about every three seconds.
+        let ahead = ScenePlanSize::about_ad(Duration::from_secs(30));
+        assert_eq!(ahead.scenes_usually(), 10);
+        assert_eq!(ahead.scenes_at_most(), 10);
+        assert_eq!(
+            ScenePlanSize::about_ad(Duration::from_secs(16)).scenes_usually(),
+            6
+        );
     }
 
     #[test]
