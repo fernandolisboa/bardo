@@ -1933,6 +1933,8 @@ pub(crate) mod testing {
         /// Credit checks and lookups for a lost submission.
         pub(crate) checks: Mutex<u32>,
         pub(crate) lookups: Mutex<u32>,
+        /// Looking for a lost submission fails this way.
+        pub(crate) lookup_failure: Mutex<Option<ProviderFailure>>,
         /// How many calls the provider refuses the token for first.
         pub(crate) refusals: Mutex<u32>,
         /// A call held open (`pause_at`).
@@ -2122,6 +2124,9 @@ pub(crate) mod testing {
         ) -> Result<Option<ClipHandle>, ProviderFailure> {
             self.keys.lock().unwrap().push(key.expose().to_owned());
             *self.lookups.lock().unwrap() += 1;
+            if let Some(failure) = self.lookup_failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
             Ok(self
                 .requests
                 .lock()

@@ -360,6 +360,23 @@ struct ImagesPayload {
     /// (#259); jobs from before styles took the look from the notes.
     #[serde(default)]
     style: String,
+    /// For each of `scenes`, in that order: the images (current and
+    /// waiting, by generation) the scene held when the job was started. An
+    /// image that is not among them and not this job's was drawn by
+    /// another job since, and the scene is left to it. `None` in a job
+    /// from before this was kept: nothing is known, and nothing is left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    had: Option<Vec<Vec<String>>>,
+}
+
+/// What an image job has delivered, saved as the job's external handle.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct ImagesState {
+    /// The scenes this job saved an image for. They are done for good: a
+    /// retry never draws them again, whatever the user did with the image
+    /// since (rejected it, replaced it with another job's).
+    #[serde(default)]
+    drawn: Vec<usize>,
 }
 
 fn landscape() -> String {
@@ -754,6 +771,21 @@ impl SceneHandler {
         // again for every scene its member is in.
         let mut tried: Vec<usize> = Vec::new();
         let mut done = 0;
+        let mut state: ImagesState = match cx.as_ref().and_then(|cx| cx.external_handle()) {
+            Some(saved) => parse(saved)?,
+            None => ImagesState::default(),
+        };
+        // Notes a scene as delivered by this job.
+        let deliver = |cx: &mut Option<&mut JobContext>, state: &mut ImagesState, index: usize| {
+            if state.drawn.contains(&index) {
+                return Ok(());
+            }
+            state.drawn.push(index);
+            match cx.as_mut() {
+                Some(cx) => cx.save_external_handle(to_json(state)).map_err(unexpected),
+                None => Ok(()),
+            }
+        };
         let step = |cx: &mut Option<&mut JobContext>, done: &mut usize, total: usize| {
             *done += 1;
             match cx.as_mut() {
@@ -789,7 +821,7 @@ impl SceneHandler {
             }
             step(&mut cx, &mut done, total)?;
         }
-        for &index in &payload.scenes {
+        for (position, &index) in payload.scenes.iter().enumerate() {
             // A new plan replaced this one: its scenes are gone.
             let Some(plan) = self.saved_plan(project, plan_id)? else {
                 return Ok(());
@@ -797,12 +829,39 @@ impl SceneHandler {
             let Ok(scene) = plan.scene(index) else {
                 continue;
             };
+            if state.drawn.contains(&index) {
+                continue;
+            }
+            // Saved by a run cut before it noted so, or by a job from
+            // before deliveries were noted.
             let drawn = scene
                 .image()
                 .into_iter()
                 .chain(scene.pending())
                 .any(|image| image.generation.job == Some(job));
             if drawn {
+                deliver(&mut cx, &mut state, index)?;
+                continue;
+            }
+            // Another job drew the scene since this one was started (the
+            // user did not wait for a retry): drawing it now would pay for
+            // an image nobody is missing.
+            let left = payload
+                .had
+                .as_ref()
+                .and_then(|had| had.get(position))
+                .is_some_and(|had| {
+                    scene
+                        .image()
+                        .into_iter()
+                        .chain(scene.pending())
+                        .any(|image| {
+                            image.generation.job != Some(job)
+                                && !had.contains(&image.generation.id.to_string())
+                        })
+                });
+            if left {
+                step(&mut cx, &mut done, total)?;
                 continue;
             }
             if cx.as_ref().is_some_and(|cx| cx.should_stop()) {
@@ -928,6 +987,7 @@ impl SceneHandler {
                     if let Some(pushed) = pushed {
                         crate::proxies::remove_media(self.files.as_ref(), project, &pushed.file);
                     }
+                    deliver(&mut cx, &mut state, index)?;
                 }
                 Err(failure) => {
                     // An answer that was lost may still have been billed.
@@ -1104,13 +1164,22 @@ impl Bardo {
             .is_some_and(|job| job.state().is_active())
     }
 
+    /// The project's scene plan or image job at work, else its latest:
+    /// an older job the user retried counts while it runs.
     fn latest_scene_job(&self, project: VideoProjectId) -> Option<Job> {
         let project = project.to_string();
-        self.jobs().into_iter().rev().find(|job| {
-            matches!(job.kind(), JobKind::ScenePlan | JobKind::SceneImages)
-                && serde_json::from_str::<ProjectOf>(job.payload())
-                    .is_ok_and(|p| p.project == project)
-        })
+        let jobs = self.jobs();
+        let of_project = || {
+            jobs.iter().rev().filter(|job| {
+                matches!(job.kind(), JobKind::ScenePlan | JobKind::SceneImages)
+                    && serde_json::from_str::<ProjectOf>(job.payload())
+                        .is_ok_and(|p| p.project == project)
+            })
+        };
+        of_project()
+            .find(|job| job.state().is_active())
+            .or_else(|| of_project().next())
+            .cloned()
     }
 
     fn scenes_idle(&self, project: VideoProjectId) -> Result<(), SceneError> {
@@ -1322,6 +1391,28 @@ impl Bardo {
             .is_ok_and(|style| style != StyleChoice::from_code(&payload.style))
     }
 
+    /// Whether `job` is an image job of a project where another scene
+    /// plan or image job runs or waits now. Run again meanwhile, it would
+    /// not yet see that job's images and would pay for a scene a second
+    /// time.
+    pub(crate) fn images_taken(&self, job: JobId) -> bool {
+        let jobs = self.jobs();
+        let Some(project) = jobs
+            .iter()
+            .find(|candidate| candidate.id() == job && candidate.kind() == JobKind::SceneImages)
+            .and_then(|job| serde_json::from_str::<ProjectOf>(job.payload()).ok())
+        else {
+            return false;
+        };
+        jobs.iter().any(|other| {
+            other.id() != job
+                && other.state().is_active()
+                && matches!(other.kind(), JobKind::ScenePlan | JobKind::SceneImages)
+                && serde_json::from_str::<ProjectOf>(other.payload())
+                    .is_ok_and(|theirs| theirs.project == project.project)
+        })
+    }
+
     fn draw_scenes(
         &self,
         plan: &ScenePlan,
@@ -1346,9 +1437,23 @@ impl Bardo {
             images_call(portraits.len() + first + scenes.len()),
             consent,
         )?;
+        let had = scenes
+            .iter()
+            .map(|&index| {
+                plan.scene(index).map(|scene| {
+                    scene
+                        .image()
+                        .into_iter()
+                        .chain(scene.pending())
+                        .map(|image| image.generation.id.to_string())
+                        .collect()
+                })
+            })
+            .collect::<Result<Vec<Vec<String>>, _>>()?;
         let payload = ImagesPayload {
             project: plan.project.to_string(),
             plan: plan.id.to_string(),
+            had: Some(had),
             scenes,
             aspect: self.video_format(&project)?.aspect().code().to_owned(),
             portraits,
@@ -2768,6 +2873,169 @@ pub(crate) mod tests {
         assert_eq!(images.len(), 3);
         assert_eq!(images[..2], kept[..]);
         assert_eq!(plan.scenes()[2].failure(), None);
+    }
+
+    #[test]
+    fn a_retry_does_not_draw_again_a_scene_whose_image_was_replaced_since() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        h.images.decline("signal");
+        let id = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+
+        // The user draws scene 2 again and takes the new image, so the
+        // one this job drew is gone.
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 1, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let replaced = app.accept_scene_image(project.id, 1).unwrap();
+
+        h.images.accept_all();
+        let asked = h.images.prompts().len();
+        app.retry_job(id).unwrap();
+        done(&app, id);
+
+        let retried = &h.images.prompts()[asked..];
+        assert_eq!(retried.len(), 1, "only the scene that failed: {retried:?}");
+        assert!(retried[0].contains("signal"), "{retried:?}");
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        assert_eq!(plan.scenes()[1].image(), replaced.scenes()[1].image());
+        assert_eq!(plan.scenes()[1].pending(), None, "it was drawn again");
+        assert!(plan.scenes()[2].image().is_some());
+    }
+
+    #[test]
+    fn a_retry_does_not_draw_a_failed_scene_another_job_drew_since() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        h.images.decline("signal");
+        let id = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        h.images.accept_all();
+
+        // The user draws the declined scene by itself, then retries the
+        // first job: there is nothing left for it to draw.
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 2, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let theirs = app.scenes(project.id).unwrap().plan.unwrap();
+        let asked = h.images.prompts().len();
+        app.retry_job(id).unwrap();
+        let job = done(&app, id);
+
+        assert_eq!(job.state(), JobState::Done);
+        assert_eq!(
+            h.images.prompts().len(),
+            asked,
+            "scene 3 was paid for twice"
+        );
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        assert_eq!(plan.scenes()[2].image(), theirs.scenes()[2].image());
+        assert_eq!(plan.scenes()[2].pending(), None);
+    }
+
+    #[test]
+    fn a_retry_waits_for_another_image_job_of_the_video() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        h.images.decline("signal");
+        let id = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        h.images.accept_all();
+
+        // The declined scene is being drawn by another job: retried now,
+        // the first would not see that image yet and would pay for another.
+        *h.images.delay.lock().unwrap() = Duration::from_millis(300);
+        let other = app
+            .regenerate_scene_image(project.id, 2, BudgetConsent::Ask)
+            .unwrap();
+        let refused = app.retry_job(id).unwrap_err();
+        assert!(matches!(refused, crate::jobs::JobActionError::ScenesTaken));
+        assert_eq!(refused.message(), crate::Text::JobScenesTaken);
+
+        *h.images.delay.lock().unwrap() = Duration::ZERO;
+        done(&app, other);
+        let asked = h.images.prompts().len();
+        app.retry_job(id).unwrap();
+        assert_eq!(done(&app, id).state(), JobState::Done);
+        assert_eq!(h.images.prompts().len(), asked);
+    }
+
+    #[test]
+    fn a_video_whose_older_image_job_runs_again_takes_no_other_image_job() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        h.images.decline("signal");
+        let id = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        // A newer job of the video, over by now.
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        h.images.accept_all();
+
+        // The first job, retried, is drawing: the newer job being over
+        // does not free the video for another.
+        *h.images.delay.lock().unwrap() = Duration::from_millis(300);
+        app.retry_job(id).unwrap();
+        assert!(app.scenes(project.id).unwrap().is_busy());
+        assert!(matches!(
+            app.regenerate_scene_image(project.id, 2, BudgetConsent::Ask),
+            Err(SceneError::Busy)
+        ));
+        *h.images.delay.lock().unwrap() = Duration::ZERO;
+        done(&app, id);
+    }
+
+    #[test]
+    fn a_retry_does_not_draw_again_a_new_image_the_user_rejected() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, drawn) = h.drawn_project(&app);
+        // Every scene is drawn again in one job, for a new style, and the
+        // last is declined.
+        let clay = bardo_domain::StyleChoice::Catalog(bardo_domain::VisualStyle::ClayStopMotion);
+        app.set_project_style(project.id, Some(clay)).unwrap();
+        h.images.decline("signal");
+        let id = app
+            .redraw_restyled_scenes(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        app.reject_scene_image(project.id, 0).unwrap();
+
+        h.images.accept_all();
+        let asked = h.images.prompts().len();
+        app.retry_job(id).unwrap();
+        done(&app, id);
+
+        assert_eq!(h.images.prompts().len() - asked, 1, "only scene 3");
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        assert_eq!(
+            plan.scenes()[0].pending(),
+            None,
+            "the rejected image is back"
+        );
+        assert_eq!(plan.scenes()[0].image(), drawn.scenes()[0].image());
+        assert!(plan.scenes()[1].pending().is_some());
+        assert!(plan.scenes()[2].pending().is_some());
     }
 
     #[test]

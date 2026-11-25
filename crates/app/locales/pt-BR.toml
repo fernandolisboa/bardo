@@ -381,6 +381,7 @@ not_started = "Não foi possível iniciar a tarefa. Tente de novo."
 runs_elsewhere = "O agente em segundo plano está rodando esta tarefa agora. Tente de novo quando ela terminar."
 superseded = "Uma narração mais nova deste projeto substituiu esta importação, então ela não roda de novo."
 restyled = "O estilo visual do vídeo mudou depois que esta tarefa começou, então ela não roda de novo. Desenhe as cenas pela etapa Cenas, que mostra quanto custam no estilo atual."
+scenes_taken = "Outra tarefa está trabalhando nestas cenas agora. Tente esta de novo quando ela terminar, para nenhuma cena ser paga duas vezes."
 take_from_page = "Nada desta tomada chegou ao provedor ainda. Faça de novo na etapa Captura, que confere antes o teto do vídeo, a tomada de teste e as checagens antes do envio."
 
 [setup]
