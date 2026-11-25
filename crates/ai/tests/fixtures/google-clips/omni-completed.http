@@ -38,10 +38,28 @@ content-type: application/json; charset=UTF-8
   ],
   "id": "v1_ChdHb29nbGVPbW5pQmFyZG9UZXN0MDAx",
   "status": "completed",
-  "model": "gemini-omni-1.1-flash",
+  "model": "gemini-omni-1.2-flash",
   "object": "interaction",
   "usage": {
     "total_input_tokens": 1290,
-    "total_output_tokens": 46336
+    "input_tokens_by_modality": [
+      {
+        "modality": "image",
+        "tokens": 1258
+      },
+      {
+        "modality": "text",
+        "tokens": 32
+      }
+    ],
+    "total_output_tokens": 40544,
+    "output_tokens_by_modality": [
+      {
+        "modality": "video",
+        "tokens": 40544
+      }
+    ],
+    "total_thought_tokens": 118,
+    "total_tokens": 41952
   }
 }

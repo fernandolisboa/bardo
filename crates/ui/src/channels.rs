@@ -697,8 +697,13 @@ impl ChannelsScreen {
         self.persona.update(cx, |select, cx| {
             select.set_selected_value(&draft.default_persona, window, cx)
         });
+        // A model its provider retired shows as the one that took its place.
+        let clip_model = draft
+            .clip_model
+            .as_ref()
+            .map(|model| self.bardo.read(cx).clip_model_now(model));
         self.clip_model.update(cx, |select, cx| {
-            select.set_selected_value(&draft.clip_model, window, cx);
+            select.set_selected_value(&clip_model, window, cx);
             // A model no longer offered shows as the default; saving keeps
             // the form's choice.
             if select.selected_value().is_none() {

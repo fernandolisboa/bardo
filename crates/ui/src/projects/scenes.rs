@@ -25,7 +25,8 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex,
+    v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, ObjectFit, SharedString, Window, div, img, px};
@@ -363,26 +364,51 @@ impl ProjectsScreen {
             .flex_wrap()
             .items_center()
             .children(filter)
-            .when(stage == Stage::Scenes && view.stale && !can_place, |row| {
-                row.child(kit::status(
-                    Tone::Warning,
-                    tr(bardo, Text::ScenesStaleTag),
-                    cx,
-                ))
-                .child(guide::info(
-                    bardo,
-                    "scenes-stale-info",
-                    tr(bardo, Text::ScenesStale),
-                    guide::refs::SCENES_REPLAN,
-                ))
-            })
+            // Scenes without a narration yet (a new version's) say so in
+            // their own notice.
+            .when(
+                view.narration.is_some() && view.stale && !can_place,
+                |row| {
+                    // Fitting keeps the pictures; else only planning again.
+                    let (why, page) = if view.can_fit {
+                        (Text::ScenesStaleFit, guide::refs::SCENES_FIT)
+                    } else {
+                        (Text::ScenesStale, guide::refs::SCENES_REPLAN)
+                    };
+                    row.child(kit::status(
+                        Tone::Warning,
+                        tr(bardo, Text::ScenesStaleTag),
+                        cx,
+                    ))
+                    .child(guide::info(
+                        bardo,
+                        "scenes-stale-info",
+                        tr(bardo, why),
+                        page,
+                    ))
+                },
+            )
             .child(div().flex_1())
             .child(actions);
+        // The channel's model was retired by its provider: say which one
+        // makes the clips now.
+        let replaced = (stage == Stage::Clips)
+            .then(|| {
+                let old = view.clips.default_replaces.as_ref()?;
+                let new = view.clips.default_model.as_ref()?;
+                let text = bardo.text_with(
+                    Text::ClipsChannelModelReplaced,
+                    &[("old", old), ("new", &new.name)],
+                );
+                Some(kit::notice(Tone::Info, SharedString::from(text), cx).text_xs())
+            })
+            .flatten();
         // The leading action's estimate, under it.
         v_flex()
             .gap_1()
             .child(row)
             .children(estimate.map(|estimate| h_flex().justify_end().child(estimate)))
+            .children(replaced)
             .into_any_element()
     }
 
@@ -399,14 +425,16 @@ impl ProjectsScreen {
         let missing = view.missing_images();
         let stale = view.stale;
         // Only the leading button is primary: planning while there is no
-        // plan or it is stale, else drawing the missing images.
+        // plan or it is stale and cannot be fitted, else drawing the
+        // missing images.
         let can_place = view
             .version
             .as_ref()
             .is_some_and(|version| version.can_place);
         let can_plan = !busy && !view.is_animating() && view.narration.is_some() && !view.too_long;
-        // A plan that cannot be asked for leads nothing.
-        let plans_first = (plan.is_none() || (stale && !can_place)) && can_plan;
+        // A plan that cannot be asked for leads nothing; nor does one whose
+        // scenes can be fitted, which keeps their pictures.
+        let plans_first = (plan.is_none() || (stale && !can_place && !view.can_fit)) && can_plan;
         let plan_button = can_plan.then(|| {
             let button = Button::new("plan-scenes").small().label(tr(
                 bardo,
@@ -434,8 +462,8 @@ impl ProjectsScreen {
             .into_any_element()
         });
         let draw_button = (missing > 0 && !busy).then(|| {
-            let button = Button::new("generate-scene-images").small();
-            if plans_first {
+            let button = self.paid(Button::new("generate-scene-images").small(), cx);
+            if plans_first || stale {
                 button.outline()
             } else {
                 button.primary()
@@ -496,7 +524,7 @@ impl ProjectsScreen {
             AnimatedScenes::None | AnimatedScenes::All => Text::AnimateMissingClips,
         };
         let button = (missing > 0 && !view.is_busy()).then(|| {
-            Button::new("animate-missing-clips")
+            self.paid(Button::new("animate-missing-clips"), cx)
                 .primary()
                 .small()
                 .label(SharedString::from(
@@ -536,6 +564,91 @@ impl ProjectsScreen {
             ))
             .collect();
         (actions, estimate)
+    }
+
+    /// A button that pays for an image or a clip: off, and saying why,
+    /// while the scenes are out of date (#262).
+    fn paid(&self, button: Button, cx: &App) -> Button {
+        let Some(view) = self.scenes.as_ref().filter(|view| view.stale) else {
+            return button;
+        };
+        let placed = view
+            .version
+            .as_ref()
+            .is_some_and(|version| version.can_place);
+        // What brings the scenes onto the narration, by what the stage
+        // offers: a narration first, placing, fitting, or planning again.
+        let why = if view.narration.is_none() {
+            Text::ScenesNoNarration
+        } else if placed {
+            Text::ScenesPaidHeldVersion
+        } else if view.can_fit {
+            Text::ScenesPaidHeld
+        } else {
+            Text::ScenesPaidHeldReplan
+        };
+        button.disabled(true).tooltip(tr(self.bardo.read(cx), why))
+    }
+
+    fn fit_scenes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The scenes are kept: a question about replacing them is over.
+        self.confirm_replan = false;
+        self.scenes_ask = None;
+        let Some(id) = self.project else {
+            return;
+        };
+        self.scenes_error = self
+            .bardo
+            .read(cx)
+            .fit_scenes(id)
+            .err()
+            .map(|error| error.message());
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    /// After a new narration of the same text: fitting the scenes to it,
+    /// which keeps every image and clip.
+    fn render_fit_scenes(&self, view: &ScenesView, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !view.can_fit {
+            return None;
+        }
+        let bardo = self.bardo.read(cx);
+        let busy = view.is_busy() || view.is_animating();
+        let card = kit::card(cx)
+            .px_3()
+            .py_2()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .gap_2()
+            .items_center()
+            .border_color(look(cx).tokens.accent_edge)
+            .child(
+                h_flex()
+                    .flex_1()
+                    .gap_1()
+                    .items_center()
+                    .child(div().font_medium().child(tr(bardo, Text::FitScenesTitle)))
+                    .child(guide::info(
+                        bardo,
+                        "fit-scenes-info",
+                        tr(bardo, Text::FitScenesHint),
+                        guide::refs::SCENES_FIT,
+                    )),
+            )
+            .when(!busy, |card| {
+                card.child(
+                    Button::new("fit-scenes")
+                        .primary()
+                        .small()
+                        .label(tr(bardo, Text::FitScenes))
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.fit_scenes(window, cx)
+                        })),
+                )
+            });
+        Some(card.into_any_element())
     }
 
     fn place_scenes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -725,18 +838,21 @@ impl ProjectsScreen {
             .children(estimate)
             .when(!busy, |card| {
                 card.child(
-                    Button::new("redraw-restyled-scenes")
-                        .outline()
-                        .small()
-                        .label(tr(bardo, Text::RedrawRestyled))
-                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                            this.run_scene(
-                                SceneAction::RedrawRestyled,
-                                BudgetConsent::Ask,
-                                window,
-                                cx,
-                            )
-                        })),
+                    self.paid(
+                        Button::new("redraw-restyled-scenes")
+                            .outline()
+                            .small()
+                            .label(tr(bardo, Text::RedrawRestyled))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.run_scene(
+                                    SceneAction::RedrawRestyled,
+                                    BudgetConsent::Ask,
+                                    window,
+                                    cx,
+                                )
+                            })),
+                        cx,
+                    ),
                 )
             });
         Some(card.into_any_element())
@@ -824,6 +940,7 @@ impl ProjectsScreen {
                 .into_any_element()
         });
         let place = self.render_place_scenes(view, cx);
+        let fit = self.render_fit_scenes(view, cx);
         let restyled = self.render_restyled(view, cx);
         let bardo = self.bardo.read(cx);
         self.scenes_error
@@ -833,6 +950,7 @@ impl ProjectsScreen {
             .chain(no_narration)
             .chain(too_long)
             .chain(place)
+            .chain(fit)
             .chain(restyled)
             .chain(confirm)
             .chain(ask)
@@ -1245,7 +1363,7 @@ impl ProjectsScreen {
                     }))
                     .child(
                         h_flex().child(
-                            Button::new(("regenerate-scene-image", index))
+                            self.paid(Button::new(("regenerate-scene-image", index)), cx)
                                 .outline()
                                 .small()
                                 .label(tr(bardo, Text::RegenerateSceneImage))
@@ -1472,7 +1590,7 @@ impl ProjectsScreen {
                             cast.portrait().is_some() || cast.failure().is_some(),
                             |row| {
                                 row.child(
-                                    Button::new(("redraw-portrait", member))
+                                    self.paid(Button::new(("redraw-portrait", member)), cx)
                                         .outline()
                                         .xsmall()
                                         .label(tr(bardo, Text::RedrawCastPortrait))
@@ -1704,7 +1822,8 @@ impl ProjectsScreen {
             (Some(_), Some(model)) => SharedString::from(model.name.clone()),
             (Some(own), None) => SharedString::from(own.model().to_owned()),
         };
-        let own = scene.clip_model().cloned();
+        // A model its provider retired checks the one that took its place.
+        let own = scene.clip_model().map(|model| bardo.clip_model_now(model));
         let channel_title = SharedString::from(
             bardo.text_with(
                 Text::SceneClipModelChannel,
@@ -1806,6 +1925,18 @@ impl ProjectsScreen {
             .model
             .is_none()
             .then(|| kit::notice(Tone::Warning, tr(bardo, Text::SceneClipModelGone), cx).text_xs());
+        // Its provider retired the scene's model: say which one runs.
+        let model_replaced = view
+            .replaces
+            .as_ref()
+            .zip(view.model.as_ref())
+            .map(|(old, new)| {
+                let text = bardo.text_with(
+                    Text::SceneClipModelReplaced,
+                    &[("old", old), ("new", &new.name)],
+                );
+                kit::notice(Tone::Info, SharedString::from(text), cx).text_xs()
+            });
 
         let state: Option<AnyElement> = if view.is_busy() {
             Some(
@@ -1865,7 +1996,7 @@ impl ProjectsScreen {
                     !view.is_busy() && view.model.is_some() && scene.pending_clip().is_none(),
                     |row| {
                         row.child(
-                            Button::new(("animate-scene", index))
+                            self.paid(Button::new(("animate-scene", index)), cx)
                                 .outline()
                                 .xsmall()
                                 .label(tr(
@@ -2047,6 +2178,7 @@ impl ProjectsScreen {
             )
             .children(slowed_note)
             .children(model_gone)
+            .children(model_replaced)
             .children(state)
             .children(actions)
             .children(review)

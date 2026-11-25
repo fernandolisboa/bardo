@@ -383,6 +383,7 @@ restored = "This was under way when the backup was made, so Bardo didn't resume 
 checksum = "The installer doesn't match the checksum its release publishes, so Bardo didn't keep it. Try again; if it happens again, report it."
 off_script = "The recording does not follow the script closely enough. Record it again reading the current script, then import it."
 vision_models = "The face, depth and mask models are missing, damaged or would not run. Reinstall Bardo to put them back, then retry."
+out_of_date = "The narration was made again since these scenes were planned, so nothing more was made for them. On the Scenes stage, fit the scenes to the narration or plan them again (on a version, place them), then start again."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
@@ -391,6 +392,9 @@ runs_elsewhere = "The background agent is running this job right now. Try again 
 superseded = "A newer narration of this project replaced this import, so it cannot run again."
 restyled = "The video's visual style changed after this job started, so it cannot run again. Draw the scenes from the Scenes stage, which shows what they cost in the current style."
 take_from_page = "Nothing of this take reached its provider yet. Make it again on the Capture step, which checks the video's cap, the test take and the preflight checks first."
+narration_busy = "A narration is being made for this project, and what this job makes now would be out of date at once. When the narration is ready, bring the scenes onto it on the Scenes stage first."
+scenes_busy = "Scenes, images or clips are being made for this project. Run this again when they are done, or cancel them first."
+asks_first = "This video's scenes hold images or clips that running this again would put out of date or discard. Start it from its stage in the project instead, which shows what is at stake and asks first."
 
 [setup]
 step_by_step = "Step by step"
@@ -460,7 +464,7 @@ placeholder = "Your ElevenLabs API key"
 
 [provider.gemini]
 name = "Gemini"
-purpose = "Images (Nano Banana) and video clips (Veo, Gemini Omni Flash), from Google AI Studio."
+purpose = "Images (Nano Banana) and video clips (Gemini Omni Flash), from Google AI Studio."
 placeholder = "Your Gemini API key"
 
 [provider.higgsfield]
@@ -722,6 +726,8 @@ voice_unchecked = "The narrator's voice has not been checked in your ElevenLabs 
 voice_unavailable = "The narrator's voice is not in your ElevenLabs account. Fix it on the Personas screen or choose another narrator."
 missing_key = "Save an ElevenLabs key under Settings to generate or import narration."
 busy = "A narration is already being made for this project."
+scenes_busy = "Scenes, images or clips are being made for this project on the current narration. Wait for them, or cancel them on the Jobs panel, before replacing the narration."
+outdates_pictures = "A new narration puts the images and clips of this video's scenes out of date. Confirm to go ahead."
 missing = "Generate or import the narration first."
 audio_missing = "The narration's audio file is missing from the project folder. Generate it again."
 cannot_play = "Could not play the narration: no audio output is available or the file is unreadable."
@@ -730,6 +736,12 @@ recording_unreadable = "Could not read the file. Check that it still exists and 
 recording_unsupported = "Bardo imports MP3 and uncompressed WAV recordings. Convert the file to one of them and import it again."
 recording_empty = "The file has no audio."
 recording_too_large = "The file is over 500 MB. Export it as MP3 and import it again."
+
+[narration.outdates]
+fit = "This video's scenes hold pictures timed on the current narration (images: {images}, clips: {clips}). A new narration puts them out of date. It reads the same text the scenes were planned on, so afterwards Fit to the narration, on the Scenes stage, keeps all of them."
+replan = "This video's scenes hold pictures timed on the current narration (images: {images}, clips: {clips}). A new narration puts them out of date, and the script changed since the scenes were planned, so they cannot be fitted to it: the scenes will have to be planned again, which discards these images and clips."
+confirm = "Replace the narration"
+cancel = "Keep the current narration"
 
 [capture]
 import = "Import capture"
@@ -1010,8 +1022,15 @@ replan_cancel = "Keep these scenes"
 planning = "Planning the scenes…"
 drawing = "Drawing the images…"
 stopped = "The last run stopped:"
-stale = "The narration was generated again after these scenes were planned, so their times no longer match. Plan them again."
+stale = "The narration was made again after these scenes were planned and reads other text, so the scenes cannot be fitted to it. Plan them again. Until then no image or clip is made for them: it would be timed for a narration that is gone."
+stale_fit = "The narration was made again after these scenes were planned, so their times no longer match. It reads the same text: Fit to the narration moves each scene to its new time and keeps every image and clip. Until then no image or clip is made for them."
 stale_tag = "Out of date"
+fit = "Fit to the narration"
+fit_title = "New narration, same text"
+fit_hint = "Keeps these scenes with their prompts, images and clips, and reads when each one starts and ends again from the new narration. It costs nothing. A scene that now runs longer than its clip holds the clip's last frame."
+paid_held = "Out of date. Fit the scenes to the narration first."
+paid_held_replan = "Out of date. Plan the scenes again first, on the Scenes stage."
+paid_held_version = "Out of date. Place the scenes on this narration first."
 count = "{n} scenes"
 generate_images = "Generate {n} images"
 images_hint = "Nano Banana draws each scene as a 16:9 image at 2K; Gemini bills each one. A scene the provider declines does not stop the others."
@@ -1043,6 +1062,8 @@ failed = "No clip:"
 model = "Video model"
 model_channel = "Default ({model})"
 model_gone = "This scene's video model is no longer offered. Pick another one."
+model_replaced = "This scene's video model, {old}, was retired by its provider. New clips use {new}."
+channel_model_replaced = "The channel's video model, {old}, was retired by its provider. New clips use {new}; saving the channel keeps it."
 plan = "Next clip: {seconds} s · {price}"
 plan_unpriced = "Next clip: {seconds} s · no rate for this model"
 slowed_next = "Plays slowed to fit the scene"
@@ -1069,6 +1090,9 @@ scene_not_found = "That scene is gone; the scenes may have been planned again."
 missing_claude_key = "Save a Claude key under Settings to plan scenes."
 missing_gemini_key = "Save a Gemini key under Settings to generate images and Google clips."
 busy = "Scenes, images or clips are already being made for this project."
+narration_busy = "A narration is being made for this project. Wait for it, or cancel it on the Jobs panel: scenes planned, drawn or animated now would be out of date as soon as it is ready."
+plan_out_of_date = "These scenes are out of date: the narration changed since they were planned, so an image or clip made now would be timed for a narration that is gone. Fit the scenes to the narration or plan them again first (on a version, place them)."
+other_text = "The narration reads other text than these scenes were planned on, so they cannot be fitted to it. Plan them again."
 would_discard_images = "Planning again discards the images and clips of these scenes. Confirm to go ahead."
 nothing_to_generate = "Every scene already has an image."
 nothing_to_review = "There is no new image to review."
@@ -1529,7 +1553,7 @@ previous_frame = "Previous frame"
 next_frame = "Next frame"
 building = "Building preview proxies… {ready} of {total} files"
 keep_editing = "You can keep editing while this runs"
-stale = "The narration changed after the scenes were planned. Plan them again to match it."
+stale = "The narration changed after the scenes were planned. On the Scenes stage, fit the scenes to it, or plan them again when it reads other text (on a version, place them)."
 
 cut_reset = "The scenes or the narration changed since your last edit, so the cut starts over from the rough cut."
 [editor.bin]
@@ -3021,8 +3045,8 @@ title = "All or pending"
 body = "Pending shows only the scenes with something left, an image to draw or to review. All shows every one."
 
 [tour.scenes.replan]
-title = "Plan again"
-body = "When the narration is made again, the scenes are marked out of date, since their times no longer match. Plan again replaces them, and asks first when that would discard images or clips."
+title = "After a new narration"
+body = "When the narration is made again, the scenes are marked out of date and no image or clip is made for them until they match it. Fit to the narration keeps every image and clip when the script did not change. Otherwise Plan again replaces the scenes, and asks first when that would discard images or clips."
 
 [tour.scenes.place]
 title = "Place the scenes"

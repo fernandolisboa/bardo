@@ -25,7 +25,14 @@ The button waits until there is a script and a narrator whose voice is in your E
 <a id="stale"></a>
 ## Out of date
 
-When the script is saved or replaced after the narration was made, the narration is marked **Out of date**: the words no longer match. **Generate again**, or import a new recording, so they do. Scenes planned on an older narration show as out of date in turn ([Scenes](scenes.md#replan)).
+When the script is saved or replaced after the narration was made, the narration is marked **Out of date**: the words no longer match. **Generate again**, or import a new recording, so they do. Scenes planned on an older narration show as out of date in turn ([Scenes](scenes.md#fit)).
+
+<a id="replace"></a>
+## Making it again
+
+A new narration, whether generated, imported or from a capture, replaces the current one. The scenes are timed on the narration, so when they already hold images or clips Bardo asks first and says how many there are. If the script did not change since the scenes were planned, **Fit to the narration** on the Scenes stage keeps all of them afterwards ([Scenes](scenes.md#fit)); if it changed, the scenes have to be planned again and those images and clips go ([Scenes](scenes.md#replan)). The question says which of the two it is.
+
+While scenes, images or clips are being made for the project, a new narration waits for them: let them finish, or cancel them on the [Jobs panel](jobs.md).
 
 <a id="import"></a>
 ## Importing a recording

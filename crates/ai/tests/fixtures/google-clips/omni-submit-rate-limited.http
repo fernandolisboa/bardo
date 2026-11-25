@@ -1,0 +1,9 @@
+HTTP/2 429
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": "rate_limit_exceeded",
+    "message": "You have exceeded the per-minute request limit for gemini-omni-1.2-flash. Wait and retry."
+  }
+}

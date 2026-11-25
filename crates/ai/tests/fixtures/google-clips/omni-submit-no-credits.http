@@ -1,0 +1,9 @@
+HTTP/2 402
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": "payment_required",
+    "message": "Your prepay credit balance is depleted. Add credits to continue."
+  }
+}
