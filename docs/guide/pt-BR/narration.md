@@ -13,7 +13,7 @@ A narração é o roteiro lido em voz alta pelo narrador do projeto, com o tempo
 <a id="generate"></a>
 ## Gerar a narração
 
-**Gerar narração** faz a ElevenLabs ler o roteiro atual com a voz e os presets de geração do narrador ([Personas](personas.md#presets)). A ElevenLabs cobra por caractere; o ⓘ ao lado do botão diz quantos caracteres o roteiro tem, e a estimativa sob ele quanto isso custa. Num anúncio, uma linha ao lado da estimativa avisa quando o roteiro diz coisas que nenhuma afirmação do briefing sustenta, ou quando não foi conferido como está agora ([A checagem de afirmações](script.md#claims)); é um lembrete e não segura nada. A geração roda como tarefa; é preciso uma chave da ElevenLabs ([Suas chaves de API](api-keys.md#providers)).
+**Gerar narração** faz a ElevenLabs ler o roteiro atual com a voz e os presets de geração do narrador ([Personas](personas.md#presets)). A ElevenLabs cobra por caractere; o ⓘ ao lado do botão diz quantos caracteres o roteiro tem, e a estimativa sob ele quanto isso custa. Num anúncio, uma linha acima da estimativa avisa quando o roteiro diz coisas que nenhuma afirmação do briefing sustenta, ou quando não foi conferido como está agora ([A checagem de afirmações](script.md#claims)); é um lembrete e não segura nada. A geração roda como tarefa; é preciso uma chave da ElevenLabs ([Suas chaves de API](api-keys.md#providers)).
 
 O botão espera até haver um roteiro e um narrador cuja voz esteja na sua conta da ElevenLabs. Se a voz do narrador nunca foi verificada ou não está lá, a etapa avisa; resolva em [Personas](personas.md#voice) ou escolha outro [narrador](projects.md#narrator).
 

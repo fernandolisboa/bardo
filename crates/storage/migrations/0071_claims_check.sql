@@ -12,6 +12,9 @@ CREATE TABLE claims_check (
     -- Unix times in milliseconds. When the brief it read had last
     -- changed: a brief changed since puts the check out of date.
     brief_at   INTEGER NOT NULL,
+    -- The advertiser's own words as the check read them: the product's
+    -- part of them changes without the brief changing.
+    notes      TEXT NOT NULL,
     checked_at INTEGER NOT NULL,
     model      TEXT NOT NULL,
     -- The job that checked it, so a resumed job does not check twice.

@@ -136,7 +136,7 @@ A product shot looks best when the product stands free of its photo's background
 - A product of kind *idea* is a concept, whatever pictures it has (a mock-up the user imported is still an idea). Changing its kind is how it stops being one.
 - With no image of its own, *Draw a concept* has Claude write a prompt from the description (a new template kind, with a fixed instruction: an original product, no existing brand, logo, trade dress or text) and the image generator draw it. The drawing waits for review and can be drawn again; the kept one is the product's concept image, used where a photo would be (reference and product shots) and marked as drawn wherever it is kept.
 - A concept's project shows a *Concept* badge. Its script follows the concept rules above. The upload review and the export show a notice the user acknowledges: the video shows an idea, not a product that exists.
-- A project is a concept when its product is of kind *idea* at the time it starts; videos already made keep their badge.
+- A project is a concept when its product is of kind *idea* at the time it starts; videos already made keep their badge. A script's concept rules follow the product's kind as it is when the script is asked for (ADR-0039).
 
 ## End card
 

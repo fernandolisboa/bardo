@@ -2834,6 +2834,14 @@ pub enum Text {
     NarrationClaimsUnbacked,
     NarrationClaimsUnbackedOne,
     NarrationClaimsNotChecked,
+    /// Beside the check button while the editor holds unsaved edits.
+    ScriptClaimsSaveFirst,
+    /// A script job that saved its script and failed in the check.
+    ScriptWrittenCheckStopped,
+    /// The out-of-date hint of a new script's check, which has no button of its own.
+    ScriptClaimsPendingOutdatedHint,
+    /// The chip of a check that found no statement at all.
+    ScriptClaimsNothingStated,
 }
 
 impl Text {
@@ -5878,6 +5886,10 @@ impl Text {
             Text::NarrationClaimsUnbacked => "narration.claims.unbacked",
             Text::NarrationClaimsUnbackedOne => "narration.claims.unbacked_one",
             Text::NarrationClaimsNotChecked => "narration.claims.not_checked",
+            Text::ScriptClaimsSaveFirst => "script.claims.save_first",
+            Text::ScriptWrittenCheckStopped => "script.claims.written_stopped",
+            Text::ScriptClaimsPendingOutdatedHint => "script.claims.pending_outdated_hint",
+            Text::ScriptClaimsNothingStated => "script.claims.nothing_stated",
         };
         Cow::Borrowed(key)
     }
@@ -8038,6 +8050,10 @@ mod tests {
         texts.push(Text::NarrationClaimsUnbacked);
         texts.push(Text::NarrationClaimsUnbackedOne);
         texts.push(Text::NarrationClaimsNotChecked);
+        texts.push(Text::ScriptClaimsSaveFirst);
+        texts.push(Text::ScriptWrittenCheckStopped);
+        texts.push(Text::ScriptClaimsPendingOutdatedHint);
+        texts.push(Text::ScriptClaimsNothingStated);
         texts.extend(Stage::ALL.map(Text::StageName));
         texts.extend(Stage::ALL.map(Text::StageAfter));
         texts.push(Text::RenderNoCut);

@@ -567,6 +567,17 @@ impl TemplateBody {
         &self.prompt
     }
 
+    /// Whether the instructions or the prompt place `variable`.
+    pub fn uses(&self, variable: TemplateVariable) -> bool {
+        [&self.instructions, &self.prompt].iter().any(|text| {
+            // The text was validated, so it parses.
+            parse(self.kind, text)
+                .unwrap_or_default()
+                .iter()
+                .any(|segment| matches!(segment, Segment::Variable(used) if *used == variable))
+        })
+    }
+
     /// Places each value in its placeholder.
     pub fn render(&self, values: &TemplateValues) -> Result<RenderedPrompt, MissingValue> {
         let fill = |text: &str| -> Result<String, MissingValue> {
@@ -720,6 +731,14 @@ mod tests {
             rendered.prompt,
             "Title: The lost probe\nAgain: The lost probe. Niche: space history"
         );
+    }
+
+    #[test]
+    fn a_body_tells_which_variables_it_places() {
+        let body = body("Write in {{ language }}.", "About {{theme_title}}.");
+        assert!(body.uses(TemplateVariable::Language));
+        assert!(body.uses(TemplateVariable::ThemeTitle));
+        assert!(!body.uses(TemplateVariable::Persona));
     }
 
     #[test]

@@ -28,6 +28,7 @@ use crate::costs::{BudgetConsent, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::Work;
 use crate::scripts::{ScriptHandler, or_not_set};
 use crate::{Bardo, KeyState, ScriptError};
+use bardo_domain::{AdRepository, RepositoryError};
 
 /// What the checker is told, whatever the script says.
 pub(crate) const CHECK_INSTRUCTIONS: &str = "\
@@ -176,43 +177,92 @@ impl CheckPayload {
         serde_json::from_str(payload)
             .map_err(|e| JobFailure::unexpected(format!("invalid claims check payload: {e}")))
     }
+
+    fn project_id(&self) -> Result<VideoProjectId, uuid::Error> {
+        uuid::Uuid::parse_str(&self.project).map(VideoProjectId::from)
+    }
+
+    fn script(&self) -> Result<ScriptText, bardo_domain::ScriptFieldError> {
+        ScriptText::new(&self.text)
+    }
 }
 
 fn unexpected(error: impl std::fmt::Display) -> JobFailure {
     JobFailure::unexpected(error.to_string())
 }
 
-/// The script a check reads: which of the project's two it was when the
-/// job found or wrote it, and its text.
-pub(crate) struct ScriptToCheck<'a> {
-    pub(crate) project: VideoProjectId,
-    pub(crate) of: CheckedScript,
-    pub(crate) text: &'a ScriptText,
+/// Which of a project's scripts reads as `text` now: the new one waiting
+/// for review, the current one, or neither.
+fn slot_of(script: Option<&Script>, text: &ScriptText) -> Option<CheckedScript> {
+    let script = script?;
+    if script.pending().is_some_and(|new| new.text() == text) {
+        Some(CheckedScript::Pending)
+    } else if script.text() == text {
+        Some(CheckedScript::Current)
+    } else {
+        None
+    }
+}
+
+/// The saved check that read `text`, under whichever script it was saved:
+/// the script may have changed hands since.
+fn check_reading(
+    ads: &dyn AdRepository,
+    project: VideoProjectId,
+    text: &ScriptText,
+) -> Result<Option<ClaimsCheck>, RepositoryError> {
+    for of in [CheckedScript::Current, CheckedScript::Pending] {
+        if let Some(check) = ads.claims_check(project, of)?.filter(|c| c.reads(text)) {
+            return Ok(Some(check));
+        }
+    }
+    Ok(None)
+}
+
+/// Puts the check kept for a new script where the project's scripts are
+/// now: it stays with the new script it read, becomes the current
+/// script's when that is the text it read (the script was accepted), and
+/// goes otherwise (the new script was put aside or replaced).
+pub(crate) fn settle_checks(
+    ads: &dyn AdRepository,
+    project: VideoProjectId,
+    script: &Script,
+) -> Result<(), RepositoryError> {
+    let Some(kept) = ads.claims_check(project, CheckedScript::Pending)? else {
+        return Ok(());
+    };
+    if script.pending().is_some_and(|new| kept.reads(new.text())) {
+        Ok(())
+    } else if kept.reads(script.text()) {
+        ads.accept_claims_check(project)
+    } else {
+        ads.drop_claims_check(project, CheckedScript::Pending)
+    }
 }
 
 impl ScriptHandler {
-    /// Checks `script` against `check`, and saves the result in place of
-    /// the script's earlier check. An earlier attempt of the job may
-    /// already have: the check is not paid for twice.
+    /// Checks `text`, one of the project's scripts, against `check`, and
+    /// saves the result in place of that script's earlier check. A text
+    /// that is no longer one of the project's scripts (put aside, or
+    /// edited since) is not checked, and an earlier attempt of the job
+    /// may already have checked it: neither is paid for.
     pub(crate) fn check_claims(
         &self,
-        script: ScriptToCheck<'_>,
+        project: VideoProjectId,
+        text: &ScriptText,
         check: &CheckBrief,
         brief_at: SystemTime,
         job: JobId,
         stop: &Stop,
     ) -> Result<(), JobFailure> {
-        let ScriptToCheck { project, of, text } = script;
-        let by_this_job = |of: CheckedScript| -> Result<bool, JobFailure> {
-            Ok(self
-                .ads
-                .claims_check(project, of)
-                .map_err(unexpected)?
-                .is_some_and(|saved| saved.job == Some(job) && saved.reads(text)))
-        };
-        // Under the other script too: the one it checked may have been
-        // accepted since.
-        if by_this_job(of)? || by_this_job(CheckedScript::Current)? {
+        let script = self.scripts.script(project).map_err(unexpected)?;
+        if slot_of(script.as_ref(), text).is_none() {
+            return Ok(());
+        }
+        if check_reading(&*self.ads, project, text)
+            .map_err(unexpected)?
+            .is_some_and(|saved| saved.job == Some(job))
+        {
             return Ok(());
         }
         let claims = check.claim_ids()?;
@@ -246,14 +296,12 @@ impl ScriptHandler {
             .map_err(|error| {
                 JobFailure::new(JobFailureKind::UnexpectedAnswer, format!("Claude: {error}"))
             })?;
-        // Where the text is now: a new script may have been accepted, or
-        // put aside, while Claude read it.
-        let of = match self.scripts.script(project).map_err(unexpected)? {
-            Some(script) if script.pending().is_some_and(|p| p.text() == text) => {
-                CheckedScript::Pending
-            }
-            Some(script) if script.text() == text => CheckedScript::Current,
-            _ => of,
+        // Where the text is now: a new script may have been accepted, put
+        // aside or replaced, or the script edited, while Claude read it.
+        // A text that is no script's any more takes no script's check.
+        let script = self.scripts.script(project).map_err(unexpected)?;
+        let Some(of) = slot_of(script.as_ref(), text) else {
+            return Ok(());
         };
         self.ads
             .save_claims_check(&ClaimsCheck {
@@ -261,6 +309,7 @@ impl ScriptHandler {
                 of,
                 text: text.as_str().to_owned(),
                 brief_at,
+                notes: check.notes.clone(),
                 statements,
                 checked_at: crate::publications::whole_millis(SystemTime::now()),
                 model: generated.model,
@@ -277,18 +326,13 @@ impl ScriptHandler {
         stop: &Stop,
     ) -> Result<(), JobFailure> {
         let payload = CheckPayload::parse(payload)?;
-        let project = uuid::Uuid::parse_str(&payload.project)
-            .map(VideoProjectId::from)
-            .map_err(unexpected)?;
-        let text = ScriptText::new(&payload.text).map_err(|error| {
+        let project = payload.project_id().map_err(unexpected)?;
+        let text = payload.script().map_err(|error| {
             JobFailure::unexpected(format!("the script to check is not usable ({error:?})"))
         })?;
         self.check_claims(
-            ScriptToCheck {
-                project,
-                of: CheckedScript::Current,
-                text: &text,
-            },
+            project,
+            &text,
             &payload.check,
             from_millis(payload.brief_at),
             job,
@@ -343,7 +387,12 @@ pub enum NarrationClaims {
     NotChecked,
 }
 
-fn check_view(check: &ClaimsCheck, text: &ScriptText, brief: &ScriptBrief) -> ClaimsCheckView {
+fn check_view(
+    check: &ClaimsCheck,
+    text: &ScriptText,
+    brief: &ScriptBrief,
+    notes: &str,
+) -> ClaimsCheckView {
     let unbacked = check
         .unbacked()
         .map(|statement| UnbackedStatement {
@@ -365,7 +414,7 @@ fn check_view(check: &ClaimsCheck, text: &ScriptText, brief: &ScriptBrief) -> Cl
         }
     }
     ClaimsCheckView {
-        outdated: check.is_outdated(text, &brief.brief),
+        outdated: check.is_outdated(text, &brief.brief, notes),
         unbacked,
         used,
         sensitive,
@@ -381,6 +430,33 @@ impl Bardo {
             && CheckPayload::parse(job.payload()).is_ok_and(|payload| payload.project == project)
     }
 
+    /// Whether a check of `text` by `job` is still to be made: the text
+    /// is one of the project's scripts and the job has not checked it.
+    pub(crate) fn check_left(
+        &self,
+        project: VideoProjectId,
+        text: &ScriptText,
+        job: JobId,
+    ) -> bool {
+        let Ok(script) = self.scripts.script(project) else {
+            return false;
+        };
+        slot_of(script.as_ref(), text).is_some()
+            && !check_reading(&*self.ads, project, text)
+                .ok()
+                .flatten()
+                .is_some_and(|saved| saved.job == Some(job))
+    }
+
+    /// The call a claims check job run again still pays for, if any.
+    pub(crate) fn check_call_left(&self, job: &Job) -> Option<(VideoProjectId, Vec<PlannedCall>)> {
+        let payload = CheckPayload::parse(job.payload()).ok()?;
+        let project = payload.project_id().ok()?;
+        let text = payload.script().ok()?;
+        self.check_left(project, &text, job.id())
+            .then(|| (project, vec![payload.check.call(&text)]))
+    }
+
     /// The claims checks of an ad project's scripts; `None` for any other
     /// project, and before a script is written.
     pub(crate) fn script_claims(
@@ -392,23 +468,24 @@ impl Bardo {
         let (Some(script), Some(brief)) = (script, brief) else {
             return Ok(None);
         };
-        let current = self
-            .ads
-            .claims_check(project.id, CheckedScript::Current)?
-            .map(|check| check_view(&check, script.text(), brief));
+        let reads = CheckBrief::of(brief);
+        // The check that read the script as it is, wherever it was saved;
+        // else the one kept for the current script, now out of date.
+        let current = match check_reading(&*self.ads, project.id, script.text())? {
+            Some(check) => Some(check),
+            None => self.ads.claims_check(project.id, CheckedScript::Current)?,
+        }
+        .map(|check| check_view(&check, script.text(), brief, &reads.notes));
         // A check left from an earlier new script is not this one's.
         let pending = match script.pending() {
-            Some(pending) => self
-                .ads
-                .claims_check(project.id, CheckedScript::Pending)?
-                .filter(|check| check.reads(pending.text()))
-                .map(|check| check_view(&check, pending.text(), brief)),
+            Some(pending) => check_reading(&*self.ads, project.id, pending.text())?
+                .map(|check| check_view(&check, pending.text(), brief, &reads.notes)),
             None => None,
         };
         Ok(Some(ScriptClaims {
             current,
             pending,
-            estimate: self.estimate(&[CheckBrief::of(brief).call(script.text())])?,
+            estimate: self.estimate(&[reads.call(script.text())])?,
         }))
     }
 
@@ -426,10 +503,9 @@ impl Bardo {
         let Some(brief) = self.script_brief(project)? else {
             return Ok(None);
         };
-        let check = self
-            .ads
-            .claims_check(project.id, CheckedScript::Current)?
-            .filter(|check| !check.is_outdated(script.text(), &brief.brief));
+        let notes = CheckBrief::of(&brief).notes;
+        let check = check_reading(&*self.ads, project.id, script.text())?
+            .filter(|check| !check.is_outdated(script.text(), &brief.brief, &notes));
         Ok(match check {
             None => Some(NarrationClaims::NotChecked),
             Some(check) => match check.unbacked().count() {
@@ -774,6 +850,192 @@ mod tests {
             "the script is not written again"
         );
         assert_eq!(claims(&app, &project).current.unwrap().unbacked.len(), 1);
+    }
+
+    fn refuse_checks(h: &Harness, refuse: bool) {
+        *h.text.check_failure.lock().unwrap() = refuse.then(|| {
+            ProviderFailure::new(ProviderFailureKind::Rejected, "the request was refused")
+        });
+    }
+
+    #[test]
+    fn a_job_run_again_after_its_new_script_was_put_aside_writes_and_checks_nothing() {
+        let h = Harness::new();
+        let app = start(&h);
+        let project = checked(&h, &app);
+        // The new script is saved, and its check fails.
+        h.answer("This one refills. Get yours.".to_owned());
+        refuse_checks(&h, true);
+        let job = wait_done(
+            &app,
+            app.generate_script(project.id, BudgetConsent::Ask).unwrap(),
+        );
+        assert_eq!(job.state(), JobState::Failed);
+        assert!(
+            app.script(project.id)
+                .unwrap()
+                .script
+                .unwrap()
+                .pending()
+                .is_some()
+        );
+        // Run again, it would pay for the check alone.
+        let (_, left) = app.script_calls_left(&job).unwrap();
+        assert_eq!(left.len(), 1);
+
+        // The user puts the new script aside, then runs the job again.
+        app.reject_script(project.id).unwrap();
+        refuse_checks(&h, false);
+        assert!(app.script_calls_left(&job).is_none());
+        let asked = h.text.requests().len();
+        app.retry_job(job.id()).unwrap();
+        done(&app, job.id());
+        assert_eq!(h.text.requests().len(), asked, "nothing is paid for");
+        let view = app.script(project.id).unwrap();
+        assert!(view.script.unwrap().pending().is_none());
+        assert_eq!(view.claims.unwrap().current.unwrap().unbacked.len(), 1);
+    }
+
+    #[test]
+    fn a_check_of_a_text_that_is_no_script_any_more_is_neither_paid_for_nor_saved() {
+        let h = Harness::new();
+        let app = start(&h);
+        let project = checked(&h, &app);
+        app.edit_script(project.id, "This one refills. Get yours.")
+            .unwrap();
+        refuse_checks(&h, true);
+        let failed = wait_done(
+            &app,
+            app.check_script_claims(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(failed.state(), JobState::Failed);
+        assert_eq!(app.script_calls_left(&failed).unwrap().1.len(), 1);
+
+        // The script is edited again and checked as it reads now.
+        refuse_checks(&h, false);
+        app.edit_script(project.id, "It refills. Get yours.")
+            .unwrap();
+        h.text.check_with(&[(1, "It refills", 1)]);
+        done(
+            &app,
+            app.check_script_claims(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        // The failed check read a text that is gone: run again, it asks
+        // Claude nothing and leaves the valid check alone.
+        assert!(app.script_calls_left(&failed).is_none());
+        let asked = h.text.requests().len();
+        app.retry_job(failed.id()).unwrap();
+        done(&app, failed.id());
+        assert_eq!(h.text.requests().len(), asked);
+        let check = claims(&app, &project).current.unwrap();
+        assert!(!check.outdated);
+        assert_eq!(check.unbacked, []);
+    }
+
+    #[test]
+    fn a_new_script_accepted_without_a_check_takes_no_other_scripts_check() {
+        let h = Harness::new();
+        let app = start(&h);
+        let project = checked(&h, &app);
+        // A first new script, checked, is replaced by a second one whose
+        // check fails.
+        h.answer("This one refills. Get yours.".to_owned());
+        h.text.check_with(&[(1, "The notebook refills", 1)]);
+        done(
+            &app,
+            app.generate_script(project.id, BudgetConsent::Ask).unwrap(),
+        );
+        assert!(claims(&app, &project).pending.is_some());
+        h.answer("It refills. Get yours.".to_owned());
+        refuse_checks(&h, true);
+        wait_done(
+            &app,
+            app.generate_script(project.id, BudgetConsent::Ask).unwrap(),
+        );
+        refuse_checks(&h, false);
+        // The first one's check is no script's any more.
+        assert_eq!(claims(&app, &project).pending, None);
+        assert_eq!(
+            app.ads
+                .claims_check(project.id, CheckedScript::Pending)
+                .unwrap(),
+            None
+        );
+
+        app.accept_script(project.id).unwrap();
+        let view = claims(&app, &project);
+        assert_eq!(view.pending, None);
+        // Neither the first new script's check nor the replaced script's.
+        assert_eq!(view.current, None);
+        let script = app.script(project.id).unwrap().script;
+        assert_eq!(
+            app.narration_claims(&project, script.as_ref()).unwrap(),
+            Some(NarrationClaims::NotChecked)
+        );
+    }
+
+    #[test]
+    fn a_check_follows_its_script_even_when_only_the_script_changed_hands() {
+        let h = Harness::new();
+        let app = start(&h);
+        let project = checked(&h, &app);
+        h.answer("This one refills. Get yours.".to_owned());
+        h.text.check_with(&[(1, "The notebook refills", 1)]);
+        let job = done(
+            &app,
+            app.generate_script(project.id, BudgetConsent::Ask).unwrap(),
+        );
+        // The script is accepted and the app stops before the check
+        // moves with it.
+        let mut script = app.scripts.script(project.id).unwrap().unwrap();
+        script.accept(SystemTime::now()).unwrap();
+        app.scripts.save_script(&script).unwrap();
+
+        let check = claims(&app, &project).current.unwrap();
+        assert!(!check.outdated);
+        assert_eq!(check.unbacked, []);
+        assert_eq!(app.narration_claims(&project, Some(&script)).unwrap(), None);
+        // The job that checked it has nothing left to pay for.
+        assert!(!app.check_left(project.id, script.text(), job.id()));
+        // The next thing that touches the scripts puts the check in place.
+        settle_checks(&*app.ads, project.id, &script).unwrap();
+        let moved = app
+            .ads
+            .claims_check(project.id, CheckedScript::Current)
+            .unwrap()
+            .unwrap();
+        assert!(moved.reads(script.text()));
+    }
+
+    #[test]
+    fn the_products_own_words_changing_puts_the_check_out_of_date() {
+        let h = Harness::new();
+        let app = start(&h);
+        let (product, _, project) = ad_project(&h, &app);
+        app.confirm_brief(project.id).unwrap();
+        h.answer(AD.to_owned());
+        done(
+            &app,
+            app.generate_script(project.id, BudgetConsent::Ask).unwrap(),
+        );
+        assert!(!claims(&app, &project).current.unwrap().outdated);
+        // What must be said is the product's: the brief does not change.
+        app.update_product(
+            product.id,
+            bardo_domain::ProductDraft {
+                must_say: "Sold by Paper & Co.".into(),
+                ..crate::ad_angles::testing::draft()
+            },
+        )
+        .unwrap();
+        assert!(claims(&app, &project).current.unwrap().outdated);
+        let script = app.script(project.id).unwrap().script;
+        assert_eq!(
+            app.narration_claims(&project, script.as_ref()).unwrap(),
+            Some(NarrationClaims::NotChecked)
+        );
     }
 
     #[test]

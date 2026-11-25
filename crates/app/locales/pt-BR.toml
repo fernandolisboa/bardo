@@ -641,7 +641,7 @@ format_channel = "Do canal: {format}"
 format_hint = "Short ou vídeo longo. Define o tamanho do próximo roteiro (a menos que o projeto escolha uma duração), o formato das próximas imagens e dos novos cortes, e o preset do YouTube. O que já foi feito fica como está."
 length = "Duração"
 length_format = "Do formato: {length}"
-length_hint = "Quanto dura o próximo roteiro: a duração do formato, ou 30 segundos, 1 minuto ou 3 minutos, abaixo dos 3:00 que Shorts e Reels aceitam (o X aceita 2:20). O formato continua definindo a forma da imagem (vertical ou 16:9) e o preset. A estimativa do vídeo inteiro segue a duração até existir um roteiro."
+length_hint = "Quanto dura o próximo roteiro: a duração do formato, ou 15 segundos, 30 segundos, 1 minuto ou 3 minutos, abaixo dos 3:00 que Shorts e Reels aceitam (o X aceita 2:20). O formato continua definindo a forma da imagem (vertical ou 16:9) e o preset. A estimativa do vídeo inteiro segue a duração até existir um roteiro."
 style = "Estilo visual"
 style_channel = "Do canal: {style}"
 style_channel_notes = "Do canal: as notas de estética"
@@ -2988,7 +2988,7 @@ body = "O narrador lê a narração deste vídeo e dá forma ao roteiro. É a pe
 
 [tour.projects.format]
 title = "Short ou longo, e quanto dura"
-body = "Um Short é um vídeo vertical de 45 a 60 segundos; um vídeo longo é 16:9 e tem de 8 a 10 minutos. O projeto segue o canal, a não ser que você escolha o outro aqui. Isso define o formato das próximas imagens e dos novos cortes, e o preset do YouTube. Duração, ao lado, faz o roteiro deste vídeo ter 30 segundos, 1 minuto ou 3 minutos em vez da duração do formato, e Estilo escolhe como as imagens deste vídeo são desenhadas em vez do estilo visual do canal."
+body = "Um Short é um vídeo vertical de 45 a 60 segundos; um vídeo longo é 16:9 e tem de 8 a 10 minutos. O projeto segue o canal, a não ser que você escolha o outro aqui. Isso define o formato das próximas imagens e dos novos cortes, e o preset do YouTube. Duração, ao lado, faz o roteiro deste vídeo ter 15 segundos, 30 segundos, 1 minuto ou 3 minutos em vez da duração do formato, e Estilo escolhe como as imagens deste vídeo são desenhadas em vez do estilo visual do canal."
 
 [tour.projects.mode]
 title = "Como é produzido, e quanto custa"
@@ -3011,7 +3011,7 @@ name = "Tour do Roteiro"
 
 [tour.script.write]
 title = "Gere e depois edite"
-body = "O Claude escreve o roteiro a partir do modelo de roteiro, do canal, do tema e do narrador. Depois que ele chega aqui, o roteiro é seu: edite, e Salvar guarda o que você digitou. Uma narração feita a partir de um roteiro anterior passa a aparecer como desatualizada."
+body = "O Claude escreve o roteiro a partir do modelo de roteiro, do canal, do tema e do narrador; o de um anúncio, a partir do modelo de roteiro de anúncio e do briefing. Depois que ele chega aqui, o roteiro é seu: edite, e Salvar guarda o que você digitou. Uma narração feita a partir de um roteiro anterior passa a aparecer como desatualizada."
 
 [tour.script.review]
 title = "Uma nova versão para revisar"
@@ -4574,9 +4574,9 @@ body = "Cada ângulo mostra o formato, com quem fala, as primeiras palavras e as
 running = "Conferindo o roteiro com as afirmações do briefing…"
 stopped = "A checagem de afirmações parou:"
 title = "Checagem de afirmações"
-info = "O Claude lista o que o roteiro diz sobre o produto e liga cada ponto a uma afirmação do briefing. O que nenhuma afirmação sustenta aparece aqui. Isso não trava nada: você decide se a frase fica, muda ou sai."
+info = "O Claude lista o que o roteiro diz sobre o produto e liga cada ponto a uma afirmação do briefing. O que nenhuma afirmação sustenta aparece aqui. Isso não trava nada: você decide se a frase fica, muda ou sai. A checagem lê o roteiro como está salvo."
 not_checked = "Este roteiro ainda não foi conferido."
-clean = "Tudo o que diz tem base"
+clean = "Tudo o que o roteiro diz tem base"
 unbacked = "{n} pontos sem base"
 unbacked_one = "1 ponto sem base"
 outdated = "Desatualizada"
@@ -4588,14 +4588,18 @@ sensitive_title = "Afirmações sensíveis que este roteiro usa"
 none_used = "O roteiro não diz nada que uma afirmação do briefing sustente."
 check = "Conferir afirmações"
 check_again = "Conferir de novo"
-checked_at = "Conferido {when}"
+checked_at = "Conferida {when}"
 pending_missing = "Este roteiro novo não foi conferido. Aceite e confira as afirmações, ou gere de novo."
+save_first = "Salve as edições antes: a checagem lê o roteiro salvo."
+written_stopped = "O roteiro foi escrito, mas a checagem de afirmações parou:"
+pending_outdated_hint = "O briefing mudou depois desta checagem. Aceite o roteiro e confira de novo para ver como ele está agora."
+nothing_stated = "Não diz nada sobre o produto"
 
 [narration.claims]
-unbacked = "O roteiro diz {n} coisas que nenhuma afirmação do briefing sustenta. Elas estão na checagem de afirmações da etapa Roteiro."
-unbacked_one = "O roteiro diz 1 coisa que nenhuma afirmação do briefing sustenta. Ela está na checagem de afirmações da etapa Roteiro."
-not_checked = "O roteiro não foi conferido com as afirmações do briefing como está agora. Se quiser saber, confira as afirmações na etapa Roteiro antes."
+unbacked = "O roteiro tem {n} pontos que nenhuma afirmação do briefing sustenta. Eles estão na checagem de afirmações da etapa Roteiro."
+unbacked_one = "O roteiro tem 1 ponto que nenhuma afirmação do briefing sustenta. Ele está na checagem de afirmações da etapa Roteiro."
+not_checked = "O roteiro, como está agora, ainda não foi conferido com as afirmações do briefing. Se quiser, confira antes na etapa Roteiro."
 
 [tour.script.claims]
 title = "A checagem de afirmações"
-body = "Em um anúncio, o Claude lista o que o roteiro diz sobre o produto. O que nenhuma afirmação do briefing sustenta fica marcado aqui, e você decide o que fazer com a frase. Depois de editar, confira de novo."
+body = "Em um anúncio, o Claude lista o que o roteiro diz sobre o produto. O que nenhuma afirmação do briefing sustenta fica marcado aqui, e você decide o que fazer com a frase. Depois de editar, salve e confira de novo."

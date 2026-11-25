@@ -875,6 +875,11 @@ impl ProjectsScreen {
                 // Another stage's page starts at its top.
                 self.page_scroll.set_offset(point(px(0.), px(0.)));
             }
+            if self.stage != stage {
+                // A question about a cost belongs to the stage it was asked on.
+                self.script_ask = None;
+                self.claims_ask = None;
+            }
             self.stage = stage;
             self.ensure_render_checked(cx);
             cx.notify();
@@ -1686,6 +1691,24 @@ impl ProjectsScreen {
             .is_some_and(|job| job.state().is_active())
     }
 
+    /// Whether the stage's job wrote a script that is here, the current
+    /// one or (`pending`) the new one waiting for review. What such a job
+    /// still does, or failed at, is the claims check.
+    fn job_wrote(&self, pending: bool) -> bool {
+        let Some(view) = self.view.as_ref() else {
+            return false;
+        };
+        let (Some(job), Some(script)) = (view.job.as_ref(), view.script.as_ref()) else {
+            return false;
+        };
+        let generation = if pending {
+            script.pending().map(|pending| pending.generation())
+        } else {
+            Some(script.source().generation())
+        };
+        generation.is_some_and(|generation| generation.job == Some(job.id()))
+    }
+
     fn generate(&mut self, consent: BudgetConsent, window: &mut Window, cx: &mut Context<Self>) {
         self.script_ask = None;
         let Some(id) = self.project else {
@@ -2380,6 +2403,9 @@ impl ProjectsScreen {
                                 bardo,
                                 if job.kind() == JobKind::ClaimsCheck {
                                     Text::ScriptClaimsStopped
+                                } else if self.job_wrote(false) || self.job_wrote(true) {
+                                    // The script is saved; only its check failed.
+                                    Text::ScriptWrittenCheckStopped
                                 } else {
                                     Text::ScriptStopped
                                 },
@@ -2440,6 +2466,8 @@ impl ProjectsScreen {
                     .overflow_y_scroll()
                     .child(SharedString::from(text.to_owned())),
             )
+            // What the new script states is read before choosing.
+            .children(self.render_pending_claims(cx))
             .child(
                 h_flex()
                     .gap_2()
@@ -2463,7 +2491,6 @@ impl ProjectsScreen {
                             })),
                     ),
             )
-            .children(self.render_pending_claims(cx))
             .child(
                 self.render_provenance(
                     generation,

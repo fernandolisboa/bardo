@@ -583,7 +583,7 @@ impl AdRepository for Database {
         let id = project.to_string();
         let row = conn
             .query_row(
-                "SELECT text, brief_at, checked_at, model, job_id FROM claims_check
+                "SELECT text, brief_at, checked_at, model, job_id, notes FROM claims_check
                  WHERE project_id = ?1 AND script = ?2",
                 params![id, of.code()],
                 |row| {
@@ -593,12 +593,13 @@ impl AdRepository for Database {
                         row.get::<_, i64>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
                     ))
                 },
             )
             .optional()
             .map_err(boxed)?;
-        let Some((text, brief_at, checked_at, model, job)) = row else {
+        let Some((text, brief_at, checked_at, model, job, notes)) = row else {
             return Ok(None);
         };
         Ok(Some(ClaimsCheck {
@@ -606,6 +607,7 @@ impl AdRepository for Database {
             of,
             text,
             brief_at: from_unix_millis(brief_at),
+            notes,
             statements: check_statements(&conn, &id, of.code())?,
             checked_at: from_unix_millis(checked_at),
             model,
@@ -625,8 +627,8 @@ impl AdRepository for Database {
         .map_err(boxed)?;
         tx.execute(
             "INSERT INTO claims_check
-                (project_id, script, text, brief_at, checked_at, model, job_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                (project_id, script, text, brief_at, checked_at, model, job_id, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 project,
                 script,
@@ -635,6 +637,7 @@ impl AdRepository for Database {
                 to_unix_millis(check.checked_at),
                 check.model,
                 check.job.map(|job| job.to_string()),
+                check.notes,
             ],
         )
         .map_err(boxed)?;
@@ -1107,6 +1110,7 @@ mod tests {
             of,
             text: text.to_owned(),
             brief_at: time(1_800_000_800),
+            notes: "Offer: not set\nCall to action: Order yours today".into(),
             statements: vec![
                 CheckedStatement {
                     sentence: Some(1),

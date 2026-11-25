@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::ad_briefs::{ScriptBrief, unset_ad_values};
 use crate::ads::{as_data, with_ad_rules, with_concept_rules};
 use crate::claims_check::{
-    CheckBrief, ScriptClaims, ScriptToCheck, check_call_ahead, from_millis, millis,
+    CheckBrief, ScriptClaims, check_call_ahead, from_millis, millis, settle_checks,
 };
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler, Work};
@@ -208,43 +208,99 @@ impl JobHandler for ScriptHandler {
         if cx.kind() == JobKind::ClaimsCheck {
             return self.check_on_request(payload, cx.id(), &cx.stop());
         }
-        self.generate(payload, cx.id(), &cx.stop())
+        let (id, stop) = (cx.id(), cx.stop());
+        self.generate(payload, id, &stop, cx)
+    }
+}
+
+/// The script `job` wrote in an earlier attempt, while it is still one of
+/// the project's: the new one waiting for review, or the one the current
+/// script came from.
+fn written_by(
+    scripts: &dyn ScriptRepository,
+    project: VideoProjectId,
+    job: JobId,
+) -> Result<Option<ScriptText>, RepositoryError> {
+    let by_job = |generated: &GeneratedScript| generated.generation().job == Some(job);
+    Ok(scripts.script(project)?.and_then(|script| {
+        if let Some(pending) = script.pending().filter(|pending| by_job(pending)) {
+            Some(pending.text().clone())
+        } else if by_job(script.source()) {
+            Some(script.source().text().clone())
+        } else {
+            None
+        }
+    }))
+}
+
+/// What a script job's checkpoint reads once its script is saved.
+const WRITTEN: &str = "written";
+
+/// Where a script job notes that it wrote its script: the job's
+/// checkpoint, or a plain flag for a handler run outside the queue. The
+/// note outlives the script, which the user may put aside while the job
+/// waits to run again.
+pub(crate) trait WroteScript {
+    fn wrote(&self) -> bool;
+    fn note_written(&mut self);
+}
+
+impl WroteScript for JobContext {
+    fn wrote(&self) -> bool {
+        self.checkpoint() == Some(WRITTEN)
+    }
+
+    fn note_written(&mut self) {
+        if let Err(error) =
+            self.save_checkpoint(WRITTEN, bardo_domain::Progress::from_permille(500))
+        {
+            tracing::warn!(job = %self.id(), "could not note that a job wrote its script: {error}");
+        }
+    }
+}
+
+impl WroteScript for bool {
+    fn wrote(&self) -> bool {
+        *self
+    }
+
+    fn note_written(&mut self) {
+        *self = true;
     }
 }
 
 impl ScriptHandler {
     /// Generates the script `job` asked for and saves it; an ad's script
     /// is then checked against the claims of its brief.
-    fn generate(&self, payload: &str, job: JobId, stop: &Stop) -> Result<(), JobFailure> {
+    fn generate(
+        &self,
+        payload: &str,
+        job: JobId,
+        stop: &Stop,
+        noted: &mut dyn WroteScript,
+    ) -> Result<(), JobFailure> {
         let payload = ScriptPayload::parse(payload)?;
         let project = payload.project()?;
+        let brief_at = payload.brief_at.map(from_millis);
+        let check = payload.check.clone();
         // An earlier attempt of this job may have saved its script and
         // stopped before its check, or before the queue recorded it as
         // done.
-        let saved = self.scripts.script(project).map_err(unexpected)?;
-        let written = saved.as_ref().and_then(|script| {
-            let by_job = |generated: &GeneratedScript| generated.generation().job == Some(job);
-            if let Some(pending) = script.pending().filter(|pending| by_job(pending)) {
-                Some((CheckedScript::Pending, pending.text().clone()))
-            } else if by_job(script.source()) {
-                Some((CheckedScript::Current, script.source().text().clone()))
-            } else {
-                None
+        let text = match written_by(&*self.scripts, project, job).map_err(unexpected)? {
+            Some(text) => text,
+            // It wrote one, and the user put it aside since: the job
+            // neither writes another nor checks one nobody kept.
+            None if noted.wrote() => return Ok(()),
+            None => {
+                let text = self.write(payload, project, job, stop)?;
+                noted.note_written();
+                text
             }
-        });
-        let brief_at = payload.brief_at.map(from_millis);
-        let check = payload.check.clone();
-        let (of, text) = match written {
-            Some(written) => written,
-            None => self.write(payload, project, job, stop)?,
         };
         match check {
             Some(check) => self.check_claims(
-                ScriptToCheck {
-                    project,
-                    of,
-                    text: &text,
-                },
+                project,
+                &text,
                 &check,
                 brief_at.unwrap_or_else(SystemTime::now),
                 job,
@@ -255,14 +311,14 @@ impl ScriptHandler {
     }
 
     /// Has Claude write the script and saves it: the project's first, or
-    /// a new one beside the current. Returns which, with its text.
+    /// a new one beside the current. Returns its text.
     fn write(
         &self,
         payload: ScriptPayload,
         project: VideoProjectId,
         job: JobId,
         stop: &Stop,
-    ) -> Result<(CheckedScript, ScriptText), JobFailure> {
+    ) -> Result<ScriptText, JobFailure> {
         let key = self.key()?;
         let request = TextRequest {
             effort: TextEffort::Careful,
@@ -321,15 +377,17 @@ impl ScriptHandler {
         let text = generated.text().clone();
         // Read again: the user may have edited the script meanwhile, and
         // their text must survive.
-        let (of, script) = match self.scripts.script(project).map_err(unexpected)? {
+        let script = match self.scripts.script(project).map_err(unexpected)? {
             Some(mut script) => {
                 script.offer(generated, now);
-                (CheckedScript::Pending, script)
+                script
             }
-            None => (CheckedScript::Current, Script::first(generated, now)),
+            None => Script::first(generated, now),
         };
         self.scripts.save_script(&script).map_err(unexpected)?;
-        Ok((of, text))
+        // The check of a new script this one replaced is no script's now.
+        settle_checks(&*self.ads, project, &script).map_err(unexpected)?;
+        Ok(text)
     }
 }
 
@@ -366,6 +424,46 @@ impl Bardo {
                 || crate::localization::adapts_again(job, &id)
                 || Self::checks_claims_of(job, &id)
         })
+    }
+
+    /// What a failed or cancelled script job, or claims check, still pays
+    /// for when it is run again: the script it has yet to write and the
+    /// check it has yet to make. `None` when `job` is neither, or nothing
+    /// of it is left to pay for.
+    pub(crate) fn script_calls_left(
+        &self,
+        job: &Job,
+    ) -> Option<(VideoProjectId, Vec<PlannedCall>)> {
+        if job.kind() == JobKind::ClaimsCheck {
+            return self.check_call_left(job);
+        }
+        if job.kind() != JobKind::ScriptGeneration {
+            return None;
+        }
+        let payload = ScriptPayload::parse(job.payload()).ok()?;
+        let project = payload.project().ok()?;
+        let calls = match written_by(&*self.scripts, project, job.id()).ok()? {
+            Some(text) => {
+                let check = payload.check.as_ref()?;
+                if !self.check_left(project, &text, job.id()) {
+                    return None;
+                }
+                vec![check.call(&text)]
+            }
+            // It wrote its script, which was put aside since.
+            None if job.checkpoint() == Some(WRITTEN) => return None,
+            None => {
+                let mut calls = vec![
+                    PlannedCall::new(Provider::Claude, CostPurpose::Script, 1)
+                        .with_prompt(&payload.instructions, &payload.prompt),
+                ];
+                if payload.check.is_some() {
+                    calls.push(check_call_ahead());
+                }
+                calls
+            }
+        };
+        Some((project, calls))
     }
 
     /// The template a project's script is written from: the ad script
@@ -543,6 +641,15 @@ impl Bardo {
             if brief.as_ref().is_some_and(ScriptBrief::is_concept) {
                 rendered.instructions = with_concept_rules(&rendered.instructions);
             }
+            // The rules speak of the numbered claims: an edited template
+            // that left them out still sends them.
+            let fixed = brief
+                .as_ref()
+                .map(|brief| brief.fixed_for(&template.body))
+                .unwrap_or_default();
+            if !fixed.is_empty() {
+                rendered.prompt = format!("{}\n\n{fixed}", rendered.prompt);
+            }
         }
         Ok((rendered, brief))
     }
@@ -638,7 +745,17 @@ impl Bardo {
         let mut script = self.own_script(project)?;
         script.accept(SystemTime::now())?;
         self.scripts.save_script(&script)?;
-        self.ads.accept_claims_check(project)?;
+        settle_checks(&*self.ads, project, &script)?;
+        // A new script accepted without a check of its own does not keep
+        // the check of the script it replaced.
+        if self
+            .ads
+            .claims_check(project, CheckedScript::Current)?
+            .is_some_and(|check| !check.reads(script.text()))
+        {
+            self.ads
+                .drop_claims_check(project, CheckedScript::Current)?;
+        }
         Ok(script)
     }
 
@@ -648,8 +765,7 @@ impl Bardo {
         let mut script = self.own_script(project)?;
         script.reject(SystemTime::now())?;
         self.scripts.save_script(&script)?;
-        self.ads
-            .drop_claims_check(project, CheckedScript::Pending)?;
+        settle_checks(&*self.ads, project, &script)?;
         Ok(script)
     }
 }
@@ -1188,7 +1304,9 @@ mod tests {
                 in_flight: std::sync::Arc::default(),
             },
         };
-        handler.generate(&payload, id, &Stop::never()).unwrap();
+        handler
+            .generate(&payload, id, &Stop::never(), &mut false)
+            .unwrap();
         assert_eq!(first.text.requests().len(), 1, "Claude is asked once");
         assert_eq!(script(&app, &project), saved);
     }

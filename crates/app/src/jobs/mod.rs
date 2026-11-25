@@ -273,7 +273,8 @@ impl Bardo {
     /// checkpoint. An image or clip job with scenes still to pay for asks
     /// first when those would reach a budget or pass the video's cap, or
     /// have no price (`JobActionError::OverBudget`); so does a product's
-    /// sheet job with a call still to pay for.
+    /// sheet job with a call still to pay for, and a script job or claims
+    /// check with its script or its check still to pay for.
     pub fn retry_job(&self, id: JobId) -> Result<(), JobActionError> {
         self.retry_job_with(id, BudgetConsent::Ask)
     }
@@ -361,7 +362,10 @@ impl Bardo {
         if let Some(calls) = self.ad_angle_calls_left(&job) {
             return Ok(self.check_budget(&calls, consent)?.err());
         }
-        let Some((project, calls)) = self.images_left(&job).or_else(|| self.clips_left(&job))
+        let Some((project, calls)) = self
+            .images_left(&job)
+            .or_else(|| self.clips_left(&job))
+            .or_else(|| self.script_calls_left(&job))
         else {
             return Ok(None);
         };

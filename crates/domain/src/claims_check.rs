@@ -67,6 +67,10 @@ pub struct ClaimsCheck {
     pub text: String,
     /// When the brief the check read had last changed.
     pub brief_at: SystemTime,
+    /// The advertiser's own words as the check read them (the offer, the
+    /// call to action and what must be said). The product's part of them
+    /// changes without the brief changing.
+    pub notes: String,
     pub statements: Vec<CheckedStatement>,
     pub checked_at: SystemTime,
     /// The model that checked it.
@@ -104,9 +108,10 @@ impl ClaimsCheck {
         self.text == text.as_str()
     }
 
-    /// Whether the script or the brief changed since the check read them.
-    pub fn is_outdated(&self, text: &ScriptText, brief: &AdBrief) -> bool {
-        !self.reads(text) || brief.changed_at() > self.brief_at
+    /// Whether the script, the brief or the advertiser's words (`notes`,
+    /// as a check would read them now) changed since the check read them.
+    pub fn is_outdated(&self, text: &ScriptText, brief: &AdBrief, notes: &str) -> bool {
+        !self.reads(text) || brief.changed_at() > self.brief_at || self.notes != notes
     }
 
     /// The sentence of the checked script a statement names.
@@ -162,8 +167,9 @@ pub struct ClaimsAnswerError(pub String);
 /// A statement tied to no claim, or to a number the prompt did not give,
 /// is unbacked: the checker cannot vouch for a claim the brief does not
 /// have. A statement that names a sentence the script does not have is
-/// kept without one, so a flag is never lost to a miscount. One that says
-/// nothing is left out.
+/// kept without one, so a flag is never lost to a miscount; so is one
+/// whose words are missing, as long as it names a sentence. One that
+/// names no sentence and says nothing is left out.
 pub fn checked_statements(
     answer: &str,
     sentences: usize,
@@ -197,11 +203,12 @@ pub fn checked_statements(
             .chars()
             .take(CheckedStatement::MAX_SAYS_CHARS)
             .collect();
-        if says.is_empty() {
+        let sentence = number(entry, "sentence").filter(|index| *index < sentences);
+        if says.is_empty() && sentence.is_none() {
             continue;
         }
         statements.push(CheckedStatement {
-            sentence: number(entry, "sentence").filter(|index| *index < sentences),
+            sentence,
             says,
             claim: number(entry, "claim").and_then(|index| claims.get(index).copied()),
         });
@@ -231,6 +238,7 @@ mod tests {
             of: CheckedScript::Current,
             text: SCRIPT.to_owned(),
             brief_at: at(10),
+            notes: "Call to action: Order yours today".to_owned(),
             statements,
             checked_at: at(20),
             model: "claude-test".to_owned(),
@@ -322,11 +330,10 @@ mod tests {
     }
 
     #[test]
-    fn what_a_statement_says_is_one_line_within_its_limit_and_never_empty() {
+    fn what_a_statement_says_is_one_line_within_its_limit() {
         let long = "word ".repeat(200);
         let answer = serde_json::json!({"statements": [
             {"sentence": 1, "says": "  It folds\n flat  ", "claim": 1},
-            {"sentence": 1, "says": "   ", "claim": 0},
             {"sentence": 1, "says": long, "claim": 0},
         ]})
         .to_string();
@@ -337,6 +344,23 @@ mod tests {
             statements[1].says.chars().count(),
             CheckedStatement::MAX_SAYS_CHARS
         );
+    }
+
+    #[test]
+    fn a_flag_without_words_is_kept_with_its_sentence() {
+        let answer = serde_json::json!({"statements": [
+            {"sentence": 3, "says": "   ", "claim": 0},
+            {"sentence": 2, "claim": 0},
+            // Neither a sentence nor words: nothing to show.
+            {"sentence": 9, "says": "", "claim": 0},
+        ]})
+        .to_string();
+        let statements = checked_statements(&answer, 4, &[ClaimId::new()]).unwrap();
+        assert_eq!(statements.len(), 2);
+        assert_eq!(statements[0].sentence, Some(2));
+        assert_eq!(statements[0].says, "");
+        assert!(statements[0].is_unbacked());
+        assert_eq!(statements[1].sentence, Some(1));
     }
 
     #[test]
@@ -396,18 +420,25 @@ mod tests {
     }
 
     #[test]
-    fn a_check_is_out_of_date_once_the_script_or_the_brief_changes() {
+    fn a_check_is_out_of_date_once_what_it_read_changes() {
         let check = check(Vec::new());
         let same = ScriptText::new(SCRIPT).unwrap();
+        let notes = check.notes.clone();
         assert!(check.reads(&same));
-        assert!(!check.is_outdated(&same, &brief(at(10))));
-        assert!(!check.is_outdated(&same, &brief(at(5))));
+        assert!(!check.is_outdated(&same, &brief(at(10)), &notes));
+        assert!(!check.is_outdated(&same, &brief(at(5)), &notes));
         // The brief changed after the check read it.
-        assert!(check.is_outdated(&same, &brief(at(11))));
+        assert!(check.is_outdated(&same, &brief(at(11)), &notes));
         // The script was edited.
         let edited = ScriptText::new(&SCRIPT.replace("brightest", "kindest")).unwrap();
         assert!(!check.reads(&edited));
-        assert!(check.is_outdated(&edited, &brief(at(10))));
+        assert!(check.is_outdated(&edited, &brief(at(10)), &notes));
+        // The product's own words changed, which the brief does not record.
+        assert!(check.is_outdated(
+            &same,
+            &brief(at(10)),
+            "Call to action: Order yours today\nMust be said: Sold by Lumen."
+        ));
     }
 
     #[test]

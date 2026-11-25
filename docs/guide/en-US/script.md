@@ -17,7 +17,7 @@ The script is what the narrator will say. Claude writes it, you edit it, and eve
 
 An [ad](brief.md) is written from the **ad script template** instead, with what its brief holds: the product, who the ad speaks to, the angle and its format, the brief's numbered claims, the offer, the call to action and what must and must never be said. The template asks for the hook in the first two seconds, the product named by the middle at the latest, short sentences of about four to nine words, and the call to action last, in your words, as a sentence of its own. An ad's script aims 2 seconds under the project's length, so the video ends on time: about 26 to 32 words for 15 seconds, 58 to 70 for 30. It may state only the brief's claims, and the [claims check](#claims) reads it as soon as it is written. For a product of kind *idea*, Claude is told it is a concept: the script speaks of what it would do, and never says it can be bought or used today.
 
-Once the script is here, it is yours: type straight into it. It holds up to 60,000 characters, and the word count beside the title gives a sense of the video's length.
+Once the script is here, it is yours: type straight into it and **Save** ([Saving your edits](#save)). It holds up to 60,000 characters, and the word count beside the title gives a sense of the video's length.
 
 <a id="review"></a>
 ## A new version to review
@@ -44,12 +44,16 @@ Before you generate, the estimate under the buttons says what the call will cost
 
 Only an ad has one. With every ad script Claude writes, the same job makes a second, small call that reads the script and lists what it states about the product: what it is, what it does, what it costs, any number, comparison, result or promise. Each statement is tied to one claim of the [brief](brief.md#claims), or to none. The **Claims check** card under the script shows the result:
 
-- **Everything it states is backed**, or how many statements have no backing. Each of those is listed with the sentence that makes it and, under it, what it states.
+- **Everything it states is backed**, or how many statements have no backing. Each of those is listed with the sentence that makes it and, under it, what it states. A script that states nothing about the product reads **States nothing about the product**.
 - **Claims this script uses**, and **Sensitive claims this script uses** apart from them: the ones marked [sensitive](products.md#claims) on the product, which need care.
 
-A statement without backing locks nothing: you decide whether the sentence stays, changes or goes. The Narration stage says beside its estimate when the script it is about to read has such statements, or was not checked as it reads now ([Narration](narration.md#generate)).
+A statement without backing locks nothing: you decide whether the sentence stays, changes or goes. The Narration stage says above its estimate when the script it is about to read has such statements, or was not checked as it reads now ([Narration](narration.md#generate)).
 
-A check belongs to the script and the brief it read. Save an edit, or change the brief, and the card reads **Out of date**; **Check again** checks the saved script and replaces the earlier check. It is a small paid call, with its estimate under the button. A new script waiting for review shows its own check inside its card, and accepting the script keeps that check with it.
+A check belongs to the script and the brief it read. Save an edit, change the brief, or change the product's own must-say words, and the card reads **Out of date**; **Check again** checks the saved script and replaces the earlier check. It is a small paid call, with its estimate under the button. The check reads the script as saved: while the editor holds edits you have not saved, the button waits and a line asks you to save first. A script that has no check yet (an ad written before the check existed, or a check that failed) reads **This script was not checked yet**, and the button is **Check claims**.
+
+A new script waiting for review shows its own check inside its card, above **Accept new script**, and accepting the script keeps that check with it. A check follows the text it read: accept a new script and the current one's check goes with the script it belonged to.
+
+While a check runs, the card says so. If the job wrote the script and then failed in its check, the stage says **The script was written, but its claims check stopped**; running the job again from [Jobs](jobs.md) pays for the check only, and asks first if that would go past a budget.
 
 The check is not a template: its instructions are fixed, so no edit makes it look away. A statement the answer ties to a claim the brief does not hold counts as having no backing.
 

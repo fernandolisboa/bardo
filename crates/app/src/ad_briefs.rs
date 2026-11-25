@@ -15,7 +15,7 @@ use std::time::SystemTime;
 use bardo_domain::{
     AdAngle, AdBrief, BriefClaim, BriefClaimError, BriefFieldError, BriefNotReady, BriefText,
     Claim, ClaimDrift, ClaimId, Product, ProductId, ProductKind, ProductSheet, RepositoryError,
-    Script, TemplateVariable, VideoProject, VideoProjectId,
+    Script, TemplateBody, TemplateVariable, VideoProject, VideoProjectId,
 };
 
 use crate::ads::as_data;
@@ -169,6 +169,27 @@ impl ScriptBrief {
         } else {
             claims.join("\n")
         }
+    }
+
+    /// What an ad's request carries whatever its template says: the
+    /// claims the ad may state and what it must never say, for a template
+    /// edited to leave either out. Empty when `body` places both.
+    pub(crate) fn fixed_for(&self, body: &TemplateBody) -> String {
+        let mut blocks = Vec::new();
+        if !body.uses(TemplateVariable::BriefClaims) {
+            blocks.push(format!(
+                "What the ad may state about the product, numbered. It states nothing else \
+                 about it:\n<claims>\n{}\n</claims>",
+                as_data(&self.numbered_claims())
+            ));
+        }
+        if !body.uses(TemplateVariable::NeverSay) {
+            blocks.push(format!(
+                "What the advertiser says the ad must never say:\n<never_say>\n{}\n</never_say>",
+                as_data(&or_not_set(&one_line(self.product.brief.never_say())))
+            ));
+        }
+        blocks.join("\n\n")
     }
 
     /// The values of the variables only an ad script template has.
@@ -878,6 +899,46 @@ mod tests {
     }
 
     #[test]
+    fn a_template_that_leaves_the_claims_out_still_sends_them() {
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, _, project) = ad_project(&h, &app);
+        app.confirm_brief(project.id).unwrap();
+        app.save_template(
+            TemplateKind::AdScript,
+            "Sell it hard.",
+            "Write an ad for {{product}}, {{target_length}}.",
+        )
+        .unwrap();
+        let template = app.current_template(TemplateKind::AdScript).unwrap();
+        let (rendered, _) = app.render_script(&project, &template).unwrap();
+        assert!(rendered.instructions.ends_with(crate::ads::AD_RULES));
+        let claims = rendered.prompt.find("<claims>\n1. ").expect("the claims");
+        let never = rendered
+            .prompt
+            .find("<never_say>\ncheap\n</never_say>")
+            .expect("the never-say note");
+        assert!(claims < never);
+        assert!(rendered.prompt.starts_with("Write an ad for "));
+
+        // A template that places one of them gets only the other.
+        app.save_template(
+            TemplateKind::AdScript,
+            "",
+            "Claims:\n{{ brief_claims }}\nWrite the ad.",
+        )
+        .unwrap();
+        let template = app.current_template(TemplateKind::AdScript).unwrap();
+        let (rendered, _) = app.render_script(&project, &template).unwrap();
+        assert_eq!(rendered.prompt.matches("<claims>").count(), 0);
+        assert!(
+            rendered
+                .prompt
+                .ends_with("<never_say>\ncheap\n</never_say>")
+        );
+    }
+
+    #[test]
     fn an_ads_script_is_written_from_the_ad_script_template_with_its_brief() {
         let h = Harness::new();
         let app = start(&h);
@@ -929,6 +990,12 @@ mod tests {
         // An ad starts at 30 seconds, and its script leaves 2 of them to
         // the end card.
         assert!(prompt.contains("about 58 to 70 words (23 to 28 seconds spoken)"));
+        // The channel's own text sits in a tag, like the rest.
+        assert!(prompt.contains("<channel>\nName: "));
+        // The template places the claims and the never-say note, so
+        // nothing is added after it.
+        assert_eq!(prompt.matches("<claims>").count(), 1);
+        assert!(!prompt.contains("<never_say>"));
         // The script names the template it was written from.
         let script = app.script(project.id).unwrap().script.unwrap();
         assert_eq!(
