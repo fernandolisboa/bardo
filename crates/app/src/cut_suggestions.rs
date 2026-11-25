@@ -1093,7 +1093,7 @@ mod tests {
         let chunks = cut_chunks(&narration, &points, &CHUNK_LIMITS).len();
         assert!(chunks > 2, "{chunks}");
 
-        *h.decisions.delay.lock().unwrap() = Duration::from_millis(100);
+        *h.decisions.delay.lock().unwrap() = Duration::from_millis(250);
         let job = app.suggest_cuts(&mut editor, BudgetConsent::Ask).unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while app

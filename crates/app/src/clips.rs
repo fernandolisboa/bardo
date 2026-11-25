@@ -1962,12 +1962,24 @@ mod tests {
             .count()
     }
 
-    /// Lets the call held open go on a moment after the app starts closing.
+    /// A harness whose app, when closing, waits for its handlers however
+    /// slow the machine is.
+    fn closing_patiently() -> Harness {
+        Harness {
+            closing_wait: Some(PATIENCE),
+            ..Harness::new()
+        }
+    }
+
+    /// Closes the app, and lets the call held open go on once the app has
+    /// told its jobs to stop.
     fn close_with_a_call_open(app: Bardo, clips: &Arc<FakeClips>) {
         let resumer = {
-            let clips = Arc::clone(clips);
+            let (clips, queue) = (Arc::clone(clips), app.queue_probe());
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(150));
+                while !queue.closing() {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
                 clips.resume();
             })
         };
@@ -2057,7 +2069,7 @@ mod tests {
 
     #[test]
     fn closing_while_an_image_is_handed_over_sends_the_clip_once_after_the_restart() {
-        let mut h = Harness::new();
+        let mut h = closing_patiently();
         let (clips, app, project) = charged_on_every_send(&mut h, FakeClips::default());
         clips.pause_at(ClipCall::StageImage);
         let id = app
@@ -2078,7 +2090,7 @@ mod tests {
 
     #[test]
     fn a_clip_sent_as_the_app_closes_is_kept_for_the_next_start() {
-        let mut h = Harness::new();
+        let mut h = closing_patiently();
         let (clips, app, project) = charged_on_every_send(&mut h, FakeClips::default());
         clips.pause_at(ClipCall::Submit);
         let id = app
@@ -2095,6 +2107,35 @@ mod tests {
         assert_eq!(*clips.lookups.lock().unwrap(), 0, "nothing to look for");
         assert_eq!(clips_in_costs(&h, &project), 1);
         assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+    }
+
+    #[test]
+    fn a_run_refused_its_save_after_the_app_closed_sends_no_clip() {
+        let mut h = Harness {
+            closing_wait: Some(Duration::from_millis(20)),
+            ..Harness::new()
+        };
+        let (clips, app, project) = charged_on_every_send(&mut h, FakeClips::default());
+        clips.pause_at(ClipCall::StageImage);
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap();
+        wait_for(&clips, FakeClips::paused);
+
+        // The app closes without the run, whose upload ends only later:
+        // its note of the staged image is refused, so it stops there.
+        let closed = app.queue_probe();
+        drop(app);
+        clips.resume();
+        wait_for(&clips, |_| !closed.runs(id));
+        assert_eq!(sends(&clips), 0, "the run that lost its job still paid");
+
+        // The next start runs the job from what was saved: nothing staged.
+        let app = h.start();
+        done(&app, id);
+        assert_eq!(sends(&clips), 1);
+        assert_eq!(clips.staged.lock().unwrap().len(), 2, "handed over again");
+        assert_eq!(clips_in_costs(&h, &project), 1);
     }
 
     #[test]

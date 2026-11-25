@@ -798,7 +798,8 @@ impl Job {
     /// handler told to stop goes on until its next check, and what it hands
     /// to a provider meanwhile is still paid for, so the next run must find
     /// it. By then the job may be cancelled, or queued again by hand while
-    /// that run still stops. Its progress stays as it was.
+    /// that run still stops. Its progress stays as it was. Only for a job
+    /// whose run has not returned yet, which the queue knows.
     pub fn keep_from_stopping_run(
         &mut self,
         checkpoint: Option<String>,

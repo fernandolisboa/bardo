@@ -47,6 +47,10 @@ pub struct JobSettings {
     /// How often the queue renews its leases, says it is up and reads what
     /// another runner changed. Well under `lease`.
     pub tick: Duration,
+    /// How long a closing queue waits for its stopped handlers to return.
+    /// Until then they may still save what they resume from, and the next
+    /// runner finds their jobs free at once.
+    pub closing_wait: Duration,
 }
 
 impl Default for JobSettings {
@@ -56,6 +60,7 @@ impl Default for JobSettings {
             retry: RetryPolicy::default(),
             lease: JOB_LEASE,
             tick: RUNNER_TICK,
+            closing_wait: Duration::from_secs(2),
         }
     }
 }
@@ -87,10 +92,6 @@ impl Runner {
         self.scope.as_ref().is_none_or(|scope| scope(job))
     }
 }
-
-/// How long a closing queue waits for its stopped handlers to return, so
-/// the next runner finds their jobs free at once.
-const CLOSING_WAIT: Duration = Duration::from_secs(2);
 
 /// How often a closing queue saves again the ends storage refused.
 const CLOSING_RETRY: Duration = Duration::from_millis(50);
@@ -231,9 +232,9 @@ impl JobContext {
     }
 
     /// Saves where to resume from, with the progress reached there. Kept
-    /// for a run that was told to stop, too (the progress is then not
-    /// shown). `Err` when it was not saved: storage failed, or the run lost
-    /// the job (`SaveNotKept`).
+    /// for a run that was told to stop, too (a job cancelled meanwhile does
+    /// not show the progress). `Err` when it was not saved: storage failed,
+    /// or the run lost the job (`SaveNotKept`).
     pub fn save_checkpoint(
         &mut self,
         checkpoint: impl Into<String>,
@@ -301,7 +302,7 @@ struct State {
     /// The queue is closing: handlers were told to stop and may still save
     /// what they resume from while it waits for them.
     closing: bool,
-    /// The queue closed: no worker writes to the repository from now on.
+    /// The queue closed: no worker saves a job from now on.
     closed: bool,
     /// When the queue next renews, says it is up and reads storage.
     next_tick: Instant,
@@ -380,8 +381,8 @@ impl Shared {
         }
         let job = state.job_mut(id).ok_or(SaveNotKept)?;
         apply(job).map_err(|_| SaveNotKept)?;
-        // The copy here keeps it even when storage refuses: the run's end
-        // (or the next save) writes it then.
+        // The copy here has it even when storage refuses: this run's next
+        // save writes it, or its end while the job still runs.
         let saved = self.repository.save(job);
         self.changed();
         saved
@@ -653,6 +654,12 @@ impl JobQueue {
         self.shared.state().paused
     }
 
+    /// Looks at the queue from a test, also after it is dropped.
+    #[cfg(test)]
+    pub(crate) fn probe(&self) -> QueueProbe {
+        QueueProbe(Arc::clone(&self.shared))
+    }
+
     /// Whether the job's handler still runs in this process. A cancelled
     /// job reads cancelled at once; its handler stops on its next check
     /// and cleans up before it returns.
@@ -714,12 +721,30 @@ impl JobQueue {
     }
 }
 
+/// What a test sees of a queue, also after the queue is dropped.
+#[cfg(test)]
+pub(crate) struct QueueProbe(Arc<Shared>);
+
+#[cfg(test)]
+impl QueueProbe {
+    /// Whether the queue started closing: its handlers were told to stop.
+    pub(crate) fn closing(&self) -> bool {
+        self.0.state().closing
+    }
+
+    /// Whether the job's handler has not returned yet.
+    pub(crate) fn runs(&self, id: JobId) -> bool {
+        self.0.state().workers.contains_key(&id)
+    }
+}
+
 impl Drop for JobQueue {
     /// Tells running handlers to stop and waits for the scheduler, then a
     /// little for the handlers, which may still save what they resume
     /// from. Running jobs stay running in storage, so the next start
-    /// resumes them. Once this returns, no worker writes to the repository
-    /// again: a handler still busy is refused its saves (`SaveNotKept`).
+    /// resumes them. Once this returns, no worker saves a job again: a
+    /// handler still busy is refused its saves (`SaveNotKept`), and only
+    /// gives up its lease when it returns.
     fn drop(&mut self) {
         {
             let mut state = self.shared.state();
@@ -736,7 +761,7 @@ impl Drop for JobQueue {
         // wait for them a little, so the next runner resumes their jobs at
         // once. One still busy keeps its lease until it runs out. Ends
         // storage refused are saved again meanwhile.
-        let deadline = Instant::now() + CLOSING_WAIT;
+        let deadline = Instant::now() + self.shared.settings.closing_wait;
         let mut state = self.shared.state();
         loop {
             self.shared.save_unsaved(&mut state);
