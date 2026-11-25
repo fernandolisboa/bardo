@@ -379,15 +379,18 @@ pub fn parse_status(value: &Value) -> Result<ClipStatus, ProviderFailure> {
     let status = job["status"]
         .as_str()
         .ok_or_else(|| unexpected("the status answer has no status"))?;
-    let failed = |kind, what: &str| {
-        ClipStatus::Failed(ProviderFailure::new(
+    let ended = |kind, what: &str| {
+        ProviderFailure::new(
             kind,
             match &reason {
                 Some(reason) => format!("{what}: {reason}"),
                 None => what.to_owned(),
             },
-        ))
+        )
     };
+    let failed = |kind, what: &str| ClipStatus::Failed(ended(kind, what));
+    // No clip, and no word that none was made: its credits may be spent.
+    let lost = |what: &str| ClipStatus::Lost(ended(ProviderFailureKind::Unexpected, what));
     Ok(match status.to_ascii_lowercase().as_str() {
         "completed" | "succeeded" | "done" => match result_url(job) {
             Some(video) => ClipStatus::Done { video },
@@ -401,22 +404,16 @@ pub fn parse_status(value: &Value) -> Result<ClipStatus, ProviderFailure> {
             ProviderFailureKind::ProviderDown,
             "Higgsfield could not make the clip",
         ),
-        "lookup_failed" | "not_found" => failed(
-            ProviderFailureKind::Unexpected,
-            "Higgsfield does not know this clip",
-        ),
+        "lookup_failed" | "not_found" => lost("Higgsfield does not know this clip"),
         "queued" | "pending" | "waiting" | "submitted" | "created" => ClipStatus::Queued,
         "in_progress" | "running" | "processing" | "generating" | "started" => ClipStatus::Running,
         // A status this adapter does not know: over when the server says
         // every job is, else still going.
         _ => match value["all_terminal"].as_bool() {
-            Some(true) => failed(
-                ProviderFailureKind::Unexpected,
-                &format!(
-                    "the clip ended as \"{}\"",
-                    status.chars().take(40).collect::<String>()
-                ),
-            ),
+            Some(true) => lost(&format!(
+                "the clip ended as \"{}\"",
+                status.chars().take(40).collect::<String>()
+            )),
             Some(false) => ClipStatus::Running,
             None => {
                 return Err(unexpected(format!(

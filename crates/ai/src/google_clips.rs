@@ -440,13 +440,15 @@ pub fn parse_omni_status(
             }
         }),
         Some("failed") => Ok(ended_with("Gemini Omni Flash", &body["error"])),
-        Some("cancelled") => Ok(ClipStatus::Failed(unexpected(
+        // Google does not say whether work stopped in these ways is
+        // charged.
+        Some("cancelled") => Ok(ClipStatus::Lost(unexpected(
             "the request was cancelled on Google",
         ))),
-        Some("incomplete" | "budget_exceeded") => Ok(ClipStatus::Failed(unexpected(
+        Some("incomplete" | "budget_exceeded") => Ok(ClipStatus::Lost(unexpected(
             "Gemini Omni Flash stopped before the clip was done",
         ))),
-        Some("requires_action") => Ok(ClipStatus::Failed(unexpected(
+        Some("requires_action") => Ok(ClipStatus::Lost(unexpected(
             "Gemini Omni Flash asked for more input",
         ))),
         Some(other) => Err(unexpected(format!("unknown interaction status {other}"))),
@@ -599,7 +601,7 @@ impl<T: Transport> ClipGenerator for GoogleClips<T> {
             200..=299 if is_interaction(handle) => parse_omni_status(&response, handle),
             200..=299 => parse_veo_status(&response),
             // Gone for good: Google keeps work for two days.
-            404 => Ok(ClipStatus::Failed(unexpected(
+            404 => Ok(ClipStatus::Lost(unexpected(
                 "Google does not know this request",
             ))),
             _ => Err(google_failure(&response)),

@@ -348,7 +348,7 @@ fn is_moderation(message: &str) -> bool {
 pub fn parse_status(response: &HttpResponse) -> Result<ClipStatus, ProviderFailure> {
     let body = json_body(response)?;
     let Some(task) = body["data"].as_array().and_then(|tasks| tasks.first()) else {
-        return Ok(ClipStatus::Failed(unexpected(
+        return Ok(ClipStatus::Lost(unexpected(
             "Kling does not know this task",
         )));
     };

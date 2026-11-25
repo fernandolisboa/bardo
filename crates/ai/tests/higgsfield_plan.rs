@@ -507,7 +507,9 @@ fn a_status_this_adapter_does_not_know_follows_whether_the_job_is_over() {
     let adapter = plan(&["wait-unknown-over", "wait-unknown-going"]);
     let handle = ClipHandle(JOB.into());
     match adapter.status(&key(), &handle).unwrap() {
-        ClipStatus::Failed(failure) => {
+        // Over, and not said to have made nothing: it may have been
+        // charged.
+        ClipStatus::Lost(failure) => {
             assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
             assert!(failure.detail.contains("expired"), "{}", failure.detail);
         }
@@ -550,7 +552,10 @@ fn the_status_reads_every_state_without_waiting() {
     assert!(broke.detail.contains("refunded"), "{}", broke.detail);
     let declined = failed(adapter.status(&key(), &handle).unwrap());
     assert_eq!(declined.kind, ProviderFailureKind::Declined);
-    let unknown = failed(adapter.status(&key(), &handle).unwrap());
+    // A job the plan cannot find may have spent its credits.
+    let ClipStatus::Lost(unknown) = adapter.status(&key(), &handle).unwrap() else {
+        panic!("a job the plan does not know is lost, not failed");
+    };
     assert_eq!(unknown.kind, ProviderFailureKind::Unexpected);
 
     let calls = tool_calls(&adapter);
