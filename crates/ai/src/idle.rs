@@ -8,19 +8,24 @@
 
 use std::io::Read;
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, sync_channel};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError, sync_channel};
 use std::time::{Duration, Instant};
 
 use bardo_domain::Stop;
 
-use crate::http::TransportError;
-use crate::http::{BinaryResponse, HttpRequest, HttpResponse, StreamedResponse, Transport};
+use crate::http::{
+    BinaryResponse, GIVEN_UP_UNSENT, HttpRequest, HttpResponse, StreamedResponse, Transport,
+    TransportError,
+};
 
 /// How often a wait for an answer asks whether to give it up.
 pub const STOP_POLL: Duration = Duration::from_millis(100);
 
 /// Reads `inner` and fails with `TimedOut` when no byte arrives for
-/// `idle`, or once its `Stop` asks. The body is read on a thread of its
+/// `idle`, or once its `Stop` asks and the read would have to wait: what
+/// has arrived by then is still handed over, so an answer that came whole
+/// as the stop asked is read whole. The body is read on a thread of its
 /// own, which ends with the body or, once this reader is dropped, at its
 /// next read, and closes the connection there: after a silence or a stop
 /// that thread and its connection stay until the next byte arrives or the
@@ -65,6 +70,10 @@ impl IdleTimeout {
                     break;
                 }
             }
+            // The body's end is told before its connection is let go, which
+            // may take a while: a reader told to stop just then still finds
+            // the end of an answer that arrived whole.
+            drop(sender);
         });
         Self {
             chunks,
@@ -97,10 +106,8 @@ impl Read for IdleTimeout {
         if buffer.is_empty() {
             return Ok(0);
         }
-        // An answer given up stays given up, with whatever of it waits
-        // here unread.
-        if self.given_up || self.stop.asked() {
-            self.given_up = true;
+        // An answer given up stays given up.
+        if self.given_up {
             return Err(Self::gave_up());
         }
         if self.at == self.pending.len() {
@@ -112,20 +119,34 @@ impl Read for IdleTimeout {
             if self.ended {
                 return Ok(0);
             }
-            let silent_at = Instant::now() + self.idle;
+            // A silence too long to count is no limit.
+            let silent_at = Instant::now().checked_add(self.idle);
             loop {
-                let left = silent_at.saturating_duration_since(Instant::now());
-                if left.is_zero() {
-                    self.timed_out = true;
-                    return Err(self.silence());
-                }
-                // Waits in short steps only when somebody may stop it.
-                let step = if self.stop.may_ask() {
-                    left.min(STOP_POLL)
+                // Told to stop, the reader takes what has arrived and does
+                // not wait for more.
+                let stopping = self.stop.asked();
+                let next = if stopping {
+                    self.chunks.try_recv().map_err(|error| match error {
+                        TryRecvError::Empty => RecvTimeoutError::Timeout,
+                        TryRecvError::Disconnected => RecvTimeoutError::Disconnected,
+                    })
                 } else {
-                    left
+                    let left = silent_at.map_or(Duration::MAX, |at| {
+                        at.saturating_duration_since(Instant::now())
+                    });
+                    if left.is_zero() {
+                        self.timed_out = true;
+                        return Err(self.silence());
+                    }
+                    // Waits in short steps only when somebody may stop it.
+                    let step = if self.stop.may_ask() {
+                        left.min(STOP_POLL)
+                    } else {
+                        left
+                    };
+                    self.chunks.recv_timeout(step)
                 };
-                match self.chunks.recv_timeout(step) {
+                match next {
                     Ok(Ok(chunk)) => {
                         self.pending = chunk;
                         self.at = 0;
@@ -140,12 +161,11 @@ impl Read for IdleTimeout {
                         self.ended = true;
                         return Ok(0);
                     }
-                    Err(RecvTimeoutError::Timeout) => {
-                        if self.stop.asked() {
-                            self.given_up = true;
-                            return Err(Self::gave_up());
-                        }
+                    Err(RecvTimeoutError::Timeout) if stopping => {
+                        self.given_up = true;
+                        return Err(Self::gave_up());
                     }
+                    Err(RecvTimeoutError::Timeout) => {}
                 }
             }
         }
@@ -173,35 +193,61 @@ impl<T> Watched<T> {
     }
 }
 
+/// Whether a request sent on a thread of its own has left, decided once by
+/// whichever comes first: the transport about to send it, or the wait for
+/// it being given up.
+const WAITING: u8 = 0;
+/// The transport was let go on: the request may have arrived.
+const LEFT: u8 = 1;
+/// The wait was given up first: the transport sends nothing.
+const HELD: u8 = 2;
+
 impl<T: Transport + 'static> Watched<T> {
     /// Sends `request` on a thread of its own and waits for the answer to
-    /// begin, giving the wait up once `stop` asks. The request cannot be
-    /// taken back: the thread ends when the transport answers or gives up
-    /// by its own bounds, and drops what it got, which closes the
-    /// connection.
+    /// begin, giving the wait up once `stop` asks. A request that has not
+    /// left by then (no connection yet) is held back and never sent. One
+    /// that left cannot be taken back: the thread ends when the transport
+    /// answers or gives up by its own bounds, and drops what it got, which
+    /// closes the connection.
     fn begin(
         &self,
         request: &HttpRequest,
         stop: &Stop,
     ) -> Result<StreamedResponse, TransportError> {
         if stop.asked() {
-            return Err(TransportError::not_sent(
-                "given up before the request was sent",
-            ));
+            return Err(TransportError::not_sent(GIVEN_UP_UNSENT));
         }
+        let leaving = Arc::new(AtomicU8::new(WAITING));
+        // What the transport asks as the request is about to leave
+        // (`Transport::send_streamed_until`).
+        let may_leave = {
+            let (stop, leaving) = (stop.clone(), Arc::clone(&leaving));
+            Stop::when(move || {
+                let to = if stop.asked() { HELD } else { LEFT };
+                let decided = leaving
+                    .compare_exchange(WAITING, to, Ordering::SeqCst, Ordering::SeqCst)
+                    .map_or_else(|already| already, |_| to);
+                decided == HELD
+            })
+        };
         let (sender, begun) = sync_channel(1);
         let transport = Arc::clone(&self.transport);
         let request = request.clone();
         std::thread::spawn(move || {
-            let _ = sender.send(transport.send_streamed(&request));
+            let _ = sender.send(transport.send_streamed_until(&request, &may_leave));
         });
         loop {
             match begun.recv_timeout(STOP_POLL) {
                 Ok(response) => return response,
                 Err(RecvTimeoutError::Timeout) if stop.asked() => {
-                    return Err(TransportError::unanswered(
-                        "given up before the answer began",
-                    ));
+                    let held = leaving
+                        .compare_exchange(WAITING, HELD, Ordering::SeqCst, Ordering::SeqCst)
+                        .map_or_else(|already| already == HELD, |_| true);
+                    return Err(if held {
+                        TransportError::not_sent(GIVEN_UP_UNSENT)
+                    } else {
+                        TransportError::unanswered("given up before the answer began")
+                    });
                 }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => {
@@ -241,10 +287,17 @@ impl<T: Transport + 'static> Transport for Watched<T> {
         } else {
             self.transport.send_streamed(request)?
         };
+        // An error is short and says what the request came to (whether
+        // Claude started anything): it is read whatever the stop says.
+        let stop = if (200..=299).contains(&response.status) {
+            stop.clone()
+        } else {
+            Stop::never()
+        };
         Ok(StreamedResponse {
             status: response.status,
             headers: response.headers,
-            body: Box::new(IdleTimeout::until(response.body, self.idle, stop.clone())),
+            body: Box::new(IdleTimeout::until(response.body, self.idle, stop)),
         })
     }
 }
@@ -382,6 +435,151 @@ mod tests {
         assert!(error.to_string().contains("given up"), "{error}");
     }
 
+    /// A body that counts how often it was asked for more.
+    struct Counted(Fed, Arc<std::sync::atomic::AtomicU32>);
+
+    impl Read for Counted {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.0.read(buffer)
+        }
+    }
+
+    #[test]
+    fn what_arrived_before_the_stop_is_read_and_only_the_wait_is_given_up() {
+        let asked = Arc::default();
+        let reads = Arc::<std::sync::atomic::AtomicU32>::default();
+        let (feed, body) = channel();
+        let mut reader = IdleTimeout::until(
+            Box::new(Counted(Fed(body), Arc::clone(&reads))),
+            Duration::from_secs(60),
+            stop_on(&asked),
+        );
+        feed.send(Ok(b"the whole ".to_vec())).unwrap();
+        feed.send(Ok(b"answer".to_vec())).unwrap();
+        // Asked for a third piece, the reading thread has handed the two
+        // over: they wait here, unread, when the stop asks.
+        let waited = Instant::now();
+        while reads.load(std::sync::atomic::Ordering::SeqCst) < 3 {
+            assert!(waited.elapsed() < Duration::from_secs(10));
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        asked.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let mut text = Vec::new();
+        let error = reader.read_to_end(&mut text).unwrap_err();
+        assert_eq!(text, b"the whole answer", "what arrived is not thrown away");
+        assert!(error.to_string().contains("given up"), "{error}");
+        drop(feed);
+    }
+
+    /// A transport that takes its time to connect: it waits for the test,
+    /// then asks whether the request may still leave, as every transport
+    /// does.
+    struct Connecting {
+        connecting: Sender<()>,
+        connected: std::sync::Mutex<Receiver<()>>,
+        sent: Arc<std::sync::atomic::AtomicU32>,
+        done: Sender<()>,
+    }
+
+    impl Transport for Connecting {
+        fn send(&self, _: &HttpRequest) -> Result<HttpResponse, TransportError> {
+            unreachable!("streamed")
+        }
+
+        fn send_streamed(&self, _: &HttpRequest) -> Result<StreamedResponse, TransportError> {
+            unreachable!("asked through send_streamed_until")
+        }
+
+        fn send_streamed_until(
+            &self,
+            _: &HttpRequest,
+            stop: &Stop,
+        ) -> Result<StreamedResponse, TransportError> {
+            self.connecting.send(()).unwrap();
+            let _ = self.connected.lock().unwrap().recv();
+            let result = if stop.asked() {
+                Err(TransportError::not_sent(GIVEN_UP_UNSENT))
+            } else {
+                self.sent.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(StreamedResponse {
+                    status: 529,
+                    headers: Vec::new(),
+                    body: Box::new(std::io::Cursor::new(b"busy, started nothing".to_vec())),
+                })
+            };
+            let _ = self.done.send(());
+            result
+        }
+    }
+
+    #[test]
+    fn a_request_given_up_before_it_left_is_never_sent() {
+        let (connecting, is_connecting) = channel();
+        let (connect, connected) = channel();
+        let (done, is_done) = channel();
+        let sent = Arc::<std::sync::atomic::AtomicU32>::default();
+        let transport = Watched::new(
+            Connecting {
+                connecting,
+                connected: std::sync::Mutex::new(connected),
+                sent: Arc::clone(&sent),
+                done,
+            },
+            Duration::from_secs(60),
+        );
+        let asked: Arc<std::sync::atomic::AtomicBool> = Arc::default();
+        let stop = stop_on(&asked);
+        // The job is cancelled while the connection is still being made.
+        let cancel = Arc::clone(&asked);
+        let canceller = std::thread::spawn(move || {
+            is_connecting.recv().unwrap();
+            cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        let Err(error) = transport.send_streamed_until(&HttpRequest::get("http://claude/"), &stop)
+        else {
+            panic!("given up");
+        };
+        canceller.join().unwrap();
+        assert!(error.never_left(), "nothing left, so nothing is billed");
+
+        // The connection comes up after that: the request stays unsent.
+        connect.send(()).unwrap();
+        is_done.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(sent.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn an_error_is_read_whole_though_the_stop_asked() {
+        let (connecting, is_connecting) = channel();
+        let (connect, connected) = channel();
+        let (done, _is_done) = channel();
+        let sent = Arc::<std::sync::atomic::AtomicU32>::default();
+        let transport = Watched::new(
+            Connecting {
+                connecting,
+                connected: std::sync::Mutex::new(connected),
+                sent: Arc::clone(&sent),
+                done,
+            },
+            Duration::from_secs(60),
+        );
+        connect.send(()).unwrap();
+        let asked: Arc<std::sync::atomic::AtomicBool> = Arc::default();
+        let mut response = transport
+            .send_streamed_until(&HttpRequest::get("http://claude/"), &stop_on(&asked))
+            .unwrap();
+        is_connecting.recv().unwrap();
+        // Cancelled as the refusal arrives: what Claude says of the
+        // request (it started nothing) is still read.
+        asked.store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut body = String::new();
+        response.body.read_to_string(&mut body).unwrap();
+        assert_eq!(body, "busy, started nothing");
+        assert_eq!(response.status, 529);
+    }
+
     #[test]
     fn a_stop_that_never_asks_changes_nothing() {
         let asked = Arc::default();
@@ -455,20 +653,22 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let (release, held) = channel::<()>();
+        let asked: Arc<std::sync::atomic::AtomicBool> = Arc::default();
+        let arrived = Arc::clone(&asked);
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0u8; 1024];
             let _ = stream.read(&mut request).unwrap();
-            // Takes the request and says nothing.
+            // Takes the request and says nothing; the job is cancelled
+            // then.
+            arrived.store(true, std::sync::atomic::Ordering::SeqCst);
             let _ = held.recv();
         });
-        let asked = Arc::default();
         let stop = stop_on(&asked);
         let transport = Watched::new(
             UreqTransport::without_proxy(Duration::from_secs(60)),
             Duration::from_secs(60),
         );
-        set_later(&asked, Duration::from_millis(300));
         let started = Instant::now();
         let Err(error) = transport
             .send_streamed_until(&HttpRequest::get(format!("http://{address}/stream")), &stop)

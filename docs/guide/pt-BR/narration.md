@@ -25,7 +25,14 @@ O botão espera até haver um roteiro e um narrador cuja voz esteja na sua conta
 <a id="stale"></a>
 ## Desatualizada
 
-Quando o roteiro é salvo ou substituído depois que a narração foi feita, a narração fica marcada como **Desatualizada**: as palavras não batem mais. **Gere de novo**, ou importe uma nova gravação, para que batam. As cenas planejadas sobre uma narração anterior passam a aparecer como desatualizadas também ([Cenas](scenes.md#replan)).
+Quando o roteiro é salvo ou substituído depois que a narração foi feita, a narração fica marcada como **Desatualizada**: as palavras não batem mais. **Gere de novo**, ou importe uma nova gravação, para que batam. As cenas planejadas sobre uma narração anterior passam a aparecer como desatualizadas também ([Cenas](scenes.md#fit)).
+
+<a id="replace"></a>
+## Fazer a narração de novo
+
+Uma nova narração, seja gerada, importada ou vinda de uma captura, substitui a atual. As cenas ficam nos tempos da narração, então, quando elas já têm imagens ou clipes, o Bardo pergunta antes e diz quantos são. Se o roteiro não mudou desde que as cenas foram planejadas, **Ajustar à narração**, na etapa Cenas, mantém tudo depois ([Cenas](scenes.md#fit)); se mudou, as cenas precisam ser planejadas de novo e essas imagens e clipes se perdem ([Cenas](scenes.md#replan)). A pergunta diz qual dos dois é o caso.
+
+Enquanto cenas, imagens ou clipes estão sendo feitos para o projeto, uma nova narração espera por eles: deixe terminarem, ou cancele no [painel Tarefas](jobs.md).
 
 <a id="import"></a>
 ## Importar uma gravação

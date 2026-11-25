@@ -44,6 +44,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler};
+use crate::narrations::{PicturesAtStake, PicturesConsent};
 use crate::{Bardo, KeyState, Text};
 
 /// Every provider a capture calls: ElevenLabs.
@@ -72,6 +73,15 @@ pub enum CaptureError {
     /// A narration of the project is being made or imported.
     #[error("a narration is already being made for this project")]
     Busy,
+    /// The project's scenes are being planned, drawn or animated on the
+    /// current narration: a new one waits for them.
+    #[error("scenes, images or clips are being made for this project")]
+    ScenesBusy,
+    /// The scenes hold images or clips the capture's narration puts out
+    /// of date; the card asks before starting it with
+    /// `PicturesConsent::Confirmed`.
+    #[error("a new narration puts the scenes' images and clips out of date")]
+    WouldOutdatePictures(PicturesAtStake),
     /// The import would reach the provider's budget; the card asks before
     /// starting it with `BudgetConsent::Confirmed`.
     #[error("over budget")]
@@ -169,6 +179,8 @@ impl CaptureError {
             CaptureError::MissingKey(Provider::Kling) => Text::PerformedMissingKlingKey,
             CaptureError::MissingKey(_) => Text::NarrationMissingKey,
             CaptureError::Busy => Text::NarrationBusy,
+            CaptureError::ScenesBusy => Text::NarrationScenesBusy,
+            CaptureError::WouldOutdatePictures(_) => Text::NarrationOutdatesPictures,
             CaptureError::OverBudget(_) => Text::BudgetReachedTitle,
             CaptureError::NotConfirmed => Text::CaptureNotConfirmed,
             CaptureError::Unreadable => Text::RecordingUnreadable,
@@ -222,6 +234,13 @@ impl ChosenCapture {
 
 fn billed_seconds(duration: Duration) -> u64 {
     duration.as_millis().div_ceil(1_000) as u64
+}
+
+/// The paid call over `sound`, as planned before it is sent.
+fn planned(purpose: CostPurpose, model: &str, sound: Duration) -> PlannedCall {
+    PlannedCall::new(PROVIDER, purpose, 1)
+        .with_model(model)
+        .with_audio_seconds(billed_seconds(sound))
 }
 
 /// Reads recordings the user chooses. It holds no UI state, so the screen
@@ -590,12 +609,26 @@ impl CaptureHandler {
         sound: Duration,
         failure: ProviderFailure,
     ) -> JobFailure {
-        let call = PlannedCall::new(PROVIDER, purpose, 1)
-            .with_model(model)
-            .with_audio_seconds(billed_seconds(sound));
-        self.costs
-            .record_failed_for_project(&failure, &call, Some(work.job), work.project);
+        self.costs.record_failed_for_project(
+            &failure,
+            &planned(purpose, model, sound),
+            Some(work.job),
+            work.project,
+        );
         provider_failure(failure)
+    }
+
+    /// Notes the paid call over `sound` before it is sent, so a run cut
+    /// short while it is in flight does not send it again (ADR-0030).
+    fn paying(
+        &self,
+        work: &Work,
+        purpose: CostPurpose,
+        model: &str,
+        sound: Duration,
+    ) -> Result<crate::costs::Paying, JobFailure> {
+        self.costs
+            .paying_for_project(work.job, &planned(purpose, model, sound), work.project)
     }
 
     /// Imports the recording `job` asks for. Without a context (tests
@@ -722,25 +755,30 @@ impl CaptureHandler {
                 return Ok(());
             }
             let key = key.insert(self.key()?);
-            let transcript = self
-                .transcriber
-                .transcribe(
-                    key,
-                    &TranscriptionRequest {
-                        audio: &sound,
-                        file_name: &sound_name,
-                        language: Some(&payload.language),
-                    },
+            let paying = self.paying(
+                &work,
+                CostPurpose::ScriptCheck,
+                bardo_ai::elevenlabs::TRANSCRIPTION_MODEL,
+                length,
+            )?;
+            let transcript = self.transcriber.transcribe(
+                key,
+                &TranscriptionRequest {
+                    audio: &sound,
+                    file_name: &sound_name,
+                    language: Some(&payload.language),
+                },
+            );
+            drop(paying);
+            let transcript = transcript.map_err(|failure| {
+                self.failed(
+                    &work,
+                    CostPurpose::ScriptCheck,
+                    bardo_ai::elevenlabs::TRANSCRIPTION_MODEL,
+                    length,
+                    failure,
                 )
-                .map_err(|failure| {
-                    self.failed(
-                        &work,
-                        CostPurpose::ScriptCheck,
-                        bardo_ai::elevenlabs::TRANSCRIPTION_MODEL,
-                        length,
-                        failure,
-                    )
-                })?;
+            })?;
             let record = HeardRecord {
                 model: transcript.model.clone(),
                 words: transcript
@@ -805,18 +843,24 @@ impl CaptureHandler {
                 audio: &piece,
                 file_name: &file_name,
             };
-            let (changed, purpose, model) = match &work.voice {
-                CaptureVoice::Persona { voice, presets } => (
-                    self.voice_changer.change(key, voice, *presets, &request),
+            let (purpose, model) = match &work.voice {
+                CaptureVoice::Persona { .. } => (
                     CostPurpose::VoiceChange,
                     bardo_ai::elevenlabs::VOICE_CHANGER_MODEL,
                 ),
                 CaptureVoice::Own => (
-                    self.voice_isolator.isolate(key, &request),
                     CostPurpose::VoiceIsolation,
                     bardo_ai::elevenlabs::ISOLATION_MODEL,
                 ),
             };
+            let paying = self.paying(&work, purpose, model, span.end - span.start)?;
+            let changed = match &work.voice {
+                CaptureVoice::Persona { voice, presets } => {
+                    self.voice_changer.change(key, voice, *presets, &request)
+                }
+                CaptureVoice::Own => self.voice_isolator.isolate(key, &request),
+            };
+            drop(paying);
             let changed = changed.map_err(|failure| {
                 self.failed(&work, purpose, model, span.end - span.start, failure)
             })?;
@@ -889,25 +933,30 @@ impl CaptureHandler {
                 Some(key) => key,
                 None => key.insert(self.key()?),
             };
-            let aligned = self
-                .aligner
-                .align(
-                    key,
-                    &AlignmentRequest {
-                        audio: &joined.bytes,
-                        file_name: &audio_file,
-                        text: work.text.as_str(),
-                    },
+            let paying = self.paying(
+                &work,
+                CostPurpose::NarrationAlignment,
+                bardo_ai::elevenlabs::ALIGNMENT_MODEL,
+                joined.duration,
+            )?;
+            let aligned = self.aligner.align(
+                key,
+                &AlignmentRequest {
+                    audio: &joined.bytes,
+                    file_name: &audio_file,
+                    text: work.text.as_str(),
+                },
+            );
+            drop(paying);
+            let aligned = aligned.map_err(|failure| {
+                self.failed(
+                    &work,
+                    CostPurpose::NarrationAlignment,
+                    bardo_ai::elevenlabs::ALIGNMENT_MODEL,
+                    joined.duration,
+                    failure,
                 )
-                .map_err(|failure| {
-                    self.failed(
-                        &work,
-                        CostPurpose::NarrationAlignment,
-                        bardo_ai::elevenlabs::ALIGNMENT_MODEL,
-                        joined.duration,
-                        failure,
-                    )
-                })?;
+            })?;
             let record = AlignedRecord {
                 model: aligned.model.clone(),
                 chars: aligned
@@ -1109,13 +1158,16 @@ impl Bardo {
     /// Starts a job that imports `chosen` as the project's capture: its
     /// speech, in the chosen voice, becomes the narration once it follows
     /// the current script. Needs the user's confirmation that it shows only
-    /// them; past ElevenLabs' budget it needs `consent`.
+    /// them; when the scenes hold images or clips, which the new narration
+    /// puts out of date, it needs `pictures`; past ElevenLabs' budget it
+    /// needs `consent`.
     pub fn import_capture(
         &self,
         project: VideoProjectId,
         chosen: &ChosenCapture,
         voice: CaptureVoiceChoice,
         confirmed: bool,
+        pictures: PicturesConsent,
         consent: BudgetConsent,
     ) -> Result<JobId, CaptureError> {
         let project = self
@@ -1150,8 +1202,14 @@ impl Bardo {
         if self.takes_busy(project.id) {
             return Err(CaptureError::TakeBusy);
         }
+        if self.scenes_busy(project.id) || self.clips_busy(project.id) {
+            return Err(CaptureError::ScenesBusy);
+        }
         if self.provider_key(PROVIDER).state == KeyState::NotSet {
             return Err(CaptureError::MissingKey(PROVIDER));
+        }
+        if let Some(stake) = self.pictures_to_ask(project.id, script.text().as_str(), pictures)? {
+            return Err(CaptureError::WouldOutdatePictures(stake));
         }
         if let Err(estimate) =
             self.check_video_budget(project.id, &capture_calls(chosen, voice), consent)?
@@ -1605,7 +1663,14 @@ pub(crate) mod tests {
         ) -> Job {
             let id = self
                 .app
-                .import_capture(project, chosen, voice, true, BudgetConsent::Ask)
+                .import_capture(
+                    project,
+                    chosen,
+                    voice,
+                    true,
+                    crate::PicturesConsent::Ask,
+                    BudgetConsent::Ask,
+                )
                 .unwrap();
             wait_done(&self.app, id)
         }
@@ -2034,6 +2099,7 @@ pub(crate) mod tests {
                 &s.chosen(13),
                 CaptureVoiceChoice::Persona,
                 true,
+                crate::PicturesConsent::Ask,
                 BudgetConsent::Ask
             ),
             Err(CaptureError::MissingKey(_))
@@ -2063,6 +2129,7 @@ pub(crate) mod tests {
                 &chosen,
                 CaptureVoiceChoice::Persona,
                 false,
+                crate::PicturesConsent::Ask,
                 BudgetConsent::Ask
             ),
             Err(CaptureError::NotConfirmed)
@@ -2079,6 +2146,7 @@ pub(crate) mod tests {
                 &chosen,
                 CaptureVoiceChoice::Persona,
                 true,
+                crate::PicturesConsent::Ask,
                 BudgetConsent::Ask
             ),
             Err(CaptureError::NoPersona)
@@ -2152,7 +2220,7 @@ pub(crate) mod tests {
         let (_, capture, _) = s.imported(project.id, CaptureVoiceChoice::Persona);
         let job = s
             .app
-            .generate_narration(project.id, BudgetConsent::Ask)
+            .generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
             .unwrap();
         assert_eq!(wait_done(&s.app, job).state(), JobState::Done);
         assert_eq!(s.app.narration(project.id).unwrap().capture, None);

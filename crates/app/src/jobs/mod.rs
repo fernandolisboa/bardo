@@ -11,7 +11,7 @@ use bardo_domain::{Job, JobId, JobKind, JobState};
 
 pub use countdown::TestJob;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
-pub(crate) use queue::{JobQueue, Runner};
+pub(crate) use queue::{JobQueue, PaidCallLog, Runner};
 
 use crate::backup::{BackupHandler, RestoreHandler};
 use crate::chapters::ChaptersHandler;
@@ -154,7 +154,11 @@ impl JobActionError {
             JobActionError::Busy => Text::RestoreWaitsForJobs,
             JobActionError::Superseded => Text::JobSuperseded,
             JobActionError::Restyled => Text::JobRestyled,
+            JobActionError::ScenesMovedOn => Text::JobScenesMovedOn,
             JobActionError::TakeFromItsPage => Text::JobTakeFromItsPage,
+            JobActionError::NarrationBusy => Text::JobNarrationBusy,
+            JobActionError::ScenesBusy => Text::JobScenesBusy,
+            JobActionError::AsksFirst => Text::JobAsksFirst,
             _ => Text::JobNotUpdated,
         }
     }
@@ -266,6 +270,9 @@ impl Bardo {
         }
         if self.unsent_take_needs_asking(id) {
             return Err(JobActionError::TakeFromItsPage);
+        }
+        if let Some(held) = self.retry_held(id) {
+            return Err(held);
         }
         self.jobs.retry(id)
     }
@@ -586,9 +593,10 @@ mod tests {
 
     #[test]
     fn a_handler_can_tell_a_cancel_from_the_app_closing() {
-        // A cancelled job runs again only when the user asks; one stopped
-        // because the app closes runs again by itself. A handler with a
-        // paid request on its way leaves a different note for each.
+        // A cancelled job runs again only when the user asks, and a paid
+        // answer on its way is given up. One stopped because the app
+        // closes runs again by itself: its answer is not given up (the
+        // call stays noted on the job, and the process ends anyway).
         let (db, owner) = memory_db();
         let seen: Arc<Mutex<Vec<(bool, bool)>>> = Arc::default();
         let note = Arc::clone(&seen);
@@ -613,10 +621,15 @@ mod tests {
         let closing = enqueue(&q, owner);
         wait_for(|| q.jobs(), closing, |j| j.state() == JobState::Running);
         drop(q);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while seen.lock().unwrap().len() < 2 {
+            assert!(Instant::now() < deadline, "the handler never stopped");
+            std::thread::sleep(Duration::from_millis(2));
+        }
         assert_eq!(
             *seen.lock().unwrap(),
-            [(true, true), (true, false)],
-            "stopped, and not by the user"
+            [(true, true), (false, false)],
+            "told to stop, with nothing to give up and not by the user"
         );
     }
 
@@ -1036,6 +1049,162 @@ mod tests {
         assert_eq!(late.resumed(), submitted_and_at_step_2());
     }
 
+    /// A handler that notes on its handle what it will not send again
+    /// unasked (`;ended`), which a retry on request turns into `;asked`.
+    /// Its first run saves `sent;ended` at once; then, unless `failing`
+    /// (it fails for a passing reason), it waits to be told to stop and
+    /// let go (`release`) and notes one more end (`;late`). Every later run
+    /// tells in `found` what it resumed from.
+    #[derive(Default)]
+    struct Noting {
+        runs: AtomicU32,
+        failing: bool,
+        release: AtomicBool,
+        saved: AtomicBool,
+        found: Mutex<Vec<Option<String>>>,
+    }
+
+    impl JobHandler for Noting {
+        fn asked_again(&self, external_handle: Option<&str>) -> Option<String> {
+            Some(external_handle?.replace(";ended", ";asked"))
+        }
+
+        /// What the retry asked again for stays asked.
+        fn saved_after_ask(&self, asked: Option<&str>, saved: String) -> String {
+            match asked {
+                Some(asked) if asked.contains(";asked") => saved.replacen(";ended", ";asked", 1),
+                _ => saved,
+            }
+        }
+
+        fn run(&self, _payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
+            if self.runs.fetch_add(1, Ordering::SeqCst) > 0 {
+                self.found
+                    .lock()
+                    .unwrap()
+                    .push(cx.external_handle().map(str::to_owned));
+                return Ok(());
+            }
+            cx.save_external_handle("sent;ended").unwrap();
+            if self.failing {
+                return Err(JobFailure::new(
+                    JobFailureKind::ProviderUnavailable,
+                    "HTTP 503",
+                ));
+            }
+            until_stopped(cx);
+            while !self.release.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            cx.save_external_handle("sent;ended;late").unwrap();
+            self.saved.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn noting(noting: &Arc<Noting>) -> HashMap<JobKind, Arc<dyn JobHandler>> {
+        HashMap::from([(
+            JobKind::Countdown,
+            Arc::clone(noting) as Arc<dyn JobHandler>,
+        )])
+    }
+
+    fn found(handler: &Noting) -> Vec<Option<String>> {
+        handler.found.lock().unwrap().clone()
+    }
+
+    #[test]
+    fn a_retry_on_request_tells_the_handler_in_the_same_save() {
+        let (db, owner) = memory_db();
+        let handler = Arc::new(Noting::default());
+        let q = queue(&db, owner, noting(&handler), settings());
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Running);
+        q.cancel(id).unwrap();
+        handler.release.store(true, Ordering::SeqCst);
+        wait_for(|| q.jobs(), id, |_| !q.runs_here(id));
+        assert_eq!(
+            stored(&db, owner, id).external_handle(),
+            Some("sent;ended;late")
+        );
+
+        q.retry(id).unwrap();
+
+        assert_eq!(
+            stored(&db, owner, id).external_handle(),
+            Some("sent;asked;late"),
+            "saved with the retry, before any run starts"
+        );
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(found(&handler), [Some("sent;asked;late".to_owned())]);
+    }
+
+    #[test]
+    fn a_run_that_stops_after_a_retry_on_request_keeps_what_was_asked() {
+        let (db, owner) = memory_db();
+        let handler = Arc::new(Noting::default());
+        let q = queue(&db, owner, noting(&handler), settings());
+        let id = enqueue(&q, owner);
+        wait_for(
+            || q.jobs(),
+            id,
+            |j| j.external_handle() == Some("sent;ended"),
+        );
+
+        // The user retries before the cancelled run has returned, and that
+        // run then saves again: what the retry asked for stays asked, and
+        // what the run noted after it stays noted.
+        q.cancel(id).unwrap();
+        q.retry(id).unwrap();
+        handler.release.store(true, Ordering::SeqCst);
+
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(found(&handler), [Some("sent;asked;late".to_owned())]);
+    }
+
+    #[test]
+    fn the_queue_trying_again_does_not_tell_the_handler_the_user_asked() {
+        let (db, owner) = memory_db();
+        let handler = Arc::new(Noting {
+            failing: true,
+            ..Noting::default()
+        });
+        let q = queue(&db, owner, noting(&handler), settings());
+        let id = enqueue(&q, owner);
+
+        let done = wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+
+        assert_eq!(done.attempts(), 2, "the queue went again on its own");
+        assert_eq!(
+            found(&handler),
+            [Some("sent;ended".to_owned())],
+            "with the note as the first attempt left it"
+        );
+    }
+
+    #[test]
+    fn a_run_picked_up_after_closing_does_not_tell_the_handler_the_user_asked() {
+        let (db, owner) = memory_db();
+        let handler = Arc::new(Noting::default());
+        // The closing queue waits for the run however slow the machine is.
+        let patient = JobSettings {
+            closing_wait: PATIENCE,
+            ..settings()
+        };
+        let q = queue(&db, owner, noting(&handler), patient);
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Running);
+
+        // Closing tells the run to stop; it saves its note and returns.
+        handler.release.store(true, Ordering::SeqCst);
+        drop(q);
+        assert!(handler.saved.load(Ordering::SeqCst));
+
+        let q = queue(&db, owner, noting(&handler), settings());
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(found(&handler), [Some("sent;ended;late".to_owned())]);
+    }
+
     #[test]
     fn a_closing_queue_keeps_what_a_run_saves_before_it_returns() {
         let dir = tempfile::tempdir().unwrap();
@@ -1096,6 +1265,89 @@ mod tests {
         let left = stored(&db, owner, id);
         assert_eq!(left.external_handle(), None);
         assert_eq!(left.checkpoint(), None);
+    }
+
+    /// A handler that notes a paid call, waits to be told to stop, then
+    /// notes another and clears it, telling in `notes` how each went.
+    #[derive(Default)]
+    struct PaysLate {
+        noted: AtomicBool,
+        notes: Mutex<Option<[Saved; 3]>>,
+    }
+
+    impl PaysLate {
+        fn handlers(self: &Arc<Self>) -> HashMap<JobKind, Arc<dyn JobHandler>> {
+            let this = Arc::clone(self);
+            handlers(move |_, cx| {
+                let log = cx.paid_call_log();
+                let first = Saved::of(log.note(cx.id(), Some("first".into())));
+                this.noted.store(true, Ordering::SeqCst);
+                until_stopped(cx);
+                let second = Saved::of(log.note(cx.id(), Some("second".into())));
+                let cleared = Saved::of(log.note(cx.id(), None));
+                *this.notes.lock().unwrap() = Some([first, second, cleared]);
+                Ok(())
+            })
+        }
+
+        fn wait_noted(&self) {
+            let deadline = Instant::now() + PATIENCE;
+            while !self.noted.load(Ordering::SeqCst) {
+                assert!(Instant::now() < deadline, "the run never noted its call");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+
+        fn notes(&self) -> [Saved; 3] {
+            let deadline = Instant::now() + PATIENCE;
+            loop {
+                if let Some(notes) = *self.notes.lock().unwrap() {
+                    return notes;
+                }
+                assert!(Instant::now() < deadline, "the run never ended");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+    }
+
+    #[test]
+    fn a_closing_queue_notes_no_new_paid_call_and_still_clears_one() {
+        let (db, owner) = memory_db();
+        let pays = Arc::new(PaysLate::default());
+        // The closing queue waits for the run however slow the machine is.
+        let patient = JobSettings {
+            closing_wait: PATIENCE,
+            ..settings()
+        };
+        let q = queue(&db, owner, pays.handlers(), patient);
+        let id = enqueue(&q, owner);
+        pays.wait_noted();
+        assert_eq!(stored(&db, owner, id).paid_call(), Some("first"));
+
+        drop(q);
+
+        // A call noted now would be sent with nobody left to wait for it.
+        assert_eq!(pays.notes(), [Saved::Kept, Saved::NotKept, Saved::Kept]);
+        let left = stored(&db, owner, id);
+        assert_eq!(left.state(), JobState::Running, "closing is not cancelling");
+        assert_eq!(left.paid_call(), None, "the next run goes on by itself");
+    }
+
+    #[test]
+    fn a_cancelled_job_notes_no_new_paid_call_and_still_clears_one() {
+        let (db, owner) = memory_db();
+        let pays = Arc::new(PaysLate::default());
+        let q = queue(&db, owner, pays.handlers(), settings());
+        let id = enqueue(&q, owner);
+        pays.wait_noted();
+
+        q.cancel(id).unwrap();
+
+        assert_eq!(pays.notes(), [Saved::Kept, Saved::NotKept, Saved::Kept]);
+        wait_for(|| q.jobs(), id, |_| !q.runs_here(id));
+        let left = stored(&db, owner, id);
+        assert_eq!(left.state(), JobState::Cancelled);
+        assert_eq!(left.paid_call(), None);
     }
 
     #[test]

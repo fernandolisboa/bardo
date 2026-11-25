@@ -20,8 +20,8 @@ use std::time::{Duration, SystemTime};
 use bardo_domain::{
     Alignment, ApiKey, Capture, CaptureRepository, CharTiming, CostPurpose, GenerationPresets, Job,
     JobFailure, JobFailureKind, JobId, JobKind, Metered, Narration, NarrationId,
-    NarrationRepository, NarrationSource, Persona, ProfileId, Progress, ProjectFiles, Provider,
-    RepositoryError, Script, ScriptText, SecretStore, SpeechRequest, SpeechSynthesizer,
+    NarrationRepository, NarrationSource, PaidPictures, Persona, ProfileId, Progress, ProjectFiles,
+    Provider, RepositoryError, Script, ScriptText, SecretStore, SpeechRequest, SpeechSynthesizer,
     VideoProject, VideoProjectId, VoiceFlag, VoiceRef, WordTimings, split_for_speech,
 };
 use bardo_media::{Playback, PlaybackError, mp3};
@@ -52,6 +52,15 @@ pub enum NarrationError {
     /// A narration of the project is being generated or imported.
     #[error("a narration is already being made for this project")]
     Busy,
+    /// The project's scenes are being planned, drawn or animated on the
+    /// current narration: a new one waits for them.
+    #[error("scenes, images or clips are being made for this project")]
+    ScenesBusy,
+    /// The scenes hold images or clips the new narration puts out of
+    /// date; the screen asks before starting it with
+    /// `PicturesConsent::Confirmed`.
+    #[error("a new narration puts {} images and {} clips out of date", .0.pictures.images, .0.pictures.clips)]
+    WouldOutdatePictures(PicturesAtStake),
     /// The narration would reach the provider's budget; the screen asks
     /// before starting it with `BudgetConsent::Confirmed`.
     #[error("over budget")]
@@ -90,6 +99,8 @@ impl NarrationError {
             NarrationError::VoiceFlagged(flag) => Text::NarrationVoiceFlagged(*flag),
             NarrationError::MissingKey(_) => Text::NarrationMissingKey,
             NarrationError::Busy => Text::NarrationBusy,
+            NarrationError::ScenesBusy => Text::NarrationScenesBusy,
+            NarrationError::WouldOutdatePictures(_) => Text::NarrationOutdatesPictures,
             NarrationError::OverBudget(_) => Text::BudgetReachedTitle,
             NarrationError::NoNarration => Text::NarrationMissing,
             NarrationError::RecordingUnreadable => Text::RecordingUnreadable,
@@ -100,6 +111,48 @@ impl NarrationError {
             NarrationError::Playback(_) => Text::NarrationCannotPlay,
             NarrationError::Repository(_) => Text::NarrationNotLoaded,
         }
+    }
+}
+
+/// Whether the user agreed to a new narration over scenes that hold
+/// images or clips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PicturesConsent {
+    /// Start only when no picture goes out of date; else return what is
+    /// at stake so the screen can ask.
+    Ask,
+    /// The user saw what goes out of date, as given here, and chose to
+    /// go on. When something else is at stake by now, they are asked
+    /// again.
+    Confirmed(PicturesAtStake),
+}
+
+/// What a new narration does to the pictures the project's scenes hold.
+/// They are timed on the current narration, so all of them go out of date
+/// with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PicturesAtStake {
+    pub pictures: PaidPictures,
+    /// Whether the new narration reads the text the scenes were planned
+    /// on: then the scenes can be fitted to it and keep every picture.
+    /// Else they are planned again, and the pictures go.
+    pub can_fit: bool,
+}
+
+/// Whether `job` makes the narration of `project`: generating it, or
+/// importing a recording or a capture.
+fn makes_narration_of(job: &Job, project: &str) -> bool {
+    match job.kind() {
+        JobKind::Narration => {
+            NarrationPayload::parse(job.payload()).is_ok_and(|p| p.project == project)
+        }
+        JobKind::NarrationImport => {
+            ImportPayload::parse(job.payload()).is_ok_and(|p| p.project == project)
+        }
+        JobKind::Capture => {
+            CapturePayload::parse(job.payload()).is_ok_and(|p| p.project == project)
+        }
+        _ => false,
     }
 }
 
@@ -365,21 +418,21 @@ impl NarrationHandler {
                 previous_text: index.checked_sub(1).and_then(piece),
                 next_text: piece(index + 1),
             };
-            let speech = self.speech.synthesize(key, &request).map_err(|failure| {
-                // A reading that was lost or cannot be used may still have
-                // been billed, by its characters.
-                self.costs.record_failed_for_project(
-                    &failure,
-                    &PlannedCall::new(Provider::ElevenLabs, CostPurpose::Narration, 1)
-                        .with_characters(request.text.chars().count()),
-                    Some(job),
-                    project,
-                );
-                JobFailure::new(
-                    failure.kind.into(),
-                    format!("ElevenLabs: {}", failure.detail),
-                )
-            })?;
+            let paid_call = PlannedCall::new(Provider::ElevenLabs, CostPurpose::Narration, 1)
+                .with_characters(request.text.chars().count());
+            let speech = {
+                let _paying = self.costs.paying_for_project(job, &paid_call, project)?;
+                self.speech.synthesize(key, &request).map_err(|failure| {
+                    // A reading that was lost or cannot be used may still have
+                    // been billed, by its characters.
+                    self.costs
+                        .record_failed_for_project(&failure, &paid_call, Some(job), project);
+                    JobFailure::new(
+                        failure.kind.into(),
+                        format!("ElevenLabs: {}", failure.detail),
+                    )
+                })
+            }?;
             self.costs.record_for_project(
                 PaidCall {
                     provider: Provider::ElevenLabs,
@@ -568,25 +621,85 @@ impl Bardo {
     /// importing a recording.
     pub(crate) fn latest_narration_job(&self, project: VideoProjectId) -> Option<Job> {
         let project = project.to_string();
-        self.jobs().into_iter().rev().find(|job| match job.kind() {
-            JobKind::Narration => {
-                NarrationPayload::parse(job.payload()).is_ok_and(|p| p.project == project)
-            }
-            JobKind::NarrationImport => {
-                ImportPayload::parse(job.payload()).is_ok_and(|p| p.project == project)
-            }
-            JobKind::Capture => {
-                CapturePayload::parse(job.payload()).is_ok_and(|p| p.project == project)
-            }
-            _ => false,
-        })
+        self.jobs()
+            .into_iter()
+            .rev()
+            .find(|job| makes_narration_of(job, &project))
     }
 
     /// Whether a narration of the project is being generated or imported;
-    /// one at a time.
+    /// one at a time. Any such job counts, not only the latest: an older
+    /// one run again from the Jobs panel makes a narration too.
     pub(crate) fn narration_busy(&self, project: VideoProjectId) -> bool {
-        self.latest_narration_job(project)
-            .is_some_and(|job| job.state().is_active())
+        let project = project.to_string();
+        self.jobs()
+            .iter()
+            .any(|job| job.state().is_active() && makes_narration_of(job, &project))
+    }
+
+    /// What the screen must ask before a new narration reading `text`:
+    /// the pictures at stake, unless the user agreed to exactly those.
+    /// What they agreed to is checked again, since more may have been made
+    /// or the script may have changed since they were asked.
+    pub(crate) fn pictures_to_ask(
+        &self,
+        project: VideoProjectId,
+        text: &str,
+        pictures: PicturesConsent,
+    ) -> Result<Option<PicturesAtStake>, RepositoryError> {
+        let stake = self.pictures_at_stake(project, text)?;
+        Ok(match pictures {
+            PicturesConsent::Confirmed(seen) if Some(seen) == stake => None,
+            _ => stake,
+        })
+    }
+
+    /// The pictures a new narration reading `text` would put out of date:
+    /// those of scenes that are on the current narration, or that can
+    /// still be fitted to it. `None` when nothing is at stake: no picture
+    /// yet, scenes a narration already left behind for good, or a
+    /// version's carried scenes, which are placed on whatever narration
+    /// the version gets.
+    pub(crate) fn pictures_at_stake(
+        &self,
+        project: VideoProjectId,
+        text: &str,
+    ) -> Result<Option<PicturesAtStake>, RepositoryError> {
+        let Some(plan) = self.scene_plans.scene_plan(project)? else {
+            return Ok(None);
+        };
+        let pictures = plan.paid_pictures();
+        if pictures.is_empty() {
+            return Ok(None);
+        }
+        let Some(narration) = self.narrations.narration(project)? else {
+            return Ok(None);
+        };
+        if self
+            .localizations
+            .localization(project)?
+            .is_some_and(|localization| localization.carries(&plan))
+        {
+            return Ok(None);
+        }
+        let usable = !plan.is_stale(Some(&narration)) || plan.reads(narration.text.as_str());
+        Ok(usable.then(|| PicturesAtStake {
+            pictures,
+            can_fit: plan.reads(text),
+        }))
+    }
+
+    /// What stops a new narration of the project for now: one being made,
+    /// a take being performed, or scenes being planned, drawn or animated
+    /// on the current one (their work would be out of date at once).
+    pub(crate) fn narration_held(&self, project: VideoProjectId) -> Option<NarrationError> {
+        if self.narration_busy(project) || self.takes_busy(project) {
+            Some(NarrationError::Busy)
+        } else if self.scenes_busy(project) || self.clips_busy(project) {
+            Some(NarrationError::ScenesBusy)
+        } else {
+            None
+        }
     }
 
     /// The persona that reads the project's narration: its own, else the
@@ -653,11 +766,13 @@ impl Bardo {
 
     /// Starts a job in which the project's persona reads its current
     /// script. The new narration replaces the current
-    /// one once it is complete. Past the voice provider's budget it needs
-    /// `consent`.
+    /// one once it is complete, which puts the scenes' images and clips
+    /// out of date: when there are any, it needs `pictures`. Past the
+    /// voice provider's budget it needs `consent`.
     pub fn generate_narration(
         &self,
         project: VideoProjectId,
+        pictures: PicturesConsent,
         consent: BudgetConsent,
     ) -> Result<JobId, NarrationError> {
         let project = self.narration_project(project)?;
@@ -669,12 +784,15 @@ impl Bardo {
         if let Some(flag) = persona.voice_flag {
             return Err(NarrationError::VoiceFlagged(flag));
         }
-        if self.narration_busy(project.id) || self.takes_busy(project.id) {
-            return Err(NarrationError::Busy);
+        if let Some(held) = self.narration_held(project.id) {
+            return Err(held);
         }
         let provider = persona.details.voice().provider();
         if self.provider_key(provider).state == KeyState::NotSet {
             return Err(NarrationError::MissingKey(provider));
+        }
+        if let Some(stake) = self.pictures_to_ask(project.id, script.text().as_str(), pictures)? {
+            return Err(NarrationError::WouldOutdatePictures(stake));
         }
         if let Err(estimate) =
             self.check_video_budget(project.id, &[narration_call(script.text())], consent)?
@@ -1062,7 +1180,7 @@ pub(crate) mod tests {
 
     pub(crate) fn narrate(app: &Bardo, project: &VideoProject) -> Narration {
         let id = app
-            .generate_narration(project.id, BudgetConsent::Ask)
+            .generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
             .unwrap();
         let job = wait_done(app, id);
         assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
@@ -1221,6 +1339,7 @@ pub(crate) mod tests {
                 owner: app.profile().id,
                 costs: Arc::clone(&h.db) as _,
                 themes: Arc::clone(&h.db) as _,
+                in_flight: std::sync::Arc::default(),
             },
         };
         handler.narrate(job.payload(), job.id(), None).unwrap();
@@ -1329,7 +1448,7 @@ pub(crate) mod tests {
             narrator.voice_flag = Some(flag);
             app.personas.save(&narrator).unwrap();
             let error = app
-                .generate_narration(project.id, BudgetConsent::Ask)
+                .generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
                 .unwrap_err();
             assert!(
                 matches!(error, NarrationError::VoiceFlagged(f) if f == flag),
@@ -1359,7 +1478,7 @@ pub(crate) mod tests {
         let mut app = h.start();
         let bare = project_without_persona(&app, "No Narrator");
         assert!(matches!(
-            app.generate_narration(bare.id, BudgetConsent::Ask),
+            app.generate_narration(bare.id, crate::PicturesConsent::Ask, BudgetConsent::Ask),
             Err(NarrationError::NoPersona)
         ));
         assert_eq!(
@@ -1367,14 +1486,18 @@ pub(crate) mod tests {
             Text::NarrationNoPersona
         );
         assert!(matches!(
-            app.generate_narration(VideoProjectId::new(), BudgetConsent::Ask),
+            app.generate_narration(
+                VideoProjectId::new(),
+                crate::PicturesConsent::Ask,
+                BudgetConsent::Ask
+            ),
             Err(NarrationError::ProjectNotFound)
         ));
 
         let project = project(&app);
         app.remove_provider_key(Provider::ElevenLabs).unwrap();
         let error = app
-            .generate_narration(project.id, BudgetConsent::Ask)
+            .generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
             .unwrap_err();
         assert!(matches!(
             error,
@@ -1386,16 +1509,16 @@ pub(crate) mod tests {
 
         *h.speech.delay.lock().unwrap() = Duration::from_millis(100);
         let id = app
-            .generate_narration(project.id, BudgetConsent::Ask)
+            .generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
             .unwrap();
         let busy = app
-            .generate_narration(project.id, BudgetConsent::Ask)
+            .generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
             .unwrap_err();
         assert!(matches!(busy, NarrationError::Busy));
         assert_eq!(busy.message(), Text::NarrationBusy);
         wait_done(&app, id);
         assert!(
-            app.generate_narration(project.id, BudgetConsent::Ask)
+            app.generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
                 .is_ok()
         );
     }
@@ -1427,7 +1550,7 @@ pub(crate) mod tests {
 
         assert_eq!(app.narration(project.id).unwrap().script, None);
         assert!(matches!(
-            app.generate_narration(project.id, BudgetConsent::Ask),
+            app.generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask),
             Err(NarrationError::NoScript)
         ));
         assert!(matches!(
@@ -1446,7 +1569,7 @@ pub(crate) mod tests {
         let app = h.start();
         let project = project(&app);
         let id = app
-            .generate_narration(project.id, BudgetConsent::Ask)
+            .generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
             .unwrap();
 
         let job = wait_done(&app, id);

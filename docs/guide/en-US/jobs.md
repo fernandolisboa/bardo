@@ -25,7 +25,7 @@ A running job shows a bar and its percent. Screens show their own jobs too: a st
 
 **Cancel** stops a running or queued job. What it already made is kept for a retry, and a call a provider already answered is paid and counted in [Costs](costs.md#spent). A cancelled render or export keeps the networks it finished, and a retry does the ones left.
 
-A text Claude is still writing (a script, a scene plan, a title) is given up when its job is cancelled: Bardo stops reading and closes the connection instead of waiting for the end. Claude may charge for what it wrote until then, so [Costs](costs.md#spent) counts an estimate of the whole text, which is more than a text cancelled early cost. A plan whose answer arrives just as you cancel is not applied to the project; it is paid, and **Retry** on that job uses it without asking Claude again.
+A text Claude is still writing (a script, a scene plan, a title) is given up when its job is cancelled: Bardo stops reading and closes the connection instead of waiting for the end. Claude may charge for what it wrote until then, so [Costs](costs.md#spent) counts an estimate of the whole text, which may be more than a text cancelled early cost. A scene plan whose answer arrives just as you cancel is not applied to the project; it is paid, and **Retry** on that job, or **Plan scenes** on the Scenes stage, makes the plan from it without asking Claude again.
 
 <a id="retry"></a>
 ## Retrying
@@ -34,14 +34,16 @@ When a provider fails for a passing reason (a connection that could not be made,
 
 A paid request for text, an image, a voice or music that was sent and got no answer is not tried again by itself: the provider may have done the work and charged for it. The job stops as **Failed** and says so, and [Costs](costs.md#spent) counts an estimate of what it may have cost. See [A paid request got no answer](troubleshooting.md#answer-lost).
 
+A clip request the provider took and that then ended without a clip (failed, cancelled or forgotten there) is not sent again by itself either, since sending it again is a new request. Its scene shows the failure, the job stops as **Failed** once the other scenes are done, and **Retry** is what sends it again ([Clips](clips.md)).
+
 **Retry**, on a failed or cancelled job, queues it again. It goes on from the last point it saved rather than from the start. Fix what the failure names first: see [Troubleshooting](troubleshooting.md).
+
+A scene plan or image job is not queued again while another scene job of its project is queued, running or still stopping: the two would pay for the same work. And an older scene plan job is not queued again once the project's scenes were planned or drawn after it, since it would replace that plan and its images: plan again from the [Scenes](scenes.md) stage, which asks first.
 
 <a id="restart"></a>
 ## Closing Bardo mid-job
 
-Closing Bardo, or the computer, never loses a job. The next time Bardo opens, each running job picks up from the last point it saved, and the attempt it was on does not count against its retries. A job that had already handed work to a provider (a clip being made, an upload being processed) asks the provider how it went rather than paying for it twice. A job waiting to retry, or waiting for its time, keeps waiting.
-
-A scene plan Claude was still writing when Bardo closed is the exception: Claude may have charged for the part it wrote, so the next time Bardo opens the plan is not asked for again by itself. The job stops as **Failed** with [A paid request got no answer](troubleshooting.md#answer-lost), [Costs](costs.md#spent) counts an estimate of it, and **Retry** sends a new request.
+Closing Bardo, or the computer, never loses a job. The next time Bardo opens, each running job picks up from the last point it saved, and the attempt it was on does not count against its retries. A job that had already handed work to a provider (a clip being made, an upload being processed) asks the provider how it went rather than paying for it twice. A job that was waiting for the answer to a paid request for text, an image, a voice or music, which cannot be asked about, does not send it again: it stops as **Failed**, as for [a paid request that got no answer](troubleshooting.md#answer-lost), and [Costs](costs.md#spent) counts an estimate of what it may have cost. A job waiting to retry, or waiting for its time, keeps waiting.
 
 <a id="test"></a>
 ## Test jobs

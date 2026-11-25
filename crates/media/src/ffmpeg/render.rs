@@ -48,7 +48,8 @@ pub struct RenderPlan {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VideoClip {
     pub source: ClipSource,
-    /// Where in the source the clip starts (ignored for stills and black).
+    /// Where in the source the clip starts (ignored for stills and black);
+    /// in the time it plays, for a slowed one.
     pub start: Duration,
     /// Rounded to whole frames of the output rate. A source shorter than
     /// this holds its last frame to the end.
@@ -62,6 +63,38 @@ pub struct VideoClip {
     /// and black.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion: Option<Motion>,
+    /// A video played slower than it was made; ignored on stills and
+    /// black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slowed: Option<Slowed>,
+}
+
+/// A video played slower than it was made: `recorded` of the source
+/// lasts `played` (#260). The frames in between are blended from their
+/// neighbours, so the slow motion does not stutter. A plan that plays it
+/// no slower than it was made (`played` not above `recorded`) plays it as
+/// it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Slowed {
+    pub recorded: Duration,
+    pub played: Duration,
+}
+
+/// How much more of its file a slowed clip reads than it shows: a few
+/// frames of any clip a provider makes.
+const SLOWED_READ_AHEAD: Duration = Duration::from_millis(100);
+
+impl Slowed {
+    /// Whether it slows anything at all.
+    fn applies(&self) -> bool {
+        !self.recorded.is_zero() && self.played > self.recorded
+    }
+
+    /// `played` of the clip's time, in the source's.
+    fn in_source(&self, played: Duration) -> Duration {
+        let nanos = played.as_nanos() * self.recorded.as_nanos() / self.played.as_nanos().max(1);
+        Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX))
+    }
 }
 
 /// A view moving over a still's framed picture, from `from` to `to` over
@@ -552,6 +585,9 @@ fn video_graph<'a>(
             .get(index + 1)
             .and_then(|next| next.transition)
             .map_or(Duration::ZERO, |t| t.after);
+        let slowed = clip
+            .slowed
+            .filter(|slowed| matches!(clip.source, ClipSource::Video(_)) && slowed.applies());
         // A source with less picture before its start than the transition
         // needs holds its first frame for the rest.
         let (start, held) = match clip.source {
@@ -585,14 +621,21 @@ fn video_graph<'a>(
             continue;
         }
         let input = inputs.len();
+        // A slowed clip is cut in the time it plays: what is read of its
+        // file is shorter by as much as it is slowed.
+        let in_source = |played: Duration| slowed.map_or(played, |slowed| slowed.in_source(played));
         inputs.push(Input {
             source: match &clip.source {
                 ClipSource::Video(path) => InputSource::File(path),
                 ClipSource::Still(path) => InputSource::Still(path, fps),
                 ClipSource::Black => InputSource::Black(fps),
             },
-            start,
-            duration: before + clip.duration + after,
+            start: in_source(start),
+            // A slowed clip reads a little past its end: the last frame it
+            // shows is blended from the one after it, and `trim` cuts what
+            // is left over.
+            duration: in_source(before + clip.duration + after)
+                + slowed.map_or(Duration::ZERO, |_| SLOWED_READ_AHEAD),
         });
         let framing = framing_filter(clip.framing, width, height);
         let held = if held > 0 {
@@ -600,11 +643,26 @@ fn video_graph<'a>(
         } else {
             String::new()
         };
+        // A slowed clip's frames come later by as much as it is slowed,
+        // and `framerate` makes the output's frames between them by
+        // blending the two around each, where `fps` would repeat one and
+        // the motion would stutter. `framerate` keeps its input's time
+        // base where `fps` counts in frames, and a transition refuses two
+        // streams that count time differently: `settb` makes it the same.
+        let timing = match slowed {
+            Some(slowed) => format!(
+                "setpts=(PTS-STARTPTS)*{}/{},framerate=fps={numerator}/{denominator},\
+                 settb={denominator}/{numerator}",
+                slowed.played.as_millis(),
+                slowed.recorded.as_millis().max(1),
+            ),
+            None => format!("setpts=PTS-STARTPTS,fps={numerator}/{denominator}"),
+        };
         // A source that ends early holds its last frame (`tpad`), so every
         // clip is exactly as many frames long as asked and the clips after
         // it stay in time with the audio.
         chains.push(format!(
-            "[{input}:v:0]settb=AVTB,setpts=PTS-STARTPTS,fps={numerator}/{denominator},\
+            "[{input}:v:0]settb=AVTB,{timing},\
              tpad={held}stop=-1:stop_mode=clone,trim=end_frame={frames},{framing},setsar=1,format=yuv420p[v{index}]"
         ));
     }
@@ -1042,6 +1100,7 @@ mod tests {
             framing: Framing::Crop { x: 0.5, y: 0.5 },
             transition: None,
             motion: None,
+            slowed: None,
         }
     }
 
@@ -1138,6 +1197,115 @@ mod tests {
              scale=1080:1920:flags=bicubic,setsar=1,format=yuv420p[v0];"
         ));
         assert!(graph.ends_with("[v0][v1]concat=n=2:v=1:a=0,format=yuv420p[vout]"));
+    }
+
+    #[test]
+    fn a_slowed_clip_reads_less_of_its_file_and_blends_the_frames_between() {
+        // A 5 second clip over a 6.5 second scene, cut from half a second
+        // into what plays.
+        let mut plan = plan();
+        plan.video[0] = VideoClip {
+            slowed: Some(Slowed {
+                recorded: secs(5.0),
+                played: secs(6.5),
+            }),
+            ..video("a.mp4", 0.65, 5.85)
+        };
+        let (inputs, graph) =
+            video_graph(&plan, FrameSize::new(1080, 1920), (30, 1), "yuv420p", None);
+        assert_eq!(
+            (inputs[0].start, inputs[0].duration),
+            (secs(0.5), secs(4.6)),
+            "in the file's own time, and a little past its end"
+        );
+        assert!(
+            graph.starts_with(
+                "[0:v:0]settb=AVTB,setpts=(PTS-STARTPTS)*6500/5000,framerate=fps=30/1,settb=1/30,\
+                 tpad=stop=-1:stop_mode=clone,trim=end_frame=176,"
+            ),
+            "{graph}"
+        );
+        // The clip after it plays as it was made.
+        assert!(graph.contains("[1:v:0]settb=AVTB,setpts=PTS-STARTPTS,fps=30/1,"));
+        assert_eq!(plan.duration(), secs(5.85) + plan.video[1].duration);
+    }
+
+    #[test]
+    fn a_slowed_clip_plays_on_from_the_playhead_and_into_its_transitions() {
+        let slowed = Slowed {
+            recorded: secs(4.0),
+            played: secs(5.0),
+        };
+        let mut plan = plan();
+        plan.video[1] = VideoClip {
+            slowed: Some(slowed),
+            transition: transition(TransitionKind::Crossfade, 0.5, 0.5),
+            ..video("b.mp4", 1.0, 3.0)
+        };
+        // The lead-in of the transition is half a second of what plays:
+        // 0.4 of the file before 0.8.
+        let (inputs, graph) = video_graph(&plan, FrameSize::new(960, 540), (30, 1), "bgra", None);
+        assert_eq!(
+            (inputs[1].start, inputs[1].duration),
+            (secs(0.4), secs(2.9))
+        );
+        assert!(graph.contains(
+            "[1:v:0]settb=AVTB,setpts=(PTS-STARTPTS)*5000/4000,framerate=fps=30/1,settb=1/30,"
+        ));
+
+        // A second into the clip, the file is read from 1.6 seconds on.
+        let later = plan.starting_at(plan.video[0].duration + secs(1.0));
+        assert_eq!(later.video[0].slowed, Some(slowed));
+        let (inputs, _) = video_graph(&later, FrameSize::new(960, 540), (30, 1), "bgra", None);
+        assert_eq!(
+            (inputs[0].start, inputs[0].duration),
+            (secs(1.6), secs(1.7))
+        );
+    }
+
+    #[test]
+    fn only_a_video_that_plays_longer_than_it_was_made_is_slowed() {
+        let slowed = |recorded: f64, played: f64| {
+            Some(Slowed {
+                recorded: secs(recorded),
+                played: secs(played),
+            })
+        };
+        let graph_of = |clip: VideoClip| {
+            let plan = RenderPlan {
+                video: vec![clip],
+                ..plan()
+            };
+            video_graph(&plan, FrameSize::new(960, 540), (30, 1), "bgra", None).1
+        };
+        for same in [slowed(5.0, 5.0), slowed(5.0, 4.0), slowed(0.0, 4.0), None] {
+            let graph = graph_of(VideoClip {
+                slowed: same,
+                ..video("a.mp4", 0.0, 2.0)
+            });
+            assert!(graph.contains("setpts=PTS-STARTPTS,fps=30/1,"), "{graph}");
+        }
+        let still = graph_of(VideoClip {
+            source: ClipSource::Still(PathBuf::from("a.png")),
+            slowed: slowed(5.0, 7.0),
+            ..video("a.mp4", 0.0, 2.0)
+        });
+        assert!(!still.contains("framerate"), "{still}");
+    }
+
+    #[test]
+    fn a_plan_without_slowed_clips_is_written_as_before() {
+        // A render records the fingerprint of its plan's JSON: clips that
+        // are not slowed must not change it.
+        let json = serde_json::to_string(&plan()).unwrap();
+        assert!(!json.contains("slowed"), "{json}");
+        let mut slowed = plan();
+        slowed.video[0].slowed = Some(Slowed {
+            recorded: secs(5.0),
+            played: secs(6.0),
+        });
+        let json = serde_json::to_string(&slowed).unwrap();
+        assert_eq!(serde_json::from_str::<RenderPlan>(&json).unwrap(), slowed);
     }
 
     fn transition(kind: TransitionKind, before: f64, after: f64) -> Option<Transition> {

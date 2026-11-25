@@ -355,6 +355,125 @@ pub(crate) struct CostBook {
     pub(crate) costs: Arc<dyn CostRepository>,
     /// To find the channel of a video project.
     pub(crate) themes: Arc<dyn ThemeRepository>,
+    /// Where paid calls in flight are noted on their jobs, shared by every
+    /// clone: set by the first job the queue runs (`paid_calls_sent_once`),
+    /// and never for a handler run without a queue, which notes nothing.
+    pub(crate) in_flight: Arc<OnceLock<crate::jobs::PaidCallLog>>,
+}
+
+/// A paid call noted on its job while it waits for its answer, with what
+/// it typically uses, so a run cut short before the answer leaves enough
+/// to record it (ADR-0030). Stored on the job as JSON.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct InFlight {
+    provider: String,
+    model: String,
+    purpose: String,
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+    #[serde(default)]
+    image_tokens: u64,
+    #[serde(default)]
+    characters: u64,
+    #[serde(default)]
+    video_seconds: u64,
+    #[serde(default)]
+    audio_seconds: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    channel: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    project: Option<String>,
+}
+
+impl InFlight {
+    fn usage(&self) -> Metered {
+        Metered {
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+            image_tokens: self.image_tokens,
+            characters: self.characters,
+            video_seconds: self.video_seconds,
+            audio_seconds: self.audio_seconds,
+            posts: 0,
+        }
+    }
+}
+
+/// A paid call noted on its job (`CostBook::paying`): the note is cleared
+/// when this is dropped, once the call answered, whatever it answered.
+#[must_use = "the note is cleared when this is dropped: keep it for the call"]
+pub(crate) struct Paying {
+    note: Option<(crate::jobs::PaidCallLog, JobId)>,
+}
+
+impl Drop for Paying {
+    fn drop(&mut self) {
+        if let Some((log, job)) = self.note.take()
+            && let Err(error) = log.note(job, None)
+        {
+            // A run that lost its job, or a closing app: the next run
+            // takes the call as lost, which records it once more at worst.
+            tracing::debug!(%job, "could not clear a paid call's note: {error}");
+        }
+    }
+}
+
+/// Wraps every handler so that a run finding a paid call an earlier run
+/// sent and was cut short on (a close, a crash) fails the job instead of
+/// paying for it again, with the call in Costs (ADR-0030).
+pub(crate) fn paid_calls_sent_once(
+    handlers: std::collections::HashMap<bardo_domain::JobKind, Arc<dyn crate::JobHandler>>,
+    costs: &CostBook,
+) -> std::collections::HashMap<bardo_domain::JobKind, Arc<dyn crate::JobHandler>> {
+    handlers
+        .into_iter()
+        .map(|(kind, handler)| {
+            let guarded: Arc<dyn crate::JobHandler> = Arc::new(SentOnce {
+                handler,
+                costs: costs.clone(),
+            });
+            (kind, guarded)
+        })
+        .collect()
+}
+
+struct SentOnce {
+    handler: Arc<dyn crate::JobHandler>,
+    costs: CostBook,
+}
+
+impl crate::JobHandler for SentOnce {
+    fn run(
+        &self,
+        payload: &str,
+        cx: &mut crate::JobContext,
+    ) -> Result<(), bardo_domain::JobFailure> {
+        // Every clone of the book, in every handler, notes its paid calls
+        // on this queue's jobs. Set here, before any handler runs, so no
+        // call goes unnoted.
+        let _ = self.costs.in_flight.set(cx.paid_call_log());
+        match cx.paid_call() {
+            // A run already told to stop ends without a record: its failure
+            // is not saved (the queue is closing, or the job is cancelled),
+            // the note stays, and the next run would record it again.
+            Some(_) if cx.should_stop() => Err(bardo_domain::JobFailure::new(
+                bardo_domain::JobFailureKind::Unexpected,
+                "stopped before the paid call left by an earlier run was recorded",
+            )),
+            Some(note) => Err(self.costs.record_cut_short(cx.id(), note)),
+            None => self.handler.run(payload, cx),
+        }
+    }
+
+    fn asked_again(&self, external_handle: Option<&str>) -> Option<String> {
+        self.handler.asked_again(external_handle)
+    }
+
+    fn saved_after_ask(&self, asked: Option<&str>, saved: String) -> String {
+        self.handler.saved_after_ask(asked, saved)
+    }
 }
 
 /// A paid call that just answered.
@@ -429,6 +548,113 @@ impl CostBook {
                 call.purpose
             );
         }
+    }
+
+    /// Notes `call` on `job` before it is sent, for a video project (or a
+    /// channel alone), with what it typically uses: a run cut short before
+    /// its answer leaves the note, and the next run records the call and
+    /// fails instead of sending it again (`paid_calls_sent_once`). The note
+    /// goes when the returned guard is dropped. `Err` when it was not kept,
+    /// so the call is not sent: the app is closing, the job was cancelled,
+    /// the run lost its job, or storage failed.
+    pub(crate) fn paying(
+        &self,
+        job: JobId,
+        call: &PlannedCall,
+        channel: Option<ChannelId>,
+        project: Option<VideoProjectId>,
+    ) -> Result<Paying, bardo_domain::JobFailure> {
+        let Some(log) = self.in_flight.get() else {
+            return Ok(Paying { note: None });
+        };
+        let usage = self.typical(call).unwrap_or_else(|error| {
+            tracing::warn!("could not read past costs to note a paid call: {error}");
+            call.known(first_guess(call.purpose, call.provider))
+                .times(call.calls)
+        });
+        let channel = channel.or_else(|| project.and_then(|project| self.channel_of(project)));
+        let note = InFlight {
+            provider: call.provider.code().to_owned(),
+            model: call.model.to_string(),
+            purpose: call.purpose.code().to_owned(),
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            image_tokens: usage.image_tokens,
+            characters: usage.characters,
+            video_seconds: usage.video_seconds,
+            audio_seconds: usage.audio_seconds,
+            channel: channel.map(|id| id.to_string()),
+            project: project.map(|id| id.to_string()),
+        };
+        let text = serde_json::to_string(&note)
+            .map_err(|error| bardo_domain::JobFailure::unexpected(error.to_string()))?;
+        log.note(job, Some(text)).map_err(|error| {
+            bardo_domain::JobFailure::unexpected(format!(
+                "the paid call was not sent: its note was not kept ({error})"
+            ))
+        })?;
+        Ok(Paying {
+            note: Some((log.clone(), job)),
+        })
+    }
+
+    /// `paying` for a call made for a video project, under its channel.
+    pub(crate) fn paying_for_project(
+        &self,
+        job: JobId,
+        call: &PlannedCall,
+        project: VideoProjectId,
+    ) -> Result<Paying, bardo_domain::JobFailure> {
+        self.paying(job, call, None, Some(project))
+    }
+
+    /// Records the paid call an earlier run of `job` sent and was cut short
+    /// on (`note`, from `paying`), as an estimate, and says why the job
+    /// fails: the provider may have done and billed the work.
+    fn record_cut_short(&self, job: JobId, note: &str) -> bardo_domain::JobFailure {
+        let failure = |provider: &str| {
+            bardo_domain::JobFailure::new(
+                bardo_domain::JobFailureKind::AnswerLost,
+                format!("{provider}: Bardo closed before the answer came back"),
+            )
+        };
+        let Ok(note) = serde_json::from_str::<InFlight>(note) else {
+            tracing::warn!(%job, "a paid call's note could not be read; nothing recorded");
+            return failure("the provider");
+        };
+        let (Ok(provider), Ok(purpose)) = (
+            note.provider.parse::<Provider>(),
+            note.purpose.parse::<CostPurpose>(),
+        ) else {
+            tracing::warn!(%job, "a paid call's note names an unknown provider or purpose");
+            return failure(&note.provider);
+        };
+        let parse = |text: &Option<String>| {
+            text.as_deref()
+                .and_then(|text| uuid::Uuid::parse_str(text).ok())
+        };
+        let usage = note.usage();
+        if usage != Metered::default() {
+            self.record(
+                PaidCall {
+                    provider,
+                    model: &note.model,
+                    purpose,
+                    usage,
+                    job: Some(job),
+                    reported: None,
+                },
+                parse(&note.channel).map(ChannelId::from),
+                parse(&note.project).map(VideoProjectId::from),
+            );
+        }
+        failure(match provider {
+            Provider::Claude => "Claude",
+            Provider::ElevenLabs => "ElevenLabs",
+            Provider::Gemini => "Gemini",
+            Provider::TypeSafe => "JEV",
+            other => other.code(),
+        })
     }
 
     /// `record` for a call made for a video project, under its channel.
@@ -967,30 +1193,31 @@ pub(crate) mod tests {
     fn the_built_in_rates_price_google_clips_by_model_and_resolution() {
         let per_second = |model: &str| price(Provider::Gemini, model, Meter::VideoSeconds);
         let dollars = |text| Some(Money::parse(text).unwrap());
+        // $12.00 per million output tokens: 5,792 a second at 720p and
+        // 8,688 a second at 1080p.
         for (model, expected) in [
-            ("veo-3.1-generate-preview/720p", "0.40"),
-            ("veo-3.1-generate-preview/1080p", "0.40"),
-            ("veo-3.1-fast-generate-preview/720p", "0.10"),
-            ("veo-3.1-fast-generate-preview/1080p", "0.12"),
-            ("veo-3.1-lite-generate-preview/720p", "0.05"),
-            ("veo-3.1-lite-generate-preview/1080p", "0.08"),
-            ("gemini-omni-1.1-flash/720p", "0.10136"),
+            ("gemini-omni-1.2-flash/720p", "0.069504"),
+            ("gemini-omni-1.2-flash/1080p", "0.104256"),
         ] {
             assert_eq!(per_second(model), dollars(expected), "{model}");
         }
-        assert_eq!(
-            per_second("gemini-omni-1.1-flash/1080p"),
-            None,
-            "no published price"
+        let ten_seconds = RateTable::new(default_rates().to_vec()).price(
+            Provider::Gemini,
+            bardo_ai::google_clips::DEFAULT_MODEL,
+            &Metered::video_seconds(10),
         );
+        assert_eq!(ten_seconds, dollars("0.69504"), "Google says about $0.70");
+        // Veo is shut down: nothing calls it. An Omni 1.1 clip already
+        // being made when Bardo moved to 1.2 is billed at 1.1's price.
+        for gone in bardo_ai::google_clips::retired() {
+            let expected = match gone.id.model() {
+                "gemini-omni-1.1-flash/720p" => dollars("0.10136"),
+                _ => None,
+            };
+            assert_eq!(per_second(gone.id.model()), expected, "{}", gone.id);
+        }
         for model in bardo_ai::google_clips::models() {
-            let priced = per_second(model.id.model()).is_some();
-            assert_eq!(
-                priced,
-                !model.id.model().ends_with("flash/1080p"),
-                "{}",
-                model.id
-            );
+            assert!(per_second(model.id.model()).is_some(), "{}", model.id);
         }
     }
 
@@ -1127,6 +1354,8 @@ pub(crate) mod tests {
     /// What a failed paid call leaves in Costs, and whether the queue makes
     /// it again (ADR-0030).
     mod failed_calls {
+        use std::time::Duration;
+
         use bardo_domain::{
             BilledUse, JobFailureKind, JobState, TokenUsage, VideoProject, VideoProjectId,
         };
@@ -1258,6 +1487,80 @@ pub(crate) mod tests {
         }
 
         #[test]
+        fn a_script_in_flight_when_the_app_closes_is_not_asked_again_and_is_in_costs() {
+            use std::sync::atomic::Ordering;
+            let h = Harness {
+                closing_wait: Some(Duration::from_millis(20)),
+                ..Harness::new()
+            };
+            let app = h.start();
+            let project = crate::scenes::tests::project(&app);
+            let before = h.text.requests().len();
+            h.text.hang.store(true, Ordering::SeqCst);
+            let id = app
+                .generate_script(project.id, BudgetConsent::Confirmed)
+                .unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !h.text.hanging.load(Ordering::SeqCst) {
+                assert!(std::time::Instant::now() < deadline, "never asked");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            // Bardo closes while Claude works on the script.
+            drop(app);
+
+            // The cut-short call stays open: its process is gone.
+            let app = h.start();
+            let job = wait_done(&app, id);
+            assert_eq!(
+                h.text.requests().len() - before,
+                1,
+                "asked again with no click"
+            );
+            assert_eq!(job.state(), JobState::Failed);
+            assert_eq!(job.attempts(), 1);
+            let failure = job.failure().unwrap();
+            assert_eq!(failure.kind, JobFailureKind::AnswerLost);
+            assert_eq!(
+                failure.detail,
+                "Claude: Bardo closed before the answer came back"
+            );
+            let records = costs(&h, project.id, CostPurpose::Script);
+            assert_eq!(records.len(), 1, "what it may have cost is in Costs");
+            assert_eq!(records[0].job, Some(id));
+            assert_eq!(records[0].channel, Some(project.channel));
+            assert_eq!(records[0].provider, Provider::Claude);
+            assert!(records[0].usage.output_tokens > 0, "{:?}", records[0].usage);
+
+            // The user's retry asks for it, once.
+            app.retry_job(id).unwrap();
+            done(&app, id);
+            assert_eq!(h.text.requests().len() - before, 2);
+            assert_eq!(job_of(&app, id).paid_call(), None);
+            h.text.release.store(true, Ordering::SeqCst);
+        }
+
+        fn job_of(app: &crate::Bardo, id: bardo_domain::JobId) -> bardo_domain::Job {
+            app.jobs().into_iter().find(|job| job.id() == id).unwrap()
+        }
+
+        #[test]
+        fn the_note_of_a_paid_call_goes_with_its_answer() {
+            let h = Harness {
+                closing_wait: Some(Duration::from_millis(20)),
+                ..Harness::new()
+            };
+            let app = h.start();
+            let project = crate::scenes::tests::project(&app);
+            let id = app
+                .generate_script(project.id, BudgetConsent::Confirmed)
+                .unwrap();
+            done(&app, id);
+            let job = job_of(&app, id);
+            assert_eq!(job.paid_call(), None, "the note goes with the answer");
+            assert_eq!(script_costs(&h, &project), 1);
+        }
+
+        #[test]
         fn a_lost_script_is_in_costs_and_a_refused_one_is_not() {
             let h = Harness::new();
             let app = h.start();
@@ -1377,7 +1680,11 @@ pub(crate) mod tests {
             *h.speech.failure.lock().unwrap() = Some(lost());
 
             let id = app
-                .generate_narration(project.id, BudgetConsent::Confirmed)
+                .generate_narration(
+                    project.id,
+                    crate::PicturesConsent::Ask,
+                    BudgetConsent::Confirmed,
+                )
                 .unwrap();
             let job = wait_done(&app, id);
 
@@ -1429,7 +1736,11 @@ pub(crate) mod tests {
             });
 
             let id = app
-                .generate_narration(project.id, BudgetConsent::Confirmed)
+                .generate_narration(
+                    project.id,
+                    crate::PicturesConsent::Ask,
+                    BudgetConsent::Confirmed,
+                )
                 .unwrap();
             wait_done(&app, id);
 

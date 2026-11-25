@@ -355,6 +355,7 @@ fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> Scen
                 .map(|(clip, image)| SceneClip {
                     file: clip.file.clone(),
                     seconds: clip.seconds,
+                    stretch: clip.stretch,
                     source_image: image.generation.id,
                     generation: copied(&clip.generation),
                 });
@@ -479,18 +480,16 @@ impl LocalizationHandler {
                 schema: ADAPTATION_SCHEMA.to_owned(),
             },
         };
-        self.text
-            .generate_until(&key, &request, stop)
-            .map_err(|failure| {
-                self.costs.record_failed(
-                    &failure,
-                    &PlannedCall::text(CostPurpose::Script, &request),
-                    Some(job),
-                    channel,
-                    project,
-                );
-                JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-            })
+        let paid_call = PlannedCall::text(CostPurpose::Script, &request);
+        let generated = {
+            let _paying = self.costs.paying(job, &paid_call, channel, project)?;
+            self.text.generate_until(&key, &request, stop)
+        };
+        generated.map_err(|failure| {
+            self.costs
+                .record_failed(&failure, &paid_call, Some(job), channel, project);
+            JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
+        })
     }
 
     /// Records what the adaptation cost, on `channel` and, once it exists,
@@ -1406,6 +1405,7 @@ mod tests {
         assert_eq!(job.attempts(), 1, "not made again by the queue");
         assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
         assert_eq!(h.text.requests().len() - before, 1);
+        assert_eq!(h.text.unstoppable(), 0, "the job hands over its stop");
         // The source's own script is a Script cost too: this one is the job's.
         let costs: Vec<_> =
             h.db.recent_costs(app.profile().id, CostPurpose::Script, 10)
@@ -1645,7 +1645,11 @@ mod tests {
             files: Arc::clone(&h.files) as _,
             text: Arc::clone(&h.text) as _,
             secrets: Arc::clone(&h.secrets) as _,
-            costs: app.cost_book.clone(),
+            // Run here, outside the queue: no job runs to note a call on.
+            costs: crate::costs::CostBook {
+                in_flight: Arc::default(),
+                ..app.cost_book.clone()
+            },
         }
     }
 
@@ -1778,7 +1782,7 @@ mod tests {
 
         done(
             &app,
-            app.generate_narration(version.id, BudgetConsent::Ask)
+            app.generate_narration(version.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
                 .unwrap(),
         );
         let placed = app.place_scenes(version.id).unwrap();
@@ -1849,13 +1853,24 @@ mod tests {
 
         done(
             &app,
-            app.generate_narration(version.id, BudgetConsent::Ask)
+            app.generate_narration(version.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
                 .unwrap(),
         );
         let narration = app.narrations.narration(version.id).unwrap().unwrap();
         let view = app.scenes(version.id).unwrap();
         assert!(view.stale);
         assert!(view.version.as_ref().is_some_and(|v| v.can_place));
+        // Placing is the carried scenes' way onto the narration: they are
+        // not fitted, and nothing is drawn for them until they are placed.
+        assert!(!view.can_fit);
+        assert!(matches!(
+            app.fit_scenes(version.id),
+            Err(crate::SceneError::PlanOutOfDate)
+        ));
+        assert!(matches!(
+            app.regenerate_scene_image(version.id, 0, BudgetConsent::Ask),
+            Err(crate::SceneError::PlanOutOfDate)
+        ));
         let stages = crate::stages::project_stages(
             &app.script(version.id).unwrap(),
             &app.narration(version.id).unwrap(),

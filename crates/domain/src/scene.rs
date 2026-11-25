@@ -19,7 +19,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::{
     ClipModelRef, Generation, GenerationId, JobFailureKind, Narration, NarrationId, ProfileId,
-    RepositoryError, StyleChoice, VideoProjectId,
+    RepositoryError, StretchLimit, StyleChoice, VideoProjectId, spoken_words,
 };
 
 uuid_id!(
@@ -48,29 +48,41 @@ pub struct Sentence {
 /// `?` or `…` (closing quotes and brackets aside) or followed by a line
 /// break ends one, and none runs longer than `MAX_SENTENCE_WORDS`.
 pub fn sentences(narration: &Narration) -> Vec<Sentence> {
-    let text = narration.text.as_str();
     let words = narration.words.as_slice();
-    let mut sentences = Vec::new();
+    let ranges: Vec<Range<usize>> = words.iter().map(|word| word.text.clone()).collect();
+    sentence_spans(narration.text.as_str(), &ranges)
+        .into_iter()
+        .map(|span| {
+            let (opening, closing) = (&words[span.start], &words[span.end - 1]);
+            Sentence {
+                text: opening.text.start..closing.text.end,
+                start: opening.start,
+                end: closing.end.max(opening.start),
+                words: span,
+            }
+        })
+        .collect()
+}
+
+/// The sentences of `text` as runs of its `words` (their places in
+/// `text`, in order), by the rules of [`sentences`]. They depend on the
+/// text alone, not on when it is spoken.
+fn sentence_spans(text: &str, words: &[Range<usize>]) -> Vec<Range<usize>> {
+    let mut spans = Vec::new();
     let mut first = 0;
     for (index, word) in words.iter().enumerate() {
         let next = words.get(index + 1);
         let ends = next.is_none_or(|next| {
-            ends_sentence(&text[word.text.clone()])
-                || text[word.text.end..next.text.start].contains('\n')
+            ends_sentence(&text[word.clone()])
+                || text[word.end..next.start].contains('\n')
                 || index + 1 - first >= MAX_SENTENCE_WORDS
         });
         if ends {
-            let opening = &words[first];
-            sentences.push(Sentence {
-                words: first..index + 1,
-                text: opening.text.start..word.text.end,
-                start: opening.start,
-                end: word.end.max(opening.start),
-            });
+            spans.push(first..index + 1);
             first = index + 1;
         }
     }
-    sentences
+    spans
 }
 
 /// A word that ends a sentence: `.`, `!`, `?` or `…`, past closing quotes
@@ -552,9 +564,38 @@ pub struct SceneClip {
     pub file: String,
     /// The length asked for, in seconds.
     pub seconds: u32,
+    /// Set when it was asked for shorter than its scene on purpose
+    /// (`ClipLength`): it plays slowed, to end when the scene does, within
+    /// the limit it was made under.
+    pub stretch: Option<StretchLimit>,
     /// The generation of the image it starts from.
     pub source_image: GenerationId,
     pub generation: Generation,
+}
+
+impl SceneClip {
+    /// How long the clip runs at the speed it was made.
+    pub fn recorded(&self) -> Duration {
+        Duration::from_secs(self.seconds.into())
+    }
+
+    /// What a stretched clip plays past its scene's end when its limit
+    /// allows: the picture a transition out of it shows, which would
+    /// otherwise be its last frame held.
+    pub const STRETCH_HANDLE: Duration = Duration::from_millis(500);
+
+    /// How long it plays over a scene of `scene`: its own length, or for
+    /// a stretched clip the scene's and a handle after it, as far as its
+    /// limit goes. Past that it holds its last frame, as any clip shorter
+    /// than its scene does.
+    pub fn played_over(&self, scene: Duration) -> Duration {
+        match self.stretch {
+            Some(limit) if scene > self.recorded() => {
+                (scene + Self::STRETCH_HANDLE).min(limit.longest(self.seconds))
+            }
+            _ => self.recorded(),
+        }
+    }
 }
 
 /// A user action on a scene's clip that does not apply right now.
@@ -913,6 +954,29 @@ pub struct NoScenes;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("the plan has no scene {0}")]
 pub struct NoSuchScene(pub usize);
+
+/// A narration that reads other text than a plan's scenes were written
+/// over, so the plan cannot be fitted to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the narration reads other text than the scenes were planned on")]
+pub struct OtherText;
+
+/// The pictures a plan holds that were paid for: what a narration that no
+/// longer fits the plan puts out of date.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PaidPictures {
+    /// Scene images, the new ones waiting for review and the cast's
+    /// portraits.
+    pub images: usize,
+    /// Clips, the new ones waiting for review included.
+    pub clips: usize,
+}
+
+impl PaidPictures {
+    pub fn is_empty(&self) -> bool {
+        self.images == 0 && self.clips == 0
+    }
+}
 
 /// The scenes of a video project, planned on its narration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1336,6 +1400,116 @@ impl ScenePlan {
         narration.is_none_or(|narration| narration.id != self.narration)
     }
 
+    /// Where each scene's words start in `text` (byte offsets), when the
+    /// scenes' words, in order, are all of `text` (nothing before, between
+    /// or after them but white space) and every scene with words starts a
+    /// sentence of `text`, as planned scenes do. `None` when `text` reads
+    /// anything else, or breaks into sentences elsewhere.
+    fn scene_offsets(&self, text: &str) -> Option<Vec<usize>> {
+        let words = spoken_words(text);
+        let sentences: Vec<usize> = sentence_spans(text, &words)
+            .iter()
+            .map(|span| words[span.start].start)
+            .collect();
+        let mut offsets = Vec::with_capacity(self.scenes.len());
+        let mut cursor = 0;
+        for scene in &self.scenes {
+            let rest = &text[cursor..];
+            let at = cursor + (rest.len() - rest.trim_start().len());
+            if !text[at..].starts_with(scene.text.as_str()) {
+                return None;
+            }
+            if !scene.text.is_empty() && sentences.binary_search(&at).is_err() {
+                return None;
+            }
+            offsets.push(at);
+            cursor = at + scene.text.len();
+        }
+        text[cursor..].trim().is_empty().then_some(offsets)
+    }
+
+    /// Whether `text` is what the scenes were written over: a narration
+    /// that reads it can take this plan with [`ScenePlan::fitted_to`].
+    pub fn reads(&self, text: &str) -> bool {
+        self.scene_offsets(text).is_some()
+    }
+
+    /// The plan fitted to `narration`, a new reading of the text it was
+    /// made for: every scene keeps its words, prompts, people, place,
+    /// images and clips, and only when it starts and ends is read again
+    /// from the new word timings, the way [`ScenePlan::from_draft`] times
+    /// a new plan (the first scene from the start, each until the next
+    /// starts, the last to the narration's end). It is the same plan, by
+    /// its id, on the new narration. A narration that reads other text
+    /// does not fit: those scenes are planned again.
+    pub fn fitted_to(&self, narration: &Narration, now: SystemTime) -> Result<Self, OtherText> {
+        if narration.id == self.narration {
+            return Ok(self.clone());
+        }
+        let offsets = self
+            .scene_offsets(narration.text.as_str())
+            .ok_or(OtherText)?;
+        let words = narration.words.as_slice();
+        let end = narration
+            .duration
+            .max(words.last().map_or(Duration::ZERO, |word| word.end));
+        let mut starts: Vec<Duration> = Vec::with_capacity(offsets.len());
+        for (index, (scene, offset)) in self.scenes.iter().zip(&offsets).enumerate() {
+            let word = words.get(words.partition_point(|word| word.text.start < *offset));
+            let start = match word {
+                _ if index == 0 => Duration::ZERO,
+                // A scene with words starts at a word; one without (a
+                // version's scene whose sentences were all dropped) where
+                // the next words are said.
+                Some(word) if scene.text.is_empty() || word.text.start == *offset => {
+                    word.start.min(end)
+                }
+                None if scene.text.is_empty() => end,
+                _ => return Err(OtherText),
+            };
+            starts.push(start.max(starts.last().copied().unwrap_or(Duration::ZERO)));
+        }
+        let scenes = self
+            .scenes
+            .iter()
+            .enumerate()
+            .map(|(index, scene)| Scene {
+                start: starts[index],
+                end: starts
+                    .get(index + 1)
+                    .copied()
+                    .unwrap_or(end)
+                    .max(starts[index]),
+                ..scene.clone()
+            })
+            .collect();
+        Ok(Self {
+            narration: narration.id,
+            scenes,
+            updated_at: now,
+            ..self.clone()
+        })
+    }
+
+    /// The images and clips the plan holds.
+    pub fn paid_pictures(&self) -> PaidPictures {
+        let portraits = self
+            .cast
+            .iter()
+            .filter(|member| member.portrait.is_some())
+            .count();
+        let count = |held: fn(&Scene) -> usize| self.scenes.iter().map(held).sum::<usize>();
+        PaidPictures {
+            images: portraits
+                + count(|scene| {
+                    usize::from(scene.image.is_some()) + usize::from(scene.pending.is_some())
+                }),
+            clips: count(|scene| {
+                usize::from(scene.clip.is_some()) + usize::from(scene.pending_clip.is_some())
+            }),
+        }
+    }
+
     /// Scenes without an image, which a new image job draws.
     pub fn missing_images(&self) -> Vec<usize> {
         (0..self.scenes.len())
@@ -1374,6 +1548,12 @@ pub trait ScenePlanRepository: Send + Sync {
     /// other, and saves the generations it refers to; all or none.
     fn save_scene_plan(&self, plan: &ScenePlan) -> Result<(), RepositoryError>;
 
+    /// Saves `plan` fitted to a new narration ([`ScenePlan::fitted_to`]):
+    /// the project's plan with its scenes at their new times. The
+    /// project's saved cut goes with the old times, since it was laid out
+    /// on them: the editor builds the rough cut again. All or none.
+    fn save_fitted_plan(&self, plan: &ScenePlan) -> Result<(), RepositoryError>;
+
     /// Saves scene `index` of the saved plan `plan` (prompts, model,
     /// images, clips, failures) and the generations of its images and
     /// clips, leaving the other scenes as they are. Fails when the plan is
@@ -1397,6 +1577,10 @@ impl<T: ScenePlanRepository + ?Sized> ScenePlanRepository for Arc<T> {
 
     fn save_scene_plan(&self, plan: &ScenePlan) -> Result<(), RepositoryError> {
         (**self).save_scene_plan(plan)
+    }
+
+    fn save_fitted_plan(&self, plan: &ScenePlan) -> Result<(), RepositoryError> {
+        (**self).save_fitted_plan(plan)
     }
 
     fn save_scene(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
@@ -1663,6 +1847,7 @@ mod tests {
         SceneClip {
             file: file.into(),
             seconds: 5,
+            stretch: None,
             source_image: source.generation.id,
             generation: generation(narration, Provider::Higgsfield, file),
         }
@@ -2387,6 +2572,304 @@ mod tests {
         assert_eq!(scene.motion_prompt().as_str(), "Pan left.");
         assert!(scene.set_motion_prompt(None));
         assert_eq!(scene.motion_prompt().as_str(), "Slow push in.");
+    }
+
+    /// `narration`, read again: the same text, every character `char_ms`
+    /// long, lasting `tail` ms past its last character.
+    fn read_again(narration: &Narration, char_ms: u64, tail: u64) -> Narration {
+        read(narration, narration.text.as_str(), char_ms, tail)
+    }
+
+    /// Another narration of `narration`'s project, reading `text`.
+    fn read(narration: &Narration, text: &str, char_ms: u64, tail: u64) -> Narration {
+        let alignment = Alignment {
+            chars: text
+                .chars()
+                .enumerate()
+                .map(|(n, c)| CharTiming {
+                    text: c.to_string(),
+                    start: ms(n as u64 * char_ms),
+                    end: ms((n as u64 + 1) * char_ms),
+                })
+                .collect(),
+        };
+        Narration {
+            id: NarrationId::new(),
+            text: ScriptText::new(text).unwrap(),
+            duration: alignment.end() + ms(tail),
+            words: WordTimings::from_alignment(text, &alignment),
+            ..narration.clone()
+        }
+    }
+
+    /// A storyboard of `STORY` with a person, a place and every kind of
+    /// picture: an image, a new one waiting, a clip, a new one waiting and
+    /// a portrait.
+    fn pictured_plan(n: &Narration) -> ScenePlan {
+        let mut plan = ScenePlan::from_draft(
+            generation(n, Provider::Claude, "{}"),
+            n,
+            PlanDraft {
+                cast: vec![member("the probe", "A small silver probe with one dish.")],
+                places: vec![somewhere(
+                    "the hangar",
+                    "A dim hangar with a concrete floor.",
+                )],
+                scenes: vec![
+                    SceneDraft {
+                        place: Some(0),
+                        ..cast_draft(0, "The probe in the hangar.", vec![0])
+                    },
+                    cast_draft(1, "A voice from the dark.", Vec::new()),
+                    SceneDraft {
+                        place: Some(0),
+                        ..cast_draft(2, "The probe answers in the hangar.", vec![0])
+                    },
+                ],
+            },
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let first = image(n, "one.png");
+        let moving = clip(n, "one.mp4", &first);
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        scene.add_image(first.clone());
+        scene.add_image(image(n, "one-again.png"));
+        scene.add_clip(moving);
+        scene.accept_clip().unwrap();
+        scene.add_clip(clip(n, "one-again.mp4", &first));
+        scene.edit_prompt(ScenePrompt::new("The probe in the hangar, at night.").unwrap());
+        plan.scene_mut(2, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .add_image(image(n, "three.png"));
+        plan.cast_mut(0, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .set_portrait(image(n, "probe.png"));
+        plan
+    }
+
+    #[test]
+    fn a_plan_counts_the_pictures_paid_for() {
+        let n = narration(STORY, 0);
+        assert_eq!(
+            plan(&n, vec![draft(0, "A.")]).paid_pictures(),
+            PaidPictures::default()
+        );
+        assert!(PaidPictures::default().is_empty());
+        let pictures = pictured_plan(&n).paid_pictures();
+        assert_eq!(
+            pictures,
+            PaidPictures {
+                images: 4,
+                clips: 2
+            },
+            "two images of scene 1, one of scene 3 and a portrait; two clips"
+        );
+        assert!(!pictures.is_empty());
+    }
+
+    #[test]
+    fn a_new_narration_of_the_same_text_fits_the_plan_and_keeps_every_picture() {
+        let n = narration(STORY, 0);
+        let plan = pictured_plan(&n);
+        // Read again, slower, with a pause at the end.
+        let again = read_again(&n, 250, 700);
+        assert!(plan.is_stale(Some(&again)));
+        assert!(plan.reads(again.text.as_str()));
+
+        let later = SystemTime::UNIX_EPOCH + Duration::from_secs(60);
+        let fitted = plan.fitted_to(&again, later).unwrap();
+
+        assert!(!fitted.is_stale(Some(&again)));
+        assert_eq!(fitted.id, plan.id, "the same plan: its jobs still find it");
+        assert_eq!(fitted.narration, again.id);
+        assert_eq!(fitted.generation, plan.generation);
+        assert_eq!(fitted.updated_at, later);
+        assert_eq!(fitted.cast(), plan.cast());
+        assert_eq!(fitted.places(), plan.places());
+        // Each scene starts where the new narration says its first word.
+        let spoken = sentences(&again);
+        let times: Vec<_> = fitted.scenes().iter().map(|s| (s.start, s.end)).collect();
+        assert_eq!(
+            times,
+            [
+                (Duration::ZERO, spoken[1].start),
+                (spoken[1].start, spoken[2].start),
+                (spoken[2].start, again.duration),
+            ]
+        );
+        assert_eq!(spoken[1].start, ms(10 * 250), "'Who' is the 11th character");
+        // Nothing else about a scene changed.
+        for (fitted, scene) in fitted.scenes().iter().zip(plan.scenes()) {
+            let timed_as_before = Scene {
+                start: scene.start,
+                end: scene.end,
+                ..fitted.clone()
+            };
+            assert_eq!(&timed_as_before, scene);
+        }
+        assert_eq!(fitted.paid_pictures(), plan.paid_pictures());
+        assert_eq!(
+            fitted.files().collect::<Vec<_>>(),
+            plan.files().collect::<Vec<_>>()
+        );
+        // It is the plan the planner's answer would give on this narration.
+        let planned = ScenePlan::from_drafts(
+            generation(&again, Provider::Claude, "{}"),
+            &again,
+            Vec::new(),
+            vec![draft(0, "A."), draft(1, "B."), draft(2, "C.")],
+            later,
+        )
+        .unwrap();
+        let planned: Vec<_> = planned
+            .scenes()
+            .iter()
+            .map(|s| (s.start, s.end, s.text.clone()))
+            .collect();
+        let fitted_scenes: Vec<_> = fitted
+            .scenes()
+            .iter()
+            .map(|s| (s.start, s.end, s.text.clone()))
+            .collect();
+        assert_eq!(fitted_scenes, planned);
+    }
+
+    #[test]
+    fn fitting_a_plan_to_its_own_narration_changes_nothing() {
+        let n = narration(STORY, 300);
+        let plan = pictured_plan(&n);
+        let fitted = plan.fitted_to(&n, plan.updated_at).unwrap();
+        assert_eq!(fitted, plan);
+    }
+
+    #[test]
+    fn a_narration_read_the_very_same_way_gives_the_plan_its_own_times() {
+        // Accents, an opening quote, a dash on its own and a mark before
+        // the first word; the last word ends past the narration's length.
+        let text = "— Era uma vez, em março. \"Não sei\", disse ela.\nÉ só — nada mais.";
+        for tail in [0, 300] {
+            let mut n = narration(text, tail);
+            if tail == 0 {
+                n.duration -= ms(250);
+            }
+            for firsts in [vec![0], vec![0, 1, 2], vec![0, 2]] {
+                let drafts = firsts.iter().map(|&first| draft(first, "A shot")).collect();
+                let planned = plan(&n, drafts);
+                let same = Narration {
+                    id: NarrationId::new(),
+                    ..n.clone()
+                };
+                assert!(planned.reads(text));
+                let fitted = planned.fitted_to(&same, planned.updated_at).unwrap();
+                assert_eq!(fitted.scenes(), planned.scenes(), "{firsts:?}");
+                assert_eq!(fitted.narration, same.id);
+            }
+        }
+    }
+
+    #[test]
+    fn a_scene_that_would_no_longer_start_a_sentence_does_not_fit() {
+        let n = narration("Hi there.\nWho are you\nI am the probe.", 0);
+        let planned = plan(
+            &n,
+            vec![draft(0, "One"), draft(1, "Two"), draft(2, "Three")],
+        );
+        for text in [
+            // The space between two scenes is gone: one word holds both.
+            "Hi there.Who are you\nI am the probe.",
+            // The line break that ended a sentence is a space now.
+            "Hi there.\nWho are you I am the probe.",
+        ] {
+            let other = read(&n, text, 100, 0);
+            assert!(!planned.reads(text), "{text:?}");
+            assert_eq!(
+                planned.fitted_to(&other, SystemTime::UNIX_EPOCH),
+                Err(OtherText),
+                "{text:?}"
+            );
+        }
+        // Other white space where a sentence still ends is the same text.
+        let text = "Hi there.  Who are you\n\nI am the probe.\n";
+        assert!(planned.reads(text));
+        let fitted = planned
+            .fitted_to(&read(&n, text, 100, 0), SystemTime::UNIX_EPOCH)
+            .unwrap();
+        assert_eq!(fitted.scenes().len(), 3);
+    }
+
+    #[test]
+    fn a_narration_of_other_text_does_not_fit_the_plan() {
+        let n = narration(STORY, 0);
+        let plan = pictured_plan(&n);
+        for text in [
+            // A word changed inside a scene.
+            "Hi there. Who are they?\nI am \"the probe.\" It ends",
+            // A sentence more at the end.
+            "Hi there. Who are you?\nI am \"the probe.\" It ends here. Or not.",
+            // A sentence less.
+            "Hi there. Who are you?",
+            // A sentence more at the start.
+            "Listen. Hi there. Who are you?\nI am \"the probe.\" It ends",
+            // A scene's last sentence moved into the next line break.
+            "Hi there. Who are you?\nI am \"the probe.\"\nIt ends",
+        ] {
+            let other = read(&n, text, 100, 0);
+            assert!(!plan.reads(text), "{text:?}");
+            assert_eq!(
+                plan.fitted_to(&other, SystemTime::UNIX_EPOCH),
+                Err(OtherText),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn white_space_between_scenes_does_not_stop_a_plan_from_fitting() {
+        let n = narration(STORY, 0);
+        let plan = pictured_plan(&n);
+        // The second scene now starts on a new line.
+        let text = "Hi there.\n\nWho are you?\nI am \"the probe.\" It ends";
+        let again = read(&n, text, 100, 0);
+        let fitted = plan.fitted_to(&again, SystemTime::UNIX_EPOCH).unwrap();
+        let spoken = sentences(&again);
+        assert_eq!(fitted.scenes()[1].start, spoken[1].start);
+        assert_eq!(fitted.scenes()[1].text, "Who are you?");
+    }
+
+    #[test]
+    fn a_scene_without_words_keeps_its_place_in_a_fitted_plan() {
+        let n = narration(STORY, 0);
+        let plan = pictured_plan(&n);
+        // As a version's placed plan can be: its middle scene lost every
+        // sentence, and the first one took them.
+        let mut scenes = plan.scenes().to_vec();
+        scenes[0].text = "Hi there. Who are you?".into();
+        scenes[0].end = scenes[2].start;
+        scenes[1].text = String::new();
+        scenes[1].start = scenes[2].start;
+        scenes[1].end = scenes[2].start;
+        let placed = ScenePlan::restore(ScenePlanRecord {
+            id: plan.id,
+            project: plan.project,
+            owner: plan.owner,
+            narration: plan.narration,
+            generation: plan.generation.clone(),
+            scenes,
+            updated_at: plan.updated_at,
+        });
+        let again = read_again(&n, 200, 0);
+        let fitted = placed.fitted_to(&again, SystemTime::UNIX_EPOCH).unwrap();
+        let third = sentences(&again)[2].start;
+        let times: Vec<_> = fitted.scenes().iter().map(|s| (s.start, s.end)).collect();
+        assert_eq!(
+            times,
+            [
+                (Duration::ZERO, third),
+                (third, third),
+                (third, again.duration)
+            ]
+        );
     }
 
     #[test]

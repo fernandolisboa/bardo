@@ -29,7 +29,9 @@ use base64::Engine as _;
 use serde_json::{Value, json};
 
 use crate::claude_stream::{self, StreamEnd, StreamedAnswer};
-use crate::http::{HttpRequest, HttpResponse, StreamedResponse, Transport, UreqTransport};
+use crate::http::{
+    GIVEN_UP_UNSENT, HttpRequest, HttpResponse, StreamedResponse, Transport, UreqTransport,
+};
 use crate::idle::{STOP_POLL, Watched};
 use crate::key_check::failure;
 use crate::retry::{
@@ -333,9 +335,16 @@ fn comes_back_shortly(answer: &StreamedAnswer) -> bool {
 
 /// A request given up before it was sent: nothing is billed for it.
 fn not_sent() -> ProviderFailure {
+    ProviderFailure::new(ProviderFailureKind::Unreachable, GIVEN_UP_UNSENT)
+}
+
+/// A request Claude said it started nothing of (a rate limit, an
+/// overload), given up during the wait to send it again: nothing is
+/// billed for it.
+fn not_sent_again() -> ProviderFailure {
     ProviderFailure::new(
         ProviderFailureKind::Unreachable,
-        "given up before the request was sent",
+        "Claude was busy and started nothing, and the wait to send the request again was given up",
     )
 }
 
@@ -543,14 +552,22 @@ impl<T: Transport> ClaudeTextGenerator<T> {
                 let answer = match comes_whole(&mut body) {
                     // A server that does not stream hands the answer over
                     // whole.
-                    Ok(true) => parse_whole(&buffered(status, headers, body))?,
+                    Ok(true) => match parse_whole(&buffered(status, headers, body)) {
+                        Ok(answer) => answer,
+                        // Cut by the stop, not by the server.
+                        Err(_) if stop.asked() => {
+                            StreamedAnswer::unstarted(StreamEnd::Broken("given up".to_owned()))
+                        }
+                        Err(failure) => return Err(failure),
+                    },
                     Ok(false) => claude_stream::read(body),
                     Err(error) => StreamedAnswer::unstarted(StreamEnd::Broken(error.to_string())),
                 };
-                // An answer that arrived whole all the same is an answer:
-                // it is paid for, and the caller decides what to do with
-                // it.
-                if stop.asked() && answer.end != StreamEnd::Complete {
+                // Only an answer that broke off is given up. One that
+                // arrived whole all the same is an answer: it is paid for,
+                // and the caller decides what to do with it. And an error
+                // Claude sent in its place still says what it says.
+                if stop.asked() && matches!(answer.end, StreamEnd::Broken(_)) {
                     return Err(given_up(&answer));
                 }
                 let wait = (comes_back_shortly(&answer) && may_resend).then(|| {
@@ -588,7 +605,7 @@ impl<T: Transport> ClaudeTextGenerator<T> {
             match wait {
                 Some(wait) if retry < self.backoff.retries => {
                     if !self.pause(wait, stop) {
-                        return Err(not_sent());
+                        return Err(not_sent_again());
                     }
                     retry += 1;
                 }

@@ -1229,6 +1229,7 @@ impl ControlPlayer {
                 framing: Framing::Fit,
                 transition: None,
                 motion: None,
+                slowed: None,
             }],
             audio: vec![AudioTrack {
                 clips: vec![AudioClip {

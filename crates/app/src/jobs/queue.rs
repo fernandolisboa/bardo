@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -34,6 +34,26 @@ use bardo_domain::{
 /// and stops at once when a save is refused.
 pub trait JobHandler: Send + Sync {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure>;
+
+    /// The job was queued again on request (`JobQueue::retry`, a retry by
+    /// the user), which a run cannot tell from the queue trying again
+    /// after a failure that passes or from a run picked up after the app
+    /// closed. `external_handle` is what the job saved; the answer
+    /// replaces it, and `None` keeps it. For a handler whose saved state
+    /// says what must not be sent again unless the user asks. Runs under
+    /// the queue's lock: no waiting.
+    fn asked_again(&self, _external_handle: Option<&str>) -> Option<String> {
+        None
+    }
+
+    /// A run told to stop saves `saved` onto a job already queued again
+    /// on request, whose handle `asked_again` left as `asked`: what to
+    /// keep. What the user asked again for at the retry stays asked, and
+    /// what the run learned after it does not. Runs under the queue's
+    /// lock: no waiting.
+    fn saved_after_ask(&self, _asked: Option<&str>, saved: String) -> String {
+        saved
+    }
 }
 
 /// How the queue runs jobs.
@@ -116,10 +136,30 @@ pub enum JobActionError {
     /// the cost shown there.
     #[error("the video's visual style changed since the job started")]
     Restyled,
+    /// A scene plan job that is no longer its project's latest scene job:
+    /// run again, it would replace the plan made, and remove the images
+    /// drawn, since. The Scenes stage plans again and asks first.
+    #[error("the project's scenes were planned or drawn after this job")]
+    ScenesMovedOn,
     /// A performed take that never reached its provider: it is made again
     /// from the capture, where its cap, test and checks are asked again.
     #[error("make the take again from its capture")]
     TakeFromItsPage,
+    /// A scene job (plan, images or clips) while a narration of its
+    /// project is being made: what it makes would be out of date at once.
+    #[error("a narration of the project is being made")]
+    NarrationBusy,
+    /// A narration job while scenes of its project are being planned,
+    /// drawn or animated on the current narration; and a scene job beside
+    /// another scene job of its project that is queued, running or, once
+    /// cancelled, still stopping: the two would pay for the same work and
+    /// save over each other.
+    #[error("scenes of the project are being made")]
+    ScenesBusy,
+    /// Running it again would put paid images or clips out of date, or
+    /// discard them, which its stage asks about first: it starts there.
+    #[error("the job starts from its stage, which asks first")]
+    AsksFirst,
     #[error(transparent)]
     NotAllowed(#[from] InvalidJobTransition),
     #[error(transparent)]
@@ -143,13 +183,14 @@ impl From<SaveNotKept> for RepositoryError {
 /// Tells a running handler to stop, because the user cancelled the job,
 /// the app is closing or another runner took the job. Most handlers need
 /// not tell these apart. One with a paid request on its way does
-/// (`JobContext::cancelled`): a cancelled job runs again only when the
-/// user asks, and the others run again by themselves.
+/// (`JobContext::cancelled`, `JobContext::stop`).
 #[derive(Default)]
 struct StopSignal {
     stopped: Mutex<bool>,
     /// The user cancelled the job, whatever else stopped it.
     cancelled: AtomicBool,
+    /// Another runner took the job, whatever else stopped this run.
+    lost: AtomicBool,
     changed: Condvar,
 }
 
@@ -161,6 +202,11 @@ impl StopSignal {
 
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+        self.stop();
+    }
+
+    fn lose(&self) {
+        self.lost.store(true, Ordering::Release);
         self.stop();
     }
 
@@ -186,6 +232,8 @@ pub struct JobContext {
     attempt: u32,
     checkpoint: Option<String>,
     external_handle: Option<String>,
+    /// A paid call an earlier run sent and never had the answer to.
+    paid_call: Option<String>,
     /// Set by `defer`: the attempt ends waiting, not done.
     deferred: Option<SystemTime>,
     stop: Arc<StopSignal>,
@@ -219,6 +267,17 @@ impl JobContext {
         self.external_handle.as_deref()
     }
 
+    /// A paid call an earlier run of the job sent and was cut short before
+    /// its answer came (by a close or a crash): see `PaidCallLog`.
+    pub fn paid_call(&self) -> Option<&str> {
+        self.paid_call.as_deref()
+    }
+
+    /// Where the code that makes a paid call for this queue's jobs notes it.
+    pub(crate) fn paid_call_log(&self) -> PaidCallLog {
+        PaidCallLog(Arc::downgrade(&self.shared))
+    }
+
     /// True once the job is cancelled or the app is closing.
     pub fn should_stop(&self) -> bool {
         self.stop.is_stopped()
@@ -233,11 +292,18 @@ impl JobContext {
         self.stop.cancelled.load(Ordering::Acquire)
     }
 
-    /// The stop signal, for work that waits outside the handler (an
-    /// answer a provider is still writing) and gives it up when asked.
+    /// For a paid answer a provider is still writing: asks once it is to
+    /// be given up, because the user cancelled the job or another runner
+    /// took it. Not while the app is closing: the process ends moments
+    /// later and the connection with it, and a call that never came back
+    /// stays noted on its job (`CostBook::paying`), so the next start does
+    /// not send it again. Given up there, it would come back, lose its
+    /// note, and be sent again by the run that resumes the job.
     pub fn stop(&self) -> Stop {
         let stop = Arc::clone(&self.stop);
-        Stop::when(move || stop.is_stopped())
+        Stop::when(move || {
+            stop.cancelled.load(Ordering::Acquire) || stop.lost.load(Ordering::Acquire)
+        })
     }
 
     /// Waits `duration`, waking early when told to stop. True when the full
@@ -292,13 +358,25 @@ impl JobContext {
     ) -> Result<(), RepositoryError> {
         let handle = handle.into();
         self.external_handle = Some(handle.clone());
-        self.shared.save_resume(self.id, |job| {
-            if job.state() == JobState::Running {
-                job.record_external_handle(handle)
-            } else {
-                job.keep_from_stopping_run(None, Some(handle))
+        let handler = self.shared.handlers.get(&self.kind);
+        self.shared.save_resume(self.id, |job| match job.state() {
+            JobState::Running => job.record_external_handle(handle),
+            // Queued again on request while this run still stops.
+            JobState::Queued => {
+                let kept = match handler {
+                    Some(handler) => handler.saved_after_ask(job.external_handle(), handle),
+                    None => handle,
+                };
+                job.keep_from_stopping_run(None, Some(kept))
             }
+            _ => job.keep_from_stopping_run(None, Some(handle)),
         })
+    }
+
+    /// `text` with the keys the app knows masked, for what a handler keeps
+    /// in storage (a failure's detail is masked the same way).
+    pub fn redact(&self, text: &str) -> String {
+        self.shared.redactor.redact(text)
     }
 }
 
@@ -406,8 +484,20 @@ impl Shared {
         id: JobId,
         apply: impl FnOnce(&mut Job) -> Result<(), InvalidJobTransition>,
     ) -> Result<(), RepositoryError> {
+        self.save_resume_unless(id, false, apply)
+    }
+
+    /// `save_resume`, refused as well while the queue is closing when
+    /// `not_while_closing`: for a save that starts something the closing
+    /// queue would not see the end of.
+    fn save_resume_unless(
+        &self,
+        id: JobId,
+        not_while_closing: bool,
+        apply: impl FnOnce(&mut Job) -> Result<(), InvalidJobTransition>,
+    ) -> Result<(), RepositoryError> {
         let mut state = self.state();
-        if state.closed || state.lost.contains(&id) {
+        if state.closed || state.lost.contains(&id) || (not_while_closing && state.closing) {
             return Err(SaveNotKept.into());
         }
         let job = state.job_mut(id).ok_or(SaveNotKept)?;
@@ -500,6 +590,20 @@ impl Shared {
         }
     }
 
+    /// Queues a failed or cancelled job again because the user asked, and
+    /// tells its handler so in the same save (`JobHandler::asked_again`).
+    fn ask_again(&self, job: &mut Job) -> Result<(), InvalidJobTransition> {
+        job.retry()?;
+        let asked = self
+            .handlers
+            .get(&job.kind())
+            .and_then(|handler| handler.asked_again(job.external_handle()));
+        match asked {
+            Some(handle) => job.keep_from_stopping_run(None, Some(handle)),
+            None => Ok(()),
+        }
+    }
+
     /// Changes one job through `apply` on a copy, saves the copy and only
     /// then keeps it, so a failed save leaves the job as it was.
     fn transition(
@@ -536,6 +640,28 @@ impl Shared {
         self.changed();
         self.wake.notify_all();
         Ok(new_state)
+    }
+}
+
+/// Notes on a running job the paid call its run sends, before it goes,
+/// and clears it once the answer came (ADR-0030). Reached by job id, from
+/// the code that makes the call. A run cut short in between leaves the
+/// note, and the next run sees it (`JobContext::paid_call`).
+#[derive(Clone)]
+pub(crate) struct PaidCallLog(Weak<Shared>);
+
+impl PaidCallLog {
+    /// Saves `call` (`None` clears it) on `job`, whose run must be this
+    /// queue's. `Err` when it was not saved: the run lost the job or the
+    /// queue closed (`SaveNotKept`), or storage failed.
+    ///
+    /// A call is not noted, so not sent, once the queue started closing or
+    /// the job was cancelled: its answer would come to nobody. Clearing a
+    /// note is kept then, as any save of a stopping run is.
+    pub(crate) fn note(&self, job: JobId, call: Option<String>) -> Result<(), RepositoryError> {
+        let shared = self.0.upgrade().ok_or(SaveNotKept)?;
+        let sending = call.is_some();
+        shared.save_resume_unless(job, sending, |stored| stored.record_paid_call(call))
     }
 }
 
@@ -734,7 +860,9 @@ impl JobQueue {
     }
 
     pub(crate) fn retry(&self, id: JobId) -> Result<(), JobActionError> {
-        self.shared.transition(id, Job::retry).map(drop)
+        self.shared
+            .transition(id, |job| self.shared.ask_again(job))
+            .map(drop)
     }
 
     /// Queues a failed or cancelled job again, like `retry`, to start no
@@ -742,7 +870,7 @@ impl JobQueue {
     pub(crate) fn retry_at(&self, id: JobId, at: Option<SystemTime>) -> Result<(), JobActionError> {
         self.shared
             .transition(id, |job| {
-                job.retry()?;
+                self.shared.ask_again(job)?;
                 match at {
                     Some(at) => job.wait_until(at),
                     None => Ok(()),
@@ -1018,7 +1146,7 @@ fn tick(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>) {
         // lease): this run stops, and that one's goes on.
         tracing::warn!(job = %id, "lost the lease on a running job");
         if let Some(stop) = state.workers.get(&id) {
-            stop.stop();
+            stop.lose();
         }
         state.lost.insert(id);
     }
@@ -1095,6 +1223,7 @@ fn spawn_worker(shared: &Arc<Shared>, job: &Job, stop: Arc<StopSignal>) -> std::
         attempt: job.attempts(),
         checkpoint: job.checkpoint().map(str::to_owned),
         external_handle: job.external_handle().map(str::to_owned),
+        paid_call: job.paid_call().map(str::to_owned),
         deferred: None,
         stop,
         shared: Arc::clone(shared),

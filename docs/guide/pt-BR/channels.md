@@ -66,13 +66,24 @@ Como os vídeos do canal são feitos: quais cenas viram clipes de IA e com qual 
 <a id="defaults"></a>
 ## Modelo de vídeo, legendas, transições e movimento
 
-- **Modelo de vídeo**: o modelo que anima as imagens das cenas do canal em clipes curtos, pelo Higgsfield, pelo Kling ou pelo Google, no [modo de produção](#production) **Tudo animado, modelo do canal**; os outros modos escolhem o seu modelo. Manter o padrão segue o primeiro provedor, na ordem Higgsfield, Kling, Google, com chave salva, e o modelo padrão desse provedor quando ele muda: só com uma chave do Kling ou do Gemini, os clipes vão para o Kling ou para o Veo, nunca para um provedor sem chave. Qualquer cena pode escolher outro modelo na etapa [Clipes](clips.md#model).
+- **Modelo de vídeo**: o modelo que anima as imagens das cenas do canal em clipes curtos, pelo Higgsfield, pelo Kling ou pelo Google, no [modo de produção](#production) **Tudo animado, modelo do canal**; os outros modos escolhem o seu modelo. Manter o padrão segue o primeiro provedor, na ordem Higgsfield, Kling, Google, com chave salva, e o modelo padrão desse provedor quando ele muda: só com uma chave do Kling ou do Gemini, os clipes vão para o Kling ou para o Gemini Omni Flash, nunca para um provedor sem chave. Um canal salvo com um modelo que o provedor descontinuou depois mostra o modelo que ficou no lugar. Qualquer cena pode escolher outro modelo na etapa [Clipes](clips.md#model).
+- **Duração dos clipes** e **Esticar um clipe em até**: se um clipe um pouco mais curto que a cena é comprado e reproduzido em câmera lenta, e até quanto ([Duração dos clipes](#clip-length)).
 - **Modelo de tomada**: o modelo que faz a persona interpretar cada tomada de uma captura, pelo Higgsfield, pelo BytePlus ModelArk ou pelo Kling: o Kling 3.0 Motion Control no Higgsfield, a não ser que você escolha outro. Qualquer tomada pode escolher outro ([Clipe interpretado](capture.md#performed)).
 - **Estilo de legenda**: o visual das legendas nos projetos novos do canal. Cada projeto pode escolher outro estilo no [editor](editor.md#captions).
 - **Palavra falada**: a cor em que acende a palavra sendo dita, nos projetos novos do canal. **Amarelo** é o padrão de um canal novo; **Desligado** é onde começam os canais criados antes disso existir, para que seus cortes e renders fiquem como estavam. Cada projeto pode escolher outra cor no [editor](editor.md#captions).
 - **Transição padrão** e a **Duração** dela: o que o editor põe num corte quando você aperta **T** ou escolhe uma transição para um clipe; uma fusão de 0,5 s, a menos que você mude. Cada corte pode usar outra ([Transições](editor.md#transitions)).
 - **Movimento nas imagens** e a **Intensidade** dele: como a câmera passeia por cada imagem parada num corte novo, o efeito Ken Burns. **Variado** (o padrão de um canal novo, com intensidade **Média**) dá a cada cena um zoom ou pan diferente do anterior; **Nenhum** deixa as imagens paradas, e é onde começam os canais criados antes de existir movimento, para os cortes e renders deles ficarem como estavam; ou escolha um movimento para todas as cenas. Cortes já feitos guardam os movimentos que têm, e cada imagem pode usar outro ([Movimento nas imagens](editor.md#motion)).
 - **Estilo da miniatura**: como fica o texto das miniaturas novas do canal no YouTube, Forte a menos que você mude. Cada vídeo pode escolher outro ([Miniatura](uploading.md#thumbnail)).
+
+<a id="clip-length"></a>
+## Duração dos clipes
+
+Alguns modelos de vídeo só fazem clipes de poucas durações fixas, como 5 ou 10 segundos no Kling 2.6. Uma cena narrada por 6 segundos levaria o clipe de 10, e 4 dos segundos pagos nunca apareceriam.
+
+- **Duração dos clipes**: **Clipe mais curto, em câmera lenta** (o padrão): quando a cena é um pouco mais longa que uma das durações do modelo, o Bardo pede essa duração e a reproduz mais devagar, para terminar junto com a cena. **Sempre cobrir a cena** pede a primeira duração que cobre a cena e corta o que sobra.
+- **Esticar um clipe em até**: quanto um clipe pode durar além da duração com que foi feito, de 5% a 100%, de 5 em 5, e 40% a menos que você mude. Com 40%, um clipe de 5 segundos cobre uma cena de até 7 segundos, e uma cena mais longa leva a duração seguinte. Um limite menor deixa o movimento mais perto do que o modelo fez e paga mais segundos; um maior desacelera mais e paga menos. Só aparece enquanto os clipes ficam em câmera lenta.
+
+Modelos que aceitam qualquer duração dentro de uma faixa não mudam: os clipes deles são feitos com a duração da cena. As duas escolhas valem para os próximos clipes; um clipe já feito continua tocando do jeito em que foi feito ([Clipes em câmera lenta](clips.md#stretch)).
 
 <a id="accounts"></a>
 ## Depois: as contas de rede

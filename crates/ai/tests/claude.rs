@@ -376,6 +376,8 @@ struct Held {
     begun: Vec<u8>,
     feed: Mutex<Option<Receiver<Vec<u8>>>>,
     sent: AtomicU32,
+    /// Set once what began was read and the reader waits for more.
+    waiting: Arc<AtomicBool>,
     /// Set when the answer's body is dropped, which is what closes a
     /// real connection.
     dropped: Arc<AtomicBool>,
@@ -388,6 +390,7 @@ impl Held {
             begun: begun.as_bytes().to_vec(),
             feed: Mutex::new(Some(held)),
             sent: AtomicU32::new(0),
+            waiting: Arc::default(),
             dropped: Arc::default(),
         };
         (transport, feed)
@@ -397,6 +400,7 @@ impl Held {
 struct HeldReader {
     begun: Option<Vec<u8>>,
     feed: Receiver<Vec<u8>>,
+    waiting: Arc<AtomicBool>,
     dropped: Arc<AtomicBool>,
 }
 
@@ -404,10 +408,13 @@ impl Read for HeldReader {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         let piece = match self.begun.take() {
             Some(begun) => begun,
-            None => match self.feed.recv() {
-                Ok(piece) => piece,
-                Err(_) => return Ok(0),
-            },
+            None => {
+                self.waiting.store(true, Ordering::SeqCst);
+                match self.feed.recv() {
+                    Ok(piece) => piece,
+                    Err(_) => return Ok(0),
+                }
+            }
         };
         buffer[..piece.len()].copy_from_slice(&piece);
         Ok(piece.len())
@@ -434,6 +441,7 @@ impl Transport for Held {
             body: Box::new(HeldReader {
                 begun: Some(self.begun.clone()),
                 feed,
+                waiting: Arc::clone(&self.waiting),
                 dropped: Arc::clone(&self.dropped),
             }),
         })
@@ -456,16 +464,12 @@ const BEGUN: &str = "event: message_start\n\
 #[test]
 fn an_answer_given_up_midway_is_a_lost_answer_and_its_stream_is_dropped() {
     // Claude began to answer and would go on for minutes: the test holds
-    // the stream open the whole time.
+    // the stream open the whole time. The job is cancelled once the answer
+    // is under way.
     let (held, feed) = Held::new(BEGUN);
     let dropped = Arc::clone(&held.dropped);
+    let asked = Arc::clone(&held.waiting);
     let claude = ClaudeTextGenerator::with_transport(Watched::new(held, Duration::from_secs(600)));
-    let asked = Arc::<AtomicBool>::default();
-    let cancel = Arc::clone(&asked);
-    let canceller = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(300));
-        cancel.store(true, Ordering::SeqCst);
-    });
 
     let started = Instant::now();
     let failure = claude
@@ -481,7 +485,6 @@ fn an_answer_given_up_midway_is_a_lost_answer_and_its_stream_is_dropped() {
     assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
     assert!(failure.detail.contains("given up"), "{}", failure.detail);
     assert_eq!(failure.billed, None);
-    canceller.join().unwrap();
     // The body is dropped at the next byte that arrives, which closes its
     // connection.
     assert!(!dropped.load(Ordering::SeqCst), "still waiting for a byte");
@@ -528,33 +531,134 @@ fn a_wait_before_sending_again_is_given_up() {
 }
 
 #[test]
-fn a_wait_nobody_stops_is_one_wait() {
-    // With a stop that never asks, the wait is as long as without one.
-    let (sleeper, waits) = recording_sleeper();
-    let claude = ClaudeTextGenerator::with_transport(Scripted::new(vec![
-        fixture("claude", "messages-overloaded"),
-        fixture("claude", "messages-themes"),
-    ]))
-    .with_sleeper(sleeper);
-    claude
-        .generate_until(&key(), &json_request(), &Stop::when(|| false))
-        .unwrap();
-    let waits = waits.lock().unwrap();
-    assert_eq!(waits.iter().sum::<Duration>(), Duration::from_secs(1));
+fn a_wait_before_sending_again_is_as_long_whoever_may_stop_it() {
+    for stop in [Stop::never(), Stop::when(|| false)] {
+        let (sleeper, waits) = recording_sleeper();
+        let claude = ClaudeTextGenerator::with_transport(Scripted::new(vec![
+            fixture("claude", "messages-overloaded"),
+            fixture("claude", "messages-themes"),
+        ]))
+        .with_sleeper(sleeper);
+        claude
+            .generate_until(&key(), &json_request(), &stop)
+            .unwrap();
+        let waits = waits.lock().unwrap();
+        assert_eq!(waits.iter().sum::<Duration>(), Duration::from_secs(1));
+        // Nobody to stop it: one wait, as before there was a stop.
+        if !stop.may_ask() {
+            assert_eq!(waits.len(), 1);
+        }
+    }
+}
+
+/// An answer that arrives whole, and whose job is stopped as it does.
+/// `ended` is set when the body is let go, which is after its end was
+/// read and told; `handed` once the answer was handed over, its body
+/// still unread.
+struct StoppedAsItArrives {
+    answer: HttpResponse,
+    ended: Arc<AtomicBool>,
+    handed: Arc<AtomicBool>,
+    sent: Arc<AtomicU32>,
+}
+
+impl StoppedAsItArrives {
+    fn new(name: &str) -> Self {
+        Self {
+            answer: fixture("claude", name),
+            ended: Arc::default(),
+            handed: Arc::default(),
+            sent: Arc::default(),
+        }
+    }
+}
+
+struct EndsStopped(std::io::Cursor<Vec<u8>>, Arc<AtomicBool>);
+
+impl Read for EndsStopped {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(buffer)
+    }
+}
+
+impl Drop for EndsStopped {
+    fn drop(&mut self) {
+        self.1.store(true, Ordering::SeqCst);
+    }
+}
+
+impl Transport for StoppedAsItArrives {
+    fn send(&self, _: &HttpRequest) -> Result<HttpResponse, TransportError> {
+        unreachable!("the adapter streams every request")
+    }
+
+    fn send_streamed(&self, _: &HttpRequest) -> Result<StreamedResponse, TransportError> {
+        self.sent.fetch_add(1, Ordering::SeqCst);
+        self.handed.store(true, Ordering::SeqCst);
+        Ok(StreamedResponse {
+            status: self.answer.status,
+            headers: self.answer.headers.clone(),
+            body: Box::new(EndsStopped(
+                std::io::Cursor::new(self.answer.body.clone().into_bytes()),
+                Arc::clone(&self.ended),
+            )),
+        })
+    }
 }
 
 #[test]
 fn an_answer_that_arrived_whole_is_an_answer_though_the_stop_asked() {
-    // The stop comes as the last of the answer is read: the answer is paid
-    // for and whole, so the caller gets it and decides.
-    let asks = AtomicU32::new(0);
-    let stop = Stop::when(move || asks.fetch_add(1, Ordering::SeqCst) >= 1);
-    let claude = generator(&["messages-themes"]);
-    let generated = claude
+    // The stop comes as the last of the answer arrives: the answer is paid
+    // for and whole, so the caller gets it and decides. Streamed or not.
+    for name in ["messages-themes", "messages-themes-not-streamed"] {
+        // Read where it is asked for: the stop has asked by the time the
+        // adapter looks at what it read.
+        let transport = StoppedAsItArrives::new(name);
+        let stop = stop_on(&transport.ended);
+        let generated = ClaudeTextGenerator::with_transport(transport)
+            .generate_until(&key(), &json_request(), &stop)
+            .unwrap_or_else(|failure| panic!("{name}: {failure:?}"));
+        assert!(stop.asked(), "{name}");
+        assert!(generated.text.contains("themes"), "{name}");
+
+        // And through the reader that gives a stopped answer up: the end
+        // of the body is told before the stop can ask.
+        let transport = StoppedAsItArrives::new(name);
+        let stop = stop_on(&transport.ended);
+        let claude =
+            ClaudeTextGenerator::with_transport(Watched::new(transport, Duration::from_secs(600)));
+        let generated = claude
+            .generate_until(&key(), &json_request(), &stop)
+            .unwrap_or_else(|failure| panic!("{name}, watched: {failure:?}"));
+        assert!(generated.text.contains("themes"), "{name}, watched");
+    }
+}
+
+#[test]
+fn an_error_claude_sent_in_the_place_of_the_answer_is_not_called_given_up() {
+    // Claude says it is overloaded and started nothing, and the job is
+    // stopped while that is read: nothing is billed, the error keeps its
+    // meaning, and nothing is sent again.
+    let transport = StoppedAsItArrives::new("messages-overloaded-at-start");
+    let stop = stop_on(&transport.handed);
+    let sent = Arc::clone(&transport.sent);
+    let (sleeper, waits) = recording_sleeper();
+    let claude = ClaudeTextGenerator::with_transport(transport).with_sleeper(sleeper);
+    let failure = claude
         .generate_until(&key(), &json_request(), &stop)
-        .unwrap();
-    assert!(generated.text.contains("themes"));
-    assert_eq!(claude.transport().sent().len(), 1);
+        .unwrap_err();
+    assert_eq!(
+        failure.kind,
+        ProviderFailureKind::Unreachable,
+        "{failure:?}"
+    );
+    assert!(
+        failure.detail.contains("started nothing"),
+        "{}",
+        failure.detail
+    );
+    assert_eq!(sent.load(Ordering::SeqCst), 1);
+    assert!(waits.lock().unwrap().is_empty(), "no wait to send again");
 }
 
 #[test]

@@ -17,7 +17,7 @@ Scenes cut the narration into the shots the video shows, each with an image. The
 
 The plan grows with the narration: a one-minute video has about ten scenes, a ten-minute one about a hundred, and that plan takes Claude a few minutes to write. Bardo reads the answer while it is being written, so a long plan is not given up on while it is still arriving, and the estimate under **Plan scenes** follows the narration's length. A narration that could take more than about 245 scenes (a little over 16 minutes of short sentences, more when they are long) is not planned: its plan might not fit in one answer, and an answer that is cut is paid for and lost. The stage says so in place of the button; use a shorter narration or split the video into more than one.
 
-Cancelling the plan in [Jobs](jobs.md#cancel) stops it within moments: Bardo closes the request instead of waiting for the end of the answer, and [Costs](costs.md#spent) counts an estimate of what Claude may have charged. While a cancelled plan or image job lets go of what it had already sent, the stage says **Cancelled. Finishing what was already sent…** and starts nothing new, so the same work is not paid twice; for an image being drawn this can take as long as that one image.
+Cancelling the plan in [Jobs](jobs.md#cancel) stops it within moments: Bardo closes the request instead of waiting for the end of the answer, and [Costs](costs.md#spent) counts an estimate of what Claude may have charged. When the whole answer arrives just as you cancel, it is paid and kept: **Plan scenes** then makes the plan from it without asking Claude again. While a cancelled plan or image job lets go of what it had already sent, the stage says **Cancelled. Finishing what was already sent…** and starts nothing new, so the same work is not paid twice; for an image being drawn this can take as long as that one image.
 
 **Generate N images** then draws every scene still without an image, in one job, in order: each image is drawn with [earlier images of the video](#same-place) beside its prompt, so the scenes look like one video. Nano Banana draws each at 2K in the shape of the video's [format](projects.md#format), 9:16 for a Short and 16:9 for a long video, and Gemini bills each one; a scene the provider declines does not stop the others. The estimate under the leading button says what the run costs. Planning needs a Claude key, and drawing a Gemini key ([Your API keys](api-keys.md#providers)).
 
@@ -77,10 +77,19 @@ The scene prompts themselves were written for the style the video had when it wa
 
 Above the scenes, **All** shows every one and **Pending** only those with something left: an image to draw or to review (at the Clips stage, a clip to make or to review). Each tab says how many it holds.
 
+<a id="fit"></a>
+## After a new narration
+
+When the narration is made again, the scenes' times no longer match and the stage reads **Out of date**. Until the scenes match the narration again, Bardo makes no image or clip for them, since it would be timed for a narration that is gone: the buttons that pay for one are off and say why, and a job run again from the Jobs panel stops without sending anything new. A clip that was already sent to the provider is still collected and kept.
+
+If the new narration reads the same text the scenes were planned on (the script did not change), the stage offers **Fit to the narration**. It keeps every scene with its prompts, people, places, images and clips, and reads when each one starts and ends again from the new narration. It costs nothing. A scene that now runs longer than its clip holds the clip's last frame (a clip made [slowed to fit](clips.md#stretch) first slows further, as far as its limit goes), and the cut in the [editor](editor.md) starts over from the rough cut on the new times, as after any new narration.
+
+The two wait for each other: while a narration is being made, scenes cannot be planned, drawn or animated, and while scenes, images or clips are being made, a new narration waits for them.
+
 <a id="replan"></a>
 ## Planning again
 
-When the narration is made again, the scenes' times no longer match and the stage reads **Out of date**. **Plan again** replaces the scenes with new ones. If they already have images or clips, Bardo asks first, since planning again discards those files.
+When the script changed too, the new narration reads other text and the scenes cannot be fitted to it: **Plan again** replaces them with new ones. If they already have images or clips, Bardo asks first, since planning again discards those files. **Plan again** is also there whenever you want a new storyboard for the same narration.
 
 <a id="place"></a>
 ## Placing the scenes on a version
@@ -89,4 +98,4 @@ A [version in another language](script.md#versions) starts with the original's s
 
 Placing also builds the version's cut from the original's: each scene's framing, motion and transition, the scenes it left out, the caption style and highlight, the mix and the frame shape. Music and SFX move to the same point of the narration (music keeps its start and end on the words, an SFX its length). Captions come from the new narration. Splits and trims inside a scene, imported footage placed by hand and edited caption text are not carried; redo them in the [editor](editor.md).
 
-Scenes stretch or shrink with their sentences. **Worth a look** lists the scenes that now run past their clip (the clip holds its last frame), those that grew by more than half or shrank by more than a third, and those the version does not narrate, which are left out of the cut. After a new narration, placing is offered again; **Plan again** replaces the scenes as in any project.
+Scenes stretch or shrink with their sentences. **Worth a look** lists the scenes that now run past their clip (the clip holds its last frame), those that grew by more than half or shrank by more than a third, and those the version does not narrate, which are left out of the cut. After a new narration, placing is offered again, and until the scenes are placed no image or clip is made for them; **Plan again** replaces the scenes as in any project.

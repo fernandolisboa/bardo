@@ -1348,6 +1348,7 @@ pub(crate) mod tests {
                 framing: bardo_media::ffmpeg::Framing::Fit,
                 transition: None,
                 motion: None,
+                slowed: None,
             }],
             audio: vec![bardo_media::ffmpeg::AudioTrack {
                 clips: vec![bardo_media::ffmpeg::AudioClip {

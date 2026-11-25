@@ -130,8 +130,8 @@ pub use diagnostics::{
 };
 pub use editor::{
     BinScene, ClipMedia, ClipPerformance, ClipProblem, ClipShows, ClipView, CutBasis, EditAction,
-    Editor, EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, WordMark,
-    media_framing, preview_size,
+    Editor, EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT,
+    SlowedClip, WordMark, media_framing, preview_size,
 };
 pub use export::{
     ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView, export_job_networks,
@@ -151,7 +151,9 @@ pub use media_import::{MediaImport, MediaImportError};
 pub use music_prompts::{MusicPromptError, MusicPromptView};
 pub use music_tracks::{GeneratedTrack, MusicTrackError, MusicTrackPlayer, MusicTracksView};
 pub use narration_import::{MAX_RECORDING_BYTES, Recording};
-pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
+pub use narrations::{
+    NarrationError, NarrationPlayer, NarrationView, PicturesAtStake, PicturesConsent,
+};
 pub use navigation::{Destination, Pillar, SettingsTab};
 pub use network_accounts::NetworkAccountError;
 pub use performed_takes::{
@@ -746,6 +748,7 @@ impl Bardo {
             owner: profile.id,
             costs,
             themes: Arc::clone(&themes),
+            in_flight: Arc::default(),
         };
         let research_handler = NicheResearchHandler {
             owner: profile.id,
@@ -888,6 +891,7 @@ impl Bardo {
         let clip_handler = ClipHandler {
             owner: profile.id,
             plans: Arc::clone(&scene_plans),
+            narrations: Arc::clone(&narrations),
             files: Arc::clone(&files),
             generators: providers.clips.clone(),
             secrets: Arc::clone(&secrets),
@@ -1026,41 +1030,44 @@ impl Bardo {
             jobs,
             profile.id,
             runner,
-            crate::jobs::built_in_handlers(crate::jobs::BuiltInHandlers {
-                research: research_handler,
-                themes: theme_handler,
-                scripts: script_handler,
-                localizations: localization_handler,
-                narrations: narration_handler,
-                imports: import_handler,
-                captures: capture_handler,
-                analyses: analysis_handler,
-                controls: control_handler,
-                take_prompts: take_prompt_handler,
-                performed: performed_handler,
-                staging: staging_handler,
-                framing: framing_handler,
-                scenes: scene_handler,
-                clips: clip_handler,
-                proxies: proxy_handler,
-                music_prompts: music_prompt_handler,
-                music: music_handler,
-                thumbnails: thumbnail_handler,
-                looks: look_handler,
-                chapters: chapters_handler,
-                renders: render_handler,
-                metadata: metadata_handler,
-                exports: export_handler,
-                metrics: metrics_handler,
-                cuts: cut_handler,
-                uploads: upload_handler,
-                backups: backup_handler,
-                restores: restore_handler,
-                updates: crate::updates::UpdateDownloadHandler {
-                    feed: Arc::clone(&providers.releases),
-                    installers: Arc::clone(&installers),
-                },
-            }),
+            crate::costs::paid_calls_sent_once(
+                crate::jobs::built_in_handlers(crate::jobs::BuiltInHandlers {
+                    research: research_handler,
+                    themes: theme_handler,
+                    scripts: script_handler,
+                    localizations: localization_handler,
+                    narrations: narration_handler,
+                    imports: import_handler,
+                    captures: capture_handler,
+                    analyses: analysis_handler,
+                    controls: control_handler,
+                    take_prompts: take_prompt_handler,
+                    performed: performed_handler,
+                    staging: staging_handler,
+                    framing: framing_handler,
+                    scenes: scene_handler,
+                    clips: clip_handler,
+                    proxies: proxy_handler,
+                    music_prompts: music_prompt_handler,
+                    music: music_handler,
+                    thumbnails: thumbnail_handler,
+                    looks: look_handler,
+                    chapters: chapters_handler,
+                    renders: render_handler,
+                    metadata: metadata_handler,
+                    exports: export_handler,
+                    metrics: metrics_handler,
+                    cuts: cut_handler,
+                    uploads: upload_handler,
+                    backups: backup_handler,
+                    restores: restore_handler,
+                    updates: crate::updates::UpdateDownloadHandler {
+                        feed: Arc::clone(&providers.releases),
+                        installers: Arc::clone(&installers),
+                    },
+                }),
+                &cost_book,
+            ),
             job_settings,
             redactor,
         )?;
@@ -1444,13 +1451,43 @@ pub(crate) mod testing {
         /// Answers although it was told to stop: the answer that arrives
         /// whole just as its job is stopped.
         pub(crate) deaf: Mutex<bool>,
+        /// While set, an answer on its way is held back, for a test to
+        /// act while the request is out; with `deaf`, the answer then
+        /// arrives whole whatever the stop said meanwhile.
+        pub(crate) held: std::sync::atomic::AtomicBool,
         /// Answers given up midway because their stop asked.
         pub(crate) given_up: std::sync::atomic::AtomicU32,
+        /// Requests nobody could have stopped (`Stop::never`): a job hands
+        /// over its own stop, so a request made by one is never among
+        /// these.
+        pub(crate) unstoppable: std::sync::atomic::AtomicU32,
+        /// The next call hangs until `release`, as when Bardo closes while
+        /// the provider works, and then answers nothing: the process that
+        /// sent it is gone.
+        pub(crate) hang: std::sync::atomic::AtomicBool,
+        /// A call is hanging.
+        pub(crate) hanging: std::sync::atomic::AtomicBool,
+        /// Lets a hanging call end.
+        pub(crate) release: std::sync::atomic::AtomicBool,
     }
 
     impl FakeTextGenerator {
         pub(crate) fn requests(&self) -> Vec<TextRequest> {
             self.requests.lock().unwrap().clone()
+        }
+
+        /// Holds answers back from now on, until `let_go`.
+        pub(crate) fn hold(&self) {
+            self.held.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        pub(crate) fn let_go(&self) {
+            self.held.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        /// How many requests came with a stop nobody can ask.
+        pub(crate) fn unstoppable(&self) -> u32 {
+            self.unstoppable.load(std::sync::atomic::Ordering::SeqCst)
         }
 
         /// Queues an answer proposing these titles, each with an angle.
@@ -1482,15 +1519,21 @@ pub(crate) mod testing {
                     "given up before the request was sent",
                 ));
             }
+            if !stop.may_ask() {
+                self.unstoppable
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
             self.requests.lock().unwrap().push(request.clone());
             let delay = *self.delay.lock().unwrap();
             let deaf = *self.deaf.lock().unwrap();
             let until = std::time::Instant::now() + delay;
             loop {
+                let held = self.held.load(std::sync::atomic::Ordering::SeqCst);
                 let left = until.saturating_duration_since(std::time::Instant::now());
-                if left.is_zero() {
+                if left.is_zero() && !held {
                     break;
                 }
+                let left = if held { Duration::from_millis(5) } else { left };
                 if !deaf && stop.asked() {
                     self.given_up
                         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1500,6 +1543,19 @@ pub(crate) mod testing {
                     ));
                 }
                 std::thread::sleep(left.min(Duration::from_millis(5)));
+            }
+            if self.hang.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                self.hanging
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                while !self.release.load(std::sync::atomic::Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                self.hanging
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::AnswerLost,
+                    "the app that sent it closed",
+                ));
             }
             if let Some(failure) = self.failure.lock().unwrap().clone() {
                 return Err(failure);
@@ -1893,6 +1949,8 @@ pub(crate) mod testing {
         StageImage,
         /// Submitting a clip: the call that is paid for.
         Submit,
+        /// Asking how a request is going.
+        Status,
     }
 
     /// Holds the next call of one kind open until `resume`.
@@ -1930,11 +1988,19 @@ pub(crate) mod testing {
         pub(crate) requests: Mutex<Vec<FakeClipRequest>>,
         pub(crate) polls: Mutex<Vec<String>>,
         pub(crate) hold: std::sync::atomic::AtomicBool,
+        /// Requests whose prompt has one of these words are answered while
+        /// the others are held.
+        pub(crate) not_held: Mutex<Vec<String>>,
+        /// Handing an image over fails this way.
+        pub(crate) stage_failure: Mutex<Option<ProviderFailure>>,
         pub(crate) failing: Mutex<Vec<String>>,
         pub(crate) submit_failure: Mutex<Option<ProviderFailure>>,
         pub(crate) quote: Mutex<Option<Money>>,
         /// How many status checks fail on the provider's side first.
         pub(crate) status_outages: Mutex<u32>,
+        /// How many requests the provider reports as failed first, in the
+        /// words adapters use for a `failed` task: an outage's.
+        pub(crate) provider_failures: Mutex<u32>,
         /// The provider it stands for; Higgsfield when `None`.
         pub(crate) provider: Option<Provider>,
         /// The key each call was made with, in order.
@@ -1942,6 +2008,8 @@ pub(crate) mod testing {
         /// Starts a new clip on every submission, like a provider without
         /// an idempotency key (the Higgsfield plan).
         pub(crate) no_idempotency: bool,
+        /// Cannot list what it started either (Google's video API).
+        pub(crate) no_lookup: bool,
         /// Submissions sent, answered or not.
         pub(crate) sends: Mutex<u32>,
         /// How many submissions start a clip and lose the answer.
@@ -1975,6 +2043,13 @@ pub(crate) mod testing {
 
         pub(crate) fn hold(&self, hold: bool) {
             self.hold.store(hold, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        /// Holds every request but the ones whose prompt has one of
+        /// `words`.
+        pub(crate) fn hold_unless(&self, words: &[&str]) {
+            *self.not_held.lock().unwrap() = words.iter().map(|word| (*word).to_owned()).collect();
+            self.hold(true);
         }
 
         /// Holds the next `call` open until `resume`.
@@ -2049,6 +2124,9 @@ pub(crate) mod testing {
         ) -> Result<StagedImage, ProviderFailure> {
             self.keys.lock().unwrap().push(key.expose().to_owned());
             self.pause.pass(ClipCall::StageImage);
+            if let Some(failure) = self.stage_failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
             let mut staged = self.staged.lock().unwrap();
             staged.push(image.clone());
             Ok(StagedImage(format!("https://fake/image-{}", staged.len())))
@@ -2067,11 +2145,16 @@ pub(crate) mod testing {
             }
             *self.sends.lock().unwrap() += 1;
             self.pause.pass(ClipCall::Submit);
+            // What each kind of provider answers when it cannot say: one
+            // that recognizes a repeated submission lets the queue send it
+            // again; one that does not says it may have started.
             let timed_out = || {
-                Err(ProviderFailure::new(
-                    bardo_domain::ProviderFailureKind::Unreachable,
-                    "timed out reading the answer",
-                ))
+                let kind = if self.no_idempotency {
+                    bardo_domain::ProviderFailureKind::AnswerLost
+                } else {
+                    bardo_domain::ProviderFailureKind::Unreachable
+                };
+                Err(ProviderFailure::new(kind, "timed out reading the answer"))
             };
             if Self::take(&self.unseen) {
                 return timed_out();
@@ -2102,6 +2185,10 @@ pub(crate) mod testing {
 
         fn dedupes_submissions(&self) -> bool {
             !self.no_idempotency
+        }
+
+        fn lists_submissions(&self) -> bool {
+            !self.no_lookup
         }
 
         fn check_submit(
@@ -2145,8 +2232,22 @@ pub(crate) mod testing {
             drop(outages);
             let index: usize = handle.0.trim_start_matches("req-").parse().unwrap();
             let prompt = self.requests.lock().unwrap()[index].request.prompt.clone();
-            if self.hold.load(std::sync::atomic::Ordering::SeqCst) {
+            self.pause.pass(ClipCall::Status);
+            let held = self.hold.load(std::sync::atomic::Ordering::SeqCst)
+                && !self
+                    .not_held
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|word| prompt.contains(word.as_str()));
+            if held {
                 return Ok(ClipStatus::Running);
+            }
+            if Self::take(&self.provider_failures) {
+                return Ok(ClipStatus::Failed(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::ProviderDown,
+                    "the task failed",
+                )));
             }
             if self.forgot.load(std::sync::atomic::Ordering::SeqCst) {
                 return Ok(ClipStatus::Lost(ProviderFailure::new(

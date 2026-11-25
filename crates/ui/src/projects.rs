@@ -24,9 +24,9 @@ use bardo_app::bardo_domain::{
 use bardo_app::{
     Bardo, BudgetConsent, ChaptersView, Control, Destination, ExportSummary, ExportView,
     MusicPromptView, MusicTrackPlayer, MusicTracksView, NarrationError, NarrationPlayer,
-    NarrationView, ProductionView, Recording, RenderReview, RenderSummary, ScenesView, ScriptError,
-    ScriptView, SpendEstimate, Stage, StageState, StageStatus, Text, ThumbnailView, TourAnchor,
-    UploadChoices, UploadReview, opening_stage, project_stages,
+    NarrationView, PicturesConsent, ProductionView, Recording, RenderReview, RenderSummary,
+    ScenesView, ScriptError, ScriptView, SpendEstimate, Stage, StageState, StageStatus, Text,
+    ThumbnailView, TourAnchor, UploadChoices, UploadReview, opening_stage, project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
@@ -54,11 +54,14 @@ use crate::{guide, layout};
 mod capture;
 mod export;
 mod music;
+mod narration_ask;
 mod render;
 mod scenes;
 mod upload;
 mod versions;
 mod youtube;
+
+use narration_ask::{NarrationAsk, NarrationWay};
 
 /// How often the screen checks the job queue for changes, and moves the
 /// highlighted word while the narration plays.
@@ -181,8 +184,8 @@ pub struct ProjectsScreen {
     versions_error: Option<Text>,
     /// A version held back at a budget: the channel, and what it costs.
     version_ask: Option<(ChannelId, SpendEstimate)>,
-    /// A narration held back at a budget.
-    narration_ask: Option<SpendEstimate>,
+    /// A narration held back at the scenes' pictures or at a budget.
+    narration_ask: Option<NarrationAsk>,
     /// Choosing or reading a recording to import; dropping it stops
     /// waiting for the result.
     choosing_recording: Option<Task<()>>,
@@ -191,8 +194,8 @@ pub struct ProjectsScreen {
     /// A recording read and waiting for the user to confirm the import,
     /// with what aligning it would cost.
     recording: Option<(Recording, SpendEstimate)>,
-    /// An import held back at a budget.
-    import_ask: Option<SpendEstimate>,
+    /// An import held back at the scenes' pictures or at a budget.
+    import_ask: Option<NarrationAsk>,
     /// Importing a capture, and what the Capture stage says.
     capture: capture::CaptureImport,
     /// The take prompt open in the Capture stage, as the user types it.
@@ -1364,6 +1367,7 @@ impl ProjectsScreen {
 
     fn generate_narration(
         &mut self,
+        pictures: PicturesConsent,
         consent: BudgetConsent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1375,10 +1379,18 @@ impl ProjectsScreen {
         if let Some(player) = self.player.as_mut() {
             player.pause();
         }
-        self.narration_error = match self.bardo.read(cx).generate_narration(id, consent) {
+        let started = self
+            .bardo
+            .read(cx)
+            .generate_narration(id, pictures, consent);
+        self.narration_error = match started {
             Ok(_) => None,
+            Err(NarrationError::WouldOutdatePictures(stake)) => {
+                self.narration_ask = Some(NarrationAsk::Pictures(stake));
+                None
+            }
             Err(NarrationError::OverBudget(estimate)) => {
-                self.narration_ask = Some(estimate);
+                self.narration_ask = Some(NarrationAsk::Budget(pictures, estimate));
                 None
             }
             Err(error) => Some(error.message()),
@@ -1441,6 +1453,7 @@ impl ProjectsScreen {
     /// Starts importing the chosen recording.
     fn import_recording(
         &mut self,
+        pictures: PicturesConsent,
         consent: BudgetConsent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1452,12 +1465,21 @@ impl ProjectsScreen {
         if let Some(player) = self.player.as_mut() {
             player.pause();
         }
-        match self.bardo.read(cx).import_narration(id, recording, consent) {
+        let started = self
+            .bardo
+            .read(cx)
+            .import_narration(id, recording, pictures, consent);
+        match started {
             Ok(_) => {
                 self.recording = None;
                 self.narration_error = None;
             }
-            Err(NarrationError::OverBudget(estimate)) => self.import_ask = Some(estimate),
+            Err(NarrationError::WouldOutdatePictures(stake)) => {
+                self.import_ask = Some(NarrationAsk::Pictures(stake));
+            }
+            Err(NarrationError::OverBudget(estimate)) => {
+                self.import_ask = Some(NarrationAsk::Budget(pictures, estimate));
+            }
             Err(error) => self.narration_error = Some(error.message()),
         }
         self.load(window, cx);
@@ -2364,7 +2386,7 @@ impl ProjectsScreen {
                 },
             ))
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                this.generate_narration(BudgetConsent::Ask, window, cx)
+                this.generate_narration(PicturesConsent::Ask, BudgetConsent::Ask, window, cx)
             }));
         let generate = if narration.is_some() && !view.stale {
             generate.outline().small()
@@ -2389,6 +2411,16 @@ impl ProjectsScreen {
             .map(|(recording, estimate)| {
                 self.render_chosen_recording(recording, estimate, narration.is_some(), cx)
             });
+
+        let narration_ask = self
+            .narration_ask
+            .as_ref()
+            .map(|ask| self.narration_question(NarrationWay::Generate, ask, cx));
+        let import_ask = self
+            .import_ask
+            .as_ref()
+            .map(|ask| self.narration_question(NarrationWay::Recording, ask, cx));
+        let bardo = self.bardo.read(cx);
 
         Some(
             v_flex()
@@ -2479,33 +2511,8 @@ impl ProjectsScreen {
                 })
                 .children(chosen)
                 .children(capture_import)
-                .children(self.narration_ask.as_ref().map(|estimate| {
-                    budget_question(
-                        "narration-budget",
-                        bardo,
-                        estimate,
-                        cx,
-                        cx.listener(|this, _: &ClickEvent, window, cx| {
-                            this.generate_narration(BudgetConsent::Confirmed, window, cx)
-                        }),
-                        cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.narration_ask = None;
-                            cx.notify();
-                        }),
-                    )
-                }))
-                .children(self.import_ask.as_ref().map(|estimate| {
-                    budget_question(
-                        "import-budget",
-                        bardo,
-                        estimate,
-                        cx,
-                        cx.listener(|this, _: &ClickEvent, window, cx| {
-                            this.import_recording(BudgetConsent::Confirmed, window, cx)
-                        }),
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.cancel_recording(cx)),
-                    )
-                }))
+                .children(narration_ask)
+                .children(import_ask)
                 .into_any_element(),
         )
     }
@@ -2768,7 +2775,12 @@ impl ProjectsScreen {
                             .small()
                             .label(tr(bardo, Text::UseRecording))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.import_recording(BudgetConsent::Ask, window, cx)
+                                this.import_recording(
+                                    PicturesConsent::Ask,
+                                    BudgetConsent::Ask,
+                                    window,
+                                    cx,
+                                )
                             })),
                     )
                     .child(

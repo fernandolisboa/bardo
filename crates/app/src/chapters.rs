@@ -303,19 +303,18 @@ impl ChaptersHandler {
                 schema: CHAPTERS_SCHEMA.to_owned(),
             },
         };
-        let generated = self
-            .text
-            .generate_until(&key, &request, stop)
-            .map_err(|failure| {
-                // An answer that was lost or cut may still have been billed.
-                self.costs.record_failed_for_project(
-                    &failure,
-                    &PlannedCall::text(CostPurpose::Chapters, &request),
-                    Some(job),
-                    project,
-                );
-                JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-            })?;
+        let paid_call = PlannedCall::text(CostPurpose::Chapters, &request);
+        let generated = {
+            let _paying = self.costs.paying_for_project(job, &paid_call, project)?;
+            self.text
+                .generate_until(&key, &request, stop)
+                .map_err(|failure| {
+                    // An answer that was lost or cut may still have been billed.
+                    self.costs
+                        .record_failed_for_project(&failure, &paid_call, Some(job), project);
+                    JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
+                })
+        }?;
         self.costs.record_for_project(
             PaidCall {
                 provider: Provider::Claude,
@@ -749,6 +748,7 @@ mod tests {
         assert_eq!(job.attempts(), 1, "not made again by the queue");
         assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
         assert_eq!(h.text.requests().len() - before, 1);
+        assert_eq!(h.text.unstoppable(), 0, "the job hands over its stop");
         let cost = only_cost(&*h.db, app.profile().id, CostPurpose::Chapters);
         assert_eq!((cost.project, cost.job), (Some(project.id), Some(id)));
     }
@@ -1064,7 +1064,7 @@ mod tests {
         assert!(!app.chapters(project.id).unwrap().stale);
         done(
             &app,
-            app.generate_narration(project.id, BudgetConsent::Ask)
+            app.generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
                 .unwrap(),
         );
         let view = app.chapters(project.id).unwrap();
@@ -1104,6 +1104,7 @@ mod tests {
                 owner: app.profile().id,
                 costs: Arc::clone(&h.db) as _,
                 themes: Arc::clone(&h.db) as _,
+                in_flight: std::sync::Arc::default(),
             },
         };
         let asked = h.text.requests().len();

@@ -461,21 +461,27 @@ impl JobHandler for CutSuggestionHandler {
                 for &point in &chunk.cuts {
                     questions = point_questions(questions, point, &candidates[point])?;
                 }
-                let decisions = engine
-                    .decide(&key, &chunk_state(chunk), &questions)
-                    .map_err(|failure| {
-                        // An answer that was lost may still have been billed.
-                        self.costs.record_failed_for_project(
-                            &failure,
-                            &PlannedCall::new(provider, CostPurpose::CutSuggestions, 1),
-                            Some(cx.id()),
-                            project,
-                        );
-                        JobFailure::new(
-                            failure.kind.into(),
-                            format!("decision engine: {}", failure.detail),
-                        )
-                    })?;
+                let paid_call = PlannedCall::new(provider, CostPurpose::CutSuggestions, 1);
+                let decisions = {
+                    let _paying = self
+                        .costs
+                        .paying_for_project(cx.id(), &paid_call, project)?;
+                    engine
+                        .decide(&key, &chunk_state(chunk), &questions)
+                        .map_err(|failure| {
+                            // An answer that was lost may still have been billed.
+                            self.costs.record_failed_for_project(
+                                &failure,
+                                &paid_call,
+                                Some(cx.id()),
+                                project,
+                            );
+                            JobFailure::new(
+                                failure.kind.into(),
+                                format!("decision engine: {}", failure.detail),
+                            )
+                        })
+                }?;
                 self.costs.record_for_project(
                     PaidCall {
                         provider,
@@ -1047,7 +1053,7 @@ mod tests {
         );
         done(
             &app,
-            app.generate_narration(project.id, BudgetConsent::Ask)
+            app.generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
                 .unwrap(),
         );
         h.answer(crate::scenes::tests::plan_answer());

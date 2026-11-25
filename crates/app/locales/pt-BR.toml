@@ -84,6 +84,11 @@ format = "Formato do vídeo"
 format_hint = "Short: vídeo vertical de menos de um minuto, para todas as redes. Longo: vídeo 16:9 de 8 a 10 minutos, para o YouTube. Define o tamanho do roteiro, o formato das imagens e do corte, e o preset do YouTube. Cada projeto pode escolher o outro."
 production = "Modo de produção"
 production_hint = "Como os vídeos deste canal são feitos: quais cenas viram clipes de IA e com qual modelo; o resto fica em imagens com movimento. Cada projeto pode escolher outro e mostra quanto o vídeo inteiro custa em cada modo antes de gerar qualquer coisa."
+clip_fit = "Duração dos clipes"
+clip_fit_hint = "Alguns modelos de vídeo só fazem durações fixas, como 5 ou 10 segundos. Com \"Clipe mais curto, em câmera lenta\", uma cena um pouco mais longa que uma dessas durações paga por essa duração, e o clipe toca em câmera lenta para terminar junto com a cena: uma cena de 6 segundos paga 5 segundos em vez de 10. Até quanto mais longa ela pode ser, você define logo abaixo. \"Sempre cobrir a cena\" pede o clipe mais longo e corta o resto; escolha quando seus clipes mostram ação rápida, em que a câmera lenta aparece. Modelos que fazem qualquer duração recebem, nos dois casos, a duração de que a cena precisa."
+stretch_limit = "Esticar um clipe em até"
+stretch_limit_hint = "O quanto um clipe pode tocar além da própria duração quando fica em câmera lenta para caber na cena. Um limite maior economiza mais e deixa mais lento: em 40%, o clipe toca no mínimo a cerca de 70% da velocidade; em 100%, na metade. Quanto maior o limite, mais a câmera lenta aparece, primeiro nos movimentos rápidos. Clipes já feitos mantêm o limite com que foram feitos."
+stretch_limit_choice = "{percent}% · um clipe de 10 s cobre até {seconds}"
 style = "Estilo visual"
 style_hint = "Como os vídeos deste canal são desenhados: fotografia, desenho animado, mangá, massinha e assim por diante. O Bardo acrescenta o estilo a cada imagem de cena, a cada retrato do elenco e ao fundo da miniatura, para toda imagem ser pedida com o mesmo visual. \"Pelas notas do canal\" tira o visual das notas de estética, como o Claude as lê. Cada projeto pode escolher outro; os que não escolhem seguem esta opção quando ela muda."
 transition = "Transição padrão"
@@ -244,6 +249,10 @@ dark_fantasy = "Fantasia sombria"
 woodblock = "Xilogravura colorida"
 chalkboard = "Quadro-negro"
 
+[clip_fit]
+stretch = "Clipe mais curto, em câmera lenta"
+cover = "Sempre cobrir a cena"
+
 [production_mode]
 economy = "Econômico"
 hook = "Gancho animado"
@@ -364,6 +373,7 @@ limit_reached = "Uma cota ou limite de uso parou o provedor. As cotas do YouTube
 provider_unavailable = "Não foi possível falar com o provedor, ou ele está com problemas. Tentando de novo automaticamente."
 answer_lost = "O pedido foi enviado, mas a resposta não voltou. O provedor pode ter feito o trabalho e cobrado por ele, então o Bardo não enviou de novo sozinho e somou uma estimativa em Custos. Tente de novo quando quiser."
 unexpected_answer = "O provedor deu uma resposta que o Bardo não entende."
+request_failed = "O provedor aceitou o pedido e depois não conseguiu atendê-lo. O Bardo não o enviou de novo sozinho, porque seria um pedido novo. Tente de novo para pedir outra vez."
 declined = "O provedor recusou este pedido pelas regras de segurança dele. Mude o que foi pedido (o prompt, o canal ou o nicho) e tente de novo."
 media = "O ffmpeg não conseguiu ler ou gravar um arquivo de mídia. Confira o arquivo indicado e tente de novo."
 missed = "O horário do post agendado passou sem ele, então nada foi postado. Escolha o que fazer na etapa Publicação do projeto."
@@ -373,6 +383,7 @@ restored = "Isto estava em andamento quando o backup foi feito, então o Bardo n
 checksum = "O instalador não confere com o checksum publicado na versão, então o Bardo não o guardou. Tente de novo; se acontecer outra vez, relate o problema."
 off_script = "A gravação não segue o roteiro de perto o bastante. Grave de novo lendo o roteiro atual e importe."
 vision_models = "Os modelos de rosto, profundidade e máscara estão faltando, danificados ou não rodaram. Reinstale o Bardo para recolocá-los e tente de novo."
+out_of_date = "A narração foi feita de novo depois que estas cenas foram planejadas, então nada mais foi feito para elas. Na etapa Cenas, ajuste as cenas à narração ou planeje de novo (numa versão, posicione as cenas), e comece de novo."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -380,7 +391,11 @@ not_started = "Não foi possível iniciar a tarefa. Tente de novo."
 runs_elsewhere = "O agente em segundo plano está rodando esta tarefa agora. Tente de novo quando ela terminar."
 superseded = "Uma narração mais nova deste projeto substituiu esta importação, então ela não roda de novo."
 restyled = "O estilo visual do vídeo mudou depois que esta tarefa começou, então ela não roda de novo. Desenhe as cenas pela etapa Cenas, que mostra quanto custam no estilo atual."
+scenes_moved_on = "As cenas deste projeto foram planejadas ou desenhadas de novo depois desta tarefa, então ela não roda de novo: ela substituiria esse plano e as imagens dele. Planeje as cenas pela etapa Cenas."
 take_from_page = "Nada desta tomada chegou ao provedor ainda. Faça de novo na etapa Captura, que confere antes o teto do vídeo, a tomada de teste e as checagens antes do envio."
+narration_busy = "Há uma narração sendo feita para este projeto, e o que esta tarefa fizesse agora ficaria desatualizado na hora. Quando a narração ficar pronta, traga as cenas para ela na etapa Cenas antes."
+scenes_busy = "Há cenas, imagens ou clipes sendo feitos para este projeto, ou uma tarefa cancelada ainda está parando. Execute de novo quando terminarem, ou cancele antes."
+asks_first = "As cenas deste vídeo têm imagens ou clipes que executar isto de novo deixaria desatualizados ou descartaria. Comece pela etapa correspondente no projeto, que mostra o que está em jogo e pergunta antes."
 
 [setup]
 step_by_step = "Passo a passo"
@@ -450,7 +465,7 @@ placeholder = "Sua chave de API da ElevenLabs"
 
 [provider.gemini]
 name = "Gemini"
-purpose = "Imagens (Nano Banana) e clipes de vídeo (Veo, Gemini Omni Flash), pelo Google AI Studio."
+purpose = "Imagens (Nano Banana) e clipes de vídeo (Gemini Omni Flash), pelo Google AI Studio."
 placeholder = "Sua chave de API do Gemini"
 
 [provider.higgsfield]
@@ -712,6 +727,8 @@ voice_unchecked = "A voz do narrador ainda não foi verificada na sua conta Elev
 voice_unavailable = "A voz do narrador não está na sua conta ElevenLabs. Resolva na tela Personas ou escolha outro narrador."
 missing_key = "Salve uma chave da ElevenLabs em Configurações para gerar ou importar narração."
 busy = "Já há uma narração sendo feita para este projeto."
+scenes_busy = "Há cenas, imagens ou clipes sendo feitos para este projeto na narração atual. Espere terminarem, ou cancele no painel Tarefas, antes de trocar a narração."
+outdates_pictures = "Uma nova narração deixa desatualizadas as imagens e os clipes das cenas deste vídeo. Confirme para continuar."
 missing = "Gere ou importe a narração primeiro."
 audio_missing = "O arquivo de áudio da narração sumiu da pasta do projeto. Gere de novo."
 cannot_play = "Não foi possível tocar a narração: não há saída de áudio disponível ou o arquivo não pode ser lido."
@@ -720,6 +737,12 @@ recording_unreadable = "Não foi possível ler o arquivo. Confira se ele ainda e
 recording_unsupported = "O Bardo importa gravações em MP3 e WAV sem compressão. Converta o arquivo para um deles e importe de novo."
 recording_empty = "O arquivo não tem áudio."
 recording_too_large = "O arquivo passa de 500 MB. Exporte em MP3 e importe de novo."
+
+[narration.outdates]
+fit = "As cenas deste vídeo têm imagens e clipes nos tempos da narração atual (imagens: {images}, clipes: {clips}). Uma nova narração deixa tudo isso desatualizado. Ela lê o mesmo texto em que as cenas foram planejadas, então depois Ajustar à narração, na etapa Cenas, mantém tudo."
+replan = "As cenas deste vídeo têm imagens e clipes nos tempos da narração atual (imagens: {images}, clipes: {clips}). Uma nova narração deixa tudo isso desatualizado, e o roteiro mudou depois que as cenas foram planejadas, então elas não podem ser ajustadas a ela: as cenas vão ter que ser planejadas de novo, o que descarta essas imagens e clipes."
+confirm = "Trocar a narração"
+cancel = "Manter a narração atual"
 
 [capture]
 import = "Importar captura"
@@ -1001,8 +1024,15 @@ planning = "Planejando as cenas…"
 drawing = "Desenhando as imagens…"
 stopping = "Cancelada. Terminando o que já tinha sido enviado…"
 stopped = "A última execução parou:"
-stale = "A narração foi gerada de novo depois que estas cenas foram planejadas, então os tempos não batem mais. Planeje de novo."
+stale = "A narração foi feita de novo depois que estas cenas foram planejadas e lê outro texto, então as cenas não podem ser ajustadas a ela. Planeje de novo. Até lá nenhuma imagem ou clipe é feito para elas: sairia nos tempos de uma narração que não existe mais."
+stale_fit = "A narração foi feita de novo depois que estas cenas foram planejadas, então os tempos não batem mais. Ela lê o mesmo texto: Ajustar à narração leva cada cena ao seu novo tempo e mantém todas as imagens e clipes. Até lá nenhuma imagem ou clipe é feito para elas."
 stale_tag = "Desatualizadas"
+fit = "Ajustar à narração"
+fit_title = "Narração nova, mesmo texto"
+fit_hint = "Mantém estas cenas com seus prompts, imagens e clipes, e lê de novo, na nova narração, quando cada uma começa e termina. Não custa nada. Uma cena que agora dura mais que o clipe segura o último quadro dele."
+paid_held = "Desatualizadas. Ajuste as cenas à narração antes."
+paid_held_replan = "Desatualizadas. Planeje as cenas de novo antes, na etapa Cenas."
+paid_held_version = "Desatualizadas. Posicione as cenas nesta narração antes."
 count = "{n} cenas"
 generate_images = "Gerar {n} imagens"
 images_hint = "O Nano Banana desenha cada cena como imagem 16:9 em 2K; o Gemini cobra cada uma. Uma cena recusada pelo provedor não interrompe as outras."
@@ -1034,8 +1064,13 @@ failed = "Sem clipe:"
 model = "Modelo de vídeo"
 model_channel = "Padrão ({model})"
 model_gone = "O modelo de vídeo desta cena não é mais oferecido. Escolha outro."
+model_replaced = "O modelo de vídeo desta cena, {old}, foi descontinuado pelo provedor. Os novos clipes usam {new}."
+channel_model_replaced = "O modelo de vídeo do canal, {old}, foi descontinuado pelo provedor. Os novos clipes usam {new}; salvar o canal mantém essa escolha."
 plan = "Próximo clipe: {seconds} s · {price}"
 plan_unpriced = "Próximo clipe: {seconds} s · sem tarifa para este modelo"
+slowed_next = "Toca em câmera lenta para caber na cena"
+slowed = "Em câmera lenta"
+slowed_hint = "O próximo clipe é pedido um pouco mais curto que a cena de propósito: custa menos e toca em câmera lenta para terminar junto com a cena. Em Duração dos clipes, no canal, você muda até quanto ou desliga isso para os próximos clipes."
 motion_prompt = "Movimento"
 motion_from_image = "Igual ao prompt de imagem"
 edit_motion = "Editar movimento"
@@ -1057,6 +1092,9 @@ scene_not_found = "Essa cena não existe mais; as cenas podem ter sido planejada
 missing_claude_key = "Salve uma chave do Claude em Configurações para planejar cenas."
 missing_gemini_key = "Salve uma chave do Gemini em Configurações para gerar imagens e clipes do Google."
 busy = "Já há cenas, imagens ou clipes sendo gerados para este projeto."
+narration_busy = "Há uma narração sendo feita para este projeto. Espere terminar, ou cancele no painel Tarefas: cenas planejadas, desenhadas ou animadas agora ficariam desatualizadas assim que ela ficasse pronta."
+plan_out_of_date = "Estas cenas estão desatualizadas: a narração mudou depois que elas foram planejadas, então uma imagem ou um clipe feito agora sairia nos tempos de uma narração que não existe mais. Ajuste as cenas à narração ou planeje de novo antes (numa versão, posicione as cenas)."
+other_text = "A narração lê outro texto, diferente daquele em que estas cenas foram planejadas, então elas não podem ser ajustadas a ela. Planeje de novo."
 would_discard_images = "Planejar de novo descarta as imagens e os clipes destas cenas. Confirme para continuar."
 nothing_to_generate = "Todas as cenas já têm imagem."
 nothing_to_review = "Não há imagem nova para revisar."
@@ -1517,7 +1555,7 @@ previous_frame = "Quadro anterior"
 next_frame = "Próximo quadro"
 building = "Gerando proxies de pré-visualização… {ready} de {total} arquivos"
 keep_editing = "Você pode continuar editando enquanto isso roda"
-stale = "A narração mudou depois que as cenas foram planejadas. Planeje-as de novo para acompanhar."
+stale = "A narração mudou depois que as cenas foram planejadas. Na etapa Cenas, ajuste as cenas a ela, ou planeje de novo quando ela lê outro texto (numa versão, posicione as cenas)."
 
 cut_reset = "As cenas ou a narração mudaram desde a sua última edição, então o corte recomeça do corte bruto."
 [editor.bin]
@@ -1532,6 +1570,7 @@ clip = "Clipe"
 source_image = "Imagem {provider} · {model}"
 source_clip = "Animada com {provider} · {model}"
 source_still = "Imagem parada"
+source_slowed = "Toca em câmera lenta para caber na cena: {recorded} de clipe em {played}"
 source_none = "Ainda sem imagem"
 source_footage = "Vídeo importado. A imagem toca sem o som dele: ponha som na faixa de música ou de efeitos."
 source_performed = "Clipe interpretado: a sua tomada, interpretada pela persona. A imagem toca sem o som dele; a narração na A1 é a voz dele."
@@ -3007,8 +3046,8 @@ title = "Todas ou pendentes"
 body = "Pendentes mostra só as cenas com algo por fazer, uma imagem para desenhar ou revisar. Todas mostra cada uma."
 
 [tour.scenes.replan]
-title = "Planeje de novo"
-body = "Quando a narração é feita de novo, as cenas ficam desatualizadas, porque os tempos delas não batem mais. Planejar de novo as substitui, e pergunta antes quando isso descartaria imagens ou clipes."
+title = "Depois de uma nova narração"
+body = "Quando a narração é feita de novo, as cenas ficam desatualizadas e nenhuma imagem ou clipe é feito para elas até baterem com ela. Ajustar à narração mantém todas as imagens e clipes quando o roteiro não mudou. Senão, Planejar de novo substitui as cenas, e pergunta antes quando isso descartaria imagens ou clipes."
 
 [tour.scenes.place]
 title = "Posicionar as cenas"
@@ -3035,7 +3074,7 @@ body = "Um novo clipe espera ao lado do atual; reproduza-o antes de usar. Uma ce
 
 [tour.clips.cost]
 title = "Quanto custa um clipe"
-body = "Quanto vai durar o próximo clipe da cena e quanto ele custa pela tarifa do provedor, antes de você animar. O provedor cobra cada segundo."
+body = "Quanto vai durar o próximo clipe da cena e quanto ele custa pela tarifa do provedor, antes de você animar. O provedor cobra cada segundo. Num modelo de durações fixas, uma cena um pouco mais longa que uma delas paga esse clipe mais curto, que toca em câmera lenta para caber; o canal define até quanto, ou desliga."
 
 [tour.personas]
 name = "Tour das Personas"
@@ -3201,7 +3240,7 @@ body = "Shorts são verticais, têm menos de um minuto e servem para todas as re
 
 [tour.channels.defaults]
 title = "Modelo de vídeo, legendas e transições"
-body = "O modelo que anima as imagens das cenas do canal em clipes, o visual das legendas nos projetos novos e a cor em que acende a palavra falada, e a transição que o editor põe num corte. Qualquer cena pode escolher outro modelo, qualquer projeto outras legendas e qualquer corte outra transição."
+body = "O modelo que anima as imagens das cenas do canal em clipes, e se um clipe um pouco mais curto que a cena fica em câmera lenta para caber, e em quanto, para você pagar menos segundos. Depois, o visual das legendas nos projetos novos e a cor em que acende a palavra falada, e a transição que o editor põe num corte. Qualquer cena pode escolher outro modelo, qualquer projeto outras legendas e qualquer corte outra transição."
 
 [tour.channels.accounts]
 title = "Contas de rede"
@@ -3367,7 +3406,7 @@ body = "Uma falha passageira, como uma conexão que não pôde ser feita, faz a 
 
 [tour.jobs.restart]
 title = "Fechar o Bardo no meio de uma tarefa"
-body = "Feche o Bardo quando quiser: na próxima vez que ele abrir, cada tarefa continua do último ponto salvo, e o trabalho que um provedor já fez não é pago duas vezes."
+body = "Feche o Bardo quando quiser: na próxima vez que ele abrir, cada tarefa continua do último ponto salvo, e o trabalho que um provedor já fez não é pago duas vezes. Um pedido pago que ainda esperava a resposta não é enviado de novo sozinho: a tarefa aparece como falha, e Tentar de novo pede outra vez."
 
 [tour.keys]
 name = "Tour de Chaves de API"

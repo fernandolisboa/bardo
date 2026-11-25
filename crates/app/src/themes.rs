@@ -677,20 +677,18 @@ impl ThemeHandler {
 
         let key = self.key(Provider::Claude)?;
         let request = proposal_request(&payload.brief, niche, &avoid);
-        let generated = self
-            .text
-            .generate_until(&key, &request, stop)
-            .map_err(|failure| {
-                // An answer that was lost or cut may still have been billed.
-                self.costs.record_failed(
-                    &failure,
-                    &PlannedCall::text(CostPurpose::ThemeIdeas, &request),
-                    Some(job),
-                    Some(channel),
-                    None,
-                );
-                provider_failure("Claude", failure)
-            })?;
+        let paid_call = PlannedCall::text(CostPurpose::ThemeIdeas, &request);
+        let generated = {
+            let _paying = self.costs.paying(job, &paid_call, Some(channel), None)?;
+            self.text
+                .generate_until(&key, &request, stop)
+                .map_err(|failure| {
+                    // An answer that was lost or cut may still have been billed.
+                    self.costs
+                        .record_failed(&failure, &paid_call, Some(job), Some(channel), None);
+                    provider_failure("Claude", failure)
+                })
+        }?;
         self.costs.record(
             PaidCall {
                 provider: Provider::Claude,
@@ -775,17 +773,23 @@ impl ThemeHandler {
                         .map_err(unexpected)?;
                 }
             }
-            let decisions = engine.decide(&key, &state, &questions).map_err(|failure| {
-                // An answer that was lost may still have been billed.
-                self.costs.record_failed(
-                    &failure,
-                    &PlannedCall::new(provider, CostPurpose::ThemeRanking, 1),
-                    Some(cx.id()),
-                    Some(channel),
-                    None,
-                );
-                provider_failure("decision engine", failure)
-            })?;
+            let paid_call = PlannedCall::new(provider, CostPurpose::ThemeRanking, 1);
+            let decisions = {
+                let _paying = self
+                    .costs
+                    .paying(cx.id(), &paid_call, Some(channel), None)?;
+                engine.decide(&key, &state, &questions).map_err(|failure| {
+                    // An answer that was lost may still have been billed.
+                    self.costs.record_failed(
+                        &failure,
+                        &paid_call,
+                        Some(cx.id()),
+                        Some(channel),
+                        None,
+                    );
+                    provider_failure("decision engine", failure)
+                })
+            }?;
             self.costs.record(
                 PaidCall {
                     provider,
@@ -1482,6 +1486,7 @@ mod tests {
         suggest(&app, &channel);
 
         let requests = h.text.requests();
+        assert_eq!(h.text.unstoppable(), 0, "the job hands over its stop");
         assert_eq!(requests.len(), 1);
         let request = &requests[0];
         assert!(matches!(request.format, TextFormat::Json { .. }));

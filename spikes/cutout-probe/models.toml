@@ -1,0 +1,172 @@
+# Sources and files of the product-cutout spike (issue #277), each pinned:
+# upstream code by commit, weights by SHA-256 (and by revision where the
+# host has one). tools/convert.py downloads them, checks every hash, and
+# writes the [[model]] files with their weights kept as float16, as
+# crates/vision/models.toml's are. This is also the draft of the entries
+# the vision models manifest would gain; docs/spikes/product-cutout.md
+# says which.
+#
+# Licenses, as each source states them:
+# - U²-Net: the repository is Apache-2.0; its README links to the weight
+#   files on a file host. Trained on DUTS-TR.
+# - IS-Net: the repository says its "code and evaluation metric use Apache
+#   License 2.0"; its README links to the weight files on a file host and
+#   does not say what the general-use weights were trained on. DIS5K, the
+#   set of its academic weights, has terms of its own (non-commercial
+#   research and education).
+# - BiRefNet: the repository is MIT, and each model's page, which holds
+#   the weight file, states MIT; the general-use weights were trained on
+#   DIS5K among other sets.
+# RMBG (CC BY-NC) is not here and must never be added.
+
+[sources.u2net]
+name = "U²-Net"
+version = "u2net.pth"
+url = "https://drive.usercontent.google.com/download?id=1ao1ovG1Qtx4b7EoskHXmi2E9rp5CHLcZ&export=download&confirm=t"
+sha256 = "10025a17f49cd3208afc342b589890e402ee63123d6f2d289a4a0903695cce58"
+license = "Apache-2.0"
+license_url = "https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE"
+
+[sources.u2net.code]
+repo = "https://github.com/xuebinqin/U-2-Net.git"
+commit = "ac7e1c817ecab7c7dff5ce6b1abba61cd213ff29"
+license = "Apache-2.0"
+
+[sources.u2netp]
+name = "U²-Net, small (U²-Netp)"
+version = "u2netp.pth"
+url = "https://drive.usercontent.google.com/download?id=1rbSTGKAE-MTxBYHd-51l2hMOQPT_7EPy&export=download&confirm=t"
+sha256 = "e7567cde013fb64813973ce6e1ecc25a80c05c3ca7adbc5a54f3c3d90991b854"
+license = "Apache-2.0"
+license_url = "https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE"
+
+[sources.u2netp.code]
+repo = "https://github.com/xuebinqin/U-2-Net.git"
+commit = "ac7e1c817ecab7c7dff5ce6b1abba61cd213ff29"
+license = "Apache-2.0"
+
+[sources.isnet_general_use]
+name = "IS-Net, general use"
+version = "isnet-general-use.pth"
+url = "https://drive.usercontent.google.com/download?id=1XHIzgTzY5BQHw140EDIgwIb53K659ENH&export=download&confirm=t"
+sha256 = "9e1aafea58f0b55d0c35077e0ceade6ba1ba2bce372fd4f8f77215391f3fac13"
+license = "Apache-2.0"
+license_url = "https://github.com/xuebinqin/DIS/blob/main/LICENSE.md"
+
+[sources.isnet_general_use.code]
+repo = "https://github.com/xuebinqin/DIS.git"
+commit = "b6764e20381f6f42a70f83fa3324181529ed1403"
+license = "Apache-2.0"
+
+[sources.birefnet_lite]
+name = "BiRefNet lite (Swin-T), general use"
+version = "aa62cd8"
+url = "https://huggingface.co/ZhengPeng7/BiRefNet_lite/resolve/aa62cd87eafb9cc43056d08ef3615a14628b831d/model.safetensors"
+sha256 = "4417d89795250e698c3cb0ae8df15743810065f646f48a694fdfa7ca052d0815"
+license = "MIT"
+license_url = "https://huggingface.co/ZhengPeng7/BiRefNet_lite"
+
+[sources.birefnet_lite.code]
+repo = "https://github.com/ZhengPeng7/BiRefNet.git"
+commit = "f7079632d681ecf12161fcea8905682934e59e51"
+license = "MIT"
+
+[sources.birefnet_lite_matting]
+name = "BiRefNet lite (Swin-T), matting"
+version = "99c3341"
+url = "https://huggingface.co/ZhengPeng7/BiRefNet_lite-matting/resolve/99c33412e3f58e1f33187abdc8c435c645243690/model.safetensors"
+sha256 = "ce8bcfc045e336322c0424a5863dcfb7e9ce8fed0a5fd4d1b2b20adf12d97243"
+license = "MIT"
+license_url = "https://huggingface.co/ZhengPeng7/BiRefNet_lite-matting"
+
+[sources.birefnet_lite_matting.code]
+repo = "https://github.com/ZhengPeng7/BiRefNet.git"
+commit = "f7079632d681ecf12161fcea8905682934e59e51"
+license = "MIT"
+
+# The files tools/convert.py writes. `input` is height and width; `scale`,
+# `mean` and `std` are how each upstream prepares a photo; `range` is what
+# its own inference does to the output (U²-Net and IS-Net stretch it from
+# its smallest to its largest value). `sha256` and `size` are those of the
+# files the spike's numbers were measured on. The conversion says when
+# it wrote other bytes, which another CPU can make it do: the files are
+# the pin, not a new conversion.
+
+[[model]]
+file = "u2netp_320x320.onnx"
+sha256 = "fbd20e309fb80d8a7884900c706d38bb3aaf0333538a38d27b2d8a4d794a7975"
+size = 2387844
+from = "u2netp"
+input = [320, 320]
+scale = "max"
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
+range = "min-max"
+
+[[model]]
+file = "u2net_320x320.onnx"
+sha256 = "859b218d08f9f0d46fd9a58c47d5d9a08da7762406c69cf2e1cbf0af6ababcc1"
+size = 88099422
+from = "u2net"
+input = [320, 320]
+scale = "max"
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
+range = "min-max"
+
+[[model]]
+file = "isnet_general_use_1024x1024.onnx"
+sha256 = "f4bf44420862609032c6de61ee8e3bfd89c121589dcebc6354f6ffd18abe5c74"
+size = 88140951
+from = "isnet_general_use"
+input = [1024, 1024]
+scale = "byte"
+mean = [0.5, 0.5, 0.5]
+std = [1.0, 1.0, 1.0]
+range = "min-max"
+
+[[model]]
+file = "birefnet_lite_1024x1024.onnx"
+sha256 = "24b1439a4980fbb958c6b4bf1485f3e370b7d4d028b676a49854b0b6a6f791a1"
+size = 94670931
+from = "birefnet_lite"
+input = [1024, 1024]
+scale = "byte"
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
+range = "as-is"
+
+# The same weights at smaller inputs: less time and memory, for a
+# coarser mask.
+[[model]]
+file = "birefnet_lite_768x768.onnx"
+sha256 = "5d589b5abc03530addf90037759bbc78b3c0b888c909589ae94ce24a7593f0b0"
+size = 94670931
+from = "birefnet_lite"
+input = [768, 768]
+scale = "byte"
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
+range = "as-is"
+
+[[model]]
+file = "birefnet_lite_512x512.onnx"
+sha256 = "78ea5e9857829c3597caa4e81ffca1cd370f9bcefaacbdcf9648ba8516ed4b8c"
+size = 94670931
+from = "birefnet_lite"
+input = [512, 512]
+scale = "byte"
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
+range = "as-is"
+
+[[model]]
+file = "birefnet_lite_matting_1024x1024.onnx"
+sha256 = "ae0db21287e15219c3e195bd97217088fc8bece3bc1c20463d667034e55b7204"
+size = 94670931
+from = "birefnet_lite_matting"
+input = [1024, 1024]
+scale = "byte"
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
+range = "as-is"

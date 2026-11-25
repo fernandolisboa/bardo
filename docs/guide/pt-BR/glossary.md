@@ -90,9 +90,11 @@ As palavras que o Bardo usa, em termos simples.
 
 **Clipe**: um vídeo curto que um modelo de vídeo faz a partir da imagem de uma cena. Opcional.
 
+**Clipe em câmera lenta**: um clipe feito um pouco mais curto que a cena e reproduzido mais devagar para terminar junto com ela, pagando menos segundos. Só com modelos de vídeo de durações fixas; o canal define até quanto um clipe pode esticar, ou desliga ([Clipes em câmera lenta](clips.md#stretch)).
+
 **Prompt de movimento**: como a imagem da cena se move no clipe: o assunto, a ação, a câmera.
 
-**Modelo de vídeo**: o modelo que faz os clipes, como o Kling (pela Higgsfield, pelo plano Higgsfield ou direto do Kling) ou o Veo pelo Gemini. Definido por canal e trocável por cena.
+**Modelo de vídeo**: o modelo que faz os clipes, como o Kling (pela Higgsfield, pelo plano Higgsfield ou direto do Kling) ou o Gemini Omni Flash pelo Gemini. Definido por canal e trocável por cena.
 
 **Geração**: o registro de como algo foi feito: provedor, modelo, prompt e versão do modelo de instruções. Editar o resultado não muda esse registro.
 

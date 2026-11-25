@@ -1,0 +1,9 @@
+HTTP/2 503
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": "service_unavailable",
+    "message": "The service is temporarily overloaded. Please try again later."
+  }
+}

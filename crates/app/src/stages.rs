@@ -260,7 +260,7 @@ pub fn project_stages(
 
     let scenes_stage = if scenes.narration.is_none() {
         StageStatus::locked(Stage::Scenes, StageNote::After(Stage::Narration))
-    } else if running(scenes.job.as_ref()) {
+    } else if scenes.is_busy() {
         StageStatus::working(Stage::Scenes)
     } else if plan.is_none() {
         StageStatus::new(Stage::Scenes, StageState::Open, StageNote::ScenesMissing)

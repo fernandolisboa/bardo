@@ -84,6 +84,11 @@ format = "Video format"
 format_hint = "Short: a vertical video of under a minute, for every network. Long: a 16:9 video of 8 to 10 minutes, for YouTube. It sets the script's length, the shape of the pictures and the cut, and YouTube's preset. Each project can pick the other."
 production = "Production mode"
 production_hint = "How this channel's videos are made: which scenes become AI clips and with which model; the rest stay stills with motion. Each project can pick another and shows what the whole video costs in each mode before anything is generated."
+clip_fit = "Clip length"
+clip_fit_hint = "Some video models only make set lengths, such as 5 or 10 seconds. With \"Shorter clip, slowed to fit\", a scene a little longer than one of those lengths pays for that length, and its clip plays slowed down to end with the scene: a 6 second scene pays for 5 seconds instead of 10. How much longer the scene may be is set just below. \"Always cover the scene\" asks for the longer clip and trims the rest; pick it when your clips show fast action, where slow motion is noticed. Models that make any length are asked for what the scene needs either way."
+stretch_limit = "Stretch a clip by up to"
+stretch_limit_hint = "How much longer than its own length a clip may play when it is slowed to fit its scene. A higher limit saves more and slows more: at 40%, a clip plays no slower than about 70% of its speed; at 100%, at half speed. The higher the limit, the more the slow motion shows, on fast movement first. Clips already made keep the limit they were made under."
+stretch_limit_choice = "{percent}% · a 10 s clip covers up to {seconds}"
 style = "Visual style"
 style_hint = "How this channel's videos are drawn: a photograph, a cartoon, manga, clay and so on. Bardo adds the style to every scene image, every cast portrait and the thumbnail's background, so every image is asked for the same look. \"From the channel's notes\" takes the look from the aesthetic notes instead, as Claude reads them. Each project can pick another; the ones that do not follow this choice when it changes."
 transition = "Default transition"
@@ -244,6 +249,10 @@ dark_fantasy = "Dark fantasy"
 woodblock = "Woodblock print"
 chalkboard = "Chalkboard"
 
+[clip_fit]
+stretch = "Shorter clip, slowed to fit"
+cover = "Always cover the scene"
+
 [production_mode]
 economy = "Economy"
 hook = "Animated hook"
@@ -364,6 +373,7 @@ limit_reached = "A quota or rate limit stopped the provider. YouTube quotas rese
 provider_unavailable = "Could not reach the provider, or it is having problems. Retrying automatically."
 answer_lost = "The request was sent, but no answer came back. The provider may have done the work and charged for it, so Bardo did not send it again by itself and added an estimate to Costs. Retry when you are ready."
 unexpected_answer = "The provider gave an answer Bardo does not understand."
+request_failed = "The provider took the request and then could not complete it. Bardo did not send it again by itself, since that would be a new request. Retry to ask for it again."
 declined = "The provider declined this request under its safety rules. Change what was asked (the prompt, the channel or the niche) and try again."
 media = "ffmpeg could not read or write a media file. Check the file named, then retry."
 missed = "The scheduled post's time passed without it, so nothing was posted. Choose what to do on the project's Publish stage."
@@ -373,6 +383,7 @@ restored = "This was under way when the backup was made, so Bardo didn't resume 
 checksum = "The installer doesn't match the checksum its release publishes, so Bardo didn't keep it. Try again; if it happens again, report it."
 off_script = "The recording does not follow the script closely enough. Record it again reading the current script, then import it."
 vision_models = "The face, depth and mask models are missing, damaged or would not run. Reinstall Bardo to put them back, then retry."
+out_of_date = "The narration was made again since these scenes were planned, so nothing more was made for them. On the Scenes stage, fit the scenes to the narration or plan them again (on a version, place them), then start again."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
@@ -380,7 +391,11 @@ not_started = "Could not start the job. Try again."
 runs_elsewhere = "The background agent is running this job right now. Try again when it finishes."
 superseded = "A newer narration of this project replaced this import, so it cannot run again."
 restyled = "The video's visual style changed after this job started, so it cannot run again. Draw the scenes from the Scenes stage, which shows what they cost in the current style."
+scenes_moved_on = "This project's scenes were planned or drawn again after this job, so it cannot run again: it would replace that plan and its images. Plan the scenes from the Scenes stage instead."
 take_from_page = "Nothing of this take reached its provider yet. Make it again on the Capture step, which checks the video's cap, the test take and the preflight checks first."
+narration_busy = "A narration is being made for this project, and what this job makes now would be out of date at once. When the narration is ready, bring the scenes onto it on the Scenes stage first."
+scenes_busy = "Scenes, images or clips are being made for this project, or a cancelled job is still stopping. Run this again when they are done, or cancel them first."
+asks_first = "This video's scenes hold images or clips that running this again would put out of date or discard. Start it from its stage in the project instead, which shows what is at stake and asks first."
 
 [setup]
 step_by_step = "Step by step"
@@ -450,7 +465,7 @@ placeholder = "Your ElevenLabs API key"
 
 [provider.gemini]
 name = "Gemini"
-purpose = "Images (Nano Banana) and video clips (Veo, Gemini Omni Flash), from Google AI Studio."
+purpose = "Images (Nano Banana) and video clips (Gemini Omni Flash), from Google AI Studio."
 placeholder = "Your Gemini API key"
 
 [provider.higgsfield]
@@ -712,6 +727,8 @@ voice_unchecked = "The narrator's voice has not been checked in your ElevenLabs 
 voice_unavailable = "The narrator's voice is not in your ElevenLabs account. Fix it on the Personas screen or choose another narrator."
 missing_key = "Save an ElevenLabs key under Settings to generate or import narration."
 busy = "A narration is already being made for this project."
+scenes_busy = "Scenes, images or clips are being made for this project on the current narration. Wait for them, or cancel them on the Jobs panel, before replacing the narration."
+outdates_pictures = "A new narration puts the images and clips of this video's scenes out of date. Confirm to go ahead."
 missing = "Generate or import the narration first."
 audio_missing = "The narration's audio file is missing from the project folder. Generate it again."
 cannot_play = "Could not play the narration: no audio output is available or the file is unreadable."
@@ -720,6 +737,12 @@ recording_unreadable = "Could not read the file. Check that it still exists and 
 recording_unsupported = "Bardo imports MP3 and uncompressed WAV recordings. Convert the file to one of them and import it again."
 recording_empty = "The file has no audio."
 recording_too_large = "The file is over 500 MB. Export it as MP3 and import it again."
+
+[narration.outdates]
+fit = "This video's scenes hold pictures timed on the current narration (images: {images}, clips: {clips}). A new narration puts them out of date. It reads the same text the scenes were planned on, so afterwards Fit to the narration, on the Scenes stage, keeps all of them."
+replan = "This video's scenes hold pictures timed on the current narration (images: {images}, clips: {clips}). A new narration puts them out of date, and the script changed since the scenes were planned, so they cannot be fitted to it: the scenes will have to be planned again, which discards these images and clips."
+confirm = "Replace the narration"
+cancel = "Keep the current narration"
 
 [capture]
 import = "Import capture"
@@ -1001,8 +1024,15 @@ planning = "Planning the scenes…"
 drawing = "Drawing the images…"
 stopping = "Cancelled. Finishing what was already sent…"
 stopped = "The last run stopped:"
-stale = "The narration was generated again after these scenes were planned, so their times no longer match. Plan them again."
+stale = "The narration was made again after these scenes were planned and reads other text, so the scenes cannot be fitted to it. Plan them again. Until then no image or clip is made for them: it would be timed for a narration that is gone."
+stale_fit = "The narration was made again after these scenes were planned, so their times no longer match. It reads the same text: Fit to the narration moves each scene to its new time and keeps every image and clip. Until then no image or clip is made for them."
 stale_tag = "Out of date"
+fit = "Fit to the narration"
+fit_title = "New narration, same text"
+fit_hint = "Keeps these scenes with their prompts, images and clips, and reads when each one starts and ends again from the new narration. It costs nothing. A scene that now runs longer than its clip holds the clip's last frame."
+paid_held = "Out of date. Fit the scenes to the narration first."
+paid_held_replan = "Out of date. Plan the scenes again first, on the Scenes stage."
+paid_held_version = "Out of date. Place the scenes on this narration first."
 count = "{n} scenes"
 generate_images = "Generate {n} images"
 images_hint = "Nano Banana draws each scene as a 16:9 image at 2K; Gemini bills each one. A scene the provider declines does not stop the others."
@@ -1034,8 +1064,13 @@ failed = "No clip:"
 model = "Video model"
 model_channel = "Default ({model})"
 model_gone = "This scene's video model is no longer offered. Pick another one."
+model_replaced = "This scene's video model, {old}, was retired by its provider. New clips use {new}."
+channel_model_replaced = "The channel's video model, {old}, was retired by its provider. New clips use {new}; saving the channel keeps it."
 plan = "Next clip: {seconds} s · {price}"
 plan_unpriced = "Next clip: {seconds} s · no rate for this model"
+slowed_next = "Plays slowed to fit the scene"
+slowed = "Slowed to fit"
+slowed_hint = "The next clip is asked for a little shorter than its scene on purpose: it costs less, and it plays slowed down to end when the scene does. Clip length, in the channel's settings, changes how far or turns this off for later clips."
 motion_prompt = "Motion"
 motion_from_image = "Same as the image prompt"
 edit_motion = "Edit motion"
@@ -1057,6 +1092,9 @@ scene_not_found = "That scene is gone; the scenes may have been planned again."
 missing_claude_key = "Save a Claude key under Settings to plan scenes."
 missing_gemini_key = "Save a Gemini key under Settings to generate images and Google clips."
 busy = "Scenes, images or clips are already being made for this project."
+narration_busy = "A narration is being made for this project. Wait for it, or cancel it on the Jobs panel: scenes planned, drawn or animated now would be out of date as soon as it is ready."
+plan_out_of_date = "These scenes are out of date: the narration changed since they were planned, so an image or clip made now would be timed for a narration that is gone. Fit the scenes to the narration or plan them again first (on a version, place them)."
+other_text = "The narration reads other text than these scenes were planned on, so they cannot be fitted to it. Plan them again."
 would_discard_images = "Planning again discards the images and clips of these scenes. Confirm to go ahead."
 nothing_to_generate = "Every scene already has an image."
 nothing_to_review = "There is no new image to review."
@@ -1517,7 +1555,7 @@ previous_frame = "Previous frame"
 next_frame = "Next frame"
 building = "Building preview proxies… {ready} of {total} files"
 keep_editing = "You can keep editing while this runs"
-stale = "The narration changed after the scenes were planned. Plan them again to match it."
+stale = "The narration changed after the scenes were planned. On the Scenes stage, fit the scenes to it, or plan them again when it reads other text (on a version, place them)."
 
 cut_reset = "The scenes or the narration changed since your last edit, so the cut starts over from the rough cut."
 [editor.bin]
@@ -1532,6 +1570,7 @@ clip = "Clip"
 source_image = "{provider} image · {model}"
 source_clip = "Animated with {provider} · {model}"
 source_still = "Still image"
+source_slowed = "Plays slowed to fit its scene: {recorded} of clip over {played}"
 source_none = "No image yet"
 source_footage = "Imported footage. Its picture plays without its sound: put sound on the music or SFX track."
 source_performed = "Performed clip: your take, performed by the persona. Its picture plays without its sound; the narration on A1 is its voice."
@@ -3007,8 +3046,8 @@ title = "All or pending"
 body = "Pending shows only the scenes with something left, an image to draw or to review. All shows every one."
 
 [tour.scenes.replan]
-title = "Plan again"
-body = "When the narration is made again, the scenes are marked out of date, since their times no longer match. Plan again replaces them, and asks first when that would discard images or clips."
+title = "After a new narration"
+body = "When the narration is made again, the scenes are marked out of date and no image or clip is made for them until they match it. Fit to the narration keeps every image and clip when the script did not change. Otherwise Plan again replaces the scenes, and asks first when that would discard images or clips."
 
 [tour.scenes.place]
 title = "Place the scenes"
@@ -3035,7 +3074,7 @@ body = "A new clip waits beside the current one; play it before you use it. A sc
 
 [tour.clips.cost]
 title = "What a clip costs"
-body = "How long the scene's next clip will run and what it costs at the provider's rate, before you animate it. The provider bills each second."
+body = "How long the scene's next clip will run and what it costs at the provider's rate, before you animate it. The provider bills each second. With a model of fixed lengths, a scene a little longer than one of them pays for that shorter clip, which plays slowed to fit; the channel sets how far, or turns it off."
 
 [tour.personas]
 name = "Personas tour"
@@ -3201,7 +3240,7 @@ body = "Shorts are vertical and under a minute, and fit every network. Long vide
 
 [tour.channels.defaults]
 title = "Video model, captions and transitions"
-body = "The model that animates the channel's scene images into clips, the look of the captions in its new projects and the color their spoken word lights up in, and the transition the editor puts on a cut. Any scene can pick another model, any project other captions, and any cut another transition."
+body = "The model that animates the channel's scene images into clips, and whether a clip a little shorter than its scene is slowed to fit, and by how much, so you pay for fewer seconds. Then the look of the captions in its new projects and the color their spoken word lights up in, and the transition the editor puts on a cut. Any scene can pick another model, any project other captions, and any cut another transition."
 
 [tour.channels.accounts]
 title = "Network accounts"
@@ -3367,7 +3406,7 @@ body = "A passing failure, like a connection that could not be made, is tried ag
 
 [tour.jobs.restart]
 title = "Closing Bardo mid-job"
-body = "Close Bardo whenever you like: next time it opens, each job picks up from its last saved point, and work a provider already did is not paid twice."
+body = "Close Bardo whenever you like: next time it opens, each job picks up from its last saved point, and work a provider already did is not paid twice. A paid request that was still waiting for its answer is not sent again by itself: its job shows as failed, and Retry asks again."
 
 [tour.keys]
 name = "API keys tour"

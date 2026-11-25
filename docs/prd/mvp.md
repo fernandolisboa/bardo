@@ -66,7 +66,7 @@ Build order: creation (Strategy and Production) and Editing first, with export a
 34. As a creator, I want Claude to plan scenes and write one image or video prompt per scene, so that visuals follow the narration.
 35. As a creator, I want to edit each scene's prompt before generating, so that I control the visuals.
 36. As a creator, I want to generate scene images with Nano Banana, so that each scene has a visual.
-37. As a creator, I want to animate a scene into a video clip with Higgsfield or Google (Veo, Gemini Omni Flash), so that I can choose the model that looks best.
+37. As a creator, I want to animate a scene into a video clip with Higgsfield or Google (Gemini Omni Flash; Veo until Google shut it down in the Gemini API), so that I can choose the model that looks best.
 38. As a creator, I want to override the video provider and model per scene, so that I spend more only where it matters.
 39. As a creator, I want to see the estimated cost of a generation before starting it, so that I never spend by surprise.
 40. As a creator, I want a music prompt generated and to import the music file myself, so that I can use music I have rights to.
@@ -148,7 +148,7 @@ Build order: creation (Strategy and Production) and Editing first, with export a
   - Voice: synthesize script text with a voice reference; returns audio plus word timings. Also lists the account's voices.
   - Alignment: given audio and optional known text, return word timings (forced alignment when text is known, speech-to-text otherwise). Off the critical path.
   - Image generation (Nano Banana).
-  - Video generation: submit image and/or prompt with provider and model, get a provider job handle; poll or wait; download result. Adapters: Higgsfield first, Google (Veo 3.1, Gemini Omni Flash) second. Both are async on the provider side, so the interface is submit/poll, not a blocking call.
+  - Video generation: submit image and/or prompt with provider and model, get a provider job handle; poll or wait; download result. Adapters: Higgsfield first, Google (Gemini Omni Flash; Veo 3.1 until its shutdown, #298) second. Both are async on the provider side, so the interface is submit/poll, not a blocking call.
   - Decision engine: three typed question kinds (choice, score, yes/no) evaluated against a state; answers carry probabilities and confidence. JEV adapter (TypeSafe HTTP API) in the MVP; Laya (local ONNX) evaluated right after.
   - Market data: search recent uploads for a niche in a country and language; returns raw statistics. Scoring (competition, trend) is pure domain logic over those statistics.
   - Network metrics: fetch statistics for a publication. Public YouTube stats need only the API key.

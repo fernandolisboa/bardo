@@ -121,7 +121,8 @@ impl std::fmt::Debug for Stop {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
             None => f.write_str("Stop(never)"),
-            Some(_) => write!(f, "Stop(asked: {})", self.asked()),
+            // Not asked here: asking may take a lock.
+            Some(_) => f.write_str("Stop(..)"),
         }
     }
 }
@@ -132,7 +133,9 @@ pub trait TextGenerator: Send + Sync {
     /// given up after its request left fails as a lost answer
     /// (`ProviderFailureKind::AnswerLost`): the provider bills what it
     /// wrote of it. One given up before anything was sent fails as
-    /// `Unreachable`, which nothing is billed for.
+    /// `Unreachable`, which nothing is billed for. An answer that arrived
+    /// whole is returned although `stop` asked meanwhile: it is paid for,
+    /// and the caller decides what to do with it.
     fn generate_until(
         &self,
         key: &ApiKey,

@@ -14,6 +14,15 @@
 //! clip from it. A new clip waits beside the current one until the user
 //! accepts it, like a new image.
 //!
+//! A scene whose request ended without a clip (the provider failed it,
+//! declined it or lost it) is sent again only when the user retries the
+//! job: a new submission is a new paid request. The job notes the end in
+//! its saved state, so neither the queue trying again after an outage nor
+//! a run picked up after the app closed sends it, and its failure is
+//! never one the queue retries, whatever the provider called it. The
+//! queue tells the handler when the user retries (`asked_again`), in the
+//! same save as the retry, and only then are the notes dropped.
+//!
 //! A clip is billed when its provider makes it, not when Bardo fetches it,
 //! so its cost is recorded when the provider accepts the request: a clip
 //! still being made counts against the video's cap and the budgets, and so
@@ -34,11 +43,12 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, ChannelId, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelRef, ClipRequest,
-    ClipStatus, ClipSubmission, CostPurpose, CostRecordId, Generation, GenerationId, ImageFormat,
-    Job, JobFailure, JobFailureKind, JobId, JobKind, Metered, Money, ProductionMode, ProfileId,
-    Progress, ProjectFiles, Provider, ProviderFailure, ProviderFailureKind, RepositoryError, Scene,
-    SceneClip, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, StagedImage,
+    ApiKey, ChannelId, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel, ClipModelRef,
+    ClipRequest, ClipStatus, ClipSubmission, CostPurpose, CostRecordId, Generation, GenerationId,
+    ImageFormat, Job, JobFailure, JobFailureKind, JobId, JobKind, Metered, Money,
+    NarrationRepository, ProductionMode, ProfileId, Progress, ProjectFiles, Provider,
+    ProviderFailure, ProviderFailureKind, RepositoryError, Scene, SceneClip, ScenePlan,
+    ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, StagedImage, StretchLimit,
     TokenUsage, VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
@@ -76,9 +86,16 @@ pub struct ClipsView {
     /// the channel's, else the provider's default. `None` when no provider
     /// is set up.
     pub default_model: Option<ClipModel>,
+    /// The name of the model the channel was saved with, when its provider
+    /// retired it and `default_model` is the one that took its place.
+    pub default_replaces: Option<String>,
     /// The video's production mode (#248), which says which scenes
     /// "animate missing" animates.
     pub mode: ProductionMode,
+    /// How far the channel's clips are stretched over a scene a little
+    /// longer than a length their model makes (#260); `None` when every
+    /// clip covers its scene.
+    pub stretch: Option<StretchLimit>,
     /// One per scene of the plan, in order.
     pub scenes: Vec<SceneClipView>,
     /// The scenes "animate missing" would animate: the ones the mode
@@ -92,10 +109,16 @@ pub struct ClipsView {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneClipView {
     /// The model its next clip uses; `None` when the model it picked is no
-    /// longer offered.
+    /// longer offered and nothing took its place.
     pub model: Option<ClipModel>,
+    /// The name of the model the scene picked, when its provider retired
+    /// it and `model` is the one that took its place.
+    pub replaces: Option<String>,
     /// How long its next clip would be.
     pub seconds: Option<u32>,
+    /// Whether that is shorter than the scene on purpose: the clip would
+    /// play slowed, to end when the scene does (#260).
+    pub stretched: bool,
     /// What its next clip would cost at the rate table's price; `None`
     /// when no rate covers the model.
     pub price: Option<Money>,
@@ -119,6 +142,19 @@ struct ClipsPayload {
     project: String,
     plan: String,
     scenes: Vec<ClipOrder>,
+    /// How far a scene a little longer than a length its model makes
+    /// stretches a clip of that length, in percent (the channel's
+    /// `StretchLimit` when the job was queued: the budget was checked
+    /// against it too); 0 covers every scene, as a job queued before
+    /// stretching was priced.
+    #[serde(default)]
+    stretch_percent: u8,
+}
+
+impl ClipsPayload {
+    fn stretch(&self) -> Option<StretchLimit> {
+        (self.stretch_percent > 0).then(|| StretchLimit::new(self.stretch_percent.into()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +169,17 @@ struct ClipOrder {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct ClipsState {
     scenes: Vec<ClipRun>,
+    /// The scenes whose requests ended without a clip, or that the
+    /// provider would not take. While a scene is here the job leaves it
+    /// alone: sending it again is a new paid request, which only the user
+    /// asks for, by retrying the job (`ClipHandler::asked_again`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ended: Vec<Ended>,
+    /// The scenes the user's last retry asked again for. A run still
+    /// stopping then may save its old notes over them; they are dropped
+    /// again (`ClipHandler::saved_after_ask`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    asked: Vec<usize>,
 }
 
 /// One scene's submission.
@@ -146,6 +193,10 @@ struct ClipRun {
     submission: u32,
     prompt: String,
     seconds: u32,
+    /// The limit it was asked for shorter than the scene under, to play
+    /// slowed, in percent; 0 when it covers the scene.
+    #[serde(default)]
+    stretch_percent: u8,
     /// The image animated: its generation and file.
     source_image: String,
     image_file: String,
@@ -158,7 +209,9 @@ struct ClipRun {
     /// For a provider that would start a second clip if sent the same
     /// submission again: when it was sent without an answer yet (Unix
     /// seconds). Written before sending, so after a lost answer or a
-    /// crash the job looks for the clip instead of paying twice.
+    /// crash the job does not pay twice: it looks for the clip where the
+    /// provider lists what it started, and ends the scene as one that may
+    /// have started where it does not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sent_at: Option<u64>,
     /// The cost record of the request, written when the provider accepted
@@ -168,8 +221,25 @@ struct ClipRun {
     cost: Option<String>,
 }
 
+/// A scene's failure, as the job keeps it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct Ended {
+    scene: usize,
+    kind: String,
+    detail: String,
+}
+
+impl Ended {
+    fn failure(&self) -> JobFailure {
+        JobFailure::new(
+            self.kind.parse().unwrap_or(JobFailureKind::RequestFailed),
+            self.detail.clone(),
+        )
+    }
+}
+
 impl ClipRun {
-    /// Forgets the submission, so the next attempt starts a new one.
+    /// Forgets the submission, so the next one is new.
     fn restart(&mut self) {
         self.submission += 1;
         self.staged = None;
@@ -250,6 +320,8 @@ fn plan_failure(provider: Provider, error: &crate::PlanError) -> JobFailure {
 pub(crate) struct ClipHandler {
     pub(crate) owner: ProfileId,
     pub(crate) plans: Arc<dyn ScenePlanRepository>,
+    /// Says whether the plan is still on the project's narration.
+    pub(crate) narrations: Arc<dyn NarrationRepository>,
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) generators: Vec<Arc<dyn ClipGenerator>>,
     pub(crate) secrets: Arc<dyn SecretStore>,
@@ -264,6 +336,8 @@ struct ClipJob<'a> {
     job: JobId,
     project: VideoProjectId,
     plan: ScenePlanId,
+    /// How far a clip of a model of fixed lengths stretches, as queued.
+    stretch: Option<StretchLimit>,
     state: ClipsState,
     keys: Vec<(Provider, ApiKey)>,
     /// A plan's token was renewed after the provider refused it, and no
@@ -272,6 +346,33 @@ struct ClipJob<'a> {
 }
 
 impl JobHandler for ClipHandler {
+    /// The user's retry is what asks again for the scenes whose requests
+    /// ended: they are no longer left alone.
+    fn asked_again(&self, external_handle: Option<&str>) -> Option<String> {
+        let mut state: ClipsState = serde_json::from_str(external_handle?).ok()?;
+        if state.ended.is_empty() && state.asked.is_empty() {
+            return None;
+        }
+        state.asked = state.ended.drain(..).map(|ended| ended.scene).collect();
+        Some(to_json(&state))
+    }
+
+    /// A run cancelled and retried before it returned may still note a
+    /// scene's end after the retry: that note stays, since the user has
+    /// not seen it yet. Only the notes the retry cleared are dropped.
+    fn saved_after_ask(&self, asked: Option<&str>, saved: String) -> String {
+        let asked = asked.and_then(|asked| serde_json::from_str::<ClipsState>(asked).ok());
+        let (Some(asked), Ok(mut state)) = (asked, serde_json::from_str::<ClipsState>(&saved))
+        else {
+            return saved;
+        };
+        state
+            .ended
+            .retain(|ended| !asked.asked.contains(&ended.scene));
+        state.asked = asked.asked;
+        to_json(&state)
+    }
+
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
         let payload: ClipsPayload = parse(payload)?;
         let state = match cx.external_handle() {
@@ -283,6 +384,7 @@ impl JobHandler for ClipHandler {
             job: cx.id(),
             project: id(&payload.project)?,
             plan: id(&payload.plan)?,
+            stretch: payload.stretch(),
             state,
             keys: Vec::new(),
             renewed: false,
@@ -303,7 +405,22 @@ impl ClipJob<'_> {
     fn run(&mut self, orders: &[ClipOrder], cx: &mut JobContext) -> Result<(), JobFailure> {
         let total = orders.len() as u64;
         self.record_accepted(orders, cx)?;
+        // Scenes whose requests ended in an earlier run stay failed, and
+        // show it (a run cut right after noting the end had not yet).
         let mut failed: Vec<(usize, JobFailure)> = Vec::new();
+        for ended in self.state.ended.clone() {
+            let failure = ended.failure();
+            if let Some(order) = orders.iter().find(|order| order.scene == ended.scene)
+                && let Err(error) = self.show_failed(order, &failure)
+            {
+                tracing::warn!(
+                    "could not show scene {}'s failure: {}",
+                    ended.scene,
+                    error.detail
+                );
+            }
+            failed.push((ended.scene, failure));
+        }
         let mut polls = 0;
         let mut hiccups = 0;
         loop {
@@ -448,6 +565,18 @@ impl ClipJob<'_> {
             .filter(|saved| saved.id == self.plan))
     }
 
+    /// Whether the plan is no longer on the project's narration.
+    fn out_of_date(&self) -> Result<bool, JobFailure> {
+        let narration = self
+            .handler
+            .narrations
+            .narration(self.project)
+            .map_err(unexpected)?;
+        Ok(self
+            .saved_plan()?
+            .is_some_and(|plan| plan.is_stale(narration.as_ref())))
+    }
+
     fn save_state(&self, cx: &mut JobContext) -> Result<(), JobFailure> {
         cx.save_external_handle(to_json(&self.state))
             .map_err(unexpected)
@@ -470,6 +599,16 @@ impl ClipJob<'_> {
         let mut key = self.key(generator.provider())?;
         let submitted = self.run_of(order.scene).and_then(|run| run.request.clone());
         let Some(request) = submitted else {
+            // Nothing is paid for a scene the narration left behind (a job
+            // run again after the narration was made again). The requests
+            // already sent are paid: those are still waited for and kept,
+            // and one sent without an answer is still looked for.
+            let maybe_sent = self
+                .run_of(order.scene)
+                .is_some_and(|run| run.sent_at.is_some());
+            if !maybe_sent && self.out_of_date()? {
+                return Ok(Step::Failed(crate::scenes::out_of_date("clips")));
+            }
             return self.submit(order, scene, generator, &mut key, cx);
         };
         let handle = ClipHandle(request);
@@ -490,7 +629,7 @@ impl ClipJob<'_> {
             Ok(ClipStatus::Failed(failure)) => {
                 // The provider says it made nothing: not billed.
                 self.take_back(order.scene);
-                self.scene_failed(order, failure, cx)
+                self.request_ended(order, failure, cx)
             }
             Ok(ClipStatus::Lost(failure)) => {
                 // No clip, and no word that none was made: its cost stays.
@@ -501,7 +640,7 @@ impl ClipJob<'_> {
                         failure.detail
                     ),
                 );
-                self.scene_failed(order, failure, cx)
+                self.request_ended(order, failure, cx)
             }
             Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
                 Ok(Step::Hiccup(self.failure(order, failure)))
@@ -555,6 +694,41 @@ impl ClipJob<'_> {
         key: &mut ApiKey,
         cx: &mut JobContext,
     ) -> Result<Step, JobFailure> {
+        // A submission noted as sent, with no answer and nowhere to look
+        // for it, ends here: before anything is read, checked or sent.
+        let unanswered = self
+            .run_of(order.scene)
+            .is_some_and(|run| run.sent_at.is_some());
+        if unanswered && !generator.dedupes_submissions() && !generator.lists_submissions() {
+            return self.may_have_started(
+                order,
+                "Bardo stopped while the submission was on its way",
+                cx,
+            );
+        }
+        // A scene handed over and not sent (the provider was busy, the
+        // job was stopped) may have changed since: fitted to a new
+        // narration, its motion edited, its image replaced. It is handed
+        // over again, so what is sent is the scene as it is now.
+        let stretch = self.stretch;
+        let length = generator
+            .models()
+            .into_iter()
+            .find(|model| model.id.model() == order.model)
+            .map(|model| model.durations.fit(scene.duration(), stretch));
+        let image = scene.image().map(|image| image.generation.id.to_string());
+        if let Some(run) = self.run_of(order.scene)
+            && run.sent_at.is_none()
+            && run.staged.is_some()
+            && (run.prompt != scene.motion_prompt().as_str()
+                || length.as_ref().is_none_or(|length| {
+                    run.seconds != length.seconds
+                        || run.stretch_percent != length.stretch.map_or(0, StretchLimit::percent)
+                })
+                || Some(&run.source_image) != image.as_ref())
+        {
+            run.staged = None;
+        }
         let staged = self.run_of(order.scene).and_then(|run| run.staged.clone());
         let staged = match staged {
             Some(staged) => staged,
@@ -600,8 +774,10 @@ impl ClipJob<'_> {
 
     /// Submits to a provider that would start (and charge for) a second
     /// clip if sent the same submission again. The job writes down that it
-    /// sends before sending; with that note and no answer it looks for the
-    /// clip instead, and never sends again without knowing.
+    /// sends before sending. With that note and no answer it never sends
+    /// again by itself: where the provider lists what it started it looks
+    /// for the clip, and where it does not the scene ends there, as one
+    /// that may have started.
     fn submit_once(
         &mut self,
         order: &ClipOrder,
@@ -670,10 +846,25 @@ impl ClipJob<'_> {
             generator.submit(key, request, submission)
         }) {
             Ok(submitted) => self.submitted(order, submitted, cx),
-            // It may have started: the note stays for the lookup.
-            Err(failure) if failure.kind == ProviderFailureKind::Unreachable => {
-                Ok(Step::NotSubmitted(self.failure(order, failure)))
+            // It may have started. The note stays, and the queue comes
+            // back to look for the clip.
+            Err(failure)
+                if failure.kind == ProviderFailureKind::AnswerLost
+                    && generator.lists_submissions() =>
+            {
+                let waiting = ProviderFailure::new(
+                    ProviderFailureKind::Unreachable,
+                    format!(
+                        "{}; looking for the clip before sending anything again",
+                        failure.detail
+                    ),
+                );
+                Ok(Step::NotSubmitted(self.failure(order, waiting)))
             }
+            Err(failure) if failure.kind == ProviderFailureKind::AnswerLost => {
+                self.may_have_started(order, &failure.detail, cx)
+            }
+            // Nothing was started.
             Err(failure) => {
                 self.run_of(order.scene)
                     .expect("the scene's run exists")
@@ -682,6 +873,38 @@ impl ClipJob<'_> {
                 self.submit_failed(order, failure, cx)
             }
         }
+    }
+
+    /// The submission was sent, no answer says what came of it, and the
+    /// provider offers no way to look: it may be making the clip, and
+    /// billing it. The scene ends there, as any request that ended does,
+    /// and what the clip costs goes to Costs: a spend that may have
+    /// happened counts (ADR-0030). The record's id is saved first, so a
+    /// run cut here records it once.
+    fn may_have_started(
+        &mut self,
+        order: &ClipOrder,
+        why: &str,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let run = self.run_of(order.scene).expect("the scene's run exists");
+        let cost = run
+            .cost
+            .get_or_insert_with(|| CostRecordId::new().to_string())
+            .clone();
+        let run = run.clone();
+        self.save_state(cx)?;
+        self.write_cost(order, &run, &cost)?;
+        let failure = ProviderFailure::new(
+            ProviderFailureKind::AnswerLost,
+            format!(
+                "the provider did not confirm the submission and has no way to look for it, \
+                 so the clip may have been made and charged: its cost is in Costs, and it \
+                 is not sent again unless you retry ({why})"
+            ),
+        );
+        let failure = self.failure(order, failure);
+        self.note_ended(order, failure, cx)
     }
 
     /// Keeps the provider's handle and records the clip's cost: from now
@@ -747,6 +970,11 @@ impl ClipJob<'_> {
         let (Some(_), Some(cost)) = (&run.request, &run.cost) else {
             return Ok(());
         };
+        self.write_cost(order, &run, cost)
+    }
+
+    /// Writes what the scene's clip costs under the record id `cost`.
+    fn write_cost(&self, order: &ClipOrder, run: &ClipRun, cost: &str) -> Result<(), JobFailure> {
         self.handler.costs.record_request(
             id(cost)?,
             PaidCall {
@@ -814,12 +1042,14 @@ impl ClipJob<'_> {
             Err(failure) => return self.submit_failed(order, failure, cx).map(Err),
         };
         let prompt = scene.motion_prompt().as_str().to_owned();
-        let seconds = model.durations.fit(scene.duration());
+        let ClipLength { seconds, stretch } = model.durations.fit(scene.duration(), self.stretch);
+        let stretch_percent = stretch.map_or(0, StretchLimit::percent);
         let (source_image, image_file) = (image.generation.id.to_string(), image.file.clone());
         match self.run_of(order.scene) {
             Some(run) => {
                 run.prompt = prompt;
                 run.seconds = seconds;
+                run.stretch_percent = stretch_percent;
                 run.source_image = source_image;
                 run.image_file = image_file;
                 run.staged = Some(staged.clone());
@@ -829,6 +1059,7 @@ impl ClipJob<'_> {
                 submission: 1,
                 prompt,
                 seconds,
+                stretch_percent,
                 source_image,
                 image_file,
                 staged: Some(staged.clone()),
@@ -868,19 +1099,61 @@ impl ClipJob<'_> {
         self.scene_failed(order, failure, cx)
     }
 
-    /// The scene's request ended without a clip: the scene shows why, and
-    /// the next attempt submits it again.
+    /// The scene's request ended without a clip, or the provider will not
+    /// take the scene: the scene shows why. Sending it again is a new
+    /// request, so the job notes the end and leaves the scene alone until
+    /// the user retries the job; the queue trying again after an outage
+    /// (of this scene's provider or another's) never sends it, nor does a
+    /// run picked up after the app closed. Whatever the provider called
+    /// the failure, it is not one that passes.
     fn scene_failed(
         &mut self,
         order: &ClipOrder,
         failure: ProviderFailure,
         cx: &mut JobContext,
     ) -> Result<Step, JobFailure> {
-        let failure = self.failure(order, failure);
+        let mut failure = self.failure(order, failure);
+        if failure.kind.is_transient() {
+            failure.kind = JobFailureKind::RequestFailed;
+        }
+        self.note_ended(order, failure, cx)
+    }
+
+    /// The provider took the scene's request and it ended there without a
+    /// clip: failed, cancelled or forgotten. It says so as such, unless
+    /// the provider's safety rules declined it.
+    fn request_ended(
+        &mut self,
+        order: &ClipOrder,
+        failure: ProviderFailure,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let mut failure = self.failure(order, failure);
+        if failure.kind != JobFailureKind::Declined {
+            failure.kind = JobFailureKind::RequestFailed;
+        }
+        self.note_ended(order, failure, cx)
+    }
+
+    /// Notes the scene's end, so only the user's retry sends it again, and
+    /// shows it on the scene.
+    fn note_ended(
+        &mut self,
+        order: &ClipOrder,
+        failure: JobFailure,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
         if let Some(run) = self.run_of(order.scene) {
             run.restart();
-            self.save_state(cx)?;
         }
+        self.state.ended.retain(|ended| ended.scene != order.scene);
+        self.state.ended.push(Ended {
+            scene: order.scene,
+            kind: failure.kind.code().to_owned(),
+            // Kept in storage like a job's failure: known keys masked.
+            detail: cx.redact(&failure.detail),
+        });
+        self.save_state(cx)?;
         self.show_failed(order, &failure)?;
         Ok(Step::Failed(failure))
     }
@@ -943,6 +1216,8 @@ impl ClipJob<'_> {
         let clip = SceneClip {
             file: file.clone(),
             seconds: run.seconds,
+            stretch: (run.stretch_percent > 0)
+                .then(|| StretchLimit::new(run.stretch_percent.into())),
             source_image: id(&run.source_image)?,
             generation: Generation {
                 id: generation,
@@ -951,7 +1226,16 @@ impl ClipJob<'_> {
                 provider,
                 model: order.model.clone(),
                 template: plan.generation.template,
-                instructions: format!("Image to video, {} s, from {}", run.seconds, run.image_file),
+                instructions: format!(
+                    "Image to video, {} s{}, from {}",
+                    run.seconds,
+                    if run.stretch_percent > 0 {
+                        " (played slowed to fit the scene)"
+                    } else {
+                        ""
+                    },
+                    run.image_file
+                ),
                 prompt: run.prompt,
                 output: file,
                 usage: TokenUsage::default(),
@@ -1005,6 +1289,24 @@ impl Bardo {
             .any(|offered| offered.id == *model)
     }
 
+    /// The models the video providers no longer serve, each with the
+    /// offered model that takes its place.
+    pub(crate) fn retired_clip_models(&self) -> Vec<bardo_domain::RetiredClipModel> {
+        self.clips
+            .iter()
+            .flat_map(|generator| generator.retired())
+            .collect()
+    }
+
+    /// The model a saved choice names today: the model that took its place
+    /// when its provider retired it, else itself. A form shows it, and
+    /// saving a channel saves it.
+    pub fn clip_model_now(&self, saved: &ClipModelRef) -> ClipModelRef {
+        let (models, retired) = (self.clip_models(), self.retired_clip_models());
+        bardo_domain::current_clip_model(&models, &retired, saved)
+            .map_or_else(|| saved.clone(), |current| current.model.id.clone())
+    }
+
     /// The model of a channel's scenes without their own: the channel's
     /// when still offered, else the first provider's default.
     pub(crate) fn channel_clip_model(
@@ -1012,25 +1314,58 @@ impl Bardo {
         models: &[ClipModel],
         channel: ChannelId,
     ) -> Result<Option<ClipModel>, RepositoryError> {
+        Ok(self
+            .channel_clip_choice(models, channel)?
+            .map(|(model, _)| model))
+    }
+
+    /// `channel_clip_model`, with the name of the model the channel was
+    /// saved with when its provider retired it and the model returned is
+    /// the one that took its place.
+    fn channel_clip_choice(
+        &self,
+        models: &[ClipModel],
+        channel: ChannelId,
+    ) -> Result<Option<(ClipModel, Option<String>)>, RepositoryError> {
         let chosen = self
             .channels
             .get(channel)?
             .and_then(|channel| channel.details.clip_model().cloned());
+        let retired = self.retired_clip_models();
         Ok(chosen
-            .and_then(|chosen| models.iter().find(|model| model.id == chosen))
-            .or_else(|| models.first())
-            .cloned())
+            .and_then(|chosen| saved_clip_model(models, &retired, &chosen))
+            .or_else(|| models.first().cloned().map(|model| (model, None))))
     }
 
-    /// The model a scene's next clip uses.
+    /// How far `channel`'s clips stretch over a scene a little longer
+    /// than a length their model makes; `None` when they cover every
+    /// scene (the default limit when the channel is gone).
+    pub(crate) fn channel_clip_stretch(
+        &self,
+        channel: ChannelId,
+    ) -> Result<Option<StretchLimit>, RepositoryError> {
+        Ok(self
+            .channels
+            .get(channel)?
+            .map_or(Some(StretchLimit::DEFAULT), |channel| {
+                channel.details.clip_stretch()
+            }))
+    }
+
+    /// The model a scene's next clip uses, and the name of the retired
+    /// model it takes the place of.
     fn scene_clip_model(
         models: &[ClipModel],
+        retired: &[bardo_domain::RetiredClipModel],
         default_model: Option<&ClipModel>,
         scene: &Scene,
-    ) -> Option<ClipModel> {
+    ) -> (Option<ClipModel>, Option<String>) {
         match scene.clip_model() {
-            Some(own) => models.iter().find(|model| model.id == *own).cloned(),
-            None => default_model.cloned(),
+            Some(own) => match saved_clip_model(models, retired, own) {
+                Some((model, replaces)) => (Some(model), replaces),
+                None => (None, None),
+            },
+            None => (default_model.cloned(), None),
         }
     }
 
@@ -1058,33 +1393,43 @@ impl Bardo {
         plan: Option<&ScenePlan>,
     ) -> Result<ClipsView, SceneError> {
         let models = self.clip_models();
-        let channel_model = self.channel_clip_model(&models, project.channel)?;
+        let retired = self.retired_clip_models();
+        let (channel_model, channel_replaces) =
+            self.channel_clip_choice(&models, project.channel)?.unzip();
         let mode = self.production_mode(project)?;
         let default_model = Self::mode_clip_model(mode, &models, channel_model.as_ref()).cloned();
+        // Only said when the channel's model is the one in use: the other
+        // modes bring their own.
+        let default_replaces = channel_replaces
+            .flatten()
+            .filter(|_| mode.clip_model().is_none());
         let Some(plan) = plan else {
             return Ok(ClipsView {
                 models,
                 default_model,
+                default_replaces,
                 mode,
                 ..ClipsView::default()
             });
         };
         let rates = self.cost_book.rates()?;
+        let stretch = self.channel_clip_stretch(project.channel)?;
         let jobs = self.clip_jobs(plan.project);
         let scenes: Vec<SceneClipView> = plan
             .scenes()
             .iter()
             .enumerate()
             .map(|(index, scene)| {
-                let model = Self::scene_clip_model(&models, default_model.as_ref(), scene);
-                let seconds = model
+                let (model, replaces) =
+                    Self::scene_clip_model(&models, &retired, default_model.as_ref(), scene);
+                let length = model
                     .as_ref()
-                    .map(|model| model.durations.fit(scene.duration()));
-                let price = model.as_ref().zip(seconds).and_then(|(model, seconds)| {
+                    .map(|model| model.durations.fit(scene.duration(), stretch));
+                let price = model.as_ref().zip(length).and_then(|(model, length)| {
                     rates.price(
                         model.id.provider(),
                         model.id.model(),
-                        &Metered::video_seconds(u64::from(seconds)),
+                        &Metered::video_seconds(u64::from(length.seconds)),
                     )
                 });
                 let job = jobs
@@ -1097,7 +1442,9 @@ impl Bardo {
                     .map(|(job, _)| job.clone());
                 SceneClipView {
                     model,
-                    seconds,
+                    replaces,
+                    seconds: length.map(|length| length.seconds),
+                    stretched: length.is_some_and(|length| length.stretch.is_some()),
                     price,
                     job,
                 }
@@ -1119,7 +1466,9 @@ impl Bardo {
         Ok(ClipsView {
             models,
             default_model,
+            default_replaces,
             mode,
+            stretch,
             scenes,
             missing,
             missing_estimate,
@@ -1159,7 +1508,7 @@ impl Bardo {
         if view.scenes[index].is_busy() {
             return Err(SceneError::Busy);
         }
-        self.animate(&plan, &view.scenes, vec![index], consent)
+        self.animate(&plan, &view, vec![index], consent)
     }
 
     /// Starts a job that animates every scene with an image and no clip.
@@ -1173,15 +1522,19 @@ impl Bardo {
         if view.missing.is_empty() {
             return Err(SceneError::NothingToAnimate);
         }
-        self.animate(&plan, &view.scenes, view.missing, consent)
+        let missing = view.missing.clone();
+        self.animate(&plan, &view, missing, consent)
     }
 
+    /// The project's plan and its clips, to animate: the plan must be on
+    /// the project's narration, with no other narration on its way.
     fn clips_of(&self, project: VideoProjectId) -> Result<(ScenePlan, ClipsView), SceneError> {
         let project = self.scenes_project(project)?;
         let plan = self
             .scene_plans
             .scene_plan(project.id)?
             .ok_or(SceneError::NoPlan)?;
+        self.scenes_current(&plan)?;
         let view = self.clips_view(&project, Some(&plan))?;
         Ok((plan, view))
     }
@@ -1189,10 +1542,11 @@ impl Bardo {
     fn animate(
         &self,
         plan: &ScenePlan,
-        views: &[SceneClipView],
+        view: &ClipsView,
         scenes: Vec<usize>,
         consent: BudgetConsent,
     ) -> Result<JobId, SceneError> {
+        let views = &view.scenes;
         let mut orders = Vec::with_capacity(scenes.len());
         for &index in &scenes {
             let model = views[index]
@@ -1212,6 +1566,7 @@ impl Bardo {
             project: plan.project.to_string(),
             plan: plan.id.to_string(),
             scenes: orders,
+            stretch_percent: view.stretch.map_or(0, StretchLimit::percent),
         };
         let job = Job::new(self.profile.id, JobKind::SceneClips, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
@@ -1312,6 +1667,21 @@ impl Bardo {
     }
 }
 
+/// The offered model a saved choice names today (`current_clip_model`),
+/// with the name of the retired model it takes the place of.
+pub(crate) fn saved_clip_model(
+    models: &[ClipModel],
+    retired: &[bardo_domain::RetiredClipModel],
+    saved: &ClipModelRef,
+) -> Option<(ClipModel, Option<String>)> {
+    bardo_domain::current_clip_model(models, retired, saved).map(|current| {
+        (
+            current.model.clone(),
+            current.replaces.map(|gone| gone.name.clone()),
+        )
+    })
+}
+
 /// The paid calls that animate `scenes`, one per scene at its model and
 /// length.
 fn clip_calls(views: &[SceneClipView], scenes: &[usize]) -> Vec<PlannedCall> {
@@ -1335,12 +1705,12 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use bardo_domain::{
-        ChannelDraft, ClipDurations, Cost, CostRepository, JobState, Meter, ProviderFailure,
-        VideoProject,
+        ChannelDraft, ClipDurations, ClipFit, Cost, CostRepository, JobState, Meter,
+        ProviderFailure, VideoProject,
     };
 
     use super::*;
-    use crate::scenes::tests::{Harness, done, wait_done};
+    use crate::scenes::tests::{Harness, done, narrate_again, wait_done};
     use crate::testing::{CLIP, ClipCall, SCENE_IMAGE};
     use crate::{Text, testing::FakeClips};
 
@@ -1352,6 +1722,21 @@ mod tests {
 
     fn plan_of(app: &Bardo, project: &VideoProject) -> ScenePlan {
         app.scenes(project.id).unwrap().plan.unwrap()
+    }
+
+    /// Waits until `scene` shows that its clip failed.
+    fn wait_until_failed(app: &Bardo, project: &VideoProject, scene: usize) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while plan_of(app, project).scenes()[scene]
+            .clip_failure()
+            .is_none()
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the scene never failed"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 
     /// Waits until `ready` holds for the fake provider.
@@ -1395,8 +1780,11 @@ mod tests {
         let seconds = view.scenes[0].seconds.unwrap();
         assert_eq!(
             seconds,
-            ClipDurations::Range { min: 3, max: 15 }.fit(scene.duration())
+            ClipDurations::Range { min: 3, max: 15 }
+                .fit(scene.duration(), Some(StretchLimit::DEFAULT))
+                .seconds
         );
+        assert!(!view.scenes[0].stretched, "a range is asked for what fits");
 
         let job = done(
             &app,
@@ -1469,8 +1857,8 @@ mod tests {
     /// One request Google got: URL, key header and body.
     type Sent = (String, Option<String>, Vec<u8>);
 
-    /// Google's API as recorded: a Veo operation that is done on the
-    /// first check, and its clip.
+    /// Google's API as documented: an Omni Flash interaction that is
+    /// completed on the first check, with its clip inline.
     #[derive(Default, Clone)]
     struct GoogleApi {
         sent: Arc<std::sync::Mutex<Vec<Sent>>>,
@@ -1481,48 +1869,55 @@ mod tests {
             &self,
             request: &bardo_ai::http::HttpRequest,
         ) -> Result<bardo_ai::http::HttpResponse, bardo_ai::http::TransportError> {
+            use base64::Engine as _;
             self.sent.lock().unwrap().push((
                 request.url.clone(),
                 request.header_value("x-goog-api-key").map(str::to_owned),
                 request.body.clone().unwrap_or_default(),
             ));
-            const OPERATION: &str = "models/veo-3.1-lite-generate-preview/operations/op1";
-            const VIDEO: &str =
-                "https://generativelanguage.googleapis.com/v1beta/files/f1:download?alt=media";
-            let body = if request.url.ends_with(":predictLongRunning") {
-                serde_json::json!({ "name": OPERATION }).to_string()
-            } else if request.url.ends_with(OPERATION) {
+            const ID: &str = "v1_ChdCYXJkb1Rlc3Q";
+            let body = if request.url.ends_with("/interactions") {
+                serde_json::json!({ "id": ID, "status": "in_progress" })
+            } else if request.url.ends_with(&format!("/interactions/{ID}")) {
                 serde_json::json!({
-                    "name": OPERATION,
-                    "done": true,
-                    "response": { "generateVideoResponse": {
-                        "generatedSamples": [{ "video": { "uri": VIDEO } }],
-                    } },
+                    "id": ID,
+                    "status": "completed",
+                    "steps": [{ "type": "model_output", "content": [{
+                        "type": "video",
+                        "mime_type": "video/mp4",
+                        "data": base64::engine::general_purpose::STANDARD.encode(CLIP),
+                    }] }],
                 })
-                .to_string()
-            } else if request.url == VIDEO {
-                String::from_utf8(CLIP.to_vec()).unwrap()
             } else {
                 return Ok(bardo_ai::http::HttpResponse::new(404, "{}"));
             };
-            Ok(bardo_ai::http::HttpResponse::new(200, body))
+            Ok(bardo_ai::http::HttpResponse::new(200, body.to_string()))
         }
     }
 
-    #[test]
-    fn a_scene_animated_with_veo_goes_through_google_on_the_gemini_key() {
+    fn google(id: &str) -> ClipModelRef {
+        ClipModelRef::new(Provider::Gemini, id).unwrap()
+    }
+
+    /// A harness whose second video provider is Google, over `GoogleApi`.
+    fn with_google() -> (Harness, GoogleApi) {
         let mut h = Harness::new();
         let google = GoogleApi::default();
         h.more_clips.push(Arc::new(
             bardo_ai::GoogleClips::with_transport(google.clone()).with_sleeper(Arc::new(|_| {})),
         ));
+        (h, google)
+    }
+
+    #[test]
+    fn a_scene_animated_with_omni_flash_goes_through_google_on_the_gemini_key() {
+        let (h, google) = with_google();
         let app = h.start();
         let (project, drawn) = h.drawn_project(&app);
-        let veo =
-            ClipModelRef::new(Provider::Gemini, "veo-3.1-lite-generate-preview/720p").unwrap();
+        let omni = self::google("gemini-omni-1.2-flash/720p");
         let models = app.clip_models();
         assert!(
-            models.iter().any(|offered| offered.id == veo),
+            models.iter().any(|offered| offered.id == omni),
             "Google's models are offered"
         );
         assert_eq!(
@@ -1530,18 +1925,20 @@ mod tests {
             model("fake/range"),
             "the first provider's default leads"
         );
-        channel_uses(&app, &project, Some(veo.clone()));
+        channel_uses(&app, &project, Some(omni.clone()));
 
         let view = app.scenes(project.id).unwrap().clips;
         let scene = &view.scenes[0];
-        assert_eq!(scene.model.as_ref().unwrap().id, veo);
+        assert_eq!(scene.model.as_ref().unwrap().id, omni);
+        assert_eq!(scene.replaces, None);
+        assert_eq!(view.default_replaces, None);
         let seconds = scene.seconds.unwrap();
-        assert!([4, 6, 8].contains(&seconds));
-        let price = Money::from_micros(50_000 * u64::from(seconds));
+        assert!((3..=15).contains(&seconds));
+        let price = Money::from_micros(69_504 * u64::from(seconds));
         assert_eq!(
             scene.price,
             Some(price),
-            "Veo 3.1 Lite 720p at $0.05 a second"
+            "Omni 1.2 Flash 720p at $0.069504 a second"
         );
 
         let job = done(
@@ -1558,23 +1955,27 @@ mod tests {
                 .all(|(_, key, _)| key.as_deref() == Some(crate::scenes::tests::GEMINI_KEY))
         );
         let body: serde_json::Value = serde_json::from_slice(&sent[0].2).unwrap();
-        let image = &body["instances"][0]["image"]["inlineData"];
-        assert_eq!(image["mimeType"], "image/png");
+        assert_eq!(body["model"], "gemini-omni-1.2-flash");
+        let image = &body["input"][0];
+        assert_eq!(image["mime_type"], "image/png");
         assert!(
             !image["data"].as_str().unwrap().is_empty(),
             "the scene image, inline"
         );
-        assert_eq!(body["parameters"]["durationSeconds"], seconds);
-        assert_eq!(
-            body["instances"][0]["prompt"],
-            drawn.scenes()[0].prompt().as_str()
+        assert_eq!(body["response_format"]["resolution"], "720p");
+        assert_eq!(body["response_format"]["duration"], format!("{seconds}s"));
+        assert!(
+            body["input"][1]["text"]
+                .as_str()
+                .unwrap()
+                .ends_with(drawn.scenes()[0].prompt().as_str())
         );
 
         let plan = plan_of(&app, &project);
         let clip = plan.scenes()[0].pending_clip().unwrap().clone();
         assert_eq!(h.files.read(project.id, &clip.file).unwrap(), CLIP);
         assert_eq!(clip.generation.provider, Provider::Gemini);
-        assert_eq!(clip.generation.model, veo.model());
+        assert_eq!(clip.generation.model, omni.model());
         let record =
             h.db.project_costs(project.id)
                 .unwrap()
@@ -1584,6 +1985,315 @@ mod tests {
         assert_eq!(record.provider, Provider::Gemini);
         assert_eq!(record.cost, Cost::Estimated(price), "Google quotes nothing");
         assert_eq!(record.job, Some(job.id()));
+    }
+
+    /// Saves the project's channel with `model`, as a version of Bardo
+    /// that still offered it did.
+    fn channel_was_saved_with(h: &Harness, app: &Bardo, project: &VideoProject, model: &str) {
+        let mut channel = app
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.id == project.channel)
+            .unwrap();
+        channel.details = bardo_domain::ChannelDetails::validate(ChannelDraft {
+            clip_model: Some(google(model)),
+            production: ProductionMode::ChannelModel,
+            ..ChannelDraft::from(&channel.details)
+        })
+        .unwrap();
+        bardo_domain::ChannelRepository::save(h.db.as_ref(), &channel).unwrap();
+    }
+
+    #[test]
+    fn a_channel_and_a_scene_saved_with_a_model_google_shut_down_use_what_replaced_it() {
+        let (h, google) = with_google();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_was_saved_with(&h, &app, &project, "veo-3.1-fast-generate-preview/720p");
+        let mut plan = plan_of(&app, &project);
+        plan.scene_mut(1, SystemTime::now())
+            .unwrap()
+            .set_clip_model(Some(self::google("veo-3.1-lite-generate-preview/1080p")));
+        h.db.save_scene(&plan, 1).unwrap();
+
+        let view = app.scenes(project.id).unwrap().clips;
+        let used = |index: usize| {
+            let scene: &SceneClipView = &view.scenes[index];
+            (
+                scene.model.as_ref().unwrap().name.as_str(),
+                scene.replaces.as_deref(),
+            )
+        };
+        let default = view.default_model.as_ref().unwrap();
+        assert_eq!(default.id, self::google("gemini-omni-1.2-flash/720p"));
+        assert_eq!(
+            view.default_replaces.as_deref(),
+            Some("Veo 3.1 Fast 720p"),
+            "the panel says which model the channel had"
+        );
+        assert_eq!(used(0), ("Gemini Omni 1.2 Flash 720p", None));
+        assert_eq!(
+            used(1),
+            ("Gemini Omni 1.2 Flash 1080p", Some("Veo 3.1 Lite 1080p")),
+            "the scene keeps its resolution and says what it had"
+        );
+        assert_eq!(view.missing, [0, 1, 2], "every scene can be animated");
+        let seconds = view.scenes[1].seconds.unwrap();
+        assert_eq!(
+            view.scenes[1].price,
+            Some(Money::from_micros(104_256 * u64::from(seconds))),
+            "priced as the model that runs"
+        );
+        let estimate = app.production(project.id).unwrap();
+        assert_eq!(
+            estimate
+                .estimate(ProductionMode::ChannelModel)
+                .unwrap()
+                .clips,
+            3,
+            "the video's estimate counts the scene too"
+        );
+
+        done(
+            &app,
+            app.generate_missing_clips(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+
+        let sent = google.sent.lock().unwrap().clone();
+        let asked: Vec<_> = sent
+            .iter()
+            .filter(|(url, ..)| url.ends_with("/interactions"))
+            .map(|(.., body)| {
+                let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+                (
+                    body["model"].as_str().unwrap().to_owned(),
+                    body["response_format"]["resolution"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                )
+            })
+            .collect();
+        let omni = |resolution: &str| ("gemini-omni-1.2-flash".to_owned(), resolution.to_owned());
+        assert_eq!(asked, [omni("720p"), omni("1080p"), omni("720p")]);
+        let plan = plan_of(&app, &project);
+        let made: Vec<_> = plan
+            .scenes()
+            .iter()
+            .map(|scene| scene.pending_clip().unwrap().generation.model.clone())
+            .collect();
+        assert_eq!(
+            made,
+            [
+                "gemini-omni-1.2-flash/720p",
+                "gemini-omni-1.2-flash/1080p",
+                "gemini-omni-1.2-flash/720p"
+            ],
+            "each clip records the model that made it"
+        );
+    }
+
+    #[test]
+    fn saving_a_channel_with_a_retired_model_saves_what_replaced_it() {
+        let (h, _) = with_google();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let veo = self::google("veo-3.1-generate-preview/1080p");
+        let omni = self::google("gemini-omni-1.2-flash/1080p");
+        assert_eq!(app.clip_model_now(&veo), omni, "what the form shows");
+        assert_eq!(app.clip_model_now(&omni), omni);
+        let unknown = self::google("never-offered/720p");
+        assert_eq!(app.clip_model_now(&unknown), unknown);
+
+        // A settings file exported before the shutdown names the old model.
+        channel_uses(&app, &project, Some(veo));
+        let saved = app
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.id == project.channel)
+            .unwrap();
+        assert_eq!(saved.details.clip_model(), Some(&omni));
+        let view = app.scenes(project.id).unwrap().clips;
+        assert_eq!(view.default_model.unwrap().id, omni);
+        assert_eq!(view.default_replaces, None, "nothing left to say");
+    }
+
+    /// What Google does with one submission.
+    #[derive(Clone, Copy)]
+    enum GoogleSubmit {
+        /// Takes it, and the answer never arrives.
+        LosesTheAnswer,
+        /// Never gets it: the connection could not be made.
+        NeverGetsIt,
+        /// Answers that it is overloaded: nothing was started.
+        Overloaded,
+        /// Answers that the key is over its quota: nothing was started.
+        Throttled,
+    }
+
+    /// Google's API treating submissions as scripted, then taking them:
+    /// work that is done on the first check, and its clip.
+    #[derive(Default, Clone)]
+    struct GoogleSubmissions {
+        script: Arc<Mutex<std::collections::VecDeque<GoogleSubmit>>>,
+        /// The submissions that reached Google: each is a clip it makes.
+        taken: Arc<Mutex<u32>>,
+    }
+
+    impl GoogleSubmissions {
+        fn scripted(script: &[GoogleSubmit]) -> Self {
+            Self {
+                script: Arc::new(Mutex::new(script.iter().copied().collect())),
+                ..Self::default()
+            }
+        }
+
+        fn taken(&self) -> u32 {
+            *self.taken.lock().unwrap()
+        }
+    }
+
+    impl bardo_ai::http::Transport for GoogleSubmissions {
+        fn send(
+            &self,
+            request: &bardo_ai::http::HttpRequest,
+        ) -> Result<bardo_ai::http::HttpResponse, bardo_ai::http::TransportError> {
+            use bardo_ai::http::{HttpResponse, TransportError};
+            use base64::Engine as _;
+            let body = if request.url.ends_with("/interactions") {
+                let script = self.script.lock().unwrap().pop_front();
+                match script {
+                    Some(GoogleSubmit::NeverGetsIt) => {
+                        return Err(TransportError::not_sent("connection refused"));
+                    }
+                    Some(GoogleSubmit::Overloaded) => {
+                        return Ok(HttpResponse::new(
+                            503,
+                            r#"{"error":{"code":503,"message":"The model is overloaded.","status":"UNAVAILABLE"}}"#,
+                        ));
+                    }
+                    Some(GoogleSubmit::Throttled) => {
+                        return Ok(HttpResponse::new(
+                            429,
+                            r#"{"error":{"code":429,"message":"You exceeded your current quota.","status":"RESOURCE_EXHAUSTED"}}"#,
+                        ));
+                    }
+                    Some(GoogleSubmit::LosesTheAnswer) | None => {}
+                }
+                let mut taken = self.taken.lock().unwrap();
+                *taken += 1;
+                if script.is_some() {
+                    return Err(TransportError::unanswered("timed out reading the answer"));
+                }
+                serde_json::json!({ "id": format!("v1_work{taken}"), "status": "in_progress" })
+            } else if request.url.contains("/interactions/v1_work") {
+                serde_json::json!({
+                    "id": "v1_work",
+                    "status": "completed",
+                    "steps": [{ "type": "model_output", "content": [{
+                        "type": "video",
+                        "mime_type": "video/mp4",
+                        "data": base64::engine::general_purpose::STANDARD.encode(CLIP),
+                    }] }],
+                })
+            } else {
+                return Ok(HttpResponse::new(404, "{}"));
+            };
+            Ok(HttpResponse::new(200, body.to_string()))
+        }
+    }
+
+    /// The app with Google's adapter over `google`, and a drawn project
+    /// whose channel animates with Google's default model.
+    fn animating_with_google(h: &mut Harness, google: &GoogleSubmissions) -> (Bardo, VideoProject) {
+        h.more_clips.push(Arc::new(
+            bardo_ai::GoogleClips::with_transport(google.clone()).with_sleeper(Arc::new(|_| {})),
+        ));
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let model =
+            ClipModelRef::new(Provider::Gemini, bardo_ai::google_clips::DEFAULT_MODEL).unwrap();
+        channel_uses(&app, &project, Some(model));
+        (app, project)
+    }
+
+    #[test]
+    fn a_google_submission_whose_answer_is_lost_is_sent_once_and_counted() {
+        let mut h = Harness::new();
+        let google = GoogleSubmissions::scripted(&[GoogleSubmit::LosesTheAnswer]);
+        let (app, project) = animating_with_google(&mut h, &google);
+
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        // Google may be making the clip, and nobody can ask it: the queue
+        // does not send it again, the scene says so, and Costs counts it.
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "the queue went again by itself");
+        let failure = job.failure().unwrap();
+        assert_eq!(failure.kind, JobFailureKind::AnswerLost);
+        assert!(failure.detail.contains("may have"), "{failure:?}");
+        assert_eq!(google.taken(), 1, "Google started a second clip");
+        assert_eq!(clips_in_costs(&h, &project), 1, "it may have been billed");
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes()[0].clip_failure().is_some());
+
+        // Retrying is the user asking for a new clip.
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(google.taken(), 2);
+        assert_eq!(clips_in_costs(&h, &project), 2, "the lost one and the new");
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+    }
+
+    #[test]
+    fn a_google_submission_that_started_nothing_waits_and_goes_again() {
+        for refusal in [GoogleSubmit::Overloaded, GoogleSubmit::NeverGetsIt] {
+            let mut h = Harness::new();
+            let google = GoogleSubmissions::scripted(&[refusal]);
+            let (app, project) = animating_with_google(&mut h, &google);
+
+            let job = done(
+                &app,
+                app.generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+                    .unwrap(),
+            );
+
+            assert_eq!(job.attempts(), 2, "the queue waited and went again");
+            assert_eq!(google.taken(), 1);
+            assert_eq!(clips_in_costs(&h, &project), 1);
+            assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+        }
+    }
+
+    #[test]
+    fn a_google_submission_refused_for_quota_stops_the_job_with_nothing_started() {
+        let mut h = Harness::new();
+        let google = GoogleSubmissions::scripted(&[GoogleSubmit::Throttled]);
+        let (app, project) = animating_with_google(&mut h, &google);
+
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        // Google said no: nothing may have started, so nothing is counted
+        // and the scene is not marked as one whose request ended.
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::LimitReached);
+        assert_eq!(google.taken(), 0);
+        assert_eq!(clips_in_costs(&h, &project), 0);
+        assert!(plan_of(&app, &project).scenes()[0].clip_failure().is_none());
+
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(google.taken(), 1);
+        assert_eq!(clips_in_costs(&h, &project), 1);
     }
 
     /// Kling's API as documented: a task that succeeded on the first
@@ -1651,8 +2361,8 @@ mod tests {
         assert_eq!(default(&app).0, Provider::Higgsfield);
         assert_eq!(missing_key(&app), None);
 
-        // Without Higgsfield's key, Veo through the Gemini key already
-        // saved for images.
+        // Without Higgsfield's key, Omni Flash through the Gemini key
+        // already saved for images.
         app.remove_provider_key(Provider::Higgsfield).unwrap();
         assert_eq!(
             default(&app),
@@ -1684,9 +2394,9 @@ mod tests {
         assert_eq!(missing_key(&app), Some(Provider::Higgsfield));
 
         // A channel's own pick stays, whatever keys are saved.
-        let veo =
+        let omni =
             ClipModelRef::new(Provider::Gemini, bardo_ai::google_clips::DEFAULT_MODEL).unwrap();
-        channel_uses(&app, &project, Some(veo.clone()));
+        channel_uses(&app, &project, Some(omni.clone()));
         app.save_provider_key(Provider::Kling, "kling-test-key-0001")
             .unwrap();
         assert_eq!(default(&app).0, Provider::Gemini);
@@ -2037,6 +2747,249 @@ mod tests {
         assert_eq!(plan.scenes()[1].clip_model(), None);
     }
 
+    /// Gives the plan's scenes these lengths, back to back, as a
+    /// narration of ordinary pace would (the fake one speaks each scene in
+    /// under a second).
+    fn scenes_last(h: &Harness, app: &Bardo, project: &VideoProject, millis: &[u64]) -> ScenePlan {
+        let mut plan = plan_of(app, project);
+        let mut start = Duration::ZERO;
+        for (index, &millis) in millis.iter().enumerate() {
+            let scene = plan.scene_mut(index, SystemTime::now()).unwrap();
+            scene.start = start;
+            start += Duration::from_millis(millis);
+            scene.end = start;
+        }
+        h.db.save_scene_plan(&plan).unwrap();
+        plan
+    }
+
+    fn channel_fits(app: &Bardo, project: &VideoProject, fit: ClipFit, percent: u32) {
+        let channel = app
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.id == project.channel)
+            .unwrap();
+        app.update_channel(
+            channel.id,
+            ChannelDraft {
+                clip_fit: fit,
+                stretch_limit: StretchLimit::new(percent),
+                ..ChannelDraft::from(&channel.details)
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_scene_a_little_over_a_length_pays_for_it_and_its_clip_is_stretched() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        app.save_rate(Provider::Higgsfield, "fake/", Meter::VideoSeconds, "0.10")
+            .unwrap();
+
+        let view = app.scenes(project.id).unwrap().clips;
+        assert_eq!(view.stretch, Some(StretchLimit::DEFAULT));
+        let asked: Vec<_> = view
+            .scenes
+            .iter()
+            .map(|scene| (scene.seconds.unwrap(), scene.stretched))
+            .collect();
+        // 6.5 s plays a 5 s clip slowed; 8 s is past what 5 s stretches
+        // to and 4 s fits in 5.
+        assert_eq!(asked, [(5, true), (10, false), (5, false)]);
+        assert_eq!(view.scenes[0].price, Some(Money::from_cents(50)));
+        assert_eq!(
+            view.missing_estimate.as_ref().unwrap().total(),
+            Money::from_cents(200),
+            "20 seconds of clips, where covering every scene buys 25"
+        );
+
+        done(
+            &app,
+            app.generate_missing_clips(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let sent: Vec<_> = h.clips.submissions().iter().map(|r| r.seconds).collect();
+        assert_eq!(sent, [5, 10, 5]);
+        let plan = plan_of(&app, &project);
+        let clips: Vec<_> = plan
+            .scenes()
+            .iter()
+            .map(|scene| scene.pending_clip().unwrap())
+            .map(|clip| (clip.seconds, clip.stretch))
+            .collect();
+        assert_eq!(
+            clips,
+            [(5, Some(StretchLimit::DEFAULT)), (10, None), (5, None)]
+        );
+        assert_eq!(
+            plan.scenes()[0]
+                .pending_clip()
+                .unwrap()
+                .generation
+                .instructions,
+            format!(
+                "Image to video, 5 s (played slowed to fit the scene), from {}",
+                plan.scenes()[0].image().unwrap().file
+            )
+        );
+        let recorded: u64 =
+            h.db.project_costs(project.id)
+                .unwrap()
+                .into_iter()
+                .filter(|record| record.purpose == CostPurpose::SceneClip)
+                .map(|record| record.usage.video_seconds)
+                .sum();
+        assert_eq!(recorded, 20, "what is recorded is what was estimated");
+    }
+
+    #[test]
+    fn the_editor_plays_a_stretched_clip_over_its_scene_and_the_others_as_made() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        done(
+            &app,
+            app.generate_missing_clips(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        for index in 0..3 {
+            app.accept_scene_clip(project.id, index).unwrap();
+        }
+
+        let editor = app.open_editor(project.id).unwrap();
+        let view = editor.view();
+        let slowed: Vec<_> = view.clips.iter().map(|clip| clip.slowed).collect();
+        // Five seconds of clip over the scene's 6.5 and the half second a
+        // transition out of it may show: as far as 40% goes.
+        let over_its_scene = crate::SlowedClip {
+            recorded: Duration::from_secs(5),
+            played: Duration::from_secs(7),
+        };
+        assert_eq!(slowed, [Some(over_its_scene), None, None]);
+        // The cut gives each clip its scene's time, so the narration
+        // stays in sync; what plays it reads the first one's file slower.
+        let plan = editor.preview_plan().unwrap();
+        assert_eq!(plan.video[0].duration, Duration::from_millis(6_500));
+        assert_eq!(
+            plan.video[0].slowed.map(|s| (s.recorded, s.played)),
+            Some((Duration::from_secs(5), Duration::from_secs(7)))
+        );
+        assert!(plan.video[1..].iter().all(|clip| clip.slowed.is_none()));
+    }
+
+    #[test]
+    fn a_channel_that_covers_every_scene_asks_for_the_longer_clip() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        channel_fits(&app, &project, ClipFit::Cover, 40);
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+
+        let view = app.scenes(project.id).unwrap().clips;
+        assert_eq!(view.stretch, None);
+        let asked: Vec<_> = view
+            .scenes
+            .iter()
+            .map(|scene| (scene.seconds.unwrap(), scene.stretched))
+            .collect();
+        assert_eq!(asked, [(10, false), (10, false), (5, false)]);
+
+        done(
+            &app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(h.clips.submissions()[0].seconds, 10);
+        let plan = plan_of(&app, &project);
+        assert_eq!(plan.scenes()[0].pending_clip().unwrap().stretch, None);
+    }
+
+    #[test]
+    fn the_channel_says_how_far_a_clip_stretches() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        let asked = |app: &Bardo| -> Vec<(u32, bool)> {
+            let view = app.scenes(project.id).unwrap().clips;
+            view.scenes
+                .iter()
+                .map(|scene| (scene.seconds.unwrap(), scene.stretched))
+                .collect()
+        };
+
+        // At 20%, five seconds cover six: 6.5 pays for ten again.
+        channel_fits(&app, &project, ClipFit::Stretch, 20);
+        assert_eq!(asked(&app), [(10, false), (10, false), (5, false)]);
+        // At 60%, five seconds cover eight.
+        channel_fits(&app, &project, ClipFit::Stretch, 60);
+        assert_eq!(asked(&app), [(5, true), (5, true), (5, false)]);
+
+        done(
+            &app,
+            app.generate_scene_clip(project.id, 1, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(h.clips.submissions()[0].seconds, 5);
+        let clip = plan_of(&app, &project).scenes()[1]
+            .pending_clip()
+            .unwrap()
+            .clone();
+        assert_eq!(clip.stretch, Some(StretchLimit::new(60)));
+        // It plays over its whole scene, as far as its own 60% goes,
+        // whatever the channel says later.
+        channel_fits(&app, &project, ClipFit::Stretch, 20);
+        assert_eq!(
+            clip.played_over(Duration::from_secs(8)),
+            Duration::from_secs(8)
+        );
+    }
+
+    #[test]
+    fn a_clip_job_keeps_the_fit_it_was_queued_with() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        // Queued while the channel stretches and held at the provider's
+        // door: what the budget was checked against is what is asked for.
+        *h.clips.submit_failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid credentials",
+        ));
+        let job = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        wait_done(&app, job);
+        channel_fits(&app, &project, ClipFit::Cover, 40);
+        *h.clips.submit_failure.lock().unwrap() = None;
+        app.retry_job(job).unwrap();
+        done(&app, job);
+        assert_eq!(h.clips.submissions().last().unwrap().seconds, 5);
+        assert_eq!(
+            plan_of(&app, &project).scenes()[0]
+                .pending_clip()
+                .unwrap()
+                .stretch,
+            Some(StretchLimit::DEFAULT)
+        );
+
+        // A job queued before clips were stretched covers its scenes.
+        let before: ClipsPayload =
+            serde_json::from_str(r#"{"project": "p", "plan": "s", "scenes": []}"#).unwrap();
+        assert_eq!(before.stretch(), None);
+    }
+
     #[test]
     fn a_restart_while_a_clip_is_made_polls_the_same_request() {
         let h = Harness::new();
@@ -2284,6 +3237,96 @@ mod tests {
         assert_eq!(clips_in_costs(&h, &project), 1);
     }
 
+    /// `charged_on_every_send`, with a provider that cannot list what it
+    /// started either (as Google's video API).
+    fn sent_blind(h: &mut Harness, clips: FakeClips) -> (Arc<FakeClips>, Bardo, VideoProject) {
+        charged_on_every_send(
+            h,
+            FakeClips {
+                no_lookup: true,
+                ..clips
+            },
+        )
+    }
+
+    #[test]
+    fn a_lost_answer_nobody_can_look_for_ends_the_scene_at_once() {
+        let mut h = Harness::new();
+        let (clips, app, project) = sent_blind(
+            &mut h,
+            FakeClips {
+                lost: Mutex::new(1),
+                ..FakeClips::default()
+            },
+        );
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Confirmed)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        // Scene 0 may have started; the others are made as usual.
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "the queue went again by itself");
+        let failure = job.failure().unwrap();
+        assert_eq!(failure.kind, JobFailureKind::AnswerLost);
+        assert!(
+            failure.detail.contains("1 of 3 clips") && failure.detail.contains("may have"),
+            "{failure:?}"
+        );
+        assert_eq!(sends(&clips), 3, "each scene once");
+        assert_eq!(*clips.lookups.lock().unwrap(), 0, "nowhere to look");
+        assert_eq!(
+            clips_in_costs(&h, &project),
+            3,
+            "the one that may have been made counts too"
+        );
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes()[0].clip_failure().is_some());
+        assert!(
+            plan.scenes()[1..]
+                .iter()
+                .all(|s| s.pending_clip().is_some())
+        );
+
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(sends(&clips), 4, "scene 0, asked for again");
+        assert_eq!(clips_in_costs(&h, &project), 4);
+    }
+
+    #[test]
+    fn a_run_cut_while_sending_what_nobody_can_look_for_does_not_send_it_again() {
+        let mut h = Harness {
+            closing_wait: Some(Duration::from_millis(20)),
+            ..Harness::new()
+        };
+        let (clips, app, project) = sent_blind(&mut h, FakeClips::default());
+        clips.pause_at(ClipCall::Submit);
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap();
+        wait_for(&clips, FakeClips::paused);
+
+        // The app goes away with the submission on its way: the next start
+        // finds the note that it was sent, and no answer.
+        let closed = app.queue_probe();
+        drop(app);
+        let app = h.start();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(sends(&clips), 1, "sent again without knowing");
+        assert_eq!(clips_in_costs(&h, &project), 1, "it may have been billed");
+        assert!(plan_of(&app, &project).scenes()[0].clip_failure().is_some());
+
+        // The run that lost its job ends without leaving anything.
+        clips.resume();
+        wait_for(&clips, |_| !closed.runs(id));
+        assert_eq!(clips_in_costs(&h, &project), 1);
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_none());
+    }
+
     #[test]
     fn a_clip_is_in_costs_from_the_moment_its_provider_accepts_it() {
         let h = Harness::new();
@@ -2403,6 +3446,271 @@ mod tests {
             clips_in_costs(&h, &project),
             2,
             "the failed one is not billed"
+        );
+    }
+
+    #[test]
+    fn a_clip_its_provider_failed_is_not_sent_again_until_the_user_retries() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        // The provider reports the request as failed, in an outage's words.
+        *h.clips.provider_failures.lock().unwrap() = 1;
+
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "the queue did not try again");
+        assert_eq!(
+            job.failure().unwrap().kind,
+            JobFailureKind::RequestFailed,
+            "a request that ended is not an outage that passes"
+        );
+        assert_eq!(h.clips.submissions().len(), 1, "one click, one request");
+        assert_eq!(
+            plan_of(&app, &project).scenes()[0].clip_failure(),
+            Some(JobFailureKind::RequestFailed)
+        );
+
+        // The user's retry is the one that asks for a new request.
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 2);
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+    }
+
+    #[test]
+    fn the_queue_trying_again_after_an_outage_leaves_a_failed_scene_alone() {
+        let mut h = Harness::new();
+        // Scene 1 is made by a second provider, which is down.
+        let down = Arc::new(FakeClips {
+            provider: Some(Provider::Kling),
+            submit_failure: Mutex::new(Some(ProviderFailure::new(
+                ProviderFailureKind::ProviderDown,
+                "HTTP 503",
+            ))),
+            ..FakeClips::default()
+        });
+        h.more_clips.push(Arc::clone(&down) as _);
+        let mut app = h.start();
+        app.save_provider_key(Provider::Kling, "kling-test-key-0001")
+            .unwrap();
+        let (project, _) = h.drawn_project(&app);
+        let kling = ClipModelRef::new(Provider::Kling, "fake/range").unwrap();
+        app.set_scene_clip_model(project.id, 1, Some(kling))
+            .unwrap();
+        h.clips.fail("launch pad");
+
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        // The outage is waited out by the queue, attempt after attempt,
+        // and none of them sends scene 0 again: its request ended.
+        assert_eq!(job.state(), JobState::Failed);
+        assert!(job.attempts() > 1, "the queue tried again for scene 1");
+        let failure = job.failure().unwrap();
+        assert_eq!(failure.kind, JobFailureKind::ProviderUnavailable);
+        assert_eq!(
+            h.clips.submissions().len(),
+            2,
+            "scenes 0 and 2, once each: {failure:?}"
+        );
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes()[0].clip_failure().is_some());
+        assert!(plan.scenes()[2].pending_clip().is_some());
+
+        // The provider is back and the user retries: both missing scenes go.
+        *down.submit_failure.lock().unwrap() = None;
+        h.clips.succeed_all();
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 3, "scene 0, asked for again");
+        assert_eq!(down.submissions().len(), 1);
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes().iter().all(|s| s.pending_clip().is_some()));
+    }
+
+    #[test]
+    fn retrying_a_cancelled_job_sends_again_the_scene_whose_request_ended() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.fail("launch pad");
+        h.clips.hold_unless(&["launch pad"]);
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        wait_until_failed(&app, &project, 0);
+
+        // Cancelled with scene 0 failed and the others being made.
+        app.cancel_job(id).unwrap();
+        wait_done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 3);
+
+        // The retry is the user asking: scene 0 goes again, the others are
+        // picked up where they were.
+        h.clips.succeed_all();
+        h.clips.hold(false);
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 4);
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes().iter().all(|s| s.pending_clip().is_some()));
+    }
+
+    /// Scene 0 refused by its provider (`refuse` sets how), and scenes 1
+    /// and 2 on a second provider that is down, so the queue goes again
+    /// until its attempts run out. How many calls scene 0's provider got.
+    fn refused_while_another_provider_is_down(refuse: impl Fn(&FakeClips)) -> usize {
+        let mut h = Harness::new();
+        let down = Arc::new(FakeClips {
+            provider: Some(Provider::Kling),
+            submit_failure: Mutex::new(Some(ProviderFailure::new(
+                ProviderFailureKind::ProviderDown,
+                "HTTP 503",
+            ))),
+            ..FakeClips::default()
+        });
+        h.more_clips.push(Arc::clone(&down) as _);
+        let mut app = h.start();
+        app.save_provider_key(Provider::Kling, "kling-test-key-0001")
+            .unwrap();
+        let (project, _) = h.drawn_project(&app);
+        let kling = ClipModelRef::new(Provider::Kling, "fake/range").unwrap();
+        for scene in [1, 2] {
+            app.set_scene_clip_model(project.id, scene, Some(kling.clone()))
+                .unwrap();
+        }
+        refuse(&h.clips);
+
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert!(job.attempts() > 1, "the queue tried again for the outage");
+        assert_eq!(
+            plan_of(&app, &project).scenes()[0].clip_failure(),
+            Some(JobFailureKind::Declined)
+        );
+        h.clips.keys.lock().unwrap().len()
+    }
+
+    #[test]
+    fn a_scene_declined_at_submission_is_left_alone_by_the_queue_too() {
+        let calls = refused_while_another_provider_is_down(|clips| {
+            *clips.submit_failure.lock().unwrap() = Some(ProviderFailure::new(
+                ProviderFailureKind::Declined,
+                "the prompt was declined",
+            ));
+        });
+        assert_eq!(
+            calls, 2,
+            "handed over and submitted once, on the first attempt"
+        );
+    }
+
+    #[test]
+    fn a_scene_whose_image_is_declined_is_left_alone_by_the_queue_too() {
+        // Declined before the scene was ever submitted.
+        let calls = refused_while_another_provider_is_down(|clips| {
+            *clips.stage_failure.lock().unwrap() = Some(ProviderFailure::new(
+                ProviderFailureKind::Declined,
+                "the image was declined",
+            ));
+        });
+        assert_eq!(calls, 1, "handed over once, on the first attempt");
+    }
+
+    #[test]
+    fn a_scene_that_ends_after_its_cancelled_job_was_retried_waits_for_the_next_retry() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        // Scene 0 fails and scene 2 is made at once; scene 1 is held.
+        h.clips.fail("launch pad");
+        h.clips.hold_unless(&["launch pad", "control room"]);
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        wait_until_failed(&app, &project, 0);
+        while plan_of(&app, &project).scenes()[2].pending_clip().is_none() {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        // Scene 1's status call is on its way when the user cancels and
+        // retries; it then answers that the request failed.
+        h.clips.pause_at(ClipCall::Status);
+        wait_for(&h.clips, FakeClips::paused);
+        app.cancel_job(id).unwrap();
+        app.retry_job(id).unwrap();
+        h.clips.succeed_all();
+        h.clips.fail("drifting");
+        h.clips.hold(false);
+        h.clips.resume();
+        let job = wait_done(&app, id);
+
+        // The retry asked again for scene 0, which the user had seen fail;
+        // scene 1's failure came after it and is shown, not paid again.
+        assert_eq!(job.state(), JobState::Failed);
+        assert!(job.failure().unwrap().detail.contains("drifting"));
+        assert_eq!(h.clips.submissions().len(), 4, "3, then scene 0 again");
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes()[0].pending_clip().is_some());
+        assert_eq!(
+            plan.scenes()[1].clip_failure(),
+            Some(JobFailureKind::RequestFailed)
+        );
+
+        // The next retry is the user asking for scene 1.
+        h.clips.succeed_all();
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 5);
+    }
+
+    #[test]
+    fn a_run_picked_up_after_the_app_closed_leaves_a_failed_scene_alone() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.fail("launch pad");
+        // Scene 0's request ends at once; the others are held.
+        h.clips.hold_unless(&["launch pad"]);
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        wait_until_failed(&app, &project, 0);
+        assert_eq!(h.clips.submissions().len(), 3);
+
+        // The app closes with the run under way, and opens again.
+        drop(app);
+        h.clips.hold(false);
+        let app = h.start();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(
+            h.clips.submissions().len(),
+            3,
+            "nobody asked for scene 0 again"
+        );
+        let failure = job.failure().unwrap();
+        assert!(
+            failure.detail.contains("1 of 3 clips") && failure.detail.contains("launch pad"),
+            "{failure:?}"
+        );
+        let plan = plan_of(&app, &project);
+        assert!(
+            plan.scenes()[1..]
+                .iter()
+                .all(|s| s.pending_clip().is_some())
         );
     }
 
@@ -2568,7 +3876,7 @@ mod tests {
 
         assert_eq!(job.state(), JobState::Failed);
         let failure = job.failure().unwrap();
-        assert_eq!(failure.kind, JobFailureKind::UnexpectedAnswer);
+        assert_eq!(failure.kind, JobFailureKind::RequestFailed);
         assert!(
             failure.detail.contains("1 of 3 clips"),
             "{}",
@@ -2578,7 +3886,7 @@ mod tests {
         let plan = plan_of(&app, &project);
         assert_eq!(
             plan.scenes()[0].clip_failure(),
-            Some(JobFailureKind::UnexpectedAnswer)
+            Some(JobFailureKind::RequestFailed)
         );
         assert!(plan.scenes()[0].pending_clip().is_none());
         assert!(
@@ -2744,6 +4052,94 @@ mod tests {
         app.retry_job(id).unwrap();
         done(&app, id);
         assert_eq!(h.clips.submissions().len(), 1);
+    }
+
+    #[test]
+    fn a_clip_job_run_again_after_a_new_narration_sends_nothing_new() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.fail("launch pad");
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        wait_done(&app, id);
+        h.clips.succeed_all();
+        let sent = h.clips.submissions().len();
+        narrate_again(&h, &app, &project, Duration::from_secs(4));
+
+        // The scene that failed is not sent for a plan the narration left.
+        app.retry_job(id).unwrap();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::OutOfDate);
+        assert_eq!(h.clips.submissions().len(), sent, "nothing new is paid");
+
+        // Fitted to the narration, the same job sends it.
+        app.fit_scenes(project.id).unwrap();
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), sent + 1);
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes().iter().all(|s| s.pending_clip().is_some()));
+    }
+
+    #[test]
+    fn a_clip_already_sent_is_collected_after_a_new_narration() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.hold(true);
+        let id = app
+            .generate_scene_clip(project.id, 1, BudgetConsent::Ask)
+            .unwrap();
+        wait_for(&h.clips, |clips| !clips.polls.lock().unwrap().is_empty());
+        app.cancel_job(id).unwrap();
+        wait_done(&app, id);
+        narrate_again(&h, &app, &project, Duration::from_secs(4));
+
+        // The request is paid: run again, the job waits for it, and the plan
+        // is not fitted under it.
+        app.retry_job(id).unwrap();
+        assert!(matches!(app.fit_scenes(project.id), Err(SceneError::Busy)));
+        h.clips.hold(false);
+        done(&app, id);
+
+        assert_eq!(h.clips.submissions().len(), 1, "sent once");
+        assert!(plan_of(&app, &project).scenes()[1].pending_clip().is_some());
+        let fitted = app.fit_scenes(project.id).unwrap();
+        assert!(fitted.scenes()[1].pending_clip().is_some());
+    }
+
+    #[test]
+    fn a_scene_handed_over_before_the_scenes_were_fitted_is_sent_as_it_is_now() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        // The scene's image is handed over, and then the key is refused.
+        *h.clips.submit_failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid credentials",
+        ));
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        *h.clips.submit_failure.lock().unwrap() = None;
+        let short = app.scenes(project.id).unwrap().clips.scenes[0].seconds;
+
+        // The narration is read forty times slower and the scenes fitted.
+        narrate_again(&h, &app, &project, Duration::from_secs(40));
+        app.fit_scenes(project.id).unwrap();
+        let long = app.scenes(project.id).unwrap().clips.scenes[0].seconds;
+        assert_ne!(long, short);
+
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        let sent = h.clips.submissions();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(Some(sent[0].seconds), long, "as long as the scene is now");
     }
 
     #[test]
