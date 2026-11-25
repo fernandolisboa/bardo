@@ -129,6 +129,8 @@ Built on the storyboard plan (#258) and visual styles (#259).
 
 A product shot looks best when the product stands free of its photo's background. The spike finds out whether Bardo can do that on the computer, free and offline, in the `vision` crate (ONNX Runtime, ADR-0024): a salient-object model under a license that allows commercial use (candidates: U²-Net, IS-Net, BiRefNet in its small sizes; RMBG is out for its license), measured on product photos (glass, reflections, white on white, fine edges) for quality, size and speed on the CPU and with DirectML. The result decides whether the cutout is built or the card layout stays the only one for opaque photos. No slice waits on it: the card layout always works.
 
+**Result** (`docs/spikes/product-cutout.md`): BiRefNet lite at 768 × 768 cuts a product on a plain or seamless background well, and fails on a product held in a hand or lying among other things, with a mask that looks as sure as a right one. So the cutout is built (#300) only once it has been checked on a person's own product photos (check `S2.20` on #228), it is downloaded on first use, and the user always sees the cutout beside the card and chooses.
+
 ## Concept products
 
 - A product of kind *idea* is a concept, whatever pictures it has (a mock-up the user imported is still an idea). Changing its kind is how it stops being one.
@@ -215,3 +217,4 @@ In order (each is a sub-issue of #272). All start after #258 and #259 are merged
 10. #281 End card: call to action, link and offer composed over the product (after 6)
 11. #282 Commercial disclosure per network, ad metadata and the ad's upload review (after 8)
 12. #283 Placement exports: the cut in 4:5 and 1:1 for ad managers (after 10 and 11)
+13. #300 Cut a product out of its photo on the computer (after 7, and after check `S2.20` on #228 passes)

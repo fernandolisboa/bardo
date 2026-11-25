@@ -716,15 +716,16 @@ pub const CAPTURE: Tour = {
 };
 
 /// Scenes: planning them, the scene list, a scene's image and prompt,
-/// drawing it again (one scene, or all those in another style), the filter, planning again, and placing a version's
-/// scenes on its narration.
+/// drawing it again (one scene, or all those in another style), the
+/// filter, fitting them to a new narration or planning again, and placing a
+/// version's scenes on its narration.
 pub const SCENES: Tour = {
     const AT: Stage = Stage::Scenes;
     const PAGE: &str = "scenes";
     const TOOLBAR: WhenMissing = WhenMissing::LightPart(TourAnchor::Toolbar);
     Tour {
         id: TourId::Scenes,
-        version: 5,
+        version: 6,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "plan", control(Control::ScenesPlan))
@@ -743,7 +744,7 @@ pub const SCENES: Tour = {
                 .learn(PAGE, "filter"),
             at_stage(AT, "replan", control(Control::ScenesPlan))
                 .missing(TOOLBAR)
-                .learn(PAGE, "replan"),
+                .learn(PAGE, "fit"),
             // Only on a version whose scenes wait for its narration.
             at_stage(AT, "place", control(Control::ScenesPlace))
                 .missing(WhenMissing::Skip)
@@ -760,7 +761,7 @@ pub const CLIPS: Tour = {
     const SCENE: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Clips,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "animate", control(Control::ClipsAnimate))
@@ -937,7 +938,7 @@ pub const CHANNELS: Tour = {
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Channels,
-        version: 4,
+        version: 5,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "list", TourAnchor::Collection).learn(PAGE, "list"),

@@ -5,9 +5,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    CaptionHighlight, CaptionStyle, ClipModelRef, ContentLanguage, Country, Market, MotionDefault,
-    PersonaId, ProductionMode, ProfileId, RepositoryError, StyleChoice, ThumbnailLook, Transition,
-    VideoFormat,
+    CaptionHighlight, CaptionStyle, ClipFit, ClipModelRef, ContentLanguage, Country, Market,
+    MotionDefault, PersonaId, ProductionMode, ProfileId, RepositoryError, StretchLimit,
+    StyleChoice, ThumbnailLook, Transition, VideoFormat,
 };
 
 /// Identifies a channel.
@@ -79,6 +79,12 @@ pub struct ChannelDraft {
     /// The visual style of the channel's videos unless a video picks
     /// another (#259).
     pub style: StyleChoice,
+    /// How the channel's clips are asked of a model of fixed lengths
+    /// (#260).
+    pub clip_fit: ClipFit,
+    /// How far a clip is stretched under [`ClipFit::Stretch`]; kept while
+    /// the channel covers every scene, for when it stretches again.
+    pub stretch_limit: StretchLimit,
 }
 
 /// Why a draft is not a valid channel. One entry per offending field, so a
@@ -125,6 +131,8 @@ pub struct ChannelDetails {
     motion: MotionDefault,
     production: ProductionMode,
     style: StyleChoice,
+    clip_fit: ClipFit,
+    stretch_limit: StretchLimit,
 }
 
 impl ChannelDetails {
@@ -190,6 +198,8 @@ impl ChannelDetails {
             motion: draft.motion,
             production: draft.production,
             style: draft.style,
+            clip_fit: draft.clip_fit,
+            stretch_limit: draft.stretch_limit,
         })
     }
 
@@ -276,6 +286,22 @@ impl ChannelDetails {
         self.style
     }
 
+    /// How the channel's clips are asked of a model of fixed lengths.
+    pub fn clip_fit(&self) -> ClipFit {
+        self.clip_fit
+    }
+
+    /// How far a clip is stretched when the channel stretches clips.
+    pub fn stretch_limit(&self) -> StretchLimit {
+        self.stretch_limit
+    }
+
+    /// The limit the channel's next clips stretch within; `None` when
+    /// every clip covers its scene.
+    pub fn clip_stretch(&self) -> Option<StretchLimit> {
+        (self.clip_fit == ClipFit::Stretch).then_some(self.stretch_limit)
+    }
+
     /// The audience the channel aims at, for market research.
     pub fn market(&self) -> Market {
         Market::new(self.country, self.language)
@@ -307,6 +333,8 @@ impl From<&ChannelDetails> for ChannelDraft {
             motion: details.motion,
             production: details.production,
             style: details.style,
+            clip_fit: details.clip_fit,
+            stretch_limit: details.stretch_limit,
         }
     }
 }
@@ -512,8 +540,19 @@ mod tests {
             ),
             production: ProductionMode::Economy,
             style: StyleChoice::Catalog(crate::VisualStyle::Manga),
+            clip_fit: ClipFit::Cover,
+            stretch_limit: StretchLimit::new(25),
         })
         .unwrap();
+        assert_eq!(details.clip_fit(), ClipFit::Cover);
+        assert_eq!(details.stretch_limit(), StretchLimit::new(25));
+        assert_eq!(details.clip_stretch(), None, "it covers every scene");
+        let stretching = ChannelDetails::validate(ChannelDraft {
+            clip_fit: ClipFit::Stretch,
+            ..ChannelDraft::from(&details)
+        })
+        .unwrap();
+        assert_eq!(stretching.clip_stretch(), Some(StretchLimit::new(25)));
         assert_eq!(
             details.style(),
             StyleChoice::Catalog(crate::VisualStyle::Manga)

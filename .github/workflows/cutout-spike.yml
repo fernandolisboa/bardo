@@ -1,0 +1,149 @@
+name: Cutout spike
+
+# Issue #277: converts the pinned salient-object models to ONNX and runs
+# cutout-probe on the test photos, on Linux and on the Windows runner's CPU
+# (and DirectML, which on a runner with no graphics card shows how the
+# fallback behaves). The Windows job also puts together the kit for the
+# checks on a machine with a graphics card. Runs when the spike changes,
+# or by hand.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - spikes/cutout-probe/**
+      - .github/workflows/cutout-spike.yml
+
+concurrency:
+  group: cutout-spike-${{ github.ref }}
+  cancel-in-progress: true
+
+# The conversion runs upstream model code; nothing here writes to the
+# repository.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  convert:
+    name: Convert models
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        # bash with pipefail, so `convert.py | tee` fails when a check does.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the conversion tools
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -r spikes/cutout-probe/tools/requirements.txt
+      - name: Convert the models
+        run: |
+          mkdir -p cutout-models
+          grep -m1 'model name' /proc/cpuinfo | tee cutout-models/convert.log
+          python spikes/cutout-probe/tools/convert.py cutout-models --deformconv 2>&1 | tee -a cutout-models/convert.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cutout-models
+          path: |
+            cutout-models/*.onnx
+            cutout-models/models.toml
+            cutout-models/convert.log
+            cutout-models/SHA256SUMS
+          retention-days: 7
+
+  probe:
+    name: Probe (${{ matrix.os }})
+    needs: convert
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      P: spikes/cutout-probe/target/release/cutout-probe
+      PHOTOS: spikes/cutout-probe/photos
+    steps:
+      - uses: actions/checkout@v4
+      # 1.99, not stable, as in ci.yml: under Rust 1.100's build-dir layout
+      # the pinned `ort-sys` (2.0.0-rc.12, ADR-0024) cannot copy
+      # onnxruntime's DLLs on Windows.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: spikes/cutout-probe
+      - uses: actions/download-artifact@v4
+        with:
+          name: cutout-models
+          path: cutout-models
+      - name: Build cutout-probe
+        working-directory: spikes/cutout-probe
+        run: |
+          cargo fmt --check
+          cargo clippy --release --all-targets --locked -- -D warnings
+          cargo test --release --locked
+          cargo build --release --locked
+      - name: Say which CPU this runner has
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            powershell -NoProfile -Command "(Get-CimInstance Win32_Processor).Name" | tee cpu-${{ runner.os }}.txt
+          else
+            grep -m1 'model name' /proc/cpuinfo | tee cpu-${{ runner.os }}.txt
+          fi
+      - name: Load and run every model (CPU)
+        run: $P info --models cutout-models --ep cpu --placement --out info-cpu-${{ runner.os }}.json
+      - name: Load and run every model (DirectML, falls back to the CPU when it cannot start)
+        if: runner.os == 'Windows'
+        run: $P info --models cutout-models --ep directml --placement --out info-directml.json
+      - name: Cut every photo with every model (CPU), a model a process for its own memory
+        run: |
+          mkdir -p cutouts
+          for model in u2netp_320x320 u2net_320x320 isnet_general_use_1024x1024 birefnet_lite_512x512 birefnet_lite_768x768 birefnet_lite_1024x1024; do
+            $P cut --models cutout-models --photos $PHOTOS --model $model --runs 2 --out cutouts --report cut-$model-${{ runner.os }}.json
+          done
+          $P cut --models cutout-models --photos $PHOTOS --model birefnet_lite_matting_1024x1024 --runs 1 --out cutouts --report cut-birefnet_lite_matting_1024x1024-${{ runner.os }}.json
+      - name: Cut one photo in a process of its own, as a job in the app would, with the CPU's memory arena on and off
+        run: |
+          mkdir -p one
+          for model in birefnet_lite_512x512 birefnet_lite_768x768 birefnet_lite_1024x1024; do
+            $P cut --models cutout-models --photos $PHOTOS/box-1.jpg --model $model --runs 1 --out one --report one/$model-${{ runner.os }}.json
+            $P cut --models cutout-models --photos $PHOTOS/box-1.jpg --model $model --runs 1 --no-arena --out one --report one/$model-no-arena-${{ runner.os }}.json
+          done
+      - name: Put together the kit for the checks on a real Windows machine
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p kit/models kit/photos
+          cp spikes/cutout-probe/target/release/cutout-probe.exe kit/
+          cp spikes/cutout-probe/target/release/*.dll kit/ 2>/dev/null || true
+          cp cutout-models/*.onnx cutout-models/models.toml kit/models/
+          rm kit/models/*_deformconv.onnx
+          cp $PHOTOS/*.jpg kit/photos/
+          ls -l kit kit/models
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: cutout-probe-windows-kit
+          path: kit
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cutout-results-${{ runner.os }}
+          path: |
+            *.json
+            cpu-*.txt
+            one/*.json
+            cutouts/*.jpg
+          retention-days: 30

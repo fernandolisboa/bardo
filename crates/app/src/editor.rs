@@ -188,10 +188,21 @@ pub struct ClipView {
     /// one: provider and model for the inspector.
     pub image: Option<Generation>,
     pub clip: Option<Generation>,
+    /// Set when it is a clip the cut plays slower than it was made, to
+    /// last as long as its scene (#260).
+    pub slowed: Option<SlowedClip>,
     /// The scene's narration.
     pub text: String,
     /// What it performs, when it is a performed clip of the narration.
     pub performance: Option<ClipPerformance>,
+}
+
+/// A scene's clip played slower than it was made: `recorded` of clip
+/// lasts `played`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SlowedClip {
+    pub recorded: Duration,
+    pub played: Duration,
 }
 
 /// A performed piece of the video track (#193).
@@ -1287,6 +1298,19 @@ pub(crate) fn timeline_plan(
                 .played_motion()
                 .filter(|_| matches!(source, ClipSource::Still(_)))
                 .map(|motion| media_motion(motion, shown_for));
+            // A stretched clip is cut in the time it plays; what plays
+            // it turns that into its file's.
+            let slowed = match &item.source {
+                VideoSource::Clip {
+                    length,
+                    stretched_from: Some(recorded),
+                    ..
+                } => Some(ffmpeg::Slowed {
+                    recorded: *recorded,
+                    played: *length,
+                }),
+                _ => None,
+            };
             VideoClip {
                 source,
                 start: item.source_start(),
@@ -1294,6 +1318,7 @@ pub(crate) fn timeline_plan(
                 framing: media_framing(item.framing_in(aspect)),
                 transition: into.map(media_transition),
                 motion,
+                slowed,
             }
         })
         .collect();
@@ -1307,6 +1332,7 @@ pub(crate) fn timeline_plan(
             framing: ffmpeg::Framing::Fit,
             transition: None,
             motion: None,
+            slowed: None,
         });
     }
     let mix = timeline.mix();
@@ -1691,6 +1717,17 @@ impl Bardo {
                     clip: scene
                         .filter(|_| is_clip)
                         .and_then(|scene| scene.clip().map(|clip| clip.generation.clone())),
+                    slowed: match &item.source {
+                        VideoSource::Clip {
+                            length,
+                            stretched_from: Some(recorded),
+                            ..
+                        } => Some(SlowedClip {
+                            recorded: *recorded,
+                            played: *length,
+                        }),
+                        _ => None,
+                    },
                     text: scene.map(|scene| scene.text.clone()).unwrap_or_default(),
                     performance: timeline.sync(index).and_then(|sync| {
                         let file = item.source.file()?;
@@ -3605,6 +3642,43 @@ mod tests {
             .iter()
             .map(|clip| (clip.at, clip.duration))
             .collect()
+    }
+
+    #[test]
+    fn fitting_the_scenes_starts_the_cut_over_on_the_new_times() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = opened(&h, &app);
+        // The narration is made again, longer, and the cut is edited while
+        // the scenes still hold the old times.
+        crate::scenes::tests::narrate_again(&h, &app, &project, Duration::from_secs(4));
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        assert!(editor.view().stale);
+        app.edit(&mut editor, EditAction::SetAspect(AspectRatio::Vertical))
+            .unwrap();
+        let on_old_times = spans(&editor);
+        assert!(app.timelines.saved_timeline(project.id).unwrap().is_some());
+
+        // Fitting keeps the plan and the narration the cut was saved under,
+        // so that cut would come back as it is: it goes with the old times.
+        let fitted = app.fit_scenes(project.id).unwrap();
+        assert!(app.timelines.saved_timeline(project.id).unwrap().is_none());
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        assert!(!editor.view().stale);
+        let starts: Vec<Duration> = fitted.scenes().iter().map(|scene| scene.start).collect();
+        let cut: Vec<Duration> = spans(&editor).iter().map(|(at, _)| *at).collect();
+        // Each clip starts with its scene, on the frame nearest to it.
+        let frame = Duration::from_millis(34);
+        assert_eq!(cut.len(), starts.len());
+        assert!(
+            cut.iter()
+                .zip(&starts)
+                .all(|(clip, scene)| clip.abs_diff(*scene) < frame),
+            "{cut:?} {starts:?}"
+        );
+        assert_ne!(spans(&editor), on_old_times);
     }
 
     const REACH: Duration = Duration::from_millis(150);

@@ -4,10 +4,10 @@ content-type: application/json; charset=UTF-8
 {
   "id": "v1_ChdHb29nbGVPbW5pQmFyZG9UZXN0MDAx",
   "status": "failed",
-  "model": "gemini-omni-1.1-flash",
+  "model": "gemini-omni-1.2-flash",
   "object": "interaction",
   "error": {
-    "code": "internal",
+    "code": "api_error",
     "message": "Video generation failed. Please try again."
   }
 }

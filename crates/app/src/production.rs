@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use bardo_domain::{
     ClipModel, CostPurpose, Money, ProductionMode, Provider, RepositoryError, ScenePlanSize,
-    VideoLength, VideoProject, VideoProjectId, typical_length, typical_scenes,
+    StretchLimit, VideoLength, VideoProject, VideoProjectId, typical_length, typical_scenes,
 };
 
 use crate::costs::{BudgetConsent, CapReached, PlannedCall, SpendEstimate};
@@ -91,6 +91,9 @@ struct PlannedScene {
 struct VideoWork {
     calls: Vec<PlannedCall>,
     scenes: Vec<PlannedScene>,
+    /// How far the channel's clips stretch; `None` when they cover every
+    /// scene.
+    stretch: Option<StretchLimit>,
 }
 
 impl Bardo {
@@ -265,7 +268,11 @@ impl Bardo {
                 images as u64,
             ));
         }
-        Ok(VideoWork { calls, scenes })
+        Ok(VideoWork {
+            calls,
+            scenes,
+            stretch: self.channel_clip_stretch(project.channel)?,
+        })
     }
 
     /// `work` plus the clips `mode` makes, priced.
@@ -277,6 +284,7 @@ impl Bardo {
         channel_model: Option<&ClipModel>,
     ) -> Result<ModeEstimate, RepositoryError> {
         let default = Self::mode_clip_model(mode, models, channel_model);
+        let retired = self.retired_clip_models();
         let mut calls = work.calls.clone();
         let mut clips = 0;
         let mut missing_key = None;
@@ -286,7 +294,8 @@ impl Bardo {
             .filter(|scene| scene.needs_clip && mode.animates(scene.start))
         {
             let model = match &scene.own_model {
-                Some(own) => models.iter().find(|model| model.id == *own),
+                Some(own) => bardo_domain::current_clip_model(models, &retired, own)
+                    .map(|current| current.model),
                 None => default,
             };
             let Some(model) = model else { continue };
@@ -298,7 +307,7 @@ impl Bardo {
             calls.push(
                 PlannedCall::new(provider, CostPurpose::SceneClip, 1)
                     .with_model(model.id.model())
-                    .with_video_seconds(model.durations.fit(scene.length)),
+                    .with_video_seconds(model.durations.fit(scene.length, work.stretch).seconds),
             );
         }
         let (remaining, partial) = self.cost_book.price(&calls)?;
@@ -409,9 +418,10 @@ mod tests {
             .unwrap();
 
         // A minute: 900 characters, ten scenes and a portrait. The hook is
-        // the scenes at 0 and 6 seconds, each a 10-second Kling 2.6 clip
-        // (it makes 5 or 10) at US$ 0.042 a second; Kling 3.0 makes any
-        // length, so premium pays the 60 seconds at US$ 0.112.
+        // the scenes at 0 and 6 seconds, each a 5-second Kling 2.6 clip
+        // played slowed (it makes 5 or 10, and 6 seconds is within what 5
+        // stretches to) at US$ 0.042 a second; Kling 3.0 makes any length,
+        // so premium pays the 60 seconds at US$ 0.112.
         let view = app.production(short.id).unwrap();
         let economy = SCRIPT + plan(10) + 90_000 + 11 * IMAGE;
         assert_eq!(view.spent, Money::ZERO);
@@ -421,11 +431,11 @@ mod tests {
         );
         assert_eq!(
             remaining(&view, ProductionMode::AnimatedHook),
-            Money::from_micros(economy + 20 * 42_000)
+            Money::from_micros(economy + 10 * 42_000)
         );
         assert_eq!(
             remaining(&view, ProductionMode::AllAnimated),
-            Money::from_micros(economy + 100 * 42_000)
+            Money::from_micros(economy + 50 * 42_000)
         );
         assert_eq!(
             remaining(&view, ProductionMode::Premium),
@@ -446,17 +456,64 @@ mod tests {
         );
         assert_eq!(
             remaining(&view, ProductionMode::AnimatedHook),
-            Money::from_micros(economy + 20 * 42_000)
+            Money::from_micros(economy + 10 * 42_000)
         );
         assert_eq!(
             remaining(&view, ProductionMode::AllAnimated),
-            Money::from_micros(economy + 800 * 42_000)
+            Money::from_micros(economy + 400 * 42_000)
         );
         assert_eq!(
             remaining(&view, ProductionMode::Premium),
             Money::from_micros(economy + 480 * 112_000)
         );
         assert_eq!(view.total(view.mode), Some(remaining(&view, view.mode)));
+    }
+
+    #[test]
+    fn a_channel_that_covers_every_scene_pays_for_the_longer_clips() {
+        let h = harness();
+        let app = h.start();
+        let short = project(&app);
+        app.set_project_format(short.id, Some(VideoFormat::Short))
+            .unwrap();
+        let stretched = app.production(short.id).unwrap();
+        let channel = app
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.id == short.channel)
+            .unwrap();
+        app.update_channel(
+            channel.id,
+            bardo_domain::ChannelDraft {
+                clip_fit: bardo_domain::ClipFit::Cover,
+                ..bardo_domain::ChannelDraft::from(&channel.details)
+            },
+        )
+        .unwrap();
+
+        // Each 6 second scene pays for 10 seconds of Kling 2.6 and the
+        // last 4 are trimmed: twice what the stretch pays.
+        let covered = app.production(short.id).unwrap();
+        let economy = SCRIPT + plan(10) + 90_000 + 11 * IMAGE;
+        assert_eq!(
+            remaining(&covered, ProductionMode::AnimatedHook),
+            Money::from_micros(economy + 20 * 42_000)
+        );
+        assert_eq!(
+            remaining(&covered, ProductionMode::AllAnimated),
+            Money::from_micros(economy + 100 * 42_000)
+        );
+        assert_eq!(
+            remaining(&stretched, ProductionMode::AllAnimated),
+            Money::from_micros(economy + 50 * 42_000)
+        );
+        // A model of any length is asked for what the scene needs either
+        // way.
+        assert_eq!(
+            remaining(&covered, ProductionMode::Premium),
+            remaining(&stretched, ProductionMode::Premium)
+        );
     }
 
     #[test]

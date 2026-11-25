@@ -130,8 +130,8 @@ pub use diagnostics::{
 };
 pub use editor::{
     BinScene, ClipMedia, ClipPerformance, ClipProblem, ClipShows, ClipView, CutBasis, EditAction,
-    Editor, EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, WordMark,
-    media_framing, preview_size,
+    Editor, EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT,
+    SlowedClip, WordMark, media_framing, preview_size,
 };
 pub use export::{
     ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView, export_job_networks,
@@ -151,7 +151,9 @@ pub use media_import::{MediaImport, MediaImportError};
 pub use music_prompts::{MusicPromptError, MusicPromptView};
 pub use music_tracks::{GeneratedTrack, MusicTrackError, MusicTrackPlayer, MusicTracksView};
 pub use narration_import::{MAX_RECORDING_BYTES, Recording};
-pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
+pub use narrations::{
+    NarrationError, NarrationPlayer, NarrationView, PicturesAtStake, PicturesConsent,
+};
 pub use navigation::{Destination, Pillar, SettingsTab};
 pub use network_accounts::NetworkAccountError;
 pub use performed_takes::{
@@ -888,6 +890,7 @@ impl Bardo {
         let clip_handler = ClipHandler {
             owner: profile.id,
             plans: Arc::clone(&scene_plans),
+            narrations: Arc::clone(&narrations),
             files: Arc::clone(&files),
             generators: providers.clips.clone(),
             secrets: Arc::clone(&secrets),

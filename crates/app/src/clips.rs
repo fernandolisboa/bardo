@@ -49,11 +49,12 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, ChannelId, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelRef, ClipRequest,
-    ClipStatus, ClipSubmission, CostPurpose, CostRecordId, Generation, GenerationId, ImageFormat,
-    Job, JobFailure, JobFailureKind, JobId, JobKind, Metered, Money, ProductionMode, ProfileId,
-    Progress, ProjectFiles, Provider, ProviderFailure, ProviderFailureKind, RepositoryError, Scene,
-    SceneClip, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, StagedImage,
+    ApiKey, ChannelId, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel, ClipModelRef,
+    ClipRequest, ClipStatus, ClipSubmission, CostPurpose, CostRecordId, Generation, GenerationId,
+    ImageFormat, Job, JobFailure, JobFailureKind, JobId, JobKind, Metered, Money,
+    NarrationRepository, ProductionMode, ProfileId, Progress, ProjectFiles, Provider,
+    ProviderFailure, ProviderFailureKind, RepositoryError, Scene, SceneClip, ScenePlan,
+    ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, StagedImage, StretchLimit,
     TokenUsage, VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
@@ -91,9 +92,16 @@ pub struct ClipsView {
     /// the channel's, else the provider's default. `None` when no provider
     /// is set up.
     pub default_model: Option<ClipModel>,
+    /// The name of the model the channel was saved with, when its provider
+    /// retired it and `default_model` is the one that took its place.
+    pub default_replaces: Option<String>,
     /// The video's production mode (#248), which says which scenes
     /// "animate missing" animates.
     pub mode: ProductionMode,
+    /// How far the channel's clips are stretched over a scene a little
+    /// longer than a length their model makes (#260); `None` when every
+    /// clip covers its scene.
+    pub stretch: Option<StretchLimit>,
     /// One per scene of the plan, in order.
     pub scenes: Vec<SceneClipView>,
     /// The scenes "animate missing" would animate: the ones the mode
@@ -107,10 +115,16 @@ pub struct ClipsView {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneClipView {
     /// The model its next clip uses; `None` when the model it picked is no
-    /// longer offered.
+    /// longer offered and nothing took its place.
     pub model: Option<ClipModel>,
+    /// The name of the model the scene picked, when its provider retired
+    /// it and `model` is the one that took its place.
+    pub replaces: Option<String>,
     /// How long its next clip would be.
     pub seconds: Option<u32>,
+    /// Whether that is shorter than the scene on purpose: the clip would
+    /// play slowed, to end when the scene does (#260).
+    pub stretched: bool,
     /// What its next clip would cost at the rate table's price; `None`
     /// when no rate covers the model.
     pub price: Option<Money>,
@@ -134,6 +148,19 @@ struct ClipsPayload {
     project: String,
     plan: String,
     scenes: Vec<ClipOrder>,
+    /// How far a scene a little longer than a length its model makes
+    /// stretches a clip of that length, in percent (the channel's
+    /// `StretchLimit` when the job was queued: the budget was checked
+    /// against it too); 0 covers every scene, as a job queued before
+    /// stretching was priced.
+    #[serde(default)]
+    stretch_percent: u8,
+}
+
+impl ClipsPayload {
+    fn stretch(&self) -> Option<StretchLimit> {
+        (self.stretch_percent > 0).then(|| StretchLimit::new(self.stretch_percent.into()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +211,10 @@ struct ClipRun {
     submission: u32,
     prompt: String,
     seconds: u32,
+    /// The limit it was asked for shorter than the scene under, to play
+    /// slowed, in percent; 0 when it covers the scene.
+    #[serde(default)]
+    stretch_percent: u8,
     /// The image animated: its generation and file.
     source_image: String,
     image_file: String,
@@ -324,6 +355,8 @@ fn plan_failure(provider: Provider, error: &crate::PlanError) -> JobFailure {
 pub(crate) struct ClipHandler {
     pub(crate) owner: ProfileId,
     pub(crate) plans: Arc<dyn ScenePlanRepository>,
+    /// Says whether the plan is still on the project's narration.
+    pub(crate) narrations: Arc<dyn NarrationRepository>,
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) generators: Vec<Arc<dyn ClipGenerator>>,
     pub(crate) secrets: Arc<dyn SecretStore>,
@@ -338,6 +371,8 @@ struct ClipJob<'a> {
     job: JobId,
     project: VideoProjectId,
     plan: ScenePlanId,
+    /// How far a clip of a model of fixed lengths stretches, as queued.
+    stretch: Option<StretchLimit>,
     state: ClipsState,
     keys: Vec<(Provider, ApiKey)>,
     /// A plan's token was renewed after the provider refused it, and no
@@ -384,6 +419,7 @@ impl JobHandler for ClipHandler {
             job: cx.id(),
             project: id(&payload.project)?,
             plan: id(&payload.plan)?,
+            stretch: payload.stretch(),
             state,
             keys: Vec::new(),
             renewed: false,
@@ -579,6 +615,18 @@ impl ClipJob<'_> {
             .filter(|saved| saved.id == self.plan))
     }
 
+    /// Whether the plan is no longer on the project's narration.
+    fn out_of_date(&self) -> Result<bool, JobFailure> {
+        let narration = self
+            .handler
+            .narrations
+            .narration(self.project)
+            .map_err(unexpected)?;
+        Ok(self
+            .saved_plan()?
+            .is_some_and(|plan| plan.is_stale(narration.as_ref())))
+    }
+
     fn save_state(&self, cx: &mut JobContext) -> Result<(), JobFailure> {
         cx.save_external_handle(to_json(&self.state))
             .map_err(unexpected)
@@ -610,6 +658,16 @@ impl ClipJob<'_> {
         let mut key = self.key(generator.provider())?;
         let submitted = self.run_of(order.scene).and_then(|run| run.request.clone());
         let Some(request) = submitted else {
+            // Nothing is paid for a scene the narration left behind (a job
+            // run again after the narration was made again). The requests
+            // already sent are paid: those are still waited for and kept,
+            // and one sent without an answer is still looked for.
+            let maybe_sent = self
+                .run_of(order.scene)
+                .is_some_and(|run| run.sent_at.is_some());
+            if !maybe_sent && self.out_of_date()? {
+                return Ok(Step::Failed(crate::scenes::out_of_date("clips")));
+            }
             return self.submit(order, scene, generator, &mut key, cx);
         };
         let handle = ClipHandle(request);
@@ -718,6 +776,29 @@ impl ClipJob<'_> {
             .is_some_and(|had| animated_since(scene, self.job, had));
         if left && !unanswered {
             return Ok(Step::Left);
+        }
+        // A scene handed over and not sent (the provider was busy, the
+        // job was stopped) may have changed since: fitted to a new
+        // narration, its motion edited, its image replaced. It is handed
+        // over again, so what is sent is the scene as it is now.
+        let stretch = self.stretch;
+        let length = generator
+            .models()
+            .into_iter()
+            .find(|model| model.id.model() == order.model)
+            .map(|model| model.durations.fit(scene.duration(), stretch));
+        let image = scene.image().map(|image| image.generation.id.to_string());
+        if let Some(run) = self.run_of(order.scene)
+            && run.sent_at.is_none()
+            && run.staged.is_some()
+            && (run.prompt != scene.motion_prompt().as_str()
+                || length.as_ref().is_none_or(|length| {
+                    run.seconds != length.seconds
+                        || run.stretch_percent != length.stretch.map_or(0, StretchLimit::percent)
+                })
+                || Some(&run.source_image) != image.as_ref())
+        {
+            run.staged = None;
         }
         let staged = self.run_of(order.scene).and_then(|run| run.staged.clone());
         let staged = match staged {
@@ -1049,12 +1130,14 @@ impl ClipJob<'_> {
             Err(failure) => return self.submit_failed(order, failure, cx).map(Err),
         };
         let prompt = scene.motion_prompt().as_str().to_owned();
-        let seconds = model.durations.fit(scene.duration());
+        let ClipLength { seconds, stretch } = model.durations.fit(scene.duration(), self.stretch);
+        let stretch_percent = stretch.map_or(0, StretchLimit::percent);
         let (source_image, image_file) = (image.generation.id.to_string(), image.file.clone());
         match self.run_of(order.scene) {
             Some(run) => {
                 run.prompt = prompt;
                 run.seconds = seconds;
+                run.stretch_percent = stretch_percent;
                 run.source_image = source_image;
                 run.image_file = image_file;
                 run.staged = Some(staged.clone());
@@ -1064,6 +1147,7 @@ impl ClipJob<'_> {
                 submission: 1,
                 prompt,
                 seconds,
+                stretch_percent,
                 source_image,
                 image_file,
                 staged: Some(staged.clone()),
@@ -1220,6 +1304,8 @@ impl ClipJob<'_> {
         let clip = SceneClip {
             file: file.clone(),
             seconds: run.seconds,
+            stretch: (run.stretch_percent > 0)
+                .then(|| StretchLimit::new(run.stretch_percent.into())),
             source_image: id(&run.source_image)?,
             generation: Generation {
                 id: generation,
@@ -1228,7 +1314,16 @@ impl ClipJob<'_> {
                 provider,
                 model: order.model.clone(),
                 template: plan.generation.template,
-                instructions: format!("Image to video, {} s, from {}", run.seconds, run.image_file),
+                instructions: format!(
+                    "Image to video, {} s{}, from {}",
+                    run.seconds,
+                    if run.stretch_percent > 0 {
+                        " (played slowed to fit the scene)"
+                    } else {
+                        ""
+                    },
+                    run.image_file
+                ),
                 prompt: run.prompt,
                 output: file,
                 usage: TokenUsage::default(),
@@ -1282,6 +1377,24 @@ impl Bardo {
             .any(|offered| offered.id == *model)
     }
 
+    /// The models the video providers no longer serve, each with the
+    /// offered model that takes its place.
+    pub(crate) fn retired_clip_models(&self) -> Vec<bardo_domain::RetiredClipModel> {
+        self.clips
+            .iter()
+            .flat_map(|generator| generator.retired())
+            .collect()
+    }
+
+    /// The model a saved choice names today: the model that took its place
+    /// when its provider retired it, else itself. A form shows it, and
+    /// saving a channel saves it.
+    pub fn clip_model_now(&self, saved: &ClipModelRef) -> ClipModelRef {
+        let (models, retired) = (self.clip_models(), self.retired_clip_models());
+        bardo_domain::current_clip_model(&models, &retired, saved)
+            .map_or_else(|| saved.clone(), |current| current.model.id.clone())
+    }
+
     /// The model of a channel's scenes without their own: the channel's
     /// when still offered, else the first provider's default.
     pub(crate) fn channel_clip_model(
@@ -1289,25 +1402,58 @@ impl Bardo {
         models: &[ClipModel],
         channel: ChannelId,
     ) -> Result<Option<ClipModel>, RepositoryError> {
+        Ok(self
+            .channel_clip_choice(models, channel)?
+            .map(|(model, _)| model))
+    }
+
+    /// `channel_clip_model`, with the name of the model the channel was
+    /// saved with when its provider retired it and the model returned is
+    /// the one that took its place.
+    fn channel_clip_choice(
+        &self,
+        models: &[ClipModel],
+        channel: ChannelId,
+    ) -> Result<Option<(ClipModel, Option<String>)>, RepositoryError> {
         let chosen = self
             .channels
             .get(channel)?
             .and_then(|channel| channel.details.clip_model().cloned());
+        let retired = self.retired_clip_models();
         Ok(chosen
-            .and_then(|chosen| models.iter().find(|model| model.id == chosen))
-            .or_else(|| models.first())
-            .cloned())
+            .and_then(|chosen| saved_clip_model(models, &retired, &chosen))
+            .or_else(|| models.first().cloned().map(|model| (model, None))))
     }
 
-    /// The model a scene's next clip uses.
+    /// How far `channel`'s clips stretch over a scene a little longer
+    /// than a length their model makes; `None` when they cover every
+    /// scene (the default limit when the channel is gone).
+    pub(crate) fn channel_clip_stretch(
+        &self,
+        channel: ChannelId,
+    ) -> Result<Option<StretchLimit>, RepositoryError> {
+        Ok(self
+            .channels
+            .get(channel)?
+            .map_or(Some(StretchLimit::DEFAULT), |channel| {
+                channel.details.clip_stretch()
+            }))
+    }
+
+    /// The model a scene's next clip uses, and the name of the retired
+    /// model it takes the place of.
     fn scene_clip_model(
         models: &[ClipModel],
+        retired: &[bardo_domain::RetiredClipModel],
         default_model: Option<&ClipModel>,
         scene: &Scene,
-    ) -> Option<ClipModel> {
+    ) -> (Option<ClipModel>, Option<String>) {
         match scene.clip_model() {
-            Some(own) => models.iter().find(|model| model.id == *own).cloned(),
-            None => default_model.cloned(),
+            Some(own) => match saved_clip_model(models, retired, own) {
+                Some((model, replaces)) => (Some(model), replaces),
+                None => (None, None),
+            },
+            None => (default_model.cloned(), None),
         }
     }
 
@@ -1359,33 +1505,43 @@ impl Bardo {
         plan: Option<&ScenePlan>,
     ) -> Result<ClipsView, SceneError> {
         let models = self.clip_models();
-        let channel_model = self.channel_clip_model(&models, project.channel)?;
+        let retired = self.retired_clip_models();
+        let (channel_model, channel_replaces) =
+            self.channel_clip_choice(&models, project.channel)?.unzip();
         let mode = self.production_mode(project)?;
         let default_model = Self::mode_clip_model(mode, &models, channel_model.as_ref()).cloned();
+        // Only said when the channel's model is the one in use: the other
+        // modes bring their own.
+        let default_replaces = channel_replaces
+            .flatten()
+            .filter(|_| mode.clip_model().is_none());
         let Some(plan) = plan else {
             return Ok(ClipsView {
                 models,
                 default_model,
+                default_replaces,
                 mode,
                 ..ClipsView::default()
             });
         };
         let rates = self.cost_book.rates()?;
+        let stretch = self.channel_clip_stretch(project.channel)?;
         let jobs = self.clip_jobs(plan.project);
         let scenes: Vec<SceneClipView> = plan
             .scenes()
             .iter()
             .enumerate()
             .map(|(index, scene)| {
-                let model = Self::scene_clip_model(&models, default_model.as_ref(), scene);
-                let seconds = model
+                let (model, replaces) =
+                    Self::scene_clip_model(&models, &retired, default_model.as_ref(), scene);
+                let length = model
                     .as_ref()
-                    .map(|model| model.durations.fit(scene.duration()));
-                let price = model.as_ref().zip(seconds).and_then(|(model, seconds)| {
+                    .map(|model| model.durations.fit(scene.duration(), stretch));
+                let price = model.as_ref().zip(length).and_then(|(model, length)| {
                     rates.price(
                         model.id.provider(),
                         model.id.model(),
-                        &Metered::video_seconds(u64::from(seconds)),
+                        &Metered::video_seconds(u64::from(length.seconds)),
                     )
                 });
                 // The job at work on the scene, else the latest: an older
@@ -1402,7 +1558,9 @@ impl Bardo {
                     .map(|(job, _)| job.clone());
                 SceneClipView {
                     model,
-                    seconds,
+                    replaces,
+                    seconds: length.map(|length| length.seconds),
+                    stretched: length.is_some_and(|length| length.stretch.is_some()),
                     price,
                     job,
                 }
@@ -1424,7 +1582,9 @@ impl Bardo {
         Ok(ClipsView {
             models,
             default_model,
+            default_replaces,
             mode,
+            stretch,
             scenes,
             missing,
             missing_estimate,
@@ -1471,7 +1631,7 @@ impl Bardo {
         if view.scenes[index].is_busy() {
             return Err(SceneError::Busy);
         }
-        self.animate(&plan, &view.scenes, vec![index], consent)
+        self.animate(&plan, &view, vec![index], consent)
     }
 
     /// Starts a job that animates every scene with an image and no clip.
@@ -1485,15 +1645,19 @@ impl Bardo {
         if view.missing.is_empty() {
             return Err(SceneError::NothingToAnimate);
         }
-        self.animate(&plan, &view.scenes, view.missing, consent)
+        let missing = view.missing.clone();
+        self.animate(&plan, &view, missing, consent)
     }
 
+    /// The project's plan and its clips, to animate: the plan must be on
+    /// the project's narration, with no other narration on its way.
     fn clips_of(&self, project: VideoProjectId) -> Result<(ScenePlan, ClipsView), SceneError> {
         let project = self.scenes_project(project)?;
         let plan = self
             .scene_plans
             .scene_plan(project.id)?
             .ok_or(SceneError::NoPlan)?;
+        self.scenes_current(&plan)?;
         let view = self.clips_view(&project, Some(&plan))?;
         Ok((plan, view))
     }
@@ -1501,10 +1665,11 @@ impl Bardo {
     fn animate(
         &self,
         plan: &ScenePlan,
-        views: &[SceneClipView],
+        view: &ClipsView,
         scenes: Vec<usize>,
         consent: BudgetConsent,
     ) -> Result<JobId, SceneError> {
+        let views = &view.scenes;
         let mut orders = Vec::with_capacity(scenes.len());
         for &index in &scenes {
             let model = views[index]
@@ -1533,6 +1698,7 @@ impl Bardo {
             project: plan.project.to_string(),
             plan: plan.id.to_string(),
             scenes: orders,
+            stretch_percent: view.stretch.map_or(0, StretchLimit::percent),
         };
         let job = Job::new(self.profile.id, JobKind::SceneClips, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
@@ -1633,6 +1799,21 @@ impl Bardo {
     }
 }
 
+/// The offered model a saved choice names today (`current_clip_model`),
+/// with the name of the retired model it takes the place of.
+pub(crate) fn saved_clip_model(
+    models: &[ClipModel],
+    retired: &[bardo_domain::RetiredClipModel],
+    saved: &ClipModelRef,
+) -> Option<(ClipModel, Option<String>)> {
+    bardo_domain::current_clip_model(models, retired, saved).map(|current| {
+        (
+            current.model.clone(),
+            current.replaces.map(|gone| gone.name.clone()),
+        )
+    })
+}
+
 /// The paid calls that animate `scenes`, one per scene at its model and
 /// length.
 fn clip_calls(views: &[SceneClipView], scenes: &[usize]) -> Vec<PlannedCall> {
@@ -1656,12 +1837,12 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use bardo_domain::{
-        ChannelDraft, ClipDurations, Cost, CostRepository, JobState, Meter, ProviderFailure,
-        VideoProject,
+        ChannelDraft, ClipDurations, ClipFit, Cost, CostRepository, JobState, Meter,
+        ProviderFailure, VideoProject,
     };
 
     use super::*;
-    use crate::scenes::tests::{Harness, done, wait_done};
+    use crate::scenes::tests::{Harness, done, narrate_again, wait_done};
     use crate::testing::{CLIP, ClipCall, SCENE_IMAGE};
     use crate::{Text, testing::FakeClips};
 
@@ -1731,8 +1912,11 @@ mod tests {
         let seconds = view.scenes[0].seconds.unwrap();
         assert_eq!(
             seconds,
-            ClipDurations::Range { min: 3, max: 15 }.fit(scene.duration())
+            ClipDurations::Range { min: 3, max: 15 }
+                .fit(scene.duration(), Some(StretchLimit::DEFAULT))
+                .seconds
         );
+        assert!(!view.scenes[0].stretched, "a range is asked for what fits");
 
         let job = done(
             &app,
@@ -1805,8 +1989,8 @@ mod tests {
     /// One request Google got: URL, key header and body.
     type Sent = (String, Option<String>, Vec<u8>);
 
-    /// Google's API as recorded: a Veo operation that is done on the
-    /// first check, and its clip.
+    /// Google's API as documented: an Omni Flash interaction that is
+    /// completed on the first check, with its clip inline.
     #[derive(Default, Clone)]
     struct GoogleApi {
         sent: Arc<std::sync::Mutex<Vec<Sent>>>,
@@ -1817,48 +2001,55 @@ mod tests {
             &self,
             request: &bardo_ai::http::HttpRequest,
         ) -> Result<bardo_ai::http::HttpResponse, bardo_ai::http::TransportError> {
+            use base64::Engine as _;
             self.sent.lock().unwrap().push((
                 request.url.clone(),
                 request.header_value("x-goog-api-key").map(str::to_owned),
                 request.body.clone().unwrap_or_default(),
             ));
-            const OPERATION: &str = "models/veo-3.1-lite-generate-preview/operations/op1";
-            const VIDEO: &str =
-                "https://generativelanguage.googleapis.com/v1beta/files/f1:download?alt=media";
-            let body = if request.url.ends_with(":predictLongRunning") {
-                serde_json::json!({ "name": OPERATION }).to_string()
-            } else if request.url.ends_with(OPERATION) {
+            const ID: &str = "v1_ChdCYXJkb1Rlc3Q";
+            let body = if request.url.ends_with("/interactions") {
+                serde_json::json!({ "id": ID, "status": "in_progress" })
+            } else if request.url.ends_with(&format!("/interactions/{ID}")) {
                 serde_json::json!({
-                    "name": OPERATION,
-                    "done": true,
-                    "response": { "generateVideoResponse": {
-                        "generatedSamples": [{ "video": { "uri": VIDEO } }],
-                    } },
+                    "id": ID,
+                    "status": "completed",
+                    "steps": [{ "type": "model_output", "content": [{
+                        "type": "video",
+                        "mime_type": "video/mp4",
+                        "data": base64::engine::general_purpose::STANDARD.encode(CLIP),
+                    }] }],
                 })
-                .to_string()
-            } else if request.url == VIDEO {
-                String::from_utf8(CLIP.to_vec()).unwrap()
             } else {
                 return Ok(bardo_ai::http::HttpResponse::new(404, "{}"));
             };
-            Ok(bardo_ai::http::HttpResponse::new(200, body))
+            Ok(bardo_ai::http::HttpResponse::new(200, body.to_string()))
         }
     }
 
-    #[test]
-    fn a_scene_animated_with_veo_goes_through_google_on_the_gemini_key() {
+    fn google(id: &str) -> ClipModelRef {
+        ClipModelRef::new(Provider::Gemini, id).unwrap()
+    }
+
+    /// A harness whose second video provider is Google, over `GoogleApi`.
+    fn with_google() -> (Harness, GoogleApi) {
         let mut h = Harness::new();
         let google = GoogleApi::default();
         h.more_clips.push(Arc::new(
             bardo_ai::GoogleClips::with_transport(google.clone()).with_sleeper(Arc::new(|_| {})),
         ));
+        (h, google)
+    }
+
+    #[test]
+    fn a_scene_animated_with_omni_flash_goes_through_google_on_the_gemini_key() {
+        let (h, google) = with_google();
         let app = h.start();
         let (project, drawn) = h.drawn_project(&app);
-        let veo =
-            ClipModelRef::new(Provider::Gemini, "veo-3.1-lite-generate-preview/720p").unwrap();
+        let omni = self::google("gemini-omni-1.2-flash/720p");
         let models = app.clip_models();
         assert!(
-            models.iter().any(|offered| offered.id == veo),
+            models.iter().any(|offered| offered.id == omni),
             "Google's models are offered"
         );
         assert_eq!(
@@ -1866,18 +2057,20 @@ mod tests {
             model("fake/range"),
             "the first provider's default leads"
         );
-        channel_uses(&app, &project, Some(veo.clone()));
+        channel_uses(&app, &project, Some(omni.clone()));
 
         let view = app.scenes(project.id).unwrap().clips;
         let scene = &view.scenes[0];
-        assert_eq!(scene.model.as_ref().unwrap().id, veo);
+        assert_eq!(scene.model.as_ref().unwrap().id, omni);
+        assert_eq!(scene.replaces, None);
+        assert_eq!(view.default_replaces, None);
         let seconds = scene.seconds.unwrap();
-        assert!([4, 6, 8].contains(&seconds));
-        let price = Money::from_micros(50_000 * u64::from(seconds));
+        assert!((3..=15).contains(&seconds));
+        let price = Money::from_micros(69_504 * u64::from(seconds));
         assert_eq!(
             scene.price,
             Some(price),
-            "Veo 3.1 Lite 720p at $0.05 a second"
+            "Omni 1.2 Flash 720p at $0.069504 a second"
         );
 
         let job = done(
@@ -1894,23 +2087,27 @@ mod tests {
                 .all(|(_, key, _)| key.as_deref() == Some(crate::scenes::tests::GEMINI_KEY))
         );
         let body: serde_json::Value = serde_json::from_slice(&sent[0].2).unwrap();
-        let image = &body["instances"][0]["image"]["inlineData"];
-        assert_eq!(image["mimeType"], "image/png");
+        assert_eq!(body["model"], "gemini-omni-1.2-flash");
+        let image = &body["input"][0];
+        assert_eq!(image["mime_type"], "image/png");
         assert!(
             !image["data"].as_str().unwrap().is_empty(),
             "the scene image, inline"
         );
-        assert_eq!(body["parameters"]["durationSeconds"], seconds);
-        assert_eq!(
-            body["instances"][0]["prompt"],
-            drawn.scenes()[0].prompt().as_str()
+        assert_eq!(body["response_format"]["resolution"], "720p");
+        assert_eq!(body["response_format"]["duration"], format!("{seconds}s"));
+        assert!(
+            body["input"][1]["text"]
+                .as_str()
+                .unwrap()
+                .ends_with(drawn.scenes()[0].prompt().as_str())
         );
 
         let plan = plan_of(&app, &project);
         let clip = plan.scenes()[0].pending_clip().unwrap().clone();
         assert_eq!(h.files.read(project.id, &clip.file).unwrap(), CLIP);
         assert_eq!(clip.generation.provider, Provider::Gemini);
-        assert_eq!(clip.generation.model, veo.model());
+        assert_eq!(clip.generation.model, omni.model());
         let record =
             h.db.project_costs(project.id)
                 .unwrap()
@@ -1920,6 +2117,140 @@ mod tests {
         assert_eq!(record.provider, Provider::Gemini);
         assert_eq!(record.cost, Cost::Estimated(price), "Google quotes nothing");
         assert_eq!(record.job, Some(job.id()));
+    }
+
+    /// Saves the project's channel with `model`, as a version of Bardo
+    /// that still offered it did.
+    fn channel_was_saved_with(h: &Harness, app: &Bardo, project: &VideoProject, model: &str) {
+        let mut channel = app
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.id == project.channel)
+            .unwrap();
+        channel.details = bardo_domain::ChannelDetails::validate(ChannelDraft {
+            clip_model: Some(google(model)),
+            production: ProductionMode::ChannelModel,
+            ..ChannelDraft::from(&channel.details)
+        })
+        .unwrap();
+        bardo_domain::ChannelRepository::save(h.db.as_ref(), &channel).unwrap();
+    }
+
+    #[test]
+    fn a_channel_and_a_scene_saved_with_a_model_google_shut_down_use_what_replaced_it() {
+        let (h, google) = with_google();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_was_saved_with(&h, &app, &project, "veo-3.1-fast-generate-preview/720p");
+        let mut plan = plan_of(&app, &project);
+        plan.scene_mut(1, SystemTime::now())
+            .unwrap()
+            .set_clip_model(Some(self::google("veo-3.1-lite-generate-preview/1080p")));
+        h.db.save_scene(&plan, 1).unwrap();
+
+        let view = app.scenes(project.id).unwrap().clips;
+        let used = |index: usize| {
+            let scene: &SceneClipView = &view.scenes[index];
+            (
+                scene.model.as_ref().unwrap().name.as_str(),
+                scene.replaces.as_deref(),
+            )
+        };
+        let default = view.default_model.as_ref().unwrap();
+        assert_eq!(default.id, self::google("gemini-omni-1.2-flash/720p"));
+        assert_eq!(
+            view.default_replaces.as_deref(),
+            Some("Veo 3.1 Fast 720p"),
+            "the panel says which model the channel had"
+        );
+        assert_eq!(used(0), ("Gemini Omni 1.2 Flash 720p", None));
+        assert_eq!(
+            used(1),
+            ("Gemini Omni 1.2 Flash 1080p", Some("Veo 3.1 Lite 1080p")),
+            "the scene keeps its resolution and says what it had"
+        );
+        assert_eq!(view.missing, [0, 1, 2], "every scene can be animated");
+        let seconds = view.scenes[1].seconds.unwrap();
+        assert_eq!(
+            view.scenes[1].price,
+            Some(Money::from_micros(104_256 * u64::from(seconds))),
+            "priced as the model that runs"
+        );
+        let estimate = app.production(project.id).unwrap();
+        assert_eq!(
+            estimate
+                .estimate(ProductionMode::ChannelModel)
+                .unwrap()
+                .clips,
+            3,
+            "the video's estimate counts the scene too"
+        );
+
+        done(
+            &app,
+            app.generate_missing_clips(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+
+        let sent = google.sent.lock().unwrap().clone();
+        let asked: Vec<_> = sent
+            .iter()
+            .filter(|(url, ..)| url.ends_with("/interactions"))
+            .map(|(.., body)| {
+                let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+                (
+                    body["model"].as_str().unwrap().to_owned(),
+                    body["response_format"]["resolution"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                )
+            })
+            .collect();
+        let omni = |resolution: &str| ("gemini-omni-1.2-flash".to_owned(), resolution.to_owned());
+        assert_eq!(asked, [omni("720p"), omni("1080p"), omni("720p")]);
+        let plan = plan_of(&app, &project);
+        let made: Vec<_> = plan
+            .scenes()
+            .iter()
+            .map(|scene| scene.pending_clip().unwrap().generation.model.clone())
+            .collect();
+        assert_eq!(
+            made,
+            [
+                "gemini-omni-1.2-flash/720p",
+                "gemini-omni-1.2-flash/1080p",
+                "gemini-omni-1.2-flash/720p"
+            ],
+            "each clip records the model that made it"
+        );
+    }
+
+    #[test]
+    fn saving_a_channel_with_a_retired_model_saves_what_replaced_it() {
+        let (h, _) = with_google();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let veo = self::google("veo-3.1-generate-preview/1080p");
+        let omni = self::google("gemini-omni-1.2-flash/1080p");
+        assert_eq!(app.clip_model_now(&veo), omni, "what the form shows");
+        assert_eq!(app.clip_model_now(&omni), omni);
+        let unknown = self::google("never-offered/720p");
+        assert_eq!(app.clip_model_now(&unknown), unknown);
+
+        // A settings file exported before the shutdown names the old model.
+        channel_uses(&app, &project, Some(veo));
+        let saved = app
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.id == project.channel)
+            .unwrap();
+        assert_eq!(saved.details.clip_model(), Some(&omni));
+        let view = app.scenes(project.id).unwrap().clips;
+        assert_eq!(view.default_model.unwrap().id, omni);
+        assert_eq!(view.default_replaces, None, "nothing left to say");
     }
 
     /// What Google does with one submission.
@@ -1936,8 +2267,7 @@ mod tests {
     }
 
     /// Google's API treating submissions as scripted, then taking them:
-    /// work that is done on the first check, and its clip. It answers both
-    /// of Google's protocols, whichever the model asked for speaks.
+    /// work that is done on the first check, and its clip.
     #[derive(Default, Clone)]
     struct GoogleSubmissions {
         script: Arc<Mutex<std::collections::VecDeque<GoogleSubmit>>>,
@@ -1965,13 +2295,7 @@ mod tests {
         ) -> Result<bardo_ai::http::HttpResponse, bardo_ai::http::TransportError> {
             use bardo_ai::http::{HttpResponse, TransportError};
             use base64::Engine as _;
-            const VIDEO: &str =
-                "https://generativelanguage.googleapis.com/v1beta/files/f1:download?alt=media";
-            let (operation, interaction) = (
-                request.url.ends_with(":predictLongRunning"),
-                request.url.ends_with("/interactions"),
-            );
-            let body = if operation || interaction {
+            let body = if request.url.ends_with("/interactions") {
                 let script = self.script.lock().unwrap().pop_front();
                 match script {
                     Some(GoogleSubmit::NeverGetsIt) => {
@@ -1996,19 +2320,7 @@ mod tests {
                 if script.is_some() {
                     return Err(TransportError::unanswered("timed out reading the answer"));
                 }
-                if operation {
-                    serde_json::json!({ "name": format!("models/veo/operations/op{taken}") })
-                } else {
-                    serde_json::json!({ "id": format!("v1_work{taken}"), "status": "in_progress" })
-                }
-            } else if request.url.contains("/operations/op") {
-                serde_json::json!({
-                    "name": "op",
-                    "done": true,
-                    "response": { "generateVideoResponse": {
-                        "generatedSamples": [{ "video": { "uri": VIDEO } }],
-                    } },
-                })
+                serde_json::json!({ "id": format!("v1_work{taken}"), "status": "in_progress" })
             } else if request.url.contains("/interactions/v1_work") {
                 serde_json::json!({
                     "id": "v1_work",
@@ -2019,11 +2331,6 @@ mod tests {
                         "data": base64::engine::general_purpose::STANDARD.encode(CLIP),
                     }] }],
                 })
-            } else if request.url == VIDEO {
-                return Ok(HttpResponse::new(
-                    200,
-                    String::from_utf8(CLIP.to_vec()).unwrap(),
-                ));
             } else {
                 return Ok(HttpResponse::new(404, "{}"));
             };
@@ -2186,8 +2493,8 @@ mod tests {
         assert_eq!(default(&app).0, Provider::Higgsfield);
         assert_eq!(missing_key(&app), None);
 
-        // Without Higgsfield's key, Veo through the Gemini key already
-        // saved for images.
+        // Without Higgsfield's key, Omni Flash through the Gemini key
+        // already saved for images.
         app.remove_provider_key(Provider::Higgsfield).unwrap();
         assert_eq!(
             default(&app),
@@ -2219,9 +2526,9 @@ mod tests {
         assert_eq!(missing_key(&app), Some(Provider::Higgsfield));
 
         // A channel's own pick stays, whatever keys are saved.
-        let veo =
+        let omni =
             ClipModelRef::new(Provider::Gemini, bardo_ai::google_clips::DEFAULT_MODEL).unwrap();
-        channel_uses(&app, &project, Some(veo.clone()));
+        channel_uses(&app, &project, Some(omni.clone()));
         app.save_provider_key(Provider::Kling, "kling-test-key-0001")
             .unwrap();
         assert_eq!(default(&app).0, Provider::Gemini);
@@ -2570,6 +2877,249 @@ mod tests {
         // Back to the channel's model.
         let plan = app.set_scene_clip_model(project.id, 1, None).unwrap();
         assert_eq!(plan.scenes()[1].clip_model(), None);
+    }
+
+    /// Gives the plan's scenes these lengths, back to back, as a
+    /// narration of ordinary pace would (the fake one speaks each scene in
+    /// under a second).
+    fn scenes_last(h: &Harness, app: &Bardo, project: &VideoProject, millis: &[u64]) -> ScenePlan {
+        let mut plan = plan_of(app, project);
+        let mut start = Duration::ZERO;
+        for (index, &millis) in millis.iter().enumerate() {
+            let scene = plan.scene_mut(index, SystemTime::now()).unwrap();
+            scene.start = start;
+            start += Duration::from_millis(millis);
+            scene.end = start;
+        }
+        h.db.save_scene_plan(&plan).unwrap();
+        plan
+    }
+
+    fn channel_fits(app: &Bardo, project: &VideoProject, fit: ClipFit, percent: u32) {
+        let channel = app
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.id == project.channel)
+            .unwrap();
+        app.update_channel(
+            channel.id,
+            ChannelDraft {
+                clip_fit: fit,
+                stretch_limit: StretchLimit::new(percent),
+                ..ChannelDraft::from(&channel.details)
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_scene_a_little_over_a_length_pays_for_it_and_its_clip_is_stretched() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        app.save_rate(Provider::Higgsfield, "fake/", Meter::VideoSeconds, "0.10")
+            .unwrap();
+
+        let view = app.scenes(project.id).unwrap().clips;
+        assert_eq!(view.stretch, Some(StretchLimit::DEFAULT));
+        let asked: Vec<_> = view
+            .scenes
+            .iter()
+            .map(|scene| (scene.seconds.unwrap(), scene.stretched))
+            .collect();
+        // 6.5 s plays a 5 s clip slowed; 8 s is past what 5 s stretches
+        // to and 4 s fits in 5.
+        assert_eq!(asked, [(5, true), (10, false), (5, false)]);
+        assert_eq!(view.scenes[0].price, Some(Money::from_cents(50)));
+        assert_eq!(
+            view.missing_estimate.as_ref().unwrap().total(),
+            Money::from_cents(200),
+            "20 seconds of clips, where covering every scene buys 25"
+        );
+
+        done(
+            &app,
+            app.generate_missing_clips(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let sent: Vec<_> = h.clips.submissions().iter().map(|r| r.seconds).collect();
+        assert_eq!(sent, [5, 10, 5]);
+        let plan = plan_of(&app, &project);
+        let clips: Vec<_> = plan
+            .scenes()
+            .iter()
+            .map(|scene| scene.pending_clip().unwrap())
+            .map(|clip| (clip.seconds, clip.stretch))
+            .collect();
+        assert_eq!(
+            clips,
+            [(5, Some(StretchLimit::DEFAULT)), (10, None), (5, None)]
+        );
+        assert_eq!(
+            plan.scenes()[0]
+                .pending_clip()
+                .unwrap()
+                .generation
+                .instructions,
+            format!(
+                "Image to video, 5 s (played slowed to fit the scene), from {}",
+                plan.scenes()[0].image().unwrap().file
+            )
+        );
+        let recorded: u64 =
+            h.db.project_costs(project.id)
+                .unwrap()
+                .into_iter()
+                .filter(|record| record.purpose == CostPurpose::SceneClip)
+                .map(|record| record.usage.video_seconds)
+                .sum();
+        assert_eq!(recorded, 20, "what is recorded is what was estimated");
+    }
+
+    #[test]
+    fn the_editor_plays_a_stretched_clip_over_its_scene_and_the_others_as_made() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        done(
+            &app,
+            app.generate_missing_clips(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        for index in 0..3 {
+            app.accept_scene_clip(project.id, index).unwrap();
+        }
+
+        let editor = app.open_editor(project.id).unwrap();
+        let view = editor.view();
+        let slowed: Vec<_> = view.clips.iter().map(|clip| clip.slowed).collect();
+        // Five seconds of clip over the scene's 6.5 and the half second a
+        // transition out of it may show: as far as 40% goes.
+        let over_its_scene = crate::SlowedClip {
+            recorded: Duration::from_secs(5),
+            played: Duration::from_secs(7),
+        };
+        assert_eq!(slowed, [Some(over_its_scene), None, None]);
+        // The cut gives each clip its scene's time, so the narration
+        // stays in sync; what plays it reads the first one's file slower.
+        let plan = editor.preview_plan().unwrap();
+        assert_eq!(plan.video[0].duration, Duration::from_millis(6_500));
+        assert_eq!(
+            plan.video[0].slowed.map(|s| (s.recorded, s.played)),
+            Some((Duration::from_secs(5), Duration::from_secs(7)))
+        );
+        assert!(plan.video[1..].iter().all(|clip| clip.slowed.is_none()));
+    }
+
+    #[test]
+    fn a_channel_that_covers_every_scene_asks_for_the_longer_clip() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        channel_fits(&app, &project, ClipFit::Cover, 40);
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+
+        let view = app.scenes(project.id).unwrap().clips;
+        assert_eq!(view.stretch, None);
+        let asked: Vec<_> = view
+            .scenes
+            .iter()
+            .map(|scene| (scene.seconds.unwrap(), scene.stretched))
+            .collect();
+        assert_eq!(asked, [(10, false), (10, false), (5, false)]);
+
+        done(
+            &app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(h.clips.submissions()[0].seconds, 10);
+        let plan = plan_of(&app, &project);
+        assert_eq!(plan.scenes()[0].pending_clip().unwrap().stretch, None);
+    }
+
+    #[test]
+    fn the_channel_says_how_far_a_clip_stretches() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        let asked = |app: &Bardo| -> Vec<(u32, bool)> {
+            let view = app.scenes(project.id).unwrap().clips;
+            view.scenes
+                .iter()
+                .map(|scene| (scene.seconds.unwrap(), scene.stretched))
+                .collect()
+        };
+
+        // At 20%, five seconds cover six: 6.5 pays for ten again.
+        channel_fits(&app, &project, ClipFit::Stretch, 20);
+        assert_eq!(asked(&app), [(10, false), (10, false), (5, false)]);
+        // At 60%, five seconds cover eight.
+        channel_fits(&app, &project, ClipFit::Stretch, 60);
+        assert_eq!(asked(&app), [(5, true), (5, true), (5, false)]);
+
+        done(
+            &app,
+            app.generate_scene_clip(project.id, 1, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(h.clips.submissions()[0].seconds, 5);
+        let clip = plan_of(&app, &project).scenes()[1]
+            .pending_clip()
+            .unwrap()
+            .clone();
+        assert_eq!(clip.stretch, Some(StretchLimit::new(60)));
+        // It plays over its whole scene, as far as its own 60% goes,
+        // whatever the channel says later.
+        channel_fits(&app, &project, ClipFit::Stretch, 20);
+        assert_eq!(
+            clip.played_over(Duration::from_secs(8)),
+            Duration::from_secs(8)
+        );
+    }
+
+    #[test]
+    fn a_clip_job_keeps_the_fit_it_was_queued_with() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        // Queued while the channel stretches and held at the provider's
+        // door: what the budget was checked against is what is asked for.
+        *h.clips.submit_failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid credentials",
+        ));
+        let job = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        wait_done(&app, job);
+        channel_fits(&app, &project, ClipFit::Cover, 40);
+        *h.clips.submit_failure.lock().unwrap() = None;
+        app.retry_job(job).unwrap();
+        done(&app, job);
+        assert_eq!(h.clips.submissions().last().unwrap().seconds, 5);
+        assert_eq!(
+            plan_of(&app, &project).scenes()[0]
+                .pending_clip()
+                .unwrap()
+                .stretch,
+            Some(StretchLimit::DEFAULT)
+        );
+
+        // A job queued before clips were stretched covers its scenes.
+        let before: ClipsPayload =
+            serde_json::from_str(r#"{"project": "p", "plan": "s", "scenes": []}"#).unwrap();
+        assert_eq!(before.stretch(), None);
     }
 
     #[test]
@@ -3914,6 +4464,94 @@ mod tests {
         app.retry_job(id).unwrap();
         done(&app, id);
         assert_eq!(h.clips.submissions().len(), 1);
+    }
+
+    #[test]
+    fn a_clip_job_run_again_after_a_new_narration_sends_nothing_new() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.fail("launch pad");
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        wait_done(&app, id);
+        h.clips.succeed_all();
+        let sent = h.clips.submissions().len();
+        narrate_again(&h, &app, &project, Duration::from_secs(4));
+
+        // The scene that failed is not sent for a plan the narration left.
+        app.retry_job(id).unwrap();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::OutOfDate);
+        assert_eq!(h.clips.submissions().len(), sent, "nothing new is paid");
+
+        // Fitted to the narration, the same job sends it.
+        app.fit_scenes(project.id).unwrap();
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), sent + 1);
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes().iter().all(|s| s.pending_clip().is_some()));
+    }
+
+    #[test]
+    fn a_clip_already_sent_is_collected_after_a_new_narration() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.hold(true);
+        let id = app
+            .generate_scene_clip(project.id, 1, BudgetConsent::Ask)
+            .unwrap();
+        wait_for(&h.clips, |clips| !clips.polls.lock().unwrap().is_empty());
+        app.cancel_job(id).unwrap();
+        wait_done(&app, id);
+        narrate_again(&h, &app, &project, Duration::from_secs(4));
+
+        // The request is paid: run again, the job waits for it, and the plan
+        // is not fitted under it.
+        app.retry_job(id).unwrap();
+        assert!(matches!(app.fit_scenes(project.id), Err(SceneError::Busy)));
+        h.clips.hold(false);
+        done(&app, id);
+
+        assert_eq!(h.clips.submissions().len(), 1, "sent once");
+        assert!(plan_of(&app, &project).scenes()[1].pending_clip().is_some());
+        let fitted = app.fit_scenes(project.id).unwrap();
+        assert!(fitted.scenes()[1].pending_clip().is_some());
+    }
+
+    #[test]
+    fn a_scene_handed_over_before_the_scenes_were_fitted_is_sent_as_it_is_now() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        // The scene's image is handed over, and then the key is refused.
+        *h.clips.submit_failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid credentials",
+        ));
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        *h.clips.submit_failure.lock().unwrap() = None;
+        let short = app.scenes(project.id).unwrap().clips.scenes[0].seconds;
+
+        // The narration is read forty times slower and the scenes fitted.
+        narrate_again(&h, &app, &project, Duration::from_secs(40));
+        app.fit_scenes(project.id).unwrap();
+        let long = app.scenes(project.id).unwrap().clips.scenes[0].seconds;
+        assert_ne!(long, short);
+
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        let sent = h.clips.submissions();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(Some(sent[0].seconds), long, "as long as the scene is now");
     }
 
     #[test]

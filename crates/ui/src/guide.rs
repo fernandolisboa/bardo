@@ -168,10 +168,12 @@ pub mod refs {
     pub const SCENES_CAST: GuideRef = at("scenes", "cast");
     pub const SCENES_SAME_PLACE: GuideRef = at("scenes", "same-place");
     pub const SCENES_STYLE: GuideRef = at("scenes", "style");
+    pub const SCENES_FIT: GuideRef = at("scenes", "fit");
     pub const SCENES_REPLAN: GuideRef = at("scenes", "replan");
     pub const SCENES_PLACE: GuideRef = at("scenes", "place");
     pub const CLIPS_ANIMATE: GuideRef = at("clips", "animate");
     pub const CLIPS_REVIEW: GuideRef = at("clips", "review");
+    pub const CLIPS_STRETCH: GuideRef = at("clips", "stretch");
     pub const PERSONAS_LIBRARY: GuideRef = at("personas", "library");
     pub const PERSONAS_VOICE: GuideRef = at("personas", "voice");
     pub const PERSONAS_PRESETS: GuideRef = at("personas", "presets");
@@ -190,6 +192,7 @@ pub mod refs {
     pub const CHANNELS_PRODUCTION: GuideRef = at("channels", "production");
     pub const CHANNELS_STYLE: GuideRef = at("channels", "style");
     pub const CHANNELS_DEFAULTS: GuideRef = at("channels", "defaults");
+    pub const CHANNELS_CLIP_FIT: GuideRef = at("channels", "clip-length");
     pub const ACCOUNTS_ONE: GuideRef = at("network-accounts", "accounts");
     pub const ACCOUNTS_METADATA: GuideRef = at("network-accounts", "metadata");
     pub const ACCOUNTS_PRESET: GuideRef = at("network-accounts", "preset");
@@ -224,7 +227,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 96] = [
+    pub const ALL: [GuideRef; 99] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -268,10 +271,12 @@ pub mod refs {
         SCENES_CAST,
         SCENES_SAME_PLACE,
         SCENES_STYLE,
+        SCENES_FIT,
         SCENES_REPLAN,
         SCENES_PLACE,
         CLIPS_ANIMATE,
         CLIPS_REVIEW,
+        CLIPS_STRETCH,
         PERSONAS_LIBRARY,
         PERSONAS_VOICE,
         PERSONAS_PRESETS,
@@ -289,6 +294,7 @@ pub mod refs {
         CHANNELS_PRODUCTION,
         CHANNELS_STYLE,
         CHANNELS_DEFAULTS,
+        CHANNELS_CLIP_FIT,
         ACCOUNTS_ONE,
         ACCOUNTS_METADATA,
         ACCOUNTS_PRESET,

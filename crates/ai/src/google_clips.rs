@@ -1,35 +1,38 @@
 //! Video clips through Google's Gemini API, on the same key as Nano Banana:
-//! Veo 3.1 (Standard, Fast and Lite) and Gemini Omni Flash.
+//! Gemini Omni Flash, through the Interactions API.
 //!
-//! Both work asynchronously, through two protocols:
-//! - Veo: `models/{model}:predictLongRunning` returns an operation name at
-//!   once; `GET /{operation}` says when it is done and where the clip is.
-//!   The clip downloads from the Files API with the key; Google keeps it
-//!   for two days.
-//! - Omni: `POST /interactions` with `background: true` returns an
-//!   interaction id at once; `GET /interactions/{id}` says how it is going
-//!   and, once completed, carries the clip inline (base64).
+//! It works asynchronously: `POST /interactions` with `background: true`
+//! returns an interaction id at once (Google documents background runs for
+//! its text models and agents, and Bardo has used them for Omni since 1.1;
+//! a real-key check confirms it for 1.2); `GET /interactions/{id}` says how it
+//! is going and, once completed, carries the clip inline (base64). Google
+//! keeps an interaction for 55 days unless the project asks for less.
 //!
-//! Neither has a staging step: the scene's image goes inline with the
-//! submission. Neither takes an idempotency key either, and Google offers
-//! no way to list the operations or interactions a key started. So a
-//! submission is a paid call sent once (ADR-0030), without the adapter
-//! coming back by itself: a refusal in Google's words (429, its own 500
-//! or 503) started nothing and is told as such, for the job and the queue
-//! to go again; a submission that was sent and got no answer, or whose
-//! answer does not name what it started, is a lost answer, which the job
-//! never sends again by itself.
+//! There is no staging step: the scene's image goes inline with the
+//! submission. The API takes no idempotency key either, and Google offers
+//! no way to list the interactions a key started. So a submission is a paid
+//! call sent once (ADR-0030), without the adapter coming back by itself: a
+//! refusal in Google's words (429, its own 500 or 503) started nothing and
+//! is told as such, for the job and the queue to go again; a submission
+//! that was sent and got no answer, or whose answer does not name what it
+//! started, is a lost answer, which the job never sends again by itself.
 //!
 //! Google quotes no price before starting; the rate table prices each clip.
 //! Every clip carries Google's SynthID watermark and a soundtrack the
-//! models always make; the narration replaces it in the edit.
+//! model always makes; the narration replaces it in the edit.
+//!
+//! Google retires models: it shut down Veo 3.1 Preview in this API on
+//! 2026-10-22 (its other Veo models answer on another platform, to another
+//! kind of key) and serves Omni 1.1 Flash as 1.2 from 2026-12-03. `RETIRED`
+//! names each model Bardo offered once with the one that takes its place,
+//! so a channel or scene saved with it goes on making clips.
 
 use std::time::Duration;
 
 use bardo_domain::{
     ApiKey, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelRef,
     ClipRequest, ClipStatus, ClipSubmission, GeneratedClip, Provider, ProviderFailure,
-    ProviderFailureKind, StagedImage,
+    ProviderFailureKind, RetiredClipModel, StagedImage,
 };
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -42,17 +45,20 @@ pub const API_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 /// Only Google's own API host ever gets the key.
 const API_HOST: &str = "https://generativelanguage.googleapis.com/";
 
-/// The model a channel uses until the user picks another: Veo 3.1 Fast at
-/// 720p takes 4, 6 or 8 seconds, so a clip can come close to its scene.
-pub const DEFAULT_MODEL: &str = "veo-3.1-fast-generate-preview/720p";
+/// The model a channel uses until the user picks another: Omni 1.2 Flash
+/// at 720p, the resolution it renders (1080p is the same clip, upscaled).
+pub const DEFAULT_MODEL: &str = "gemini-omni-1.2-flash/720p";
 
-/// An 8-second 1080p clip is tens of megabytes; this leaves room.
+/// The same model at 1080p.
+const MODEL_1080P: &str = "gemini-omni-1.2-flash/1080p";
+
+/// A 15-second 1080p clip is tens of megabytes; this leaves room.
 pub const MAX_CLIP_BYTES: u64 = 512 * 1024 * 1024;
 
 /// A clip inline as base64 is a third bigger than the file.
 const MAX_ANSWER_BYTES: u64 = MAX_CLIP_BYTES / 3 * 4 + 1024 * 1024;
 
-/// Longest prompt passed on; Veo reads up to 1,024 tokens.
+/// Longest prompt passed on: a motion prompt is a few sentences.
 const MAX_PROMPT_CHARS: usize = 2_500;
 
 /// What `stage_image` returns: the image travels with the submission.
@@ -63,104 +69,109 @@ const INLINE: &str = "inline";
 const OMNI_FRAMING: &str = "Animate this image, starting on it as the first frame, \
     in a single continuous shot with no scene cuts and no dialogue.";
 
-/// How a model is called.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Family {
-    Veo,
-    Omni,
-}
-
 /// A model at a resolution, as Bardo offers it. The id is the API model
 /// and the resolution, `{model}/{resolution}`, so each resolution has its
 /// own price in the rate table.
 struct Spec {
     id: &'static str,
     name: &'static str,
-    family: Family,
-    durations: fn() -> ClipDurations,
 }
 
-/// Veo makes 4, 6 or 8 seconds at 720p, and only 8 at 1080p.
-fn veo_720p() -> ClipDurations {
-    ClipDurations::Choices(vec![4, 6, 8])
+/// Omni Flash makes any whole number of seconds from 3 to 15.
+fn durations() -> ClipDurations {
+    ClipDurations::Range { min: 3, max: 15 }
 }
 
-fn veo_1080p() -> ClipDurations {
-    ClipDurations::Choices(vec![8])
-}
-
-fn omni() -> ClipDurations {
-    ClipDurations::Range { min: 3, max: 10 }
-}
-
+/// Left out: 360p (too small to publish) and 4K (upscaled, at three times
+/// the price of 720p).
 const CATALOG: &[Spec] = &[
     Spec {
         id: DEFAULT_MODEL,
-        name: "Veo 3.1 Fast 720p",
-        family: Family::Veo,
-        durations: veo_720p,
+        name: "Gemini Omni 1.2 Flash 720p",
     },
     Spec {
-        id: "veo-3.1-fast-generate-preview/1080p",
-        name: "Veo 3.1 Fast 1080p",
-        family: Family::Veo,
-        durations: veo_1080p,
-    },
-    Spec {
-        id: "veo-3.1-generate-preview/720p",
-        name: "Veo 3.1 720p",
-        family: Family::Veo,
-        durations: veo_720p,
-    },
-    Spec {
-        id: "veo-3.1-generate-preview/1080p",
-        name: "Veo 3.1 1080p",
-        family: Family::Veo,
-        durations: veo_1080p,
-    },
-    Spec {
-        id: "veo-3.1-lite-generate-preview/720p",
-        name: "Veo 3.1 Lite 720p",
-        family: Family::Veo,
-        durations: veo_720p,
-    },
-    Spec {
-        id: "veo-3.1-lite-generate-preview/1080p",
-        name: "Veo 3.1 Lite 1080p",
-        family: Family::Veo,
-        durations: veo_1080p,
-    },
-    Spec {
-        id: "gemini-omni-1.1-flash/720p",
-        name: "Gemini Omni Flash 720p",
-        family: Family::Omni,
-        durations: omni,
-    },
-    Spec {
-        id: "gemini-omni-1.1-flash/1080p",
-        name: "Gemini Omni Flash 1080p",
-        family: Family::Omni,
-        durations: omni,
+        id: MODEL_1080P,
+        name: "Gemini Omni 1.2 Flash 1080p",
     },
 ];
+
+/// A model Google no longer serves, as Bardo offered it, and the catalog
+/// model of the same resolution that takes its place.
+const RETIRED: &[(&str, &str, &str)] = &[
+    (
+        "veo-3.1-fast-generate-preview/720p",
+        "Veo 3.1 Fast 720p",
+        DEFAULT_MODEL,
+    ),
+    (
+        "veo-3.1-fast-generate-preview/1080p",
+        "Veo 3.1 Fast 1080p",
+        MODEL_1080P,
+    ),
+    (
+        "veo-3.1-generate-preview/720p",
+        "Veo 3.1 720p",
+        DEFAULT_MODEL,
+    ),
+    (
+        "veo-3.1-generate-preview/1080p",
+        "Veo 3.1 1080p",
+        MODEL_1080P,
+    ),
+    (
+        "veo-3.1-lite-generate-preview/720p",
+        "Veo 3.1 Lite 720p",
+        DEFAULT_MODEL,
+    ),
+    (
+        "veo-3.1-lite-generate-preview/1080p",
+        "Veo 3.1 Lite 1080p",
+        MODEL_1080P,
+    ),
+    (
+        "gemini-omni-1.1-flash/720p",
+        "Gemini Omni 1.1 Flash 720p",
+        DEFAULT_MODEL,
+    ),
+    (
+        "gemini-omni-1.1-flash/1080p",
+        "Gemini Omni 1.1 Flash 1080p",
+        MODEL_1080P,
+    ),
+];
+
+fn model_ref(id: &str) -> ClipModelRef {
+    ClipModelRef::new(Provider::Gemini, id).expect("catalog models are valid")
+}
 
 /// The models Bardo offers through Google, the default first.
 pub fn models() -> Vec<ClipModel> {
     CATALOG
         .iter()
         .map(|spec| ClipModel {
-            id: ClipModelRef::new(Provider::Gemini, spec.id).expect("catalog models are valid"),
+            id: model_ref(spec.id),
             name: spec.name.to_owned(),
-            durations: (spec.durations)(),
+            durations: durations(),
         })
         .collect()
 }
 
-/// The catalog entry for `id`, with its API model and resolution.
-fn spec(id: &str) -> Option<(&'static Spec, &'static str, &'static str)> {
+/// The models Bardo offered through Google and Google no longer serves.
+pub fn retired() -> Vec<RetiredClipModel> {
+    RETIRED
+        .iter()
+        .map(|&(id, name, replacement)| RetiredClipModel {
+            id: model_ref(id),
+            name: name.to_owned(),
+            replacement: model_ref(replacement),
+        })
+        .collect()
+}
+
+/// The API model and resolution of the catalog entry `id`.
+fn spec(id: &str) -> Option<(&'static str, &'static str)> {
     let spec = CATALOG.iter().find(|spec| spec.id == id)?;
-    let (model, resolution) = spec.id.split_once('/')?;
-    Some((spec, model, resolution))
+    spec.id.split_once('/')
 }
 
 fn with_key(request: HttpRequest, key: &ApiKey) -> HttpRequest {
@@ -179,28 +190,8 @@ fn base64(image: &ClipImage) -> String {
     base64::engine::general_purpose::STANDARD.encode(&image.bytes)
 }
 
-/// The Veo request body: the image as the first frame, 16:9 like it.
-pub fn veo_body(request: &ClipRequest, resolution: &str) -> Value {
-    json!({
-        "instances": [{
-            "prompt": prompt(request),
-            "image": {
-                "inlineData": {
-                    "mimeType": request.first_frame.format.mime(),
-                    "data": base64(&request.first_frame),
-                },
-            },
-        }],
-        "parameters": {
-            "aspectRatio": request.aspect.code(),
-            "resolution": resolution,
-            "durationSeconds": request.seconds,
-        },
-    })
-}
-
-/// The Omni request body, run in the background so the answer comes at
-/// once with an id to poll.
+/// The request body: the image, then what to do with it, run in the
+/// background so the answer comes at once with an id to poll.
 pub fn omni_body(request: &ClipRequest, model: &str, resolution: &str) -> Value {
     json!({
         "model": model,
@@ -225,17 +216,11 @@ pub fn omni_body(request: &ClipRequest, model: &str, resolution: &str) -> Value 
 /// The request that starts the clip; `None` when the model is not one
 /// Bardo offers through Google.
 pub fn submit_request(key: &ApiKey, request: &ClipRequest) -> Option<HttpRequest> {
-    let (spec, model, resolution) = spec(&request.model)?;
-    let http = match spec.family {
-        Family::Veo => HttpRequest::post_json(
-            format!("{API_URL}/models/{model}:predictLongRunning"),
-            veo_body(request, resolution).to_string(),
-        ),
-        Family::Omni => HttpRequest::post_json(
-            format!("{API_URL}/interactions"),
-            omni_body(request, model, resolution).to_string(),
-        ),
-    };
+    let (model, resolution) = spec(&request.model)?;
+    let http = HttpRequest::post_json(
+        format!("{API_URL}/interactions"),
+        omni_body(request, model, resolution).to_string(),
+    );
     Some(with_key(http, key))
 }
 
@@ -250,7 +235,8 @@ fn is_resource_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.' | '=' | '~'))
 }
 
-/// Omni's work is an interaction; everything else is a Veo operation.
+/// Omni's work is an interaction; anything else is an operation of a model
+/// Google shut down, saved by a job from before.
 fn is_interaction(handle: &ClipHandle) -> bool {
     handle.0.starts_with("interactions/")
 }
@@ -300,20 +286,18 @@ pub fn google_failure(response: &HttpResponse) -> ProviderFailure {
     failure(Provider::Gemini, &unwrapped)
 }
 
-/// Reads a submission's answer: the operation (Veo) or interaction (Omni)
-/// to poll.
+/// Reads a submission's answer: the interaction to poll.
 pub fn parse_submission(response: &HttpResponse) -> Result<ClipHandle, ProviderFailure> {
     let body = json_body(response)?;
-    let handle = match (body["name"].as_str(), body["id"].as_str()) {
-        (Some(operation), _) => operation.to_owned(),
-        (None, Some(id)) if !id.contains('/') => format!("interactions/{id}"),
-        _ => return Err(unexpected("the submission answer has no operation")),
+    let handle = match body["id"].as_str() {
+        Some(id) if !id.contains('/') => format!("interactions/{id}"),
+        _ => return Err(unexpected("the submission answer has no interaction")),
     };
     if is_resource_name(&handle) {
         Ok(ClipHandle(handle))
     } else {
         Err(unexpected(
-            "the submission answer has an unusable operation",
+            "the submission answer has an unusable interaction",
         ))
     }
 }
@@ -333,13 +317,35 @@ fn is_safety(text: &str) -> bool {
     .any(|word| text.contains(word))
 }
 
-/// Work that ended in an error: declined when the error says safety.
+/// The error codes the API gives when policy, safety or content rules
+/// blocked the output (the API errors page, "Generation blocked codes").
+const BLOCKED_CODES: &[&str] = &[
+    "safety",
+    "recitation",
+    "language",
+    "prohibited_content",
+    "spii",
+    "blocklist",
+    "image_safety",
+    "image_prohibited_content",
+    "image_recitation",
+    "image_other",
+    "content_blocked",
+];
+
+/// Work that ended in an error: declined when its code says it was
+/// blocked or its message says safety, so the queue does not send (and
+/// pay for) it again.
 fn ended_with(model: &str, error: &Value) -> ClipStatus {
     let message = error["message"]
         .as_str()
         .map(str::trim)
         .filter(|text| !text.is_empty());
+    let blocked = error["code"]
+        .as_str()
+        .is_some_and(|code| BLOCKED_CODES.contains(&code));
     let kind = match message {
+        _ if blocked => ProviderFailureKind::Declined,
         Some(text) if is_safety(text) => ProviderFailureKind::Declined,
         _ => ProviderFailureKind::ProviderDown,
     };
@@ -350,50 +356,6 @@ fn ended_with(model: &str, error: &Value) -> ClipStatus {
             None => format!("{model} could not make the clip"),
         },
     ))
-}
-
-/// Reads a Veo operation.
-pub fn parse_veo_status(response: &HttpResponse) -> Result<ClipStatus, ProviderFailure> {
-    let body = json_body(response)?;
-    if !body["done"].as_bool().unwrap_or(false) {
-        return Ok(ClipStatus::Running);
-    }
-    if body.get("error").is_some_and(Value::is_object) {
-        return Ok(ended_with("Veo", &body["error"]));
-    }
-    let answer = &body["response"]["generateVideoResponse"];
-    let video = answer["generatedSamples"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find_map(|sample| sample["video"]["uri"].as_str())
-        .filter(|uri| uri.starts_with("https://"));
-    if let Some(uri) = video {
-        return Ok(ClipStatus::Done {
-            video: uri.to_owned(),
-        });
-    }
-    let reasons: Vec<&str> = answer["raiMediaFilteredReasons"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect();
-    let filtered = answer["raiMediaFilteredCount"].as_u64().unwrap_or(0) > 0;
-    Ok(ClipStatus::Failed(if filtered || !reasons.is_empty() {
-        ProviderFailure::new(
-            ProviderFailureKind::Declined,
-            match reasons.is_empty() {
-                true => "Google's safety filters declined the clip".to_owned(),
-                false => format!(
-                    "Google's safety filters declined the clip: {}",
-                    reasons.join(" ")
-                ),
-            },
-        )
-    } else {
-        unexpected("Veo finished without a clip")
-    }))
 }
 
 /// Every content block of an interaction's output: the model output steps,
@@ -461,9 +423,9 @@ pub fn parse_omni_status(
         Some("cancelled") => Ok(ClipStatus::Lost(unexpected(
             "the request was cancelled on Google",
         ))),
-        Some("incomplete" | "budget_exceeded") => Ok(ClipStatus::Lost(unexpected(
-            "Gemini Omni Flash stopped before the clip was done",
-        ))),
+        Some("incomplete" | "requires_continuation" | "budget_exceeded") => Ok(ClipStatus::Lost(
+            unexpected("Gemini Omni Flash stopped before the clip was done"),
+        )),
         Some("requires_action") => Ok(ClipStatus::Lost(unexpected(
             "Gemini Omni Flash asked for more input",
         ))),
@@ -497,7 +459,7 @@ fn mp4(bytes: Vec<u8>) -> Result<GeneratedClip, ProviderFailure> {
     }
 }
 
-/// Makes clips with Veo and Gemini Omni Flash, over HTTPS.
+/// Makes clips with Gemini Omni Flash, over HTTPS.
 pub struct GoogleClips<T = UreqTransport> {
     transport: T,
     backoff: Backoff,
@@ -576,7 +538,7 @@ impl<T: Transport> GoogleClips<T> {
         match response.status {
             200..=299 => mp4(response.bytes),
             403 | 404 | 410 => Err(unexpected(
-                "the clip is no longer available to download (Google keeps it for two days)",
+                "the clip is no longer available to download (Google keeps it for a while only)",
             )),
             status => Err(ProviderFailure::new(
                 ProviderFailureKind::ProviderDown,
@@ -593,6 +555,10 @@ impl<T: Transport> ClipGenerator for GoogleClips<T> {
 
     fn models(&self) -> Vec<ClipModel> {
         models()
+    }
+
+    fn retired(&self) -> Vec<RetiredClipModel> {
+        retired()
     }
 
     /// Nothing to hand over ahead: the image goes with the submission.
@@ -648,11 +614,17 @@ impl<T: Transport> ClipGenerator for GoogleClips<T> {
     fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
         let http = status_request(key, handle)
             .ok_or_else(|| unexpected(format!("{} is not a Google request", handle.0)))?;
+        if !is_interaction(handle) {
+            // Nothing is left to ask: the clip may have been made, and
+            // charged, before the model went away.
+            return Ok(ClipStatus::Lost(unexpected(
+                "Google no longer serves the model that was making this clip",
+            )));
+        }
         let response = self.send(&http)?;
         match response.status {
-            200..=299 if is_interaction(handle) => parse_omni_status(&response, handle),
-            200..=299 => parse_veo_status(&response),
-            // Gone for good: Google keeps work for two days.
+            200..=299 => parse_omni_status(&response, handle),
+            // Gone for good: Google keeps work for a while only.
             404 => Ok(ClipStatus::Lost(unexpected(
                 "Google does not know this request",
             ))),
@@ -712,10 +684,30 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), CATALOG.len());
         for spec in CATALOG {
-            let (_, model, resolution) = super::spec(spec.id).unwrap();
+            let (model, resolution) = super::spec(spec.id).unwrap();
             assert!(!model.is_empty() && !model.contains('/'), "{}", spec.id);
             assert!(["720p", "1080p"].contains(&resolution), "{}", spec.id);
         }
+    }
+
+    #[test]
+    fn a_retired_model_is_not_offered_and_its_replacement_is() {
+        for &(id, name, replacement) in RETIRED {
+            assert!(super::spec(id).is_none(), "{id} is still offered");
+            assert!(super::spec(replacement).is_some(), "{id}: {replacement}");
+            assert!(!name.is_empty(), "{id}");
+            assert_eq!(
+                id.rsplit_once('/').map(|(_, resolution)| resolution),
+                replacement
+                    .rsplit_once('/')
+                    .map(|(_, resolution)| resolution),
+                "{id} keeps its resolution"
+            );
+        }
+        let mut ids: Vec<_> = RETIRED.iter().map(|(id, ..)| id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), RETIRED.len());
     }
 
     #[test]

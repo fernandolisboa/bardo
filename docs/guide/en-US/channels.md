@@ -66,13 +66,24 @@ How the channel's videos are made: which scenes become AI clips and with which m
 <a id="defaults"></a>
 ## Video model, captions, transitions and motion
 
-- **Video model**: the model that animates the channel's scene images into short clips, through Higgsfield, Kling or Google, in the [production mode](#production) **All animated, channel's model**; the other modes pick their own model. Keeping the default follows the first provider, in the order Higgsfield, Kling, Google, whose key is saved, and that provider's default model when it changes: with only a Kling or a Gemini key, clips go to Kling or to Veo, never to a provider you have no key for. Any scene can pick another model at the [Clips](clips.md#model) stage.
+- **Video model**: the model that animates the channel's scene images into short clips, through Higgsfield, Kling or Google, in the [production mode](#production) **All animated, channel's model**; the other modes pick their own model. Keeping the default follows the first provider, in the order Higgsfield, Kling, Google, whose key is saved, and that provider's default model when it changes: with only a Kling or a Gemini key, clips go to Kling or to Gemini Omni Flash, never to a provider you have no key for. A channel saved with a model its provider has since retired shows the model that took its place. Any scene can pick another model at the [Clips](clips.md#model) stage.
+- **Clip length** and **Stretch a clip by up to**: whether a clip a little shorter than its scene is bought and played slowed, and how far ([Clip length](#clip-length)).
 - **Take model**: the model that makes the persona perform each take of a capture, through Higgsfield, BytePlus ModelArk or Kling: Kling 3.0 Motion Control on Higgsfield unless you pick another. Any take can pick another ([Performed clip](capture.md#performed)).
 - **Caption style**: how captions look in the channel's new projects. Each project can pick another style in the [editor](editor.md#captions).
 - **Spoken word**: the color the word being said lights up in, in the channel's new projects. **Yellow** is the default for a new channel; **Off** is where channels made before this existed start, so their cuts and renders stay as they were. Each project can pick another color in the [editor](editor.md#captions).
 - **Default transition** and its **Length**: what the editor puts on a cut when you press **T** or pick a transition for a clip, a crossfade of 0.5 s unless you change it. Every cut can use another one ([Transitions](editor.md#transitions)).
 - **Motion on stills** and its **Strength**: how a new cut moves the view over each still, the Ken Burns effect. **Varied** (the default for a new channel, at **Medium**) gives each scene a different zoom or pan from the one before; **None** keeps stills still, and is where channels made before motions existed start, so their cuts and renders stay as they were; or pick one motion for every scene. Cuts already made keep their motions, and every still can use another one ([Motion on stills](editor.md#motion)).
 - **Thumbnail look**: how the text of the channel's new YouTube thumbnails looks, Bold unless you change it. Each video can pick another ([Thumbnail](uploading.md#thumbnail)).
+
+<a id="clip-length"></a>
+## Clip length
+
+Some video models only make clips of a few fixed lengths, such as 5 or 10 seconds on Kling 2.6. A scene narrated for 6 seconds would take the 10-second clip, and 4 of the seconds you pay for would never be seen.
+
+- **Clip length**: **Shorter clip, slowed to fit** (the default): when a scene is a little longer than one of the model's lengths, Bardo asks for that length and plays it slower, so it ends with the scene. **Always cover the scene** asks for the first length that covers the scene and cuts what is left over.
+- **Stretch a clip by up to**: how much longer than it was made a clip may play, from 5% to 100% in steps of 5, and 40% unless you change it. At 40%, a 5-second clip covers a scene of up to 7 seconds, and a longer scene takes the next length. A lower limit keeps the motion closer to what the model made and pays for more seconds; a higher one slows more and pays for fewer. It shows only while clips are slowed to fit.
+
+Models that take any length in a range are not affected: their clips are made as long as the scene. Both choices apply to the clips made next; a clip already made keeps playing the way it was made ([Slowed clips](clips.md#stretch)).
 
 <a id="accounts"></a>
 ## Next: network accounts

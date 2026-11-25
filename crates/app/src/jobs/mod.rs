@@ -156,6 +156,9 @@ impl JobActionError {
             JobActionError::Restyled => Text::JobRestyled,
             JobActionError::ScenesTaken => Text::JobScenesTaken,
             JobActionError::TakeFromItsPage => Text::JobTakeFromItsPage,
+            JobActionError::NarrationBusy => Text::JobNarrationBusy,
+            JobActionError::ScenesBusy => Text::JobScenesBusy,
+            JobActionError::AsksFirst => Text::JobAsksFirst,
             _ => Text::JobNotUpdated,
         }
     }
@@ -270,6 +273,9 @@ impl Bardo {
         }
         if self.unsent_take_needs_asking(id) {
             return Err(JobActionError::TakeFromItsPage);
+        }
+        if let Some(held) = self.retry_held(id) {
+            return Err(held);
         }
         self.jobs.retry(id)
     }

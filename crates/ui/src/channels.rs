@@ -4,10 +4,10 @@
 //! a `ChannelDraft` and errors back to fields.
 
 use bardo_app::bardo_domain::{
-    CaptionHighlight, CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModel,
-    ClipModelRef, ContentLanguage, Country, MotionDefault, MotionPattern, MotionStrength,
-    PersonaId, ProductionMode, StyleChoice, TakeModel, ThumbnailLook, Transition, TransitionKind,
-    VideoFormat, frame_time,
+    CaptionHighlight, CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipFit,
+    ClipModel, ClipModelRef, ContentLanguage, Country, MotionDefault, MotionPattern,
+    MotionStrength, PersonaId, ProductionMode, StretchLimit, StyleChoice, TakeModel, ThumbnailLook,
+    Transition, TransitionKind, VideoFormat, frame_time,
 };
 use std::rc::Rc;
 
@@ -176,6 +176,31 @@ fn production_choices(bardo: &Bardo) -> SearchableVec<Choice<ProductionMode>> {
     }))
 }
 
+fn clip_fit_choices(bardo: &Bardo) -> SearchableVec<Choice<ClipFit>> {
+    SearchableVec::new(ClipFit::ALL.map(|value| Choice {
+        value,
+        title: tr(bardo, Text::ClipFitName(value)),
+    }))
+}
+
+/// Each limit with what it means for a 10 second clip.
+fn stretch_limit_choices(bardo: &Bardo) -> SearchableVec<Choice<StretchLimit>> {
+    SearchableVec::new(
+        StretchLimit::choices()
+            .map(|value| Choice {
+                value,
+                title: SharedString::from(bardo.text_with(
+                    Text::StretchLimitChoice,
+                    &[
+                        ("percent", &value.percent().to_string()),
+                        ("seconds", &bardo.seconds(value.longest(10))),
+                    ],
+                )),
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
 /// The channel's notes first, then the catalog in its own order.
 fn style_choices(bardo: &Bardo) -> SearchableVec<Choice<StyleChoice>> {
     SearchableVec::new(
@@ -283,6 +308,8 @@ pub struct ChannelsScreen {
     format: ChoiceSelect<VideoFormat>,
     production: ChoiceSelect<ProductionMode>,
     style: ChoiceSelect<StyleChoice>,
+    clip_fit: ChoiceSelect<ClipFit>,
+    stretch_limit: ChoiceSelect<StretchLimit>,
     transition: ChoiceSelect<TransitionKind>,
     transition_length: ChoiceSelect<u32>,
     motion: ChoiceSelect<MotionPattern>,
@@ -372,6 +399,17 @@ impl ChannelsScreen {
             let selected = index_of(&all, &defaults.style);
             SelectState::new(styles, selected, window, cx).searchable(true)
         });
+        let clip_fits = clip_fit_choices(bardo.read(cx));
+        let clip_fit = cx.new(|cx| {
+            let selected = index_of(&ClipFit::ALL, &defaults.clip_fit);
+            SelectState::new(clip_fits, selected, window, cx)
+        });
+        let stretch_limits = stretch_limit_choices(bardo.read(cx));
+        let stretch_limit = cx.new(|cx| {
+            let all: Vec<StretchLimit> = StretchLimit::choices().collect();
+            let selected = index_of(&all, &defaults.stretch_limit);
+            SelectState::new(stretch_limits, selected, window, cx)
+        });
         let transition = cx.new(|cx| {
             let selected = index_of(&TransitionKind::ALL, &defaults.transition.kind);
             SelectState::new(transitions, selected, window, cx)
@@ -410,6 +448,11 @@ impl ChannelsScreen {
                 &production,
                 |_, _, _: &SelectEvent<SearchableVec<Choice<ProductionMode>>>, cx| cx.notify(),
             ),
+            // The limit shows only while clips are stretched.
+            cx.subscribe(
+                &clip_fit,
+                |_, _, _: &SelectEvent<SearchableVec<Choice<ClipFit>>>, cx| cx.notify(),
+            ),
         ];
 
         let mut screen = Self {
@@ -432,6 +475,8 @@ impl ChannelsScreen {
             format,
             production,
             style,
+            clip_fit,
+            stretch_limit,
             transition,
             transition_length,
             motion,
@@ -479,6 +524,8 @@ impl ChannelsScreen {
         let formats = format_choices(bardo);
         let productions = production_choices(bardo);
         let styles = style_choices(bardo);
+        let clip_fits = clip_fit_choices(bardo);
+        let stretch_limits = stretch_limit_choices(bardo);
         let motions = motion_choices(bardo);
         let strengths = motion_strength_choices(bardo);
 
@@ -553,6 +600,20 @@ impl ChannelsScreen {
         self.style.update(cx, |select, cx| {
             let selected = select.selected_value().copied();
             select.set_items(styles, window, cx);
+            if let Some(value) = selected {
+                select.set_selected_value(&value, window, cx);
+            }
+        });
+        self.clip_fit.update(cx, |select, cx| {
+            let selected = select.selected_value().copied();
+            select.set_items(clip_fits, window, cx);
+            if let Some(value) = selected {
+                select.set_selected_value(&value, window, cx);
+            }
+        });
+        self.stretch_limit.update(cx, |select, cx| {
+            let selected = select.selected_value().copied();
+            select.set_items(stretch_limits, window, cx);
             if let Some(value) = selected {
                 select.set_selected_value(&value, window, cx);
             }
@@ -636,8 +697,13 @@ impl ChannelsScreen {
         self.persona.update(cx, |select, cx| {
             select.set_selected_value(&draft.default_persona, window, cx)
         });
+        // A model its provider retired shows as the one that took its place.
+        let clip_model = draft
+            .clip_model
+            .as_ref()
+            .map(|model| self.bardo.read(cx).clip_model_now(model));
         self.clip_model.update(cx, |select, cx| {
-            select.set_selected_value(&draft.clip_model, window, cx);
+            select.set_selected_value(&clip_model, window, cx);
             // A model no longer offered shows as the default; saving keeps
             // the form's choice.
             if select.selected_value().is_none() {
@@ -667,6 +733,17 @@ impl ChannelsScreen {
         });
         self.style.update(cx, |select, cx| {
             select.set_selected_value(&draft.style, window, cx)
+        });
+        self.clip_fit.update(cx, |select, cx| {
+            select.set_selected_value(&draft.clip_fit, window, cx)
+        });
+        // A limit between two of the menu's (from a settings file) shows
+        // as the nearest one.
+        let limit = StretchLimit::choices()
+            .min_by_key(|choice| choice.percent().abs_diff(draft.stretch_limit.percent()))
+            .unwrap_or_default();
+        self.stretch_limit.update(cx, |select, cx| {
+            select.set_selected_value(&limit, window, cx)
         });
         self.transition.update(cx, |select, cx| {
             select.set_selected_value(&draft.transition.kind, window, cx)
@@ -765,6 +842,18 @@ impl ChannelsScreen {
                 .unwrap_or_default(),
             style: self
                 .style
+                .read(cx)
+                .selected_value()
+                .copied()
+                .unwrap_or_default(),
+            clip_fit: self
+                .clip_fit
+                .read(cx)
+                .selected_value()
+                .copied()
+                .unwrap_or_default(),
+            stretch_limit: self
+                .stretch_limit
                 .read(cx)
                 .selected_value()
                 .copied()
@@ -1031,6 +1120,25 @@ impl ChannelsScreen {
                             guide::refs::CHANNELS_DEFAULTS,
                             Select::new(&self.clip_model).into_any_element(),
                         ))
+                        .child(explained(
+                            "channel-clip-fit-info",
+                            Text::ChannelClipFit,
+                            Text::ChannelClipFitHint,
+                            guide::refs::CHANNELS_CLIP_FIT,
+                            Select::new(&self.clip_fit).into_any_element(),
+                        ))
+                        .when(
+                            self.clip_fit.read(cx).selected_value() == Some(&ClipFit::Stretch),
+                            |fields| {
+                                fields.child(explained(
+                                    "channel-stretch-limit-info",
+                                    Text::ChannelStretchLimit,
+                                    Text::ChannelStretchLimitHint,
+                                    guide::refs::CHANNELS_CLIP_FIT,
+                                    Select::new(&self.stretch_limit).into_any_element(),
+                                ))
+                            },
+                        )
                         .child(explained(
                             "channel-take-model-info",
                             Text::ChannelTakeModel,

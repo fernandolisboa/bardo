@@ -9,8 +9,8 @@ use bardo_domain::{CaptionHighlight, CaptionStyle, TransitionKind, VideoCodec};
 use bardo_media::ffmpeg::{
     AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, ControlOutput, Dip, Duck, Ffmpeg,
     FrameSize, Framing, LoudnessTarget, MIN_VERSION, MediaError, Monitor, Motion, Output,
-    ProxyCodec, ProxySettings, RenderPlan, ThumbnailSpec, Transition, VideoClip, VideoEncoder,
-    View, VoiceCut,
+    ProxyCodec, ProxySettings, RenderPlan, Slowed, ThumbnailSpec, Transition, VideoClip,
+    VideoEncoder, View, VoiceCut,
 };
 
 fn ffmpeg() -> Ffmpeg {
@@ -67,6 +67,7 @@ fn short_plan() -> RenderPlan {
                 framing: Framing::Crop { x: 0.5, y: 0.5 },
                 transition: None,
                 motion: None,
+                slowed: None,
             },
             VideoClip {
                 source: ClipSource::Video(fixture("clip-b.mp4")),
@@ -75,6 +76,7 @@ fn short_plan() -> RenderPlan {
                 framing: Framing::Crop { x: 0.0, y: 0.5 },
                 transition: None,
                 motion: None,
+                slowed: None,
             },
         ],
         audio: vec![
@@ -473,6 +475,7 @@ fn music_plan() -> RenderPlan {
             framing: Framing::Fit,
             transition: None,
             motion: None,
+            slowed: None,
         }],
         audio: vec![AudioTrack {
             clips: vec![AudioClip {
@@ -659,6 +662,7 @@ fn rough_cut_plan() -> RenderPlan {
                 framing: Framing::Fit,
                 transition: None,
                 motion: None,
+                slowed: None,
             },
             VideoClip {
                 source: ClipSource::Video(fixture("clip-b.mp4")),
@@ -667,6 +671,7 @@ fn rough_cut_plan() -> RenderPlan {
                 framing: Framing::Fit,
                 transition: None,
                 motion: None,
+                slowed: None,
             },
             VideoClip {
                 source: ClipSource::Black,
@@ -675,6 +680,7 @@ fn rough_cut_plan() -> RenderPlan {
                 framing: Framing::Fit,
                 transition: None,
                 motion: None,
+                slowed: None,
             },
         ],
         audio: vec![AudioTrack {
@@ -743,6 +749,7 @@ fn captioned_plan(style: CaptionStyle) -> RenderPlan {
             framing: Framing::Fit,
             transition: None,
             motion: None,
+            slowed: None,
         }],
         audio: Vec::new(),
         captions: Some(CaptionTrack {
@@ -934,6 +941,7 @@ fn renders_each_clip_through_its_crop_window_at_the_output_size() {
                 framing: Framing::Crop { x, y },
                 transition: None,
                 motion: None,
+                slowed: None,
             }
         })
         .collect();
@@ -944,6 +952,7 @@ fn renders_each_clip_through_its_crop_window_at_the_output_size() {
         framing: Framing::Fit,
         transition: None,
         motion: None,
+        slowed: None,
     });
     let plan = RenderPlan {
         video,
@@ -1020,6 +1029,7 @@ fn transition_plan(kind: TransitionKind) -> RenderPlan {
                 framing: Framing::Fit,
                 transition: None,
                 motion: None,
+                slowed: None,
             },
             VideoClip {
                 source: ClipSource::Black,
@@ -1032,6 +1042,7 @@ fn transition_plan(kind: TransitionKind) -> RenderPlan {
                     after: secs(0.25),
                 }),
                 motion: None,
+                slowed: None,
             },
         ],
         audio: Vec::new(),
@@ -1148,6 +1159,7 @@ fn panning_plan() -> RenderPlan {
                 length: secs(2.0),
                 elapsed: Duration::ZERO,
             }),
+            slowed: None,
         }],
         audio: Vec::new(),
         captions: None,
@@ -1281,6 +1293,172 @@ fn a_moving_still_renders_into_a_video_of_its_length() {
         .unwrap();
     let info = ffmpeg().probe(&destination).unwrap();
     assert!(close(info.duration, 2.0, 0.05), "{:?}", info.duration);
+}
+
+#[test]
+fn a_slowed_clip_plays_over_its_whole_length_and_repeats_no_frame() {
+    // The two second pan as a video, then played over 2.8 seconds: as far
+    // as a stretched clip is slowed.
+    let dir = scratch("slowed");
+    let pan = dir.join("pan.mp4");
+    let output = Output {
+        size: PAN_SIZE,
+        video_bitrate: 4_000_000,
+        ..vertical(VideoEncoder::OpenH264)
+    };
+    ffmpeg()
+        .render(&panning_plan(), &output, None, &pan, &())
+        .unwrap();
+    let played = |slowed: Option<Slowed>| RenderPlan {
+        video: vec![VideoClip {
+            source: ClipSource::Video(pan.clone()),
+            start: Duration::ZERO,
+            duration: secs(2.8),
+            framing: Framing::Fit,
+            transition: None,
+            motion: None,
+            slowed,
+        }],
+        audio: Vec::new(),
+        captions: None,
+        skipped: Duration::ZERO,
+    };
+    let frames = |plan: &RenderPlan, from: Duration| -> Vec<Vec<u8>> {
+        ffmpeg()
+            .preview(plan, from, PAN_SIZE, (30, 1))
+            .unwrap()
+            .map(|frame| frame.bgra)
+            .collect()
+    };
+    let slowed = played(Some(Slowed {
+        recorded: secs(2.0),
+        played: secs(2.8),
+    }));
+    let slow = frames(&slowed, Duration::ZERO);
+    assert_eq!(slow.len(), 84, "as long as it plays");
+    // The pan of `a_moving_still_pans_at_an_even_pace_across_its_picture`,
+    // each of its 60 frames lasting 1.4 of the output's: it ends when
+    // the clip does instead of holding its last frame.
+    let expected = |frame: usize| {
+        let source = (frame as f64 / 1.4).min(59.0);
+        (107.0 - 64.0 * source / 59.0) * 1.25
+    };
+    let edges: Vec<f64> = slow.iter().map(|frame| red_green_edge(frame)).collect();
+    for (frame, edge) in edges.iter().enumerate() {
+        assert!(
+            (edge - expected(frame)).abs() < 2.0,
+            "frame {frame}: {edge:.2}, not {:.2}; {edges:?}",
+            expected(frame)
+        );
+    }
+    // Every frame is its own picture, blended from the two around it:
+    // repeating one every few frames is what makes slow motion stutter.
+    for (frame, pair) in slow[..83].windows(2).enumerate() {
+        assert!(pair[0] != pair[1], "frame {frame} shows twice");
+    }
+
+    // From the playhead it plays on from the same picture.
+    let later = frames(&slowed, secs(1.4));
+    assert_eq!(later.len(), 42);
+    let from_middle = red_green_edge(&later[0]);
+    assert!(
+        (from_middle - edges[42]).abs() < 1.5,
+        "{from_middle:.2}, not {:.2}",
+        edges[42]
+    );
+
+    // Played as it was made, the clip is over after 2 seconds and holds
+    // its last frame for the rest.
+    let plain = frames(&played(None), Duration::ZERO);
+    assert_eq!(plain.len(), 84);
+    assert!((red_green_edge(&plain[30]) - expected(42)).abs() < 2.0);
+    assert!(plain[62..].windows(2).all(|pair| pair[0] == pair[1]));
+}
+
+#[test]
+fn a_slowed_clip_crossfades_with_stills_and_plain_clips() {
+    // A slowed clip's frames must reach a transition in the same time
+    // base as its neighbours', or ffmpeg refuses the graph.
+    let dir = scratch("slowed-transitions");
+    let pan = dir.join("pan.mp4");
+    let output = Output {
+        size: PAN_SIZE,
+        video_bitrate: 4_000_000,
+        ..vertical(VideoEncoder::OpenH264)
+    };
+    ffmpeg()
+        .render(&panning_plan(), &output, None, &pan, &())
+        .unwrap();
+    let crossfade = Some(Transition {
+        kind: TransitionKind::Crossfade,
+        before: secs(0.25),
+        after: secs(0.25),
+    });
+    let slowed = Some(Slowed {
+        recorded: secs(2.0),
+        played: secs(2.6),
+    });
+    let clip = |source: ClipSource, start: f64, duration: f64| VideoClip {
+        source,
+        start: secs(start),
+        duration: secs(duration),
+        framing: Framing::Fit,
+        transition: None,
+        motion: None,
+        slowed: None,
+    };
+    let plan = RenderPlan {
+        video: vec![
+            clip(ClipSource::Still(fixture("bands-320x180.png")), 0.0, 1.0),
+            VideoClip {
+                slowed,
+                transition: crossfade,
+                ..clip(ClipSource::Video(pan.clone()), 0.0, 2.0)
+            },
+            VideoClip {
+                transition: crossfade,
+                ..clip(ClipSource::Video(pan.clone()), 0.5, 1.0)
+            },
+            VideoClip {
+                transition: crossfade,
+                ..panning_plan().video.remove(0)
+            },
+            // Slowed, cut in the middle of its file and after a plain cut.
+            VideoClip {
+                slowed,
+                ..clip(ClipSource::Video(pan.clone()), 0.65, 1.3)
+            },
+            VideoClip {
+                transition: crossfade,
+                ..clip(ClipSource::Black, 0.0, 0.5)
+            },
+        ],
+        audio: Vec::new(),
+        captions: None,
+        skipped: Duration::ZERO,
+    };
+    for rate in [(30, 1), (30_000, 1_001)] {
+        let frames = ffmpeg()
+            .preview(&plan, Duration::ZERO, PAN_SIZE, rate)
+            .unwrap();
+        let expected =
+            (plan.duration().as_secs_f64() * f64::from(rate.0) / f64::from(rate.1)).round() as i64;
+        let count = frames.count() as i64;
+        assert!(
+            (count - expected).abs() <= 3,
+            "{count} frames at {rate:?}, not {expected}"
+        );
+    }
+    let rendered = dir.join("cut.mp4");
+    ffmpeg()
+        .render(&plan, &output, None, &rendered, &())
+        .unwrap();
+    let info = ffmpeg().probe(&rendered).unwrap();
+    assert!(
+        close(info.duration, plan.duration().as_secs_f64(), 0.1),
+        "{:?}",
+        info.duration
+    );
 }
 
 /// The thumbnail's pixels, RGB.

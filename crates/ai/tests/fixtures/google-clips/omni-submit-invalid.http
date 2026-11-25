@@ -1,0 +1,9 @@
+HTTP/2 400
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "The value '16s' is not supported for 'duration' at 'response_format'. Supported values: '3s' to '15s'."
+  }
+}
