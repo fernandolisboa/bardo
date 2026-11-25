@@ -466,6 +466,14 @@ impl crate::JobHandler for SentOnce {
             None => self.handler.run(payload, cx),
         }
     }
+
+    fn asked_again(&self, external_handle: Option<&str>) -> Option<String> {
+        self.handler.asked_again(external_handle)
+    }
+
+    fn saved_after_ask(&self, asked: Option<&str>, saved: String) -> String {
+        self.handler.saved_after_ask(asked, saved)
+    }
 }
 
 /// A paid call that just answered.
