@@ -21,6 +21,7 @@ mod cut_suggestions;
 mod decision_engines;
 mod diagnostics;
 mod editor;
+mod end_cards;
 mod export;
 mod formats;
 mod guide;
@@ -150,6 +151,7 @@ pub use editor::{
     Editor, EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT,
     SlowedClip, WordMark, media_framing, preview_size,
 };
+pub use end_cards::{CardDraft, EndCardView, card_field_errors};
 pub use export::{
     ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView, export_job_networks,
 };
@@ -293,6 +295,8 @@ pub struct Repositories {
     /// Ad angles and the briefs of ad projects. Shared with the job
     /// queue.
     pub ads: Arc<dyn AdRepository>,
+    /// Each ad's end card design (#281). Shared with the job queue.
+    pub end_cards: Arc<dyn bardo_domain::EndCardRepository>,
     /// Narrations and their word timings. Shared with the job queue.
     pub narrations: Arc<dyn NarrationRepository>,
     /// Each project's capture and its takes. Shared with the job queue.
@@ -413,6 +417,7 @@ impl Repositories {
             personas: Arc::clone(&db) as _,
             products: Arc::clone(&db) as _,
             ads: Arc::clone(&db) as _,
+            end_cards: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
             captures: Arc::clone(&db) as _,
             staging: Arc::clone(&db) as _,
@@ -607,6 +612,7 @@ pub struct Bardo {
     personas: Arc<dyn PersonaRepository>,
     products: Arc<dyn ProductRepository>,
     ads: Arc<dyn AdRepository>,
+    end_cards: Arc<dyn bardo_domain::EndCardRepository>,
     narrations: Arc<dyn NarrationRepository>,
     captures: Arc<dyn CaptureRepository>,
     staging: Arc<dyn StagingRepository>,
@@ -729,6 +735,7 @@ impl Bardo {
             personas,
             products,
             ads,
+            end_cards,
             narrations,
             captures,
             staging,
@@ -929,6 +936,8 @@ impl Bardo {
             costs: cost_book.clone(),
             products: Arc::clone(&products),
             composer: Arc::new(bardo_media::ProductShots),
+            ads: Arc::clone(&ads),
+            end_cards: Arc::clone(&end_cards),
         };
         let plan_book = plans::PlanBook::load(
             profile.id,
@@ -1151,6 +1160,7 @@ impl Bardo {
             personas,
             products,
             ads,
+            end_cards,
             narrations,
             captures,
             staging,
@@ -3538,6 +3548,7 @@ mod tests {
             personas: Arc::new(FakePersonas::default()),
             products: Arc::clone(&db) as _,
             ads: Arc::clone(&db) as _,
+            end_cards: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
             captures: Arc::clone(&db) as _,
             staging: Arc::clone(&db) as _,

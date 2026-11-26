@@ -1921,11 +1921,13 @@ impl ProjectsScreen {
         let note = muted(cx, tr(bardo, Text::SceneComposed));
         let media = usize::from(failure.is_some());
         let look = self.render_shot_look(index, scene, busy, cx);
+        let card = self.render_end_card(index, busy, cx);
         let body = failure
             .into_iter()
             .chain(Some(picture))
             .chain(compose)
             .chain(kind)
+            .chain(card)
             .chain(look)
             .chain(Some(note))
             .collect();
@@ -1945,7 +1947,11 @@ impl ProjectsScreen {
     ) -> Option<AnyElement> {
         let view = self.scenes.as_ref()?;
         let kinds = &view.kinds;
-        let image = kinds.image(scene.product_image()?)?;
+        // An end card of text (#281) has no image, and still a backdrop.
+        let image = scene.product_image().and_then(|image| kinds.image(image));
+        if image.is_none() && !scene.is_end_card() {
+            return None;
+        }
         let project = view.project.id;
         let locked = busy || view.is_animating();
         let look = scene.look();
@@ -1970,8 +1976,8 @@ impl ProjectsScreen {
                     )
                 }))
         };
-        let shown_layout = look.layout_for(image.kind, image.cut_out);
-        let layout = (image.layouts.len() > 1).then(|| {
+        let layout = image.filter(|image| image.layouts.len() > 1).map(|image| {
+            let shown_layout = look.layout_for(image.kind, image.cut_out);
             v_flex()
                 .gap_1()
                 .child(label(
@@ -2000,27 +2006,28 @@ impl ProjectsScreen {
                         })),
                 )
         });
-        let placement = v_flex()
-            .gap_1()
-            .child(label(Text::ShotPlacementLabel, None))
-            .child(
-                h_flex()
-                    .flex_wrap()
+        // An end card sets its image in the room its text leaves.
+        let placement =
+            (!scene.is_end_card()).then(|| {
+                v_flex()
                     .gap_1()
-                    .children(ShotPlacement::ALL.into_iter().map(|place| {
-                        let next = ShotLook {
-                            placement: place,
-                            ..look
-                        };
-                        Button::new(("shot-place", index * 10 + place as usize))
-                            .xsmall()
-                            .outline()
-                            .label(tr(bardo, Text::ShotPlacementName(place)))
-                            .selected(place == look.placement)
-                            .disabled(locked && place != look.placement)
-                            .on_click(cx.listener(set(next)))
-                    })),
-            );
+                    .child(label(Text::ShotPlacementLabel, None))
+                    .child(h_flex().flex_wrap().gap_1().children(
+                        ShotPlacement::ALL.into_iter().map(|place| {
+                            let next = ShotLook {
+                                placement: place,
+                                ..look
+                            };
+                            Button::new(("shot-place", index * 10 + place as usize))
+                                .xsmall()
+                                .outline()
+                                .label(tr(bardo, Text::ShotPlacementName(place)))
+                                .selected(place == look.placement)
+                                .disabled(locked && place != look.placement)
+                                .on_click(cx.listener(set(next)))
+                        }),
+                    ))
+            });
         // The colors to build a backdrop from: the image's tones, then
         // white and black.
         let mut colors: Vec<ShotColor> = scene
@@ -2296,7 +2303,7 @@ impl ProjectsScreen {
                 v_flex()
                     .gap_3()
                     .children(layout)
-                    .child(placement)
+                    .children(placement)
                     .child(backdrop),
             )
             .into_any_element(),
@@ -3312,7 +3319,7 @@ fn scene_chip(bardo: &Bardo, state: SceneState, composed: bool, cx: &App) -> Opt
 }
 
 /// A small label over a field of the inspector.
-fn field_label(text: SharedString) -> gpui_kit::Div {
+pub(super) fn field_label(text: SharedString) -> gpui_kit::Div {
     div().text_xs().font_semibold().child(text)
 }
 

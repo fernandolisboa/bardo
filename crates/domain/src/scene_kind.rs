@@ -115,8 +115,11 @@ impl ProductPictures {
 pub struct ComposedShot {
     /// The file's name in the project folder.
     pub file: String,
-    /// The product image it shows.
-    pub image: ProductImageId,
+    /// The product image it shows; none for an end card of text (#281).
+    pub image: Option<ProductImageId>,
+    /// The end card design it shows, by its fingerprint; none for a
+    /// product shot.
+    pub card: Option<String>,
     /// The frame's shape it was composed for.
     pub aspect: AspectRatio,
     /// The look it was composed in (#285); `None` for a picture made

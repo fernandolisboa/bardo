@@ -154,6 +154,9 @@ pub enum Control {
     /// Scenes: how an ad's picked product shot looks: its layout,
     /// position and backdrop (#285).
     ShotLook,
+    /// Scenes: an ad's end card: its lines, offer, look and places
+    /// (#281).
+    EndCard,
     /// Scenes: checking the product in a scene of the product in use
     /// against the real one (#279).
     ProductCheck,
@@ -797,7 +800,7 @@ pub const SCENES: Tour = {
     const TOOLBAR: WhenMissing = WhenMissing::LightPart(TourAnchor::Toolbar);
     Tour {
         id: TourId::Scenes,
-        version: 9,
+        version: 10,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "plan", control(Control::ScenesPlan))

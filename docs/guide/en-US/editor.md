@@ -108,6 +108,8 @@ Captions are made from the narration's words and sit on the CC track. Select one
 
 **Show captions** turns them all on or off in the preview and the render; the [Render stage](render.md#review) says when they are off.
 
+An ad's [end card](scenes.md#end-card) says the call to action itself: no caption shows while it is on screen, in the preview or the render. A new cut of an ad ends 1.5 seconds after the last word, the card on screen for at least 2.5 seconds, and its generated music is made long enough to run under it.
+
 <a id="framing"></a>
 ## Framing: 16:9 or 9:16
 
@@ -128,7 +130,7 @@ A still picture does not have to sit still. Its **Motion** moves the view over i
 
 Select a still and pick its motion in the inspector, or **None** to keep it still, and its **Strength**: **Subtle** (8% closer), **Medium** (15%) or **Strong** (25%). **Use on every still** puts the selected still's motion on all of them (with **None**, it takes motion off every still), and **Vary every still** gives them zooms and pans in turn at the selected still's strength, so no still moves the way the one before it did. A still without motion shows the channel's strength, the one a picked motion takes. A new cut starts with the channel's motions, varied unless you set otherwise on the [channel](channels.md#defaults).
 
-The motion moves over the picture as it is framed: the 9:16 window in a vertical cut, the whole picture in a 16:9 one. Where the picture shows with bars (**Fit** in 9:16, or a tall picture in 16:9), the bars move with it. It lasts the clip's whole time on screen, transitions included, so the picture never stops while it shows. Splitting a still gives each piece the whole motion. Clips move on their own, so motion plays on stills only: a scene that gets a clip keeps its still's motion unplayed, and plays it again if the scene shows its still once more. A picture Bardo composed from a product image ([The scenes of an ad](scenes.md#ad)) is always shown whole and only zooms: no pan or framing is offered for it, and a pan put on every still plays on it as a zoom in of the same strength, so the product stays whole in the frame and clear of the captions.
+The motion moves over the picture as it is framed: the 9:16 window in a vertical cut, the whole picture in a 16:9 one. Where the picture shows with bars (**Fit** in 9:16, or a tall picture in 16:9), the bars move with it. It lasts the clip's whole time on screen, transitions included, so the picture never stops while it shows. Splitting a still gives each piece the whole motion. Clips move on their own, so motion plays on stills only: a scene that gets a clip keeps its still's motion unplayed, and plays it again if the scene shows its still once more. A picture Bardo composed from a product image ([The scenes of an ad](scenes.md#ad)) is always shown whole and only zooms: no pan or framing is offered for it, and a pan put on every still plays on it as a zoom in of the same strength, so the product stays whole in the frame and clear of the captions. An ad's [end card](scenes.md#end-card) holds still, so its lines are read: it takes no motion.
 
 The preview and the render draw the motion the same way, smoothly to a fraction of a pixel; a moving still takes a little longer to render than one that stays still.
 

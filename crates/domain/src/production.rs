@@ -168,10 +168,10 @@ pub const TYPICAL_PRODUCT_SHOTS: usize = 2;
 /// The scenes a plan of an ad `length` long would about have, as (start,
 /// length, composed), one every [`TYPICAL_AD_SCENE`]; the last one takes
 /// the rest. A composed scene is one Bardo makes from the product's own
-/// image, for free: when the product has an image, the end card (the
-/// last scene) and [`TYPICAL_PRODUCT_SHOTS`] scenes before it, which
-/// leave the first scenes, the hook, drawn. A product with no image has
-/// only drawn scenes.
+/// image, its logo and the user's lines, for free: the end card (the
+/// last scene, #281) and, when the product has an image,
+/// [`TYPICAL_PRODUCT_SHOTS`] scenes before it. The first scene, the hook,
+/// stays drawn.
 pub fn typical_ad_scenes(length: Duration, has_image: bool) -> Vec<(Duration, Duration, bool)> {
     let mut scenes: Vec<(Duration, Duration, bool)> = Vec::new();
     let mut start = Duration::ZERO;
@@ -186,9 +186,7 @@ pub fn typical_ad_scenes(length: Duration, has_image: bool) -> Vec<(Duration, Du
         scenes.push((start, take, false));
         start += take;
     }
-    if has_image {
-        compose_typical(&mut scenes);
-    }
+    compose_typical(&mut scenes, has_image);
     scenes
 }
 
@@ -217,18 +215,17 @@ pub fn ad_scenes_on(narration: &Narration, has_image: bool) -> Vec<(Duration, Du
             (start, end - start, false)
         })
         .collect();
-    if has_image {
-        compose_typical(&mut scenes);
-    }
+    compose_typical(&mut scenes, has_image);
     scenes
 }
 
 /// Marks the scenes counted as composed: the end card (the last scene)
-/// and [`TYPICAL_PRODUCT_SHOTS`] before it. The first scene always stays
-/// drawn: it shows the hook.
-fn compose_typical(scenes: &mut [(Duration, Duration, bool)]) {
+/// and, with an image, [`TYPICAL_PRODUCT_SHOTS`] before it. The first
+/// scene always stays drawn: it shows the hook.
+fn compose_typical(scenes: &mut [(Duration, Duration, bool)], has_image: bool) {
     let count = scenes.len();
-    let composed = (TYPICAL_PRODUCT_SHOTS + 1).min(count.saturating_sub(1));
+    let shots = if has_image { TYPICAL_PRODUCT_SHOTS } else { 0 };
+    let composed = (shots + 1).min(count.saturating_sub(1));
     for scene in scenes.iter_mut().skip(count - composed) {
         scene.2 = true;
     }
@@ -283,17 +280,25 @@ mod tests {
                 (ms(3_600), ms(1_500), true),
             ]
         );
-        assert!(ad_scenes_on(&narration, false).iter().all(|scene| !scene.2));
+        // With no image, only the end card is composed (#281).
+        assert_eq!(
+            ad_scenes_on(&narration, false)
+                .iter()
+                .map(|scene| scene.2)
+                .collect::<Vec<_>>(),
+            [false, false, false, true]
+        );
     }
 
     #[test]
     fn an_ad_not_planned_yet_counts_a_scene_every_three_seconds() {
         let secs = Duration::from_secs;
-        // A product with no image: every scene is drawn.
+        // A product with no image: every scene is drawn but the end card,
+        // a card of text (#281).
         let drawn = typical_ad_scenes(secs(15), false);
         assert_eq!(drawn.len(), 5);
-        assert!(drawn.iter().all(|scene| !scene.2));
-        assert_eq!(drawn[4], (secs(12), secs(3), false));
+        assert!(drawn[..4].iter().all(|scene| !scene.2));
+        assert_eq!(drawn[4], (secs(12), secs(3), true));
         // With an image: two product shots and the end card are free.
         let with_image = typical_ad_scenes(secs(15), true);
         assert_eq!(

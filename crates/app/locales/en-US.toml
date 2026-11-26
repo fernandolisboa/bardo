@@ -3112,7 +3112,7 @@ body = "Each scene in order, with its time, its image and where it stands: to dr
 
 [tour.scenes.scene]
 title = "A scene"
-body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images. A product shot's layout, position and backdrop change for free too; only drawing a backdrop is paid, after its estimate, and a new one waits for you to keep or discard it. A scene of the product in use is drawn with the product's photo and waits for you to check it against the real product, draw it again, or use the real image instead."
+body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images. A product shot's layout, position and backdrop change for free too; only drawing a backdrop is paid, after its estimate, and a new one waits for you to keep or discard it. A scene of the product in use is drawn with the product's photo and waits for you to check it against the real product, draw it again, or use the real image instead. The end card, the ad's last scene, is composed for free too: type its headline and second line, show the brief's offer or not, and pick its look and where its text and logo sit."
 
 [tour.scenes.redraw]
 title = "Draw again"
@@ -4619,7 +4619,7 @@ body = "For an ad, Claude lists what the script states about the product. A stat
 
 [scenes.kind]
 label = "Scene kind"
-hint = "What this scene of the ad shows. A drawn scene and the product in use are drawn by the image model. A product shot shows one of the product's own images as it is: Bardo composes it for free and it never goes to a model. So does the end card when the product has an image; when it has none, the end card is drawn. Only the kinds the product's images allow are offered."
+hint = "What this scene of the ad shows. A drawn scene and the product in use are drawn by the image model. A product shot shows one of the product's own images as it is: Bardo composes it for free and it never goes to a model. So does the end card: the backdrop, the product's image when there is one, its logo and your lines, in Bardo's fonts. Only the kinds the product's images allow are offered."
 image = "Product image"
 composed = "Composed by Bardo from the product's own image. Free, and it never goes to a model."
 too_small = "This image is small for the frame: enlarged, it may look soft. A larger image of the product keeps it sharp."
@@ -4653,6 +4653,37 @@ drawing = "Drawing a backdrop…"
 to_review = "New backdrop to review"
 keep = "Keep and use"
 discard = "Discard"
+
+[scenes.end_card]
+title = "End card"
+hint = "The last scene of the ad, composed by Bardo like a thumbnail: the backdrop, the product's image when the scene shows one, its logo and these lines, in Bardo's fonts. Free, and it never goes to a model. It stays on screen from the call to action until 1.5 s after the last word, with the music under it and no captions."
+headline = "Headline"
+second_line = "Second line"
+second_line_hint = "A link or handle, kept as you type it. May be empty."
+show_offer = "Show the offer"
+offer_is = "The offer line shows the brief's offer: {offer}"
+no_offer = "The brief has no offer, so there is no offer line. Write one on the Brief stage."
+look = "Look"
+text_place = "Text"
+logo_place = "Logo"
+no_logo = "The product has no logo. Add one on the Products screen to show it on the card."
+save = "Save card"
+saved = "Card saved. Its picture is composed again, for free."
+out_of_date = "The picture shows an older design. It is composed again before the video is rendered."
+off = "To turn the end card off, make this scene a drawn scene or a product shot: the cut then ends with the narration."
+
+[scenes.end_card.text_place_name]
+above = "Above the image"
+below = "Below the image"
+
+[scenes.end_card.logo_place_name]
+corner = "In the corner"
+with_text = "With the text"
+
+[scenes.end_card.error]
+headline_empty = "The headline cannot be empty."
+headline_too_long = "Keep the headline to at most 40 characters."
+second_line_too_long = "Keep the second line to at most 60 characters."
 
 [scenes.look.layout_name]
 card = "Card"

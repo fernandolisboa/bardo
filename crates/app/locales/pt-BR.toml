@@ -3112,7 +3112,7 @@ body = "Cada cena em ordem, com o tempo, a imagem e como está: para desenhar, p
 
 [tour.scenes.scene]
 title = "Uma cena"
-body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato de cada pessoa dela, a não ser de quem você escolheu desenhar sem retrato, e uma desenhada com um retrato mais antigo fica marcada. Edite o prompt para mudar o que o próximo desenho mostra. Num anúncio, Tipo de cena diz o que a cena é: desenhada, ou uma foto do produto que o Bardo compõe de graça a partir de uma das imagens do próprio produto. O layout, a posição e o fundo de uma foto do produto também mudam de graça; só desenhar um fundo é pago, depois da estimativa, e um fundo novo espera você manter ou descartar. Uma cena do produto em uso é desenhada com a foto do produto e espera você conferir com o produto de verdade, desenhar de novo ou usar a imagem real."
+body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato de cada pessoa dela, a não ser de quem você escolheu desenhar sem retrato, e uma desenhada com um retrato mais antigo fica marcada. Edite o prompt para mudar o que o próximo desenho mostra. Num anúncio, Tipo de cena diz o que a cena é: desenhada, ou uma foto do produto que o Bardo compõe de graça a partir de uma das imagens do próprio produto. O layout, a posição e o fundo de uma foto do produto também mudam de graça; só desenhar um fundo é pago, depois da estimativa, e um fundo novo espera você manter ou descartar. Uma cena do produto em uso é desenhada com a foto do produto e espera você conferir com o produto de verdade, desenhar de novo ou usar a imagem real. O cartão final, a última cena do anúncio, também é composto de graça: digite o título e a segunda linha, mostre ou não a oferta do briefing e escolha o visual e onde ficam o texto e o logo."
 
 [tour.scenes.redraw]
 title = "Desenhe de novo"
@@ -4619,7 +4619,7 @@ body = "Em um anúncio, o Claude lista o que o roteiro diz sobre o produto. O qu
 
 [scenes.kind]
 label = "Tipo de cena"
-hint = "O que esta cena do anúncio mostra. Uma cena desenhada e o produto em uso são desenhados pelo modelo de imagem. Uma foto do produto mostra uma das imagens do próprio produto como ela é: o Bardo compõe essa cena de graça e ela nunca vai para um modelo. O cartão final também, quando o produto tem imagem; quando não tem, o cartão final é desenhado. Só aparecem os tipos que as imagens do produto permitem."
+hint = "O que esta cena do anúncio mostra. Uma cena desenhada e o produto em uso são desenhados pelo modelo de imagem. Uma foto do produto mostra uma das imagens do próprio produto como ela é: o Bardo compõe essa cena de graça e ela nunca vai para um modelo. O cartão final também: o fundo, a imagem do produto quando há uma, o logo e as suas linhas, nas fontes do Bardo. Só aparecem os tipos que as imagens do produto permitem."
 image = "Imagem do produto"
 composed = "Composta pelo Bardo a partir da imagem do próprio produto. De graça, e ela nunca vai para um modelo."
 too_small = "Esta imagem é pequena para o quadro: ampliada, ela pode ficar sem nitidez. Uma imagem maior do produto resolve."
@@ -4653,6 +4653,37 @@ drawing = "Desenhando um fundo…"
 to_review = "Novo fundo para revisar"
 keep = "Manter e usar"
 discard = "Descartar"
+
+[scenes.end_card]
+title = "Cartão final"
+hint = "A última cena do anúncio, composta pelo Bardo como uma thumbnail: o fundo, a imagem do produto quando a cena mostra uma, o logo e estas linhas, nas fontes do Bardo. Grátis, e nunca vai para um modelo. Fica na tela da chamada para ação até 1,5 s depois da última palavra, com a música por baixo e sem legendas."
+headline = "Título"
+second_line = "Segunda linha"
+second_line_hint = "Um link ou @, mantido como você digitar. Pode ficar vazia."
+show_offer = "Mostrar a oferta"
+offer_is = "A linha de oferta mostra a oferta do briefing: {offer}"
+no_offer = "O briefing não tem oferta, então não há linha de oferta. Escreva uma na etapa Briefing."
+look = "Visual"
+text_place = "Texto"
+logo_place = "Logo"
+no_logo = "O produto não tem logo. Adicione um na tela Produtos para mostrá-lo no cartão final."
+save = "Salvar cartão final"
+saved = "Cartão final salvo. A imagem é composta de novo, de graça."
+out_of_date = "A imagem mostra um design anterior. Ela é composta de novo antes de o vídeo ser renderizado."
+off = "Para desligar o cartão final, faça desta cena uma cena desenhada ou uma foto do produto: o corte então termina com a narração."
+
+[scenes.end_card.text_place_name]
+above = "Acima da imagem"
+below = "Abaixo da imagem"
+
+[scenes.end_card.logo_place_name]
+corner = "No canto"
+with_text = "Junto ao texto"
+
+[scenes.end_card.error]
+headline_empty = "O título não pode ficar vazio."
+headline_too_long = "Use no máximo 40 caracteres no título."
+second_line_too_long = "Use no máximo 60 caracteres na segunda linha."
 
 [scenes.look.layout_name]
 card = "Cartão"

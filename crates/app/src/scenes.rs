@@ -153,6 +153,9 @@ pub enum SceneError {
     /// A scene still shows the backdrop: it cannot be discarded.
     #[error("a scene shows the backdrop")]
     BackdropInUse,
+    /// The end card's lines break a rule (#281); the editor shows which.
+    #[error("invalid end card: {0:?}")]
+    Card(Vec<bardo_domain::CardFieldError>),
     #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
@@ -177,6 +180,12 @@ impl SceneError {
             SceneError::MissingKey(Provider::HiggsfieldPlan) => Text::ScenesMissingHiggsfieldPlan,
             SceneError::MissingKey(_) => Text::ScenesMissingGeminiKey,
             SceneError::Busy => Text::ScenesBusy,
+            SceneError::Card(errors) => Text::CardFieldError(
+                errors
+                    .first()
+                    .copied()
+                    .unwrap_or(bardo_domain::CardFieldError::HeadlineEmpty),
+            ),
             SceneError::NarrationBusy => Text::ScenesNarrationBusy,
             SceneError::PlanOutOfDate => Text::ScenesPlanOutOfDate,
             SceneError::OtherText(_) => Text::ScenesOtherText,
@@ -740,6 +749,10 @@ pub(crate) struct SceneHandler {
     pub(crate) products: Arc<dyn ProductRepository>,
     /// Composes product shots on the computer (#278).
     pub(crate) composer: Arc<dyn ShotComposer>,
+    /// An ad's brief, which its end card's lines start from (#281).
+    pub(crate) ads: Arc<dyn bardo_domain::AdRepository>,
+    /// Each ad's end card design (#281).
+    pub(crate) end_cards: Arc<dyn bardo_domain::EndCardRepository>,
 }
 
 impl JobHandler for SceneHandler {
@@ -1759,9 +1772,10 @@ impl Bardo {
             _ => None,
         };
         let aspect = self.video_format(&project)?.aspect();
-        let missing_shots = plan
-            .as_ref()
-            .map_or_else(Vec::new, |plan| plan.missing_shots(aspect));
+        let missing_shots = match &plan {
+            Some(plan) => self.missing_shots(&project, plan, aspect)?,
+            None => Vec::new(),
+        };
         let kinds = self.scene_kinds(project.id)?;
         let style = self.video_style(&project)?;
         let missing = plan.as_ref().map_or(0, |plan| {
@@ -2248,8 +2262,9 @@ impl Bardo {
     ) -> Result<JobId, SceneError> {
         let plan = self.own_plan(project)?;
         let missing = plan.missing_images();
-        let aspect = self.video_format(&self.scenes_project(project)?)?.aspect();
-        let shots = plan.missing_shots(aspect);
+        let project = self.scenes_project(project)?;
+        let aspect = self.video_format(&project)?.aspect();
+        let shots = self.missing_shots(&project, &plan, aspect)?;
         if missing.is_empty() && shots.is_empty() {
             return Err(SceneError::NothingToGenerate);
         }
@@ -2261,7 +2276,7 @@ impl Bardo {
     pub fn compose_missing_shots(&self, project: VideoProjectId) -> Result<JobId, SceneError> {
         let plan = self.own_plan(project)?;
         let project = self.scenes_project(project)?;
-        let shots = plan.missing_shots(self.video_format(&project)?.aspect());
+        let shots = self.missing_shots(&project, &plan, self.video_format(&project)?.aspect())?;
         if shots.is_empty() {
             return Err(SceneError::NothingToGenerate);
         }

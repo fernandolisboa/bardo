@@ -55,6 +55,7 @@ use crate::{guide, layout};
 mod brief;
 mod capture;
 mod claims;
+mod end_card;
 mod export;
 mod music;
 mod narration_ask;
@@ -345,6 +346,15 @@ pub struct ProjectsScreen {
     brief_errors: Vec<bardo_app::bardo_domain::BriefFieldError>,
     brief_error: Option<Text>,
     brief_notice: Option<Text>,
+    /// An ad's end card (#281), for its editor in the Scenes inspector.
+    end_card: Option<bardo_app::EndCardView>,
+    /// Its headline and second line as the user types them.
+    card_headline: Entity<InputState>,
+    card_second_line: Entity<InputState>,
+    /// The stored lines the two fields were last filled with.
+    card_loaded: Option<(String, String)>,
+    card_errors: Vec<bardo_app::bardo_domain::CardFieldError>,
+    card_notice: Option<Text>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -392,6 +402,8 @@ impl ProjectsScreen {
         let brief_offer = cx.new(|cx| InputState::new(window, cx));
         let brief_call_to_action = cx.new(|cx| InputState::new(window, cx));
         let brief_link = cx.new(|cx| InputState::new(window, cx));
+        let card_headline = cx.new(|cx| InputState::new(window, cx));
+        let card_second_line = cx.new(|cx| InputState::new(window, cx));
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -521,6 +533,17 @@ impl ProjectsScreen {
         let mut subscriptions = subscriptions;
         // Typing in the brief shows Save, and clears what the last save
         // said.
+        // Typing on the end card shows Save, and clears what the last
+        // save said.
+        for input in [&card_headline, &card_second_line] {
+            subscriptions.push(cx.subscribe(input, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.card_errors.clear();
+                    this.card_notice = None;
+                    cx.notify();
+                }
+            }));
+        }
         for input in [&brief_offer, &brief_call_to_action, &brief_link] {
             subscriptions.push(cx.subscribe(input, |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -653,6 +676,12 @@ impl ProjectsScreen {
             brief_errors: Vec::new(),
             brief_error: None,
             brief_notice: None,
+            end_card: None,
+            card_headline,
+            card_second_line,
+            card_loaded: None,
+            card_errors: Vec::new(),
+            card_notice: None,
             editor,
             loaded: None,
             field_error: None,
@@ -1440,12 +1469,14 @@ impl ProjectsScreen {
             self.chapters = None;
             self.versions = None;
             self.brief = None;
+            self.end_card = None;
             return;
         };
         self.load_brief(id, window, cx);
         self.load_narration(id, cx);
         self.load_versions(id, cx);
         self.load_scenes(id, cx);
+        self.load_end_card(id, window, cx);
         self.load_music(id, window, cx);
         self.load_render(id, cx);
         self.load_export(id, window, cx);

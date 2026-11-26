@@ -73,6 +73,16 @@ pub trait MediaEngine: Send + Sync {
     fn compose_thumbnail(&self, spec: &ThumbnailSpec, destination: &Path)
     -> Result<(), MediaError>;
 
+    /// Sets an end card's `text` (#281) on the picture at `picture`, in
+    /// `layout`'s text box, into the PNG at `destination`.
+    fn draw_card_text(
+        &self,
+        picture: &Path,
+        layout: &bardo_domain::CardLayout,
+        text: &bardo_domain::CardText,
+        destination: &Path,
+    ) -> Result<(), MediaError>;
+
     /// Rewrites the picture at `source` as a JPEG of the same size at
     /// `destination`, within `max_bytes`.
     fn fit_picture(
@@ -264,6 +274,17 @@ impl MediaEngine for BundledFfmpeg {
         destination: &Path,
     ) -> Result<(), MediaError> {
         self.ffmpeg()?.compose_thumbnail(spec, destination)
+    }
+
+    fn draw_card_text(
+        &self,
+        picture: &Path,
+        layout: &bardo_domain::CardLayout,
+        text: &bardo_domain::CardText,
+        destination: &Path,
+    ) -> Result<(), MediaError> {
+        self.ffmpeg()?
+            .draw_card_text(picture, layout, text, destination)
     }
 
     fn fit_picture(

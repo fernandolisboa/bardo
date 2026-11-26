@@ -8,6 +8,7 @@
 //! job threads and passes a [`Monitor`] for progress and cancel.
 
 mod captions;
+mod card;
 mod control;
 mod encoders;
 mod frames;

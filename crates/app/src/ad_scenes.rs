@@ -339,8 +339,28 @@ pub(crate) fn unset_values() -> Vec<(TemplateVariable, String)> {
 }
 
 /// The file a composed picture is saved in, in the project folder.
-fn shot_file() -> String {
+pub(crate) fn shot_file() -> String {
     format!("shot-{}.png", uuid::Uuid::new_v4())
+}
+
+/// How `backdrop` is painted, with the bytes of a drawn one.
+pub(crate) fn backdrop_paint(backdrop: ShotBackdrop, drawn: Option<&[u8]>) -> BackdropPaint<'_> {
+    match (backdrop, drawn) {
+        (
+            ShotBackdrop::Plain {
+                from,
+                to,
+                direction,
+            },
+            _,
+        ) => BackdropPaint::Plain {
+            from,
+            to,
+            direction,
+        },
+        (_, Some(bytes)) => BackdropPaint::Picture(bytes),
+        _ => BackdropPaint::Auto,
+    }
 }
 
 impl SceneHandler {
@@ -390,6 +410,9 @@ impl SceneHandler {
         if !scene.needs_shot(aspect) {
             return Ok(());
         }
+        if scene.is_end_card() {
+            return self.compose_end_card(project, plan_id, index, aspect, product);
+        }
         let Some(wanted) = scene.product_image() else {
             return Ok(());
         };
@@ -428,22 +451,7 @@ impl SceneHandler {
                     aspect,
                     layout: look.layout_for(image.kind, image.cut_out()),
                     placement: look.placement,
-                    backdrop: match (look.backdrop, backdrop.as_deref()) {
-                        (
-                            ShotBackdrop::Plain {
-                                from,
-                                to,
-                                direction,
-                            },
-                            _,
-                        ) => BackdropPaint::Plain {
-                            from,
-                            to,
-                            direction,
-                        },
-                        (_, Some(bytes)) => BackdropPaint::Picture(bytes),
-                        _ => BackdropPaint::Auto,
-                    },
+                    backdrop: backdrop_paint(look.backdrop, backdrop.as_deref()),
                 };
                 self.composer
                     .compose(image.picture.bytes(), &recipe)
@@ -490,7 +498,8 @@ impl SceneHandler {
             .map_err(unexpected)?
             .add_shot(ComposedShot {
                 file,
-                image: wanted,
+                image: Some(wanted),
+                card: None,
                 aspect,
                 look: Some(look),
                 tones: picture.tones,
@@ -505,7 +514,7 @@ impl SceneHandler {
     /// The bytes of the drawn backdrop `backdrop` shows; none for one that
     /// is painted. A drawn backdrop that is gone, or was never kept, is
     /// why the scene cannot be composed.
-    fn backdrop_bytes(
+    pub(crate) fn backdrop_bytes(
         &self,
         project: VideoProjectId,
         backdrop: ShotBackdrop,
@@ -1116,7 +1125,7 @@ mod ad_tests {
             let scene = plan.scene(index).unwrap();
             assert!(scene.is_composed());
             let shot = scene.shot().expect("composed by the plan's job");
-            assert_eq!(shot.image, image);
+            assert_eq!(shot.image, Some(image));
             assert_eq!(shot.aspect, bardo_domain::AspectRatio::Vertical);
             assert_eq!(scene.picture(), Some(shot.file.as_str()));
             assert_eq!(size_of(&h, &project, &shot.file), (1080, 1920));
@@ -1219,7 +1228,7 @@ mod ad_tests {
     }
 
     #[test]
-    fn a_product_with_no_image_gets_drawn_scenes_and_a_drawn_end_card() {
+    fn a_product_with_no_image_gets_drawn_scenes_and_an_end_card_of_text() {
         let h = Harness::new();
         let app = start(&h);
         let (_, project, _) = narrated_ad(&h, &app, &[]);
@@ -1250,15 +1259,24 @@ mod ad_tests {
                 SceneKind::EndCard
             ]
         );
-        // With no image to compose, the end card is drawn like any scene.
-        assert!(plan.scenes().iter().all(|scene| !scene.is_composed()));
-        assert_eq!(plan.missing_images(), [0, 1, 2, 3]);
+        // With no image, the end card is a card of text (#281): composed
+        // for free, never drawn.
+        assert!(plan.scenes()[..3].iter().all(|scene| !scene.is_composed()));
+        assert!(plan.scenes()[3].is_composed());
+        assert_eq!(plan.missing_images(), [0, 1, 2]);
         done(
             &app,
             app.generate_scene_images(project.id, BudgetConsent::Ask)
                 .unwrap(),
         );
-        assert_eq!(drawings(&h), 4);
+        assert_eq!(drawings(&h), 3);
+        let card = plan_of(&app, &project, 3).shot().cloned().unwrap();
+        assert_eq!(card.image, None);
+        assert!(card.card.is_some());
+        let cards = h.media.cards.lock().unwrap();
+        let (text, layout) = cards.last().unwrap();
+        assert_eq!(layout.product, None, "a card of text");
+        assert!(!text.headline.is_empty());
     }
 
     #[test]
@@ -1269,6 +1287,8 @@ mod ad_tests {
         let view = app.scenes(project.id).unwrap();
         assert_eq!(view.template.body.kind(), TemplateKind::ImagePrompt);
         assert_eq!(view.kinds, crate::SceneKinds::default());
+        // Nor an end card (#281).
+        assert_eq!(app.end_card(project.id).unwrap(), None);
         h.answer(
             serde_json::json!({"scenes": [
                 {"first_sentence": 0, "prompt": "A probe on the launch pad",
@@ -1331,7 +1351,7 @@ mod ad_tests {
         done(&app, job);
         let scene = plan(&app, &project).scene(0).unwrap().clone();
         let shot = scene.shot().unwrap().clone();
-        assert_eq!(shot.image, images[0].id);
+        assert_eq!(shot.image, Some(images[0].id));
         assert!(h.files.exists(project.id, &shot.file));
         assert_eq!((drawings(&h), image_costs(&h, &project)), (0, 0));
 
@@ -1355,7 +1375,7 @@ mod ad_tests {
             .shot()
             .unwrap()
             .clone();
-        assert_eq!(other.image, images[1].id);
+        assert_eq!(other.image, Some(images[1].id));
         assert!(
             !h.files.exists(project.id, &shot.file),
             "the old picture goes"
@@ -1651,27 +1671,25 @@ mod ad_tests {
         assert_eq!(motions(&editor)[1], Some(zoom));
         app.edit(&mut editor, EditAction::MotionEverywhere(Some(pan)))
             .unwrap();
-        assert_eq!(
-            motions(&editor),
-            [Some(pan), Some(zoom), Some(pan), Some(zoom)]
-        );
+        // The end card holds still, its text read (#281).
+        assert_eq!(motions(&editor), [Some(pan), Some(zoom), Some(pan), None]);
         // Opened again, the saved cut reads the same.
         let again = app.open_editor(project.id).unwrap();
-        assert_eq!(
-            motions(&again),
-            [Some(pan), Some(zoom), Some(pan), Some(zoom)]
-        );
-        // A zoom out is its own to keep.
+        assert_eq!(motions(&again), [Some(pan), Some(zoom), Some(pan), None]);
+        // A zoom out is its own to keep; the end card takes none.
         let out = Motion::new(MotionKind::ZoomOut, MotionStrength::Subtle);
-        app.edit(
-            &mut editor,
-            EditAction::SetMotion {
-                index: 3,
-                motion: Some(out),
-            },
-        )
-        .unwrap();
-        assert_eq!(motions(&editor)[3], Some(out));
+        for index in [1, 3] {
+            app.edit(
+                &mut editor,
+                EditAction::SetMotion {
+                    index,
+                    motion: Some(out),
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(motions(&editor)[1], Some(out));
+        assert_eq!(motions(&editor)[3], None);
     }
 
     #[test]
@@ -1696,14 +1714,15 @@ mod ad_tests {
                 .clips
         };
         // Thirty seconds, a scene every three: ten scenes, all drawn
-        // while the product has no image.
-        assert_eq!(clips(), 10);
-        let all_drawn = economy();
-        // With an image, two product shots and the end card are neither
-        // drawn nor animated.
+        // while the product has no image, but the end card, a card of
+        // text (#281).
+        assert_eq!(clips(), 9);
+        let text_card = economy();
+        // With an image, two product shots more are neither drawn nor
+        // animated.
         add_image(&app, &product, (1200, 900), ProductImageKind::Photo);
         assert_eq!(clips(), 7);
-        assert_eq!(all_drawn - economy(), 3 * IMAGE);
+        assert_eq!(text_card - economy(), 2 * IMAGE);
 
         // Narrated: a scene for each of its four sentences, of which the
         // hook stays drawn and three are composed.
@@ -1860,7 +1879,7 @@ mod ad_tests {
         };
         done(&app, job);
         let scene = plan_of(&app, &project, 1);
-        assert_eq!(scene.shot().unwrap().image, images[0].id);
+        assert_eq!(scene.shot().unwrap().image, Some(images[0].id));
         assert!(scene.failure().is_none());
     }
 
@@ -1938,8 +1957,12 @@ mod ad_tests {
         assert_eq!(end.shot().unwrap().look, Some(look));
         assert!(!end.shot().unwrap().tones.is_empty());
         let picture = picture_of(&h, &project, end);
-        let layout = bardo_domain::ShotLayout::of(
+        // Set in the card's room for the product, clear of its text
+        // (#281).
+        let card = h.media.cards.lock().unwrap().last().unwrap().1;
+        let layout = bardo_domain::ShotLayout::in_room(
             bardo_domain::AspectRatio::Vertical,
+            card.product.unwrap(),
             (800, 1600),
             ProductLayout::Device,
             bardo_domain::ShotPlacement::Center,
@@ -2028,7 +2051,7 @@ mod ad_tests {
         );
         let scene = plan_of(&app, &project, 1);
         assert_eq!(scene.look(), look);
-        assert_eq!(scene.shot().unwrap().image, images[0].id);
+        assert_eq!(scene.shot().unwrap().image, Some(images[0].id));
         assert_eq!(drawings(&h), 0);
     }
 
@@ -2520,5 +2543,186 @@ mod ad_tests {
                 .is_err()
         );
         assert_eq!(drawings(&h), 1);
+    }
+
+    fn scene_jobs(app: &Bardo) -> Vec<bardo_domain::JobId> {
+        app.jobs()
+            .into_iter()
+            .filter(|job| job.kind() == bardo_domain::JobKind::SceneImages)
+            .map(|job| job.id())
+            .collect()
+    }
+
+    /// Runs to their end the scene jobs started since `before`: the end
+    /// card composed again.
+    fn card_composed(app: &Bardo, before: &[bardo_domain::JobId]) {
+        let started: Vec<_> = scene_jobs(app)
+            .into_iter()
+            .filter(|job| !before.contains(job))
+            .collect();
+        assert!(!started.is_empty(), "the card is composed again");
+        for job in started {
+            done(app, job);
+        }
+    }
+
+    fn last_card(h: &Harness) -> (bardo_domain::CardText, bardo_domain::CardLayout) {
+        h.media.cards.lock().unwrap().last().cloned().unwrap()
+    }
+
+    #[test]
+    fn an_end_card_starts_from_the_brief_and_shows_what_the_user_types() {
+        use bardo_domain::{CardFieldError, CardLogoPlace, CardTextPlace, ThumbnailLook};
+        let h = Harness::new();
+        let app = start(&h);
+        let (product, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        plan_with(&h, &app, &project, usual());
+
+        // It starts from the brief: its call to action, its link and its
+        // offer, and it is composed already.
+        let view = app.end_card(project.id).unwrap().unwrap();
+        assert_eq!(view.design.headline(), "Get yours");
+        assert_eq!(view.design.second_line(), "example.com/notebook");
+        assert!(view.design.offer);
+        assert_eq!(view.offer, "20% off until Friday");
+        assert_eq!(
+            (view.scene, view.out_of_date, view.has_logo),
+            (Some(3), false, false)
+        );
+        let (text, layout) = last_card(&h);
+        assert_eq!(text.headline, "Get yours");
+        assert_eq!(text.offer.as_deref(), Some("20% off until Friday"));
+        assert!(layout.product.is_some() && layout.logo.is_none());
+        let first = plan_of(&app, &project, 3).shot().unwrap().clone();
+        assert_eq!(first.image, plan_of(&app, &project, 3).product_image());
+
+        // Lines that break a rule are refused, and nothing changes.
+        let mut draft = crate::CardDraft::from(&view.design);
+        draft.headline = " ".into();
+        draft.second_line = "x".repeat(61);
+        let refused = app.save_end_card(project.id, &draft).unwrap_err();
+        assert_eq!(
+            crate::card_field_errors(&refused),
+            [
+                CardFieldError::HeadlineEmpty,
+                CardFieldError::SecondLineTooLong
+            ]
+        );
+        assert_eq!(
+            app.end_card(project.id).unwrap().unwrap().design,
+            view.design
+        );
+
+        // What the user types is composed again, for free; the offer is
+        // only ever the brief's.
+        let draft = crate::CardDraft {
+            headline: "Order today".into(),
+            second_line: "@notebook".into(),
+            offer: false,
+            look: ThumbnailLook::Banner,
+            text_place: CardTextPlace::Below,
+            logo_place: CardLogoPlace::WithText,
+        };
+        let job = app.save_end_card(project.id, &draft).unwrap().unwrap();
+        assert!(app.end_card(project.id).unwrap().unwrap().out_of_date);
+        assert!(app.scenes(project.id).unwrap().missing_shots.contains(&3));
+        done(&app, job);
+        let view = app.end_card(project.id).unwrap().unwrap();
+        assert_eq!(crate::CardDraft::from(&view.design), draft);
+        assert!(!view.out_of_date);
+        let (text, _) = last_card(&h);
+        assert_eq!(
+            (
+                text.headline.as_str(),
+                text.second_line.as_str(),
+                text.offer,
+                text.look
+            ),
+            ("Order today", "@notebook", None, ThumbnailLook::Banner)
+        );
+        let second = plan_of(&app, &project, 3).shot().unwrap().clone();
+        assert_ne!(second.file, first.file);
+        assert!(
+            !h.files.exists(project.id, &first.file),
+            "the old picture goes"
+        );
+        assert_eq!(image_costs(&h, &project), 0, "composing is free");
+
+        // A new offer on the brief shows on the card once it is on.
+        let before = scene_jobs(&app);
+        app.save_brief_text(
+            project.id,
+            "Free shipping",
+            "Get yours",
+            "example.com/notebook",
+        )
+        .unwrap();
+        app.save_end_card(
+            project.id,
+            &crate::CardDraft {
+                offer: true,
+                ..draft.clone()
+            },
+        )
+        .unwrap();
+        card_composed(&app, &before);
+        assert_eq!(last_card(&h).0.offer.as_deref(), Some("Free shipping"));
+
+        // A logo on the product goes on the card.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("logo.png");
+        std::fs::write(&path, png(400, 100, [10, 200, 30])).unwrap();
+        let before = scene_jobs(&app);
+        app.import_product_logo(product.id, &path, true).unwrap();
+        card_composed(&app, &before);
+        let view = app.end_card(project.id).unwrap().unwrap();
+        assert!(view.has_logo && !view.out_of_date);
+        assert!(last_card(&h).1.logo.is_some());
+    }
+
+    #[test]
+    fn an_end_card_stays_after_the_narration_with_the_music_and_no_captions() {
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        plan_with(&h, &app, &project, usual());
+        let narration = app.narration(project.id).unwrap().narration.unwrap();
+        let last_word = narration
+            .words()
+            .map(|(_, timing)| timing.end)
+            .max()
+            .unwrap();
+
+        let editor = app.open_editor(project.id).unwrap();
+        let view = editor.view();
+        let timeline = view.timeline.as_ref().unwrap();
+        let card = timeline.video().last().unwrap();
+        assert_eq!(card.scene(), Some(3));
+        let tail = card.end().saturating_sub(last_word);
+        assert!(
+            tail >= bardo_domain::END_CARD_TAIL
+                .saturating_sub(std::time::Duration::from_millis(40)),
+            "{tail:?} after the last word"
+        );
+        assert!(card.duration + std::time::Duration::from_millis(40) >= bardo_domain::END_CARD_MIN);
+        assert_eq!(card.motion, None, "it holds still");
+        for span in &view.captions {
+            assert!(span.end() <= card.at, "{span:?} shows over the card");
+        }
+        // A track made for the video runs under the card too.
+        assert!(
+            app.music_length_for(project.id).unwrap().unwrap()
+                >= card
+                    .end()
+                    .saturating_sub(std::time::Duration::from_millis(40))
+        );
+
+        // With the card off, the cut ends with the narration.
+        app.set_scene_kind(project.id, 3, SceneKind::Drawn, None)
+            .unwrap();
+        let editor = app.open_editor(project.id).unwrap();
+        let timeline = editor.view().timeline.clone().unwrap();
+        assert!(timeline.video_end() <= narration.duration + std::time::Duration::from_millis(40));
+        assert!(app.end_card(project.id).unwrap().unwrap().scene.is_none());
     }
 }

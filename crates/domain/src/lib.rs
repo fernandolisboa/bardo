@@ -61,6 +61,7 @@ mod cut_suggestion;
 mod decision;
 mod due;
 mod edit;
+mod end_card;
 mod files;
 mod format;
 mod framing;
@@ -213,6 +214,11 @@ pub use decision::{
 };
 pub use due::{DUE_GRACE, DueStep, PREPARE_AHEAD, UNPUBLISHED_LIFETIME, due_step, prepare_at};
 pub use edit::{Edge, Edit, EditError, HISTORY_DEPTH, History, Item, ItemRef, Shift, Track};
+pub use end_card::{
+    CardDesign, CardFieldError, CardLayout, CardLogoPlace, CardText, CardTextAlign, CardTextPlace,
+    END_CARD_MIN, END_CARD_TAIL, EndCard, EndCardRepository, MAX_CARD_HEADLINE,
+    MAX_CARD_SECOND_LINE, card_fingerprint, card_room, end_card_end,
+};
 pub use files::{ProjectFileError, ProjectFiles};
 pub use format::{AD_TAIL, UnknownVideoFormat, UnknownVideoLength, VideoFormat, VideoLength};
 pub use framing::{CROP_STEPS, CropPosition, CropRect, Framing, PictureSize, crop_window};
@@ -318,8 +324,9 @@ pub use product_sheet::{
     SheetSource, SheetTaken, SheetText, WrittenClaim, WrittenSheet, WrittenSource,
 };
 pub use product_shot::{
-    BackdropPaint, ComposedPicture, DeviceOutline, SHADOW_BLUR, SHADOW_DROP, SHOT_SHORT_SIDE,
-    ShotArea, ShotComposer, ShotError, ShotLayout, ShotRecipe, shot_frame, shot_room,
+    BackdropPaint, CardRecipe, ComposedPicture, DeviceOutline, SHADOW_BLUR, SHADOW_DROP,
+    SHOT_SHORT_SIDE, ShotArea, ShotComposer, ShotError, ShotLayout, ShotRecipe, shot_frame,
+    shot_room,
 };
 pub use production::{
     AnimatedScenes, HOOK_LENGTH, NARRATION_CHARS_PER_SECOND, ProductionMode, TYPICAL_AD_SCENE,
