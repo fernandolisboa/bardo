@@ -3457,6 +3457,63 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_project_whose_folder_cannot_be_reached_lets_no_portrait_go_and_draws_nothing() {
+        // ADR-0047 item 3 over ADR-0035: files in an unplugged folder would
+        // read as missing, and a portrait that will not read is let go and
+        // bought again. No job of that project runs until it is back.
+        let h = Harness::new();
+        let disk = Arc::new(bardo_storage::MemoryProjectFolders::default());
+        let app = h.start_from(Repositories {
+            project_folders: Arc::clone(&disk) as _,
+            ..Repositories::shared_with_files(
+                h.process_db(),
+                Arc::clone(&h.secrets) as _,
+                Arc::clone(&h.files) as _,
+            )
+        });
+        let project = cast_project(&h, &app);
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let owner = app.open_project().unwrap().unwrap().id;
+        let folder = app.project_folder(owner).unwrap();
+        let manifest = bardo_domain::ProjectFolders::manifest(&*disk, &folder).unwrap();
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        let portrait = plan.cast()[0].portrait().unwrap().clone();
+        let bytes = h.files.read(project.id, &portrait.file).unwrap();
+        // The drive is unplugged: the folder and its files are gone.
+        disk.remove(&folder);
+        h.files.remove(project.id, &portrait.file).unwrap();
+        app.check_folders();
+
+        let asked = h.images.requests.lock().unwrap().len();
+        let id = app
+            .regenerate_scene_image(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let job = app.jobs().into_iter().find(|j| j.id() == id).unwrap();
+        assert_eq!(job.state(), JobState::Queued);
+        assert!(app.waits_for_folder(&job));
+        assert_eq!(h.images.requests.lock().unwrap().len(), asked, "unpaid");
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        assert_eq!(plan.cast()[0].portrait(), Some(&portrait), "not let go");
+        assert_eq!(plan.cast()[0].failure(), None);
+
+        // Plugged back in: the job runs, with the portrait it had.
+        h.files.write(project.id, &portrait.file, &bytes).unwrap();
+        disk.put_manifest(&folder, manifest);
+        app.check_folders();
+        let job = done(&app, id);
+        assert_eq!(job.state(), JobState::Done);
+        let requests = h.images.requests.lock().unwrap()[asked..].to_vec();
+        assert_eq!(requests.len(), 1, "the scene only, not the portrait");
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        assert_eq!(plan.cast()[0].portrait(), Some(&portrait));
+    }
+
+    #[test]
     fn no_portrait_is_bought_for_a_scene_another_missing_portrait_already_stops() {
         let h = Harness::new();
         let app = h.start();

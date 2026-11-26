@@ -14,7 +14,7 @@ use bardo_domain::{Job, JobId, JobKind, JobState, RepositoryError};
 pub use countdown::TestJob;
 pub(crate) use kept::{Keeps, Kept};
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
-pub(crate) use queue::{JobQueue, PaidCallLog, Runner};
+pub(crate) use queue::{JobGate, JobQueue, PaidCallLog, Runner};
 pub(crate) use work::Work;
 
 use crate::backup::{BackupHandler, RestoreHandler};
@@ -75,6 +75,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) backups: BackupHandler,
     pub(crate) restores: RestoreHandler,
     pub(crate) updates: crate::updates::UpdateDownloadHandler,
+    pub(crate) move_media: crate::folders::MoveMediaHandler,
 }
 
 /// The handler of every job kind Bardo ships.
@@ -116,6 +117,7 @@ pub(crate) fn built_in_handlers(
         backups,
         restores,
         updates,
+        move_media,
     } = built_in;
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -164,6 +166,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Backup, Arc::new(backups));
     handlers.insert(JobKind::Restore, Arc::new(restores));
     handlers.insert(JobKind::UpdateDownload, Arc::new(updates));
+    handlers.insert(JobKind::MoveMedia, Arc::new(move_media));
     handlers
 }
 
@@ -2235,6 +2238,9 @@ mod tests {
             export_files: Arc::new(bardo_storage::MemoryExportFiles::default()),
             costs: Arc::clone(db) as _,
             files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
+            folders: Arc::clone(db) as _,
+            project_folders: bardo_storage::MemoryProjectFolders::for_database(&db),
+            places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
             research: Arc::clone(db) as _,
             secrets: Arc::new(MemorySecretStore::default()),

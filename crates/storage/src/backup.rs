@@ -13,8 +13,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use bardo_domain::{
-    BackupError, BackupInfo, BackupOptions, BackupStore, DUE_GRACE, JobFailureKind, MediaSize,
-    Network, Progress, ProgressReport, Provider, RestoreOutcome, SavedBackup,
+    BackupError, BackupInfo, BackupOptions, BackupStore, DUE_GRACE, FolderPlaces, GLOBAL_DIR,
+    JobFailureKind, MediaSize, Network, Progress, ProgressReport, Provider, RestoreOutcome,
+    SavedBackup,
 };
 use rusqlite::Connection;
 use rusqlite::backup::{Backup, StepResult};
@@ -30,11 +31,28 @@ pub const MANIFEST: &str = "bardo-backup.toml";
 /// The database's name in a backup.
 pub const DATABASE_ENTRY: &str = "bardo.db";
 
-/// The folder the project folders go under in a backup.
+/// The folder the old project folders (one per video, before project
+/// folders) go under in a backup.
 const PROJECTS_ENTRY: &str = "projects";
 
+/// The folder each project's folder, and the global folder, go under in a
+/// backup: `folders/<key>/…`, the key being the project's id or `global`.
+const FOLDERS_ENTRY: &str = "folders";
+
+/// The global folder's key under `folders/`.
+const GLOBAL_KEY: &str = "global";
+
+/// Beside a folder being restored: the restored copy, until it is swapped
+/// in.
+const STAGED_SUFFIX: &str = ".bardo-restore";
+
+/// Beside a folder restored over: the folder as it was, until tidied up.
+const PREVIOUS_SUFFIX: &str = ".bardo-previous";
+
 /// The backup layout this build writes. A higher one is a newer Bardo's.
-pub const BACKUP_FORMAT: u32 = 1;
+/// 2: each project's folder and the global folder under `folders/`, with
+/// the place each came from (ADR-0010, ADR-0047).
+pub const BACKUP_FORMAT: u32 = 2;
 
 /// How much is copied between two progress reports (and checks for stop).
 const CHUNK: usize = 1024 * 1024;
@@ -107,6 +125,67 @@ impl DataPaths {
     fn restore_record(&self) -> PathBuf {
         self.local.join("restored.toml")
     }
+
+    /// The folders staged beside where they go, written before any is, so
+    /// a staging given up removes them all.
+    fn staged_list(&self) -> PathBuf {
+        self.staging().join("folders.toml")
+    }
+
+    /// The folders restored over, as they were, written before the swap:
+    /// tidied up with the rest once the restore is in.
+    fn previous_list(&self) -> PathBuf {
+        self.staging().join("previous.toml")
+    }
+}
+
+/// A folder a backup carries under `folders/<key>`, and where it came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct BackedFolder {
+    key: String,
+    origin: PathBuf,
+    /// The project it is the folder of; `None` for the global folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    project: Option<String>,
+}
+
+/// A folder unpacked beside where it goes, and where it goes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct StagedFolder {
+    staged: PathBuf,
+    target: PathBuf,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct FolderList {
+    #[serde(default)]
+    folders: Vec<PathBuf>,
+}
+
+fn read_list(path: &Path) -> Vec<PathBuf> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|text| toml::from_str::<FolderList>(&text).ok())
+        .map(|list| list.folders)
+        .unwrap_or_default()
+}
+
+fn write_list(path: &Path, folders: Vec<PathBuf>) -> Result<(), BackupError> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(path, toml_text(&FolderList { folders })?)?;
+    Ok(())
+}
+
+/// `folder` with `suffix`, as a hidden sibling on the same volume:
+/// `D:\Bardo\Space` → `D:\Bardo\.Space.bardo-restore`.
+fn sibling(folder: &Path, suffix: &str) -> PathBuf {
+    let name = folder
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    folder.with_file_name(format!(".{name}{suffix}"))
 }
 
 /// A backup's `bardo-backup.toml`.
@@ -128,6 +207,13 @@ struct Manifest {
     saved_keys: Vec<String>,
     #[serde(default)]
     saved_credentials: Vec<String>,
+    /// Format 2: the folders under `folders/`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    folders: Vec<BackedFolder>,
+    /// In the staged restore's marker only: each folder unpacked beside
+    /// where it goes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    staged: Vec<StagedFolder>,
 }
 
 impl Manifest {
@@ -175,6 +261,8 @@ impl Manifest {
                 .iter()
                 .map(|n| n.code().to_owned())
                 .collect(),
+            folders: Vec::new(),
+            staged: Vec::new(),
         }
     }
 
@@ -234,11 +322,108 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 pub struct LocalBackups {
     db: Arc<Database>,
     paths: DataPaths,
+    /// Where the default base folder is, for the global folder and for a
+    /// restored folder whose place is gone.
+    places: Option<FolderPlaces>,
 }
 
 impl LocalBackups {
     pub fn new(db: Arc<Database>, paths: DataPaths) -> Self {
-        Self { db, paths }
+        Self {
+            db,
+            paths,
+            places: None,
+        }
+    }
+
+    /// `new`, knowing this computer's folders.
+    pub fn with_places(db: Arc<Database>, paths: DataPaths, places: FolderPlaces) -> Self {
+        Self {
+            db,
+            paths,
+            places: Some(places),
+        }
+    }
+
+    /// The base folder: the one chosen, else the default.
+    fn base_folder(&self) -> Option<PathBuf> {
+        let chosen: Option<String> = self
+            .db
+            .conn()
+            .query_row(
+                "SELECT base_folder FROM user_profile WHERE base_folder IS NOT NULL
+                 ORDER BY rowid LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+        chosen
+            .map(PathBuf::from)
+            .or_else(|| self.places.as_ref().map(|p| p.default_base().path))
+    }
+
+    /// The folders a backup with media carries, as they are now: each
+    /// project's folder and the global folder that exist.
+    fn folders(&self) -> Result<Vec<BackedFolder>, BackupError> {
+        let rows: Vec<(String, String)> = self
+            .db
+            .conn()
+            .prepare("SELECT id, folder FROM project WHERE folder IS NOT NULL ORDER BY id")
+            .and_then(|mut statement| {
+                statement
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect()
+            })
+            .map_err(database_error)?;
+        let mut folders: Vec<BackedFolder> = rows
+            .into_iter()
+            .map(|(id, folder)| BackedFolder {
+                key: id.clone(),
+                origin: PathBuf::from(folder),
+                project: Some(id),
+            })
+            .collect();
+        if let Some(base) = self.base_folder() {
+            folders.push(BackedFolder {
+                key: GLOBAL_KEY.to_owned(),
+                origin: base.join(GLOBAL_DIR),
+                project: None,
+            });
+        }
+        // One that cannot be reached is left out: its project keeps the
+        // folder it has when restored.
+        folders.retain(|folder| folder.origin.is_dir());
+        Ok(folders)
+    }
+
+    /// Every file a backup with media carries: the old project folders'
+    /// and each folder's.
+    fn media(&self, folders: &[BackedFolder]) -> Result<Vec<MediaFile>, BackupError> {
+        let mut files = media_files(&self.paths.projects)?;
+        for folder in folders {
+            let mut found = Vec::new();
+            walk(
+                &folder.origin,
+                &format!("{FOLDERS_ENTRY}/{}", folder.key),
+                &mut found,
+            )?;
+            found.sort_by(|a, b| a.entry.cmp(&b.entry));
+            files.extend(found);
+        }
+        Ok(files)
+    }
+
+    /// Where a restored folder goes: where it came from, or, when that
+    /// place is gone (a drive not here, another computer), under the base
+    /// folder.
+    fn restore_target(&self, folder: &BackedFolder) -> PathBuf {
+        match folder.origin.parent() {
+            Some(parent) if parent.is_dir() => folder.origin.clone(),
+            _ => match (self.base_folder(), folder.origin.file_name()) {
+                (Some(base), Some(name)) => base.join(name),
+                _ => folder.origin.clone(),
+            },
+        }
     }
 
     pub fn paths(&self) -> &DataPaths {
@@ -253,8 +438,13 @@ impl LocalBackups {
     ) -> Result<BackupInfo, BackupError> {
         // Whole milliseconds, as the manifest keeps it.
         let created_at = from_unix_millis(to_unix_millis(SystemTime::now()));
+        let folders = if options.media {
+            self.folders()?
+        } else {
+            Vec::new()
+        };
         let media = if options.media {
-            media_files(&self.paths.projects)?
+            self.media(&folders)?
         } else {
             Vec::new()
         };
@@ -276,7 +466,7 @@ impl LocalBackups {
             };
             let mut copier = Copier::new(info.database_bytes + info.media_bytes, progress);
             let part = with_suffix(to, ".part");
-            let zipped = write_archive(&part, &info, &copy, &media, &mut copier)
+            let zipped = write_archive(&part, &info, &folders, &copy, &media, &mut copier)
                 .and_then(|()| Ok(fs::rename(&part, to)?));
             if zipped.is_err() {
                 let _ = fs::remove_file(&part);
@@ -304,7 +494,9 @@ impl LocalBackups {
             }
             let name = entry.name().map_err(zip_error)?;
             let wanted = name == DATABASE_ENTRY
-                || (manifest.media && name.starts_with(&format!("{PROJECTS_ENTRY}/")));
+                || (manifest.media
+                    && (name.starts_with(&format!("{PROJECTS_ENTRY}/"))
+                        || name.starts_with(&format!("{FOLDERS_ENTRY}/"))));
             if !wanted {
                 continue;
             }
@@ -319,6 +511,29 @@ impl LocalBackups {
         {
             return Err(BackupError::Damaged("no database".into()));
         }
+        // Each folder is unpacked beside where it goes, on the same volume,
+        // so the swap at the next start is a rename.
+        let mut staged: Vec<(BackedFolder, StagedFolder)> = Vec::new();
+        if manifest.media {
+            for folder in &manifest.folders {
+                let target = self.restore_target(folder);
+                staged.push((
+                    folder.clone(),
+                    StagedFolder {
+                        staged: sibling(&target, STAGED_SUFFIX),
+                        target,
+                    },
+                ));
+            }
+        }
+        write_list(
+            &self.paths.staged_list(),
+            staged.iter().map(|(_, s)| s.staged.clone()).collect(),
+        )?;
+        for (_, folder) in &staged {
+            let _ = fs::remove_dir_all(&folder.staged);
+            fs::create_dir_all(&folder.staged)?;
+        }
         let mut copier = Copier::new(entries.iter().map(|(_, _, bytes)| bytes).sum(), progress);
         for (index, relative, _) in entries {
             if !relative
@@ -330,7 +545,20 @@ impl LocalBackups {
                     relative.display()
                 )));
             }
-            let target = incoming.join(&relative);
+            let target = match relative.strip_prefix(FOLDERS_ENTRY) {
+                Ok(rest) => {
+                    let mut parts = rest.components();
+                    let key = parts
+                        .next()
+                        .map(|part| part.as_os_str().to_string_lossy().into_owned());
+                    match staged.iter().find(|(f, _)| Some(&f.key) == key.as_ref()) {
+                        Some((_, folder)) => folder.staged.join(parts.as_path()),
+                        // A folder the manifest does not list.
+                        None => continue,
+                    }
+                }
+                Err(_) => incoming.join(&relative),
+            };
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -342,7 +570,29 @@ impl LocalBackups {
                 .sync_all()?;
         }
         prepare_restored(&incoming.join(DATABASE_ENTRY), SystemTime::now())?;
+        // A folder restored elsewhere than it came from: its project
+        // points there.
+        let moved: Vec<(&str, &Path)> = staged
+            .iter()
+            .filter(|(folder, staged)| folder.origin != staged.target)
+            .filter_map(|(folder, staged)| {
+                Some((folder.project.as_deref()?, staged.target.as_path()))
+            })
+            .collect();
+        if !moved.is_empty() {
+            let conn = Connection::open(incoming.join(DATABASE_ENTRY)).map_err(database_error)?;
+            for (project, target) in moved {
+                conn.execute(
+                    "UPDATE project SET folder = ?2 WHERE id = ?1",
+                    rusqlite::params![project, crate::folders::path_text(target)],
+                )
+                .map_err(database_error)?;
+            }
+            conn.close().map_err(|(_, error)| database_error(error))?;
+        }
         let info = manifest.info();
+        let mut manifest = manifest;
+        manifest.staged = staged.into_iter().map(|(_, staged)| staged).collect();
         let marker = self.paths.ready_marker();
         let part = with_suffix(&marker, ".part");
         fs::write(&part, toml_text(&manifest)?)?;
@@ -466,6 +716,7 @@ fn is_rebuilt(name: &str, present: &std::collections::HashSet<&str>) -> bool {
 fn write_archive(
     part: &Path,
     info: &BackupInfo,
+    folders: &[BackedFolder],
     database: &Path,
     media: &[MediaFile],
     copier: &mut Copier<'_, '_>,
@@ -480,8 +731,12 @@ fn write_archive(
     // Zip64 for anything near the 4 GB a plain entry holds.
     let sized = |options: SimpleFileOptions, bytes: u64| options.large_file(bytes >= 1 << 31);
 
+    let manifest = Manifest {
+        folders: folders.to_vec(),
+        ..Manifest::from_info(info)
+    };
     zip.start_file(MANIFEST, deflated).map_err(zip_error)?;
-    zip.write_all(toml_text(&Manifest::from_info(info))?.as_bytes())?;
+    zip.write_all(toml_text(&manifest)?.as_bytes())?;
     zip.start_file(DATABASE_ENTRY, sized(deflated, info.database_bytes))
         .map_err(zip_error)?;
     copier.copy(&mut File::open(database)?, &mut zip)?;
@@ -684,7 +939,7 @@ fn automatic_name(at: SystemTime) -> String {
 
 impl BackupStore for LocalBackups {
     fn media_size(&self) -> Result<MediaSize, BackupError> {
-        let files = media_files(&self.paths.projects)?;
+        let files = self.media(&self.folders()?)?;
         Ok(MediaSize {
             bytes: files.iter().map(|file| file.bytes).sum(),
             files: files.len() as u64,
@@ -733,10 +988,11 @@ impl BackupStore for LocalBackups {
             ))));
         }
         // The marker goes first: a staging half deleted is never applied.
-        for removed in [
-            fs::remove_file(self.paths.ready_marker()),
-            fs::remove_dir_all(self.paths.staging()),
-        ] {
+        let marker = fs::remove_file(self.paths.ready_marker());
+        for staged in read_list(&self.paths.staged_list()) {
+            let _ = fs::remove_dir_all(staged);
+        }
+        for removed in [marker, fs::remove_dir_all(self.paths.staging())] {
             match removed {
                 Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error.into()),
                 _ => {}
@@ -858,12 +1114,17 @@ pub(crate) fn apply_pending_restore_with(
                 let _ = fs::remove_file(paths.ready_marker());
                 return None;
             }
-            finish_media(paths, manifest.media, patience).map_err(|error| SwapFailure {
-                reason: error.to_string(),
-                undone: false,
-            })
+            finish_media(paths, manifest.media, patience)
+                .and_then(|()| {
+                    let mut moved = Vec::new();
+                    swap_folders(paths, &manifest.staged, patience, &mut moved)
+                })
+                .map_err(|error| SwapFailure {
+                    reason: error.to_string(),
+                    undone: false,
+                })
         }
-        Some(manifest) => swap(paths, manifest.media, patience),
+        Some(manifest) => swap(paths, manifest.media, &manifest.staged, patience),
         None => Err(SwapFailure {
             reason: "the staged restore could not be read".to_owned(),
             undone: true,
@@ -958,6 +1219,13 @@ pub fn lock_window(paths: &DataPaths, wait: Duration) -> io::Result<Option<Windo
 pub fn clean_restore_leftovers(paths: &DataPaths) {
     let staging = paths.staging();
     if staging.exists() && !restore_pending(paths) && !paths.keep_marker().exists() {
+        // Folders restored over, as they were, and copies never swapped in.
+        for folder in read_list(&paths.previous_list())
+            .into_iter()
+            .chain(read_list(&paths.staged_list()))
+        {
+            let _ = fs::remove_dir_all(folder);
+        }
         // Moved out of the way first, so a new restore can stage meanwhile.
         let _ = fs::remove_dir_all(paths.discarded());
         let _ = fs::rename(&staging, paths.discarded());
@@ -973,7 +1241,12 @@ struct SwapFailure {
 }
 
 /// The swap itself, undone when any step fails.
-fn swap(paths: &DataPaths, media: bool, patience: Duration) -> Result<(), SwapFailure> {
+fn swap(
+    paths: &DataPaths,
+    media: bool,
+    staged: &[StagedFolder],
+    patience: Duration,
+) -> Result<(), SwapFailure> {
     let previous = paths.previous();
     // An earlier try stopped midway: what it moved aside is not this try's
     // to undo, so a failure keeps it.
@@ -1000,7 +1273,8 @@ fn swap(paths: &DataPaths, media: bool, patience: Duration) -> Result<(), SwapFa
         let incoming = paths.incoming();
         move_path(&incoming.join(DATABASE_ENTRY), &paths.database, patience)?;
         moved.push((incoming.join(DATABASE_ENTRY), paths.database.clone()));
-        finish_media(paths, media, patience)
+        finish_media(paths, media, patience)?;
+        swap_folders(paths, staged, patience, &mut moved)
     })();
     result.map_err(|error| {
         // What cannot move back stays in `restore\previous`, kept.
@@ -1013,6 +1287,40 @@ fn swap(paths: &DataPaths, media: bool, patience: Duration) -> Result<(), SwapFa
             undone: undone && !resumed,
         }
     })
+}
+
+/// Swaps each staged folder in: the folder there moves aside beside it,
+/// the restored one takes its place. Each move is noted in `moved`, so a
+/// failure puts every one back. A folder already swapped in (Bardo stopped
+/// midway) is left as it is.
+fn swap_folders(
+    paths: &DataPaths,
+    staged: &[StagedFolder],
+    patience: Duration,
+    moved: &mut Vec<(PathBuf, PathBuf)>,
+) -> io::Result<()> {
+    let previous: Vec<PathBuf> = staged
+        .iter()
+        .map(|folder| sibling(&folder.target, PREVIOUS_SUFFIX))
+        .collect();
+    let mut kept = read_list(&paths.previous_list());
+    kept.extend(previous.iter().cloned());
+    write_list(&paths.previous_list(), kept).map_err(io::Error::other)?;
+    for (folder, aside) in staged.iter().zip(&previous) {
+        if !folder.staged.exists() {
+            continue;
+        }
+        if folder.target.exists() {
+            let _ = fs::remove_dir_all(aside);
+            move_path(&folder.target, aside, patience)?;
+            moved.push((folder.target.clone(), aside.clone()));
+        } else if let Some(parent) = folder.target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        move_path(&folder.staged, &folder.target, patience)?;
+        moved.push((folder.staged.clone(), folder.target.clone()));
+    }
+    Ok(())
 }
 
 /// Moves the restored project folders in, once the database is: also when
@@ -1548,6 +1856,8 @@ mod tests {
             media_files: 0,
             saved_keys: Vec::new(),
             saved_credentials: Vec::new(),
+            folders: Vec::new(),
+            staged: Vec::new(),
         };
         change(&mut manifest);
         toml::to_string(&manifest).unwrap()
@@ -1703,6 +2013,206 @@ mod tests {
         clean_restore_leftovers(&paths);
         assert!(!paths.staging().exists());
         assert_eq!(apply_pending_restore(&paths), None, "nothing staged");
+    }
+
+    /// A project of `owner` whose folder is `folder`, with `files` in it.
+    fn project_folder(
+        install: &Install,
+        owner: ProfileId,
+        folder: &Path,
+        files: &[(&str, &[u8])],
+    ) -> bardo_domain::ProjectId {
+        let project = crate::project::test_project(&install.db, owner);
+        bardo_domain::FolderRepository::set_project_folder(&*install.db, project, folder).unwrap();
+        for (relative, bytes) in files {
+            let path = folder.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        project
+    }
+
+    fn places(root: &Path) -> FolderPlaces {
+        FolderPlaces {
+            documents: Some(root.join("Documents")),
+            home: root.to_owned(),
+            synced: Vec::new(),
+            data_home: "Bardo".into(),
+            old_media: root.join("local").join("projects"),
+        }
+    }
+
+    fn folder_of(db: &Database, project: bardo_domain::ProjectId) -> Option<PathBuf> {
+        bardo_domain::ProjectRepository::project(db, project)
+            .unwrap()
+            .unwrap()
+            .folder
+    }
+
+    #[test]
+    fn a_backup_with_media_restores_each_project_folder_where_it_was() {
+        let (install, profile) = Install::with_profile();
+        let root = install._dir.path().to_owned();
+        let space = root.join("C").join("Bardo").join("Space");
+        let sea = root.join("D").join("Media").join("Sea");
+        let space_id = project_folder(
+            &install,
+            profile.id,
+            &space,
+            &[
+                ("bardo-project.json", b"{}"),
+                ("Videos/apollo-1a2b3c4d/clip-1.mp4", b"apollo"),
+                ("Videos/apollo-1a2b3c4d/proxy-clip-1.mp4.mkv", b"proxy"),
+            ],
+        );
+        let sea_id = project_folder(
+            &install,
+            profile.id,
+            &sea,
+            &[("World/kraken.png", b"kraken")],
+        );
+        let global = root.join("Documents").join("Bardo").join(GLOBAL_DIR);
+        fs::create_dir_all(&global).unwrap();
+        fs::write(global.join("loose.png"), b"loose").unwrap();
+        install.file("legacy/script.json", b"old");
+        let backups = LocalBackups::with_places(
+            Arc::clone(&install.db),
+            install.paths.clone(),
+            places(&root),
+        );
+        let size = backups.media_size().unwrap();
+        assert_eq!(size.files, 5, "the preview copy is made again, not carried");
+        let to = install.out("full.zip");
+        let info = backups.write(&to, WITH_MEDIA, &mut go_on()).unwrap();
+        assert_eq!(info.media_files, 5);
+        let names = entries(&to);
+        for name in [
+            format!("folders/{space_id}/bardo-project.json"),
+            format!("folders/{space_id}/Videos/apollo-1a2b3c4d/clip-1.mp4"),
+            format!("folders/{sea_id}/World/kraken.png"),
+            "folders/global/loose.png".to_owned(),
+            "projects/legacy/script.json".to_owned(),
+        ] {
+            assert!(names.contains(&name), "{name} in {names:?}");
+        }
+
+        // The folders change after the backup.
+        fs::write(space.join("Videos/apollo-1a2b3c4d/clip-1.mp4"), b"new").unwrap();
+        fs::write(sea.join("World/later.png"), b"later").unwrap();
+        let staged = backups.stage(&to, &mut go_on()).unwrap();
+        assert_eq!(staged, info);
+        // Staged beside each folder; nothing changes until the next start.
+        assert!(root.join("C/Bardo/.Space.bardo-restore").is_dir());
+        assert!(root.join("D/Media/.Sea.bardo-restore").is_dir());
+        assert_eq!(
+            fs::read(space.join("Videos/apollo-1a2b3c4d/clip-1.mp4")).unwrap(),
+            b"new"
+        );
+        drop(backups);
+        let Install { _dir, paths, db } = install;
+        drop(db);
+
+        let outcome = apply_pending_restore(&paths).unwrap();
+        assert!(outcome.succeeded(), "{outcome:?}");
+        assert_eq!(
+            fs::read(space.join("Videos/apollo-1a2b3c4d/clip-1.mp4")).unwrap(),
+            b"apollo"
+        );
+        assert!(!sea.join("World/later.png").exists());
+        assert_eq!(fs::read(sea.join("World/kraken.png")).unwrap(), b"kraken");
+        assert_eq!(fs::read(global.join("loose.png")).unwrap(), b"loose");
+        assert_eq!(
+            fs::read(paths.projects.join("legacy/script.json")).unwrap(),
+            b"old"
+        );
+        assert!(!root.join("C/Bardo/.Space.bardo-restore").exists());
+        let db = Database::open(&paths.database).unwrap();
+        assert_eq!(folder_of(&db, space_id), Some(space.clone()));
+        // What they were stays aside until tidied up.
+        assert!(root.join("D/Media/.Sea.bardo-previous").is_dir());
+        clean_restore_leftovers(&paths);
+        assert!(!root.join("D/Media/.Sea.bardo-previous").exists());
+        assert!(!root.join("C/Bardo/.Space.bardo-previous").exists());
+        assert!(space.is_dir() && sea.is_dir());
+    }
+
+    #[test]
+    fn a_folder_whose_place_is_gone_is_restored_under_the_base_folder() {
+        let (install, profile) = Install::with_profile();
+        let root = install._dir.path().to_owned();
+        let sea = root.join("E").join("Sea");
+        let sea_id = project_folder(&install, profile.id, &sea, &[("World/kraken.png", b"k")]);
+        let backups = LocalBackups::with_places(
+            Arc::clone(&install.db),
+            install.paths.clone(),
+            places(&root),
+        );
+        let to = install.out("full.zip");
+        backups.write(&to, WITH_MEDIA, &mut go_on()).unwrap();
+        // The drive is not here.
+        fs::remove_dir_all(root.join("E")).unwrap();
+        backups.stage(&to, &mut go_on()).unwrap();
+        drop(backups);
+        let Install { _dir, paths, db } = install;
+        drop(db);
+
+        assert!(apply_pending_restore(&paths).unwrap().succeeded());
+        let under_base = root.join("Documents").join("Bardo").join("Sea");
+        assert_eq!(fs::read(under_base.join("World/kraken.png")).unwrap(), b"k");
+        assert!(!root.join("E").exists());
+        let db = Database::open(&paths.database).unwrap();
+        assert_eq!(folder_of(&db, sea_id), Some(under_base));
+    }
+
+    #[test]
+    fn a_staging_given_up_removes_the_folders_it_unpacked() {
+        let (install, profile) = Install::with_profile();
+        let root = install._dir.path().to_owned();
+        let space = root.join("C").join("Space");
+        project_folder(&install, profile.id, &space, &[("World/a.png", b"a")]);
+        let backups = LocalBackups::with_places(
+            Arc::clone(&install.db),
+            install.paths.clone(),
+            places(&root),
+        );
+        let to = install.out("full.zip");
+        backups.write(&to, WITH_MEDIA, &mut go_on()).unwrap();
+        backups.stage(&to, &mut go_on()).unwrap();
+        assert!(root.join("C/.Space.bardo-restore").is_dir());
+        backups.discard_staged().unwrap();
+        assert!(!root.join("C/.Space.bardo-restore").exists());
+        assert_eq!(fs::read(space.join("World/a.png")).unwrap(), b"a");
+    }
+
+    #[test]
+    fn a_backup_from_before_project_folders_restores_into_the_old_folder() {
+        let (source, _) = Install::with_profile();
+        let snapshot_path = source.out("bardo.db");
+        fs::create_dir_all(snapshot_path.parent().unwrap()).unwrap();
+        snapshot(&source.db, &snapshot_path).unwrap();
+        let to = source.out("old.zip");
+        let manifest = manifest_text(|m| {
+            m.format = 1;
+            m.media = true;
+        });
+        zip_of(
+            &to,
+            &[
+                (MANIFEST, manifest.as_bytes()),
+                (DATABASE_ENTRY, &fs::read(&snapshot_path).unwrap()),
+                ("projects/v1/clip-1.mp4", b"clip"),
+            ],
+        );
+        let (target, _) = Install::with_profile();
+        target.backups().stage(&to, &mut go_on()).unwrap();
+        let Install { _dir, paths, db } = target;
+        drop(db);
+        assert!(apply_pending_restore(&paths).unwrap().succeeded());
+        // The media move takes it into its video folder at the next start.
+        assert_eq!(
+            fs::read(paths.projects.join("v1/clip-1.mp4")).unwrap(),
+            b"clip"
+        );
     }
 
     #[test]

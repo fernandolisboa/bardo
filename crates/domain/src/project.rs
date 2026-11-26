@@ -2,6 +2,7 @@
 //! project owns its channels, and through them their themes and videos.
 
 use std::fmt;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -213,6 +214,9 @@ pub struct Project {
     /// When the user last opened it; `None` until then.
     pub opened_at: Option<SystemTime>,
     pub created_at: SystemTime,
+    /// Where its media lives (ADR-0047 item 3); `None` until Bardo gives it
+    /// one.
+    pub folder: Option<PathBuf>,
 }
 
 impl Project {
@@ -226,6 +230,7 @@ impl Project {
             favorite: None,
             opened_at: None,
             created_at: now,
+            folder: None,
         }
     }
 

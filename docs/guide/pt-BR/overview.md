@@ -47,4 +47,4 @@ Alguns vídeos não esperam nada que você possa fazer:
 <a id="project"></a>
 ## O projeto
 
-Ao lado dos vídeos, a Visão geral lista os canais do projeto com idioma e país, quanto o trabalho do projeto gastou neste mês (o mesmo valor que [Custos](costs.md#projects) mostra para o projeto) e os narradores padrão dos canais.
+Ao lado dos vídeos, a Visão geral lista os canais do projeto com idioma e país, quanto o trabalho do projeto gastou neste mês (o mesmo valor que [Custos](costs.md#projects) mostra para o projeto) e os narradores padrão dos canais. Quando a pasta do projeto não é encontrada, a Visão geral avisa acima de tudo, com **Localizar…** ([Pasta não encontrada](storage.md#not-found)).

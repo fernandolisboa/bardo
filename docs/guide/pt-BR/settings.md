@@ -18,6 +18,7 @@ tour: appearance
 - **Publicação**: se os Reels agendados saem com o Bardo fechado. Veja [Publicar com o Bardo fechado](background-agent.md).
 - **Aparência**: o layout, o tema, o idioma da interface e os tours guiados, abaixo.
 - **Métricas**: quando os números dos seus posts sincronizam sozinhos. Veja [Sincronizar métricas](metrics-sync.md).
+- **Armazenamento**: a pasta base, onde os projetos novos ganham a pasta deles. Veja [Armazenamento](storage.md).
 - **Backup**: o backup do seu trabalho, os backups automáticos semanais e a restauração. Veja [Backup e restauração](backup.md).
 - **Sobre**: a versão do Bardo, as atualizações, o FFmpeg que vem com ele, os avisos de terceiros e a exportação de diagnóstico. Veja [Sobre o Bardo](about.md).
 

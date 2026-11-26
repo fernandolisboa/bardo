@@ -56,6 +56,19 @@ pub trait JobHandler: Send + Sync {
     }
 }
 
+/// Keeps jobs from starting while what they need cannot be reached: a
+/// project's folder that was moved or is on a drive not plugged in
+/// (ADR-0047 item 3). A job held back stays queued and starts once it
+/// can.
+pub(crate) trait JobGate: Send + Sync {
+    /// Reads again what decides it. Called by the scheduler every tick,
+    /// outside the queue's lock: it may touch the disk.
+    fn refresh(&self);
+
+    /// Whether `job` must wait. Runs under the queue's lock: no waiting.
+    fn waits(&self, job: &Job) -> bool;
+}
+
 /// How the queue runs jobs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JobSettings {
@@ -456,6 +469,8 @@ struct Shared {
     settings: JobSettings,
     /// Failure details are stored and shown, so known keys are masked first.
     redactor: Redactor,
+    /// Holds back jobs whose folder cannot be reached.
+    gate: Option<Arc<dyn JobGate>>,
     state: Mutex<State>,
     /// Wakes the scheduler: a job was queued or finished, or the app closes.
     wake: Condvar,
@@ -697,6 +712,7 @@ pub(crate) struct JobQueue {
 impl JobQueue {
     /// Loads the owner's jobs, queues again those a closed app left running,
     /// and starts scheduling.
+    #[cfg(test)]
     pub(crate) fn start(
         repository: Arc<dyn JobRepository>,
         owner: ProfileId,
@@ -704,6 +720,21 @@ impl JobQueue {
         handlers: HashMap<JobKind, Arc<dyn JobHandler>>,
         settings: JobSettings,
         redactor: Redactor,
+    ) -> Result<Self, RepositoryError> {
+        Self::start_gated(
+            repository, owner, runner, handlers, settings, redactor, None,
+        )
+    }
+
+    /// `start`, holding back the jobs `gate` says must wait.
+    pub(crate) fn start_gated(
+        repository: Arc<dyn JobRepository>,
+        owner: ProfileId,
+        runner: Runner,
+        handlers: HashMap<JobKind, Arc<dyn JobHandler>>,
+        settings: JobSettings,
+        redactor: Redactor,
+        gate: Option<Arc<dyn JobGate>>,
     ) -> Result<Self, RepositoryError> {
         let now = SystemTime::now();
         repository.heartbeat(runner.role, now, now)?;
@@ -735,6 +766,7 @@ impl JobQueue {
             handlers,
             settings,
             redactor,
+            gate,
             state: Mutex::new(State {
                 jobs,
                 workers: HashMap::new(),
@@ -763,6 +795,13 @@ impl JobQueue {
             shared,
             scheduler: Some(scheduler),
         })
+    }
+
+    /// Looks again for jobs to start: what held one back may have passed.
+    pub(crate) fn wake(&self) {
+        let _state = self.shared.state();
+        self.shared.changed();
+        self.shared.wake.notify_all();
     }
 
     /// Every job, oldest first, as of now.
@@ -991,6 +1030,14 @@ fn schedule(shared: &Arc<Shared>) {
             return;
         }
         if Instant::now() >= state.next_tick {
+            if let Some(gate) = &shared.gate {
+                drop(state);
+                gate.refresh();
+                state = shared.state();
+                if state.closing {
+                    return;
+                }
+            }
             tick(shared, &mut state);
             state.next_tick = Instant::now() + shared.settings.tick;
         }
@@ -1032,16 +1079,18 @@ fn start_due(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>, now: Syste
             workers,
             elsewhere,
             unsaved,
-            held,
+            held: held_now,
             ..
         } = &mut **state;
-        let held = *held;
+        let held = *held_now;
+        let gate = shared.gate.as_deref();
         let Some(index) = jobs
             .iter()
             .enumerate()
             .filter(|(_, job)| {
                 job.is_due(now)
                     && (!held || job.kind() == JobKind::Restore)
+                    && !gate.is_some_and(|gate| gate.waits(job))
                     && !workers.contains_key(&job.id())
                     && !unsaved.contains(&job.id())
                     && !elsewhere.contains(&job.id())
@@ -1054,6 +1103,13 @@ fn start_due(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>, now: Syste
         };
         let id = jobs[index].id();
         tried.insert(id);
+        // A hold taken since the last tick (a media move, ADR-0047) stops
+        // the start at once, not one tick later.
+        if jobs[index].kind() != JobKind::Restore && matches!(repository.holder(now), Ok(Some(_))) {
+            *held_now = true;
+            shared.changed();
+            break;
+        }
         match repository.lease(id, now, now + shared.settings.lease) {
             Ok(true) => {}
             Ok(false) => {

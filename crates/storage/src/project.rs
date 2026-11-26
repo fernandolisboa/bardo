@@ -1,6 +1,7 @@
 //! Projects (ADR-0047), and the project, channel and video jobs and cost
 //! records remember they were for.
 
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use bardo_domain::{
@@ -10,10 +11,11 @@ use bardo_domain::{
 use rusqlite::{OptionalExtension, Row, params};
 use uuid::Uuid;
 
+use crate::folders::path_text;
 use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 const SELECT_PROJECT: &str = "SELECT id, profile_id, name, color, state, favorite_position, \
-     opened_at, created_at FROM project";
+     opened_at, created_at, folder FROM project";
 
 fn read(row: &Row<'_>) -> rusqlite::Result<ProjectRow> {
     Ok(ProjectRow {
@@ -25,6 +27,7 @@ fn read(row: &Row<'_>) -> rusqlite::Result<ProjectRow> {
         favorite: row.get(5)?,
         opened_at: row.get(6)?,
         created_at: row.get(7)?,
+        folder: row.get(8)?,
     })
 }
 
@@ -37,6 +40,7 @@ struct ProjectRow {
     favorite: Option<i64>,
     opened_at: Option<i64>,
     created_at: i64,
+    folder: Option<String>,
 }
 
 impl ProjectRow {
@@ -60,6 +64,7 @@ impl ProjectRow {
                 .map_err(boxed)?,
             opened_at: self.opened_at.map(from_unix_millis),
             created_at: from_unix_millis(self.created_at),
+            folder: self.folder.map(PathBuf::from),
         })
     }
 }
@@ -100,8 +105,8 @@ impl ProjectRepository for Database {
     fn save_project(&self, project: &Project) -> Result<(), RepositoryError> {
         self.conn()
             .execute(
-                "INSERT INTO project (id, profile_id, name, color, state, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "INSERT INTO project (id, profile_id, name, color, state, created_at, folder)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT (id) DO UPDATE SET
                      name = excluded.name,
                      color = excluded.color,
@@ -113,6 +118,7 @@ impl ProjectRepository for Database {
                     project.details.color().code(),
                     project.state.code(),
                     to_unix_millis(project.created_at),
+                    project.folder.as_deref().map(path_text),
                 ],
             )
             .map_err(boxed)?;

@@ -674,7 +674,7 @@ mod tests {
     }
 
     /// The screens that tag their own controls, in every layout alike.
-    const SCREENS: [&str; 36] = [
+    const SCREENS: [&str; 37] = [
         include_str!("research.rs"),
         include_str!("themes.rs"),
         include_str!("performance.rs"),
@@ -697,6 +697,7 @@ mod tests {
         include_str!("channels.rs"),
         include_str!("network_accounts.rs"),
         include_str!("settings.rs"),
+        include_str!("storage.rs"),
         include_str!("backup.rs"),
         include_str!("settings_transfer.rs"),
         include_str!("updates.rs"),

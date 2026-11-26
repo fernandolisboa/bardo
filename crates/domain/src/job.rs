@@ -200,10 +200,15 @@ pub enum JobKind {
     /// shape after another, each with its texts to paste. Shapes already
     /// written are not rendered again on resume.
     PlacementExport,
+    /// Moves each video's media into its project's folder (#335, ADR-0047
+    /// item 3): out of the old projects folder, or after its channel moved
+    /// to another project. Holds the job runner and the background agent
+    /// meanwhile; a video moved is not moved again on resume.
+    MoveMedia,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 41] = [
+    pub const ALL: [JobKind; 42] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -245,6 +250,7 @@ impl JobKind {
         JobKind::ShotBackdrop,
         JobKind::ProductConcept,
         JobKind::PlacementExport,
+        JobKind::MoveMedia,
     ];
 
     /// Stable name stored in the database.
@@ -291,6 +297,7 @@ impl JobKind {
             JobKind::ShotBackdrop => "shot_backdrop",
             JobKind::ProductConcept => "product_concept",
             JobKind::PlacementExport => "placement_export",
+            JobKind::MoveMedia => "move_media",
         }
     }
 }

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-14
 - Amends: ADR-0006 (a restore holds the database and stops the background agent)
+- Amended by: ADR-0047 (media is backed up and restored per project folder, backup format 2)
 
 ## Context
 

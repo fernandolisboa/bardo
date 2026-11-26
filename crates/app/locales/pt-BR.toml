@@ -6,6 +6,7 @@ tagline = "Crie e opere canais dark, com IA ajudando em cada etapa."
 details = "Detalhes"
 
 [settings]
+storage_tab = "Armazenamento"
 networks_tab = "Redes"
 ui_language = "Idioma da interface"
 title = "Configurações"
@@ -315,6 +316,7 @@ start = "Iniciar tarefa de teste"
 start_failing = "Iniciar tarefa de teste com falha"
 
 [job]
+waits_for_folder = "Aguarda a pasta do projeto"
 retry_scheduled = "A tentativa {attempt} de {max} falhou. Tentando de novo automaticamente."
 failed_after = "Parou depois de {attempts} tentativas."
 cancel = "Cancelar"
@@ -322,6 +324,7 @@ retry = "Tentar de novo"
 waits_until = "Aguarda até {when}"
 
 [job.kind]
+move_media = "Mudança de mídia"
 placement_export = "Exportação para anúncios"
 render = "Render final"
 countdown = "Contagem de teste"
@@ -3675,6 +3678,21 @@ body = "As bibliotecas de código aberto com que o Bardo é feito, e as licença
 title = "Diagnóstico"
 body = "Quando algo der errado, exporte aqui um arquivo de diagnóstico e anexe-o a uma issue. Chaves, tokens e nomes de contas saem mascarados, e nada é enviado a lugar nenhum."
 
+[tour.storage]
+name = "Tour do armazenamento"
+
+[tour.storage.base_folder]
+title = "Pasta base"
+body = "Projetos novos ganham a pasta deles aqui, com uma pasta por vídeo dentro. Quando o OneDrive sincroniza a sua pasta Documentos, o Bardo usa a sua pasta de usuário e explica o porquê."
+
+[tour.storage.change]
+title = "Trocar a pasta"
+body = "Escolha outra pasta para os novos projetos, ou volte ao padrão. Os projetos que você já tem mantêm as pastas deles."
+
+[tour.storage.move]
+title = "Mudança de mídia"
+body = "A mídia de vídeos antigos, e de um canal movido para outro projeto, vai sozinha para a pasta do projeto, como uma tarefa."
+
 [tour.backup]
 name = "Tour do backup"
 
@@ -4904,6 +4922,9 @@ channels_many = "{n} canais"
 never_opened = "Ainda não aberto"
 
 [project_form]
+folder = "Pasta"
+folder_choose = "Escolher…"
+folder_hint = "O Bardo guarda aqui os vídeos e as imagens deste projeto. Renomear o projeto nunca move a pasta."
 title = "Novo projeto"
 hint = "Um projeto reúne os canais de uma marca, com as ideias e os vídeos deles. Você trabalha em um projeto por vez."
 name = "Nome"
@@ -4913,6 +4934,8 @@ create = "Criar projeto"
 cancel = "Cancelar"
 
 [project_error]
+folder_too_deep = "Este lugar é fundo demais para a pasta do projeto: escolha um com caminho mais curto."
+folder_not_made = "Não deu para criar a pasta do projeto ali. Escolha outro lugar."
 name_required = "Dê um nome ao projeto."
 name_too_long = "Use no máximo 100 caracteres."
 name_taken = "Você já tem um projeto com esse nome."
@@ -5044,3 +5067,29 @@ body = "Os narradores que falam nos seus vídeos, os produtos que seus anúncios
 [tour.library.projects]
 title = "Global por enquanto"
 body = "Hoje todo projeto usa estes mesmos itens. Uma versão futura deixa cada projeto ter os seus, com a biblioteca global compartilhada por todos."
+
+[project_folder]
+not_found = "Pasta não encontrada"
+not_found_hint = "O Bardo não encontra a pasta deste projeto em {folder}. As tarefas dele aguardam até você localizá-la: nada é desenhado de novo enquanto isso."
+locate = "Localizar…"
+locate_prompt = "Localize a pasta do projeto"
+show = "Mostrar pasta"
+
+[locate_error]
+not_a_project_folder = "Esta não é uma pasta de projeto: não tem bardo-project.json."
+other_project = "Esta pasta é de outro projeto."
+other_copy = "Esta pasta é de outra cópia do Bardo ou de outro perfil."
+not_found = "Este projeto não existe mais."
+not_saved = "Não deu para salvar a pasta. Tente de novo."
+
+[storage]
+base_folder = "Pasta base"
+base_folder_hint = "Projetos novos ganham a pasta deles aqui. Os projetos que você já tem mantêm as deles."
+change = "Alterar…"
+prompt = "Escolha a pasta base"
+use_default = "Usar a padrão"
+is_default = "Padrão"
+avoided_sync = "Sua pasta Documentos é sincronizada pelo OneDrive, então o Bardo usa sua pasta de usuário: sincronizar gigabytes de clipes enquanto são gravados falha e enche seu armazenamento na nuvem."
+synced = "Esta pasta é sincronizada pelo OneDrive: sincronizar gigabytes de clipes enquanto são gravados falha e enche seu armazenamento na nuvem."
+not_saved = "Não deu para salvar a pasta base. Tente de novo."
+move_hint = "A mídia de vídeos feitos antes das pastas de projeto, e de canais movidos para outro projeto, vai sozinha para a pasta do projeto. Acompanhe em Tarefas."

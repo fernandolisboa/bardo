@@ -24,6 +24,7 @@ mod diagnostics;
 mod editor;
 mod end_cards;
 mod export;
+mod folders;
 mod formats;
 mod guide;
 mod guide_site;
@@ -160,6 +161,7 @@ pub use end_cards::{CardDraft, EndCardView, card_field_errors};
 pub use export::{
     ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView, export_job_networks,
 };
+pub use folders::{BaseFolder, LocateError, MOVE_HOLD};
 pub use guide::{
     Guide, GuideGroup, GuideHit, GuideLink, GuidePage, GuidePageError, GuidePlace, GuideSection,
     SetupSteps, SetupTarget,
@@ -358,6 +360,13 @@ pub struct Repositories {
     pub costs: Arc<dyn CostRepository>,
     /// Each video project's media folder. Shared with the job queue.
     pub files: Arc<dyn ProjectFiles>,
+    /// The base folder, each project's folder and where each video's media
+    /// is (ADR-0047 item 3).
+    pub folders: Arc<dyn bardo_domain::FolderRepository>,
+    /// Project folders on disk: made, recognized and moved.
+    pub project_folders: Arc<dyn bardo_domain::ProjectFolders>,
+    /// The folders of this computer that decide where media goes.
+    pub places: bardo_domain::FolderPlaces,
     /// Voice samples heard on the Personas screen, kept on this machine.
     pub voice_samples: Arc<dyn VoiceSampleStore>,
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
@@ -388,16 +397,25 @@ impl Repositories {
     /// app credentials and tokens by `connection_secrets`, media by `files`,
     /// export packages by `export_files`, voice samples by `voice_samples`
     /// and backups by the folders at `paths`.
+    /// Bardo's storage on this computer: each video's media where the
+    /// database says (its project's folder), else in the old projects
+    /// folder of `paths`.
     pub fn local(
         db: Database,
         secrets: Box<dyn SecretStore>,
         connection_secrets: Box<dyn ConnectionSecrets>,
-        files: Box<dyn ProjectFiles>,
         export_files: Box<dyn ExportFiles>,
         voice_samples: Box<dyn VoiceSampleStore>,
         paths: DataPaths,
     ) -> Self {
         let db = Arc::new(db);
+        let places =
+            bardo_storage::folder_places(bardo_storage::data_home(), paths.projects.clone());
+        let files: Arc<dyn ProjectFiles> =
+            Arc::new(bardo_storage::LocalProjectFiles::with_folders(
+                paths.projects.clone(),
+                Arc::clone(&db) as _,
+            ));
         Self {
             export_files: Arc::from(export_files),
             voice_samples: Arc::from(voice_samples),
@@ -405,8 +423,14 @@ impl Repositories {
             agent_task: Arc::from(bardo_storage::platform_agent_task()),
             installers: Arc::new(LocalInstallers::new(updates_dir(&paths.local))),
             installer_runner: Arc::new(ProcessInstallerRunner),
-            backups: Arc::new(LocalBackups::new(Arc::clone(&db), paths)),
-            ..Self::shared_with_files(db, Arc::from(secrets), Arc::from(files))
+            project_folders: Arc::new(bardo_storage::LocalProjectFolders::new()),
+            backups: Arc::new(LocalBackups::with_places(
+                Arc::clone(&db),
+                paths,
+                places.clone(),
+            )),
+            places,
+            ..Self::shared_with_files(db, Arc::from(secrets), files)
         }
     }
 
@@ -458,8 +482,11 @@ impl Repositories {
             costs: Arc::clone(&db) as _,
             tours: Box::new(Arc::clone(&db)),
             youtube_data: Arc::clone(&db) as _,
+            folders: Arc::clone(&db) as _,
+            project_folders: bardo_storage::MemoryProjectFolders::for_database(&db),
             research: db,
             files,
+            places: test_places(),
             voice_samples: Arc::new(MemoryVoiceSamples::default()),
             secrets,
             connection_secrets: Arc::new(MemorySecretStore::default()),
@@ -468,6 +495,19 @@ impl Repositories {
             installers: Arc::new(MemoryInstallers::default()),
             installer_runner: Arc::new(MemoryInstallerRunner::default()),
         }
+    }
+}
+
+/// Folders for tests: nothing on this computer's disks is touched, as the
+/// project folders are in memory.
+pub fn test_places() -> bardo_domain::FolderPlaces {
+    use std::path::PathBuf;
+    bardo_domain::FolderPlaces {
+        documents: Some(PathBuf::from("/test/Documents")),
+        home: PathBuf::from("/test"),
+        synced: Vec::new(),
+        data_home: "Bardo".into(),
+        old_media: PathBuf::from("/test/AppData/Bardo/projects"),
     }
 }
 
@@ -700,6 +740,8 @@ pub struct Bardo {
     updates: updates::UpdateBook,
     /// Bringing settings in from a file, offered over the screens.
     settings_offer: Option<settings_transfer::SettingsOffer>,
+    /// The base folder, project folders and the media move.
+    folder_book: folders::FolderBook,
 }
 
 impl Bardo {
@@ -779,6 +821,9 @@ impl Bardo {
             localizations,
             costs,
             files,
+            folders,
+            project_folders,
+            places,
             voice_samples,
             secrets,
             connection_secrets,
@@ -1127,12 +1172,27 @@ impl Bardo {
             tick: job_settings.tick,
             restart_needed: Arc::clone(&restart_needed),
         };
+        let folder_book = folders::FolderBook::new(
+            profile.id,
+            folders,
+            project_folders,
+            places,
+            Arc::clone(&projects),
+            Arc::clone(&channels),
+        );
+        let move_media_handler = Self::move_media_handler(
+            profile.id,
+            &folder_book,
+            Arc::clone(&projects),
+            Arc::clone(&jobs),
+            job_settings.tick,
+        );
         let program = std::env::current_exe().unwrap_or_default();
         let runner = match role {
             RunnerRole::App => crate::jobs::Runner::app(),
             RunnerRole::Agent => crate::agent::runner(Arc::clone(&publications), &others),
         };
-        let jobs = JobQueue::start(
+        let jobs = JobQueue::start_gated(
             jobs,
             profile.id,
             runner,
@@ -1175,11 +1235,13 @@ impl Bardo {
                         feed: Arc::clone(&providers.releases),
                         installers: Arc::clone(&installers),
                     },
+                    move_media: move_media_handler,
                 }),
                 &cost_book,
             ),
             job_settings,
             redactor,
+            Some(Arc::clone(&folder_book.watch) as _),
         )?;
         Ok(Self {
             profiles,
@@ -1252,11 +1314,13 @@ impl Bardo {
             // A new copy may want another copy's settings.
             settings_offer: (first_start && role == RunnerRole::App)
                 .then(settings_transfer::SettingsOffer::default),
+            folder_book,
         })
         .inspect(|bardo| {
             if bardo.role == RunnerRole::App {
                 // The app opens on a project, after the upgrade too.
                 let _ = bardo.open_some_project();
+                bardo.prepare_folders();
             }
             bardo.mark_restored_connections();
             bardo.prune_installers();
@@ -3609,6 +3673,9 @@ mod tests {
             export_files: Arc::new(MemoryExportFiles::default()),
             costs: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),
+            folders: Arc::clone(&db) as _,
+            project_folders: bardo_storage::MemoryProjectFolders::for_database(&db),
+            places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
@@ -3756,7 +3823,6 @@ mod tests {
             db,
             Box::new(MemorySecretStore::default()),
             Box::new(MemorySecretStore::default()),
-            Box::new(MemoryProjectFiles::default()),
             Box::new(MemoryExportFiles::default()),
             Box::new(MemoryVoiceSamples::default()),
             DataPaths {

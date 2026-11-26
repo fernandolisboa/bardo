@@ -13,7 +13,7 @@ Um projeto de vídeo é um vídeo no caminho entre uma ideia aprovada e uma publ
 <a id="switch"></a>
 ## Escolher um projeto
 
-O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos do canal; escolha um para trocar. Um projeto de anúncio aparece marcado como **Anúncio** nesse menu, e a linha sob o nome dele começa com **Anúncio de** e o produto que ele anuncia. Um anúncio cujo produto era uma *ideia* quando o projeto começou é um conceito: ele aparece marcado como **Conceito** nesse menu e ao lado do nome, e continua com essa marca mesmo que o produto mude de tipo depois ([Uma imagem de conceito para uma ideia](products.md#concept)). O seletor de canal ao lado de **Vídeos** lista os projetos de outro canal.
+O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos do canal; escolha um para trocar. Um projeto de anúncio aparece marcado como **Anúncio** nesse menu, e a linha sob o nome dele começa com **Anúncio de** e o produto que ele anuncia. Um anúncio cujo produto era uma *ideia* quando o projeto começou é um conceito: ele aparece marcado como **Conceito** nesse menu e ao lado do nome, e continua com essa marca mesmo que o produto mude de tipo depois ([Uma imagem de conceito para uma ideia](products.md#concept)). O seletor de canal ao lado de **Vídeos** lista os projetos de outro canal. **Mostrar pasta** abre a pasta do vídeo no Explorer, onde ficam a narração, as imagens, os clipes e os renders ([A pasta de um projeto](storage.md#project-folder)).
 
 <a id="settings"></a>
 ## As configurações do vídeo

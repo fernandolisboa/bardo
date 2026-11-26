@@ -829,6 +829,8 @@ mod tests {
         let outcome = bardo_storage::apply_pending_restore(&paths).expect("a staged restore");
         assert!(outcome.succeeded(), "{:?}", outcome.failure);
         let db = Arc::new(Database::open(&paths.database).unwrap());
+        // Restored on the same computer: the project folders stayed.
+        bardo_storage::MemoryProjectFolders::keep_for(&s.h.db, &db);
         s.h.backups = Some(Arc::new(LocalBackups::new(Arc::clone(&db), paths)));
         s.reopen_on(db)
     }

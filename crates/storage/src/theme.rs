@@ -357,6 +357,22 @@ pub(crate) fn insert_project(
         ],
     )
     .map_err(boxed)?;
+    // A video of a project that has its folder keeps its media there from
+    // the start, in a folder named from its title now (ADR-0047).
+    tx.execute(
+        "UPDATE video_project SET folder_name = ?2, folder_project_id = (
+             SELECT c.owner_project_id FROM channel c
+             JOIN project p ON p.id = c.owner_project_id
+             WHERE c.id = video_project.channel_id AND p.folder IS NOT NULL)
+         WHERE id = ?1 AND EXISTS (
+             SELECT 1 FROM channel c JOIN project p ON p.id = c.owner_project_id
+             WHERE c.id = video_project.channel_id AND p.folder IS NOT NULL)",
+        params![
+            project.id.to_string(),
+            bardo_domain::video_folder_name(&project.title, project.id),
+        ],
+    )
+    .map_err(boxed)?;
     Ok(())
 }
 

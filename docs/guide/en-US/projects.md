@@ -13,7 +13,7 @@ A video project is one video on its way from an approved idea to a published pos
 <a id="switch"></a>
 ## Picking a project
 
-The project's name heads the screen, with a menu beside it that lists the channel's other projects; pick one to switch. An ad project is marked **Ad** in that menu, and the line under its name starts with **Ad for** and the product it advertises. An ad whose product was an *idea* when the project started is a concept: it is marked **Concept** in that menu and beside its name, and keeps that mark even if the product changes kind later ([A concept image for an idea](products.md#concept)). The channel picker next to **Videos** lists another channel's projects.
+The project's name heads the screen, with a menu beside it that lists the channel's other projects; pick one to switch. An ad project is marked **Ad** in that menu, and the line under its name starts with **Ad for** and the product it advertises. An ad whose product was an *idea* when the project started is a concept: it is marked **Concept** in that menu and beside its name, and keeps that mark even if the product changes kind later ([A concept image for an idea](products.md#concept)). The channel picker next to **Videos** lists another channel's projects. **Show folder** opens the video's folder in Explorer, where its narration, images, clips and renders are ([A project's folder](storage.md#project-folder)).
 
 <a id="settings"></a>
 ## The video's settings

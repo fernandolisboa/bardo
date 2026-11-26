@@ -566,6 +566,7 @@ fn place_name(bardo: &Bardo, place: GuidePlace) -> String {
                 SettingsTab::Publishing => Text::SettingsPublishingTab,
                 SettingsTab::Appearance => Text::SettingsAppearanceTab,
                 SettingsTab::Metrics => Text::MetricsSettingsTab,
+                SettingsTab::Storage => Text::SettingsStorageTab,
                 SettingsTab::Backup => Text::SettingsBackupTab,
                 SettingsTab::About => Text::SettingsAboutTab,
             }),
