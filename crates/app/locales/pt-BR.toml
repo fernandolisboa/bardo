@@ -513,6 +513,12 @@ placeholder = "AIza…"
 name = "API do X"
 purpose = "Posts no X, cobrados por post dos créditos do seu app do X. Usada pela conta do X conectada, sem chave de API."
 
+[model_level]
+provider = "Provedor"
+model = "Modelo"
+version = "Versão"
+variant = "Variante"
+
 [key_check]
 valid = "A chave funciona."
 rejected = "O provedor recusou esta chave. Confira se ela foi copiada inteira e se ainda está ativa."
@@ -629,6 +635,8 @@ title_too_long = "Use no máximo 120 caracteres no título."
 angle_too_long = "Use no máximo 500 caracteres no ângulo."
 
 [projects]
+settings_video = "Vídeo"
+settings_production = "Produção e gasto"
 switch = "Trocar de projeto"
 nav = "Projetos"
 title = "Projetos de vídeo"
@@ -3147,7 +3155,7 @@ body = "Como a imagem se move: um movimento de câmera e no máximo uma ação s
 
 [tour.clips.model]
 title = "Modelo de vídeo"
-body = "Cada cena usa o modelo de vídeo do canal, a menos que você escolha outro para ela aqui. Os modelos mudam no visual, na duração e no preço."
+body = "Cada cena usa o modelo de vídeo do canal, a menos que você escolha outro para ela aqui, um passo de cada vez: provedor, modelo, versão e variante. Os modelos mudam no visual, na duração e no preço."
 
 [tour.clips.review]
 title = "Revise um novo clipe"
@@ -3367,7 +3375,7 @@ body = "Shorts são verticais, têm menos de um minuto e servem para todas as re
 
 [tour.channels.defaults]
 title = "Modelo de vídeo, legendas e transições"
-body = "O modelo que anima as imagens das cenas do canal em clipes, e se um clipe um pouco mais curto que a cena fica em câmera lenta para caber, e em quanto, para você pagar menos segundos. Depois, o visual das legendas nos projetos novos e a cor em que acende a palavra falada, e a transição que o editor põe num corte. Qualquer cena pode escolher outro modelo, qualquer projeto outras legendas e qualquer corte outra transição."
+body = "O modelo que anima as imagens das cenas do canal em clipes, escolhido por provedor, modelo, versão e variante, e se um clipe um pouco mais curto que a cena fica em câmera lenta para caber, e em quanto, para você pagar menos segundos. Depois, o visual das legendas nos projetos novos e a cor em que acende a palavra falada, e a transição que o editor põe num corte. Qualquer cena pode escolher outro modelo, qualquer projeto outras legendas e qualquer corte outra transição."
 
 [tour.channels.accounts]
 title = "Contas de rede"

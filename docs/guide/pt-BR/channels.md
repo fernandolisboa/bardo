@@ -75,6 +75,11 @@ Como os vídeos do canal são feitos: quais cenas viram clipes de IA e com qual 
 - **Movimento nas imagens** e a **Intensidade** dele: como a câmera passeia por cada imagem parada num corte novo, o efeito Ken Burns. **Variado** (o padrão de um canal novo, com intensidade **Média**) dá a cada cena um zoom ou pan diferente do anterior; **Nenhum** deixa as imagens paradas, e é onde começam os canais criados antes de existir movimento, para os cortes e renders deles ficarem como estavam; ou escolha um movimento para todas as cenas. Cortes já feitos guardam os movimentos que têm, e cada imagem pode usar outro ([Movimento nas imagens](editor.md#motion)).
 - **Estilo da miniatura**: como fica o texto das miniaturas novas do canal no YouTube, Forte a menos que você mude. Cada vídeo pode escolher outro ([Miniatura](uploading.md#thumbnail)).
 
+<a id="model-picker"></a>
+## Escolher um modelo
+
+Os dois modelos são escolhidos um passo de cada vez, cada um num menu curto: **Provedor** (Higgsfield, Plano Higgsfield, Kling, Gemini, BytePlus ModelArk), **Modelo** (Kling, Seedance, Wan, Hailuo, Gemini Omni…), **Versão** (3.0, 2.6, 2.5 Turbo…) e, quando a versão vem em mais de uma, **Variante** (Standard ou Pro, 720p ou 1080p, Motion Control…). Um passo com uma só opção aparece esmaecido. Trocar um passo mantém os passos seguintes quando a nova escolha os oferece: trocar o Kling 3.0 do Higgsfield para o Kling mantém o Kling 3.0. A primeira opção de **Provedor** segue o padrão, e o botão então mostra o provedor do padrão com **(padrão)**. O mesmo seletor escolhe o modelo de uma cena em [Clipes](clips.md#model) e o de uma tomada em [Captura](capture.md#performed).
+
 <a id="clip-length"></a>
 ## Duração dos clipes
 

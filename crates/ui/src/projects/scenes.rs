@@ -9,9 +9,9 @@
 //! video player until the editor has its own.
 
 use bardo_app::bardo_domain::{
-    AnimatedScenes, AspectRatio, BackdropDirection, CastMember, ClipModel, ClipModelRef, Job,
-    JobState, ProductImageId, Scene, SceneClip, SceneImage, SceneKind, ShotBackdrop, ShotColor,
-    ShotLook, ShotPlacement, TemplateKind, VideoProjectId,
+    AnimatedScenes, AspectRatio, BackdropDirection, CastMember, ClipModel, Job, JobState,
+    ProductImageId, Scene, SceneClip, SceneImage, SceneKind, ShotBackdrop, ShotColor, ShotLook,
+    ShotPlacement, TemplateKind, VideoProjectId,
 };
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -22,7 +22,6 @@ use bardo_app::{
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Textarea;
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::tag::Tag;
@@ -422,7 +421,7 @@ impl ProjectsScreen {
                 let new = view.clips.default_model.as_ref()?;
                 let text = bardo.text_with(
                     Text::ClipsChannelModelReplaced,
-                    &[("old", old), ("new", &new.name)],
+                    &[("old", old), ("new", &new.name.to_string())],
                 );
                 Some(kit::notice(Tone::Info, SharedString::from(text), cx).text_xs())
             })
@@ -1178,7 +1177,7 @@ impl ProjectsScreen {
                             .filter(|_| !scene.is_composed())
                             .and_then(|clip| clip.model.as_ref())
                             .map_or_else(dash, |model| {
-                                plain(SharedString::from(model.name.clone()))
+                                plain(SharedString::from(model.name.to_string()))
                             }),
                         numeric: false,
                     },
@@ -2761,81 +2760,34 @@ impl ProjectsScreen {
                 },
             );
 
-        // The model menu: the channel's model, then every model by name.
-        let model_label = match (scene.clip_model(), &view.model) {
-            (None, _) => SharedString::from(
-                bardo.text_with(
-                    Text::SceneClipModelChannel,
-                    &[(
-                        "model",
-                        channel_model
-                            .as_ref()
-                            .map_or("", |model| model.name.as_str()),
-                    )],
-                ),
-            ),
-            (Some(_), Some(model)) => SharedString::from(model.name.clone()),
-            (Some(own), None) => SharedString::from(own.model().to_owned()),
-        };
-        // A model its provider retired checks the one that took its place.
+        // The model picker (#329): the channel's model, or a provider,
+        // model, version and variant of its own. A model its provider
+        // retired shows as the one that took its place.
         let own = scene.clip_model().map(|model| bardo.clip_model_now(model));
-        let channel_title = SharedString::from(
-            bardo.text_with(
-                Text::SceneClipModelChannel,
-                &[(
-                    "model",
-                    channel_model
-                        .as_ref()
-                        .map_or("", |model| model.name.as_str()),
-                )],
-            ),
-        );
-        // Every model under its provider's name; with two providers the
-        // list is longer than some windows, so it scrolls.
-        let menu_models: Vec<(Option<SharedString>, ClipModel)> = models
-            .iter()
-            .enumerate()
-            .map(|(at, model)| {
-                let provider = model.id.provider();
-                let starts_group = at == 0 || models[at - 1].id.provider() != provider;
-                let heading = starts_group.then(|| tr(bardo, Text::ProviderName(provider)));
-                (heading, model.clone())
-            })
-            .collect();
-        let model_menu = Button::new(("scene-clip-model", index))
-            .ghost()
-            .xsmall()
-            .dropdown_caret(true)
-            .label(model_label.clone())
-            .dropdown_menu(move |menu, _, _| {
-                let pick = |value: Option<ClipModelRef>, title: SharedString| {
-                    let screen = screen.clone();
-                    let checked = value == own;
-                    PopupMenuItem::new(title)
-                        .checked(checked)
-                        .on_click(move |_, window, cx| {
-                            let value = value.clone();
-                            let _ = screen.update(cx, |this, cx| {
-                                this.scene_action(window, cx, |bardo, id| {
-                                    bardo.set_scene_clip_model(id, index, value)
-                                });
-                            });
-                        })
-                };
-                let mut menu = menu
-                    .scrollable(true)
-                    .item(pick(None, channel_title.clone()));
-                for (heading, model) in &menu_models {
-                    if let Some(heading) = heading {
-                        menu = menu.separator().label(heading.clone());
-                    }
-                    menu = menu.item(pick(
-                        Some(model.id.clone()),
-                        SharedString::from(model.name.clone()),
-                    ));
-                }
-                menu
+        let on_pick: crate::model_picker::OnModel = Rc::new(move |value, window, cx| {
+            let _ = screen.update(cx, |this, cx| {
+                this.scene_action(window, cx, |bardo, id| {
+                    bardo.set_scene_clip_model(id, index, value)
+                });
             });
+        });
+        // While a clip is being made its model can't change.
+        let model_menu = crate::model_picker::ModelPicker::new(
+            format!("scene-clip-model-{index}"),
+            models
+                .iter()
+                .map(|model| (model.id.clone(), model.name.clone()))
+                .collect(),
+            own,
+            on_pick,
+        )
+        .follow(
+            Text::SceneClipModelChannel,
+            channel_model.as_ref().map(|model| model.id.clone()),
+        )
+        .disabled(view.is_busy())
+        .compact()
+        .render(bardo, cx);
         let plan_note = view.seconds.map(|seconds| {
             let seconds = seconds.to_string();
             let text = match view.price {
@@ -2869,13 +2821,6 @@ impl ProjectsScreen {
                     guide::refs::CLIPS_STRETCH,
                 ))
         });
-        // While a clip is being made its model can't change: the name
-        // shows without the menu.
-        let model_menu: AnyElement = if view.is_busy() {
-            div().text_xs().px_2().child(model_label).into_any_element()
-        } else {
-            model_menu.into_any_element()
-        };
         let model_gone = view
             .model
             .is_none()
@@ -2888,7 +2833,7 @@ impl ProjectsScreen {
             .map(|(old, new)| {
                 let text = bardo.text_with(
                     Text::SceneClipModelReplaced,
-                    &[("old", old), ("new", &new.name)],
+                    &[("old", old), ("new", &new.name.to_string())],
                 );
                 kit::notice(Tone::Info, SharedString::from(text), cx).text_xs()
             });
@@ -3178,9 +3123,8 @@ impl ProjectsScreen {
                     .items_center()
                     .child(kit::anchor_in(
                         TourAnchor::Control(Control::ClipModel),
-                        h_flex()
-                            .gap_x_2()
-                            .items_center()
+                        v_flex()
+                            .gap_1()
                             .child(
                                 div()
                                     .text_xs()
@@ -3329,9 +3273,12 @@ fn clip_record(bardo: &Bardo, models: &[ClipModel], clip: &SceneClip) -> SharedS
     let model = models
         .iter()
         .find(|model| model.id.model() == clip.generation.model)
-        .map_or(clip.generation.model.as_str(), |model| model.name.as_str());
+        .map_or_else(
+            || clip.generation.model.clone(),
+            |model| model.name.to_string(),
+        );
     SharedString::from(bardo.text_with(
         Text::SceneClipRecord,
-        &[("seconds", &clip.seconds.to_string()), ("model", model)],
+        &[("seconds", &clip.seconds.to_string()), ("model", &model)],
     ))
 }

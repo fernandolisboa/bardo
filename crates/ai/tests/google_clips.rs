@@ -60,13 +60,19 @@ fn google_offers_omni_flash_at_each_resolution_from_3_to_15_seconds() {
     let models = adapter.models();
     let offered: Vec<_> = models
         .iter()
-        .map(|model| (model.id.model(), model.name.as_str()))
+        .map(|model| (model.id.model(), model.name.to_string()))
         .collect();
     assert_eq!(
         offered,
         [
-            ("gemini-omni-1.2-flash/720p", "Gemini Omni 1.2 Flash 720p"),
-            ("gemini-omni-1.2-flash/1080p", "Gemini Omni 1.2 Flash 1080p"),
+            (
+                "gemini-omni-1.2-flash/720p",
+                "Gemini Omni 1.2 Flash 720p".to_owned()
+            ),
+            (
+                "gemini-omni-1.2-flash/1080p",
+                "Gemini Omni 1.2 Flash 1080p".to_owned()
+            ),
         ],
         "no model Google has shut down"
     );

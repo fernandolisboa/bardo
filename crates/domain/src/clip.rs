@@ -14,7 +14,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::{
-    ApiKey, AspectRatio, ImageFormat, Money, Provider, ProviderFailure, image_dimensions, shape_of,
+    ApiKey, AspectRatio, ImageFormat, ModelName, Money, Provider, ProviderFailure,
+    image_dimensions, shape_of,
 };
 
 /// Why a model reference is not valid.
@@ -238,8 +239,8 @@ impl ClipDurations {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipModel {
     pub id: ClipModelRef,
-    /// How people call it, e.g. "Kling 3.0 Standard".
-    pub name: String,
+    /// How people call it, in parts: Kling · 3.0 · Standard.
+    pub name: ModelName,
     pub durations: ClipDurations,
 }
 
@@ -548,7 +549,7 @@ mod tests {
         let model = |id: &str| ClipModelRef::new(Provider::Gemini, id).unwrap();
         let offer = |id: &str| ClipModel {
             id: model(id),
-            name: id.to_uppercase(),
+            name: id.to_uppercase().as_str().into(),
             durations: ClipDurations::Range { min: 3, max: 15 },
         };
         let retire = |id: &str, replacement: &str| RetiredClipModel {

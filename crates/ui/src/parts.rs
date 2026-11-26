@@ -84,8 +84,11 @@ pub struct Header {
     pub meta: Option<SharedString>,
     /// The ⓘ that explains the screen.
     pub info: Option<AnyElement>,
-    /// What sits on the other side: the narrator, the month, "New".
+    /// What sits on the other side: the month, "New".
     pub actions: Vec<AnyElement>,
+    /// A row of settings under the title, the full width of the header:
+    /// an open project's narrator, format, mode and cap (#330).
+    pub bar: Option<AnyElement>,
 }
 
 impl Header {
@@ -96,6 +99,7 @@ impl Header {
             meta: None,
             info: None,
             actions: Vec::new(),
+            bar: None,
         }
     }
 

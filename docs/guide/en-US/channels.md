@@ -75,6 +75,11 @@ How the channel's videos are made: which scenes become AI clips and with which m
 - **Motion on stills** and its **Strength**: how a new cut moves the view over each still, the Ken Burns effect. **Varied** (the default for a new channel, at **Medium**) gives each scene a different zoom or pan from the one before; **None** keeps stills still, and is where channels made before motions existed start, so their cuts and renders stay as they were; or pick one motion for every scene. Cuts already made keep their motions, and every still can use another one ([Motion on stills](editor.md#motion)).
 - **Thumbnail look**: how the text of the channel's new YouTube thumbnails looks, Bold unless you change it. Each video can pick another ([Thumbnail](uploading.md#thumbnail)).
 
+<a id="model-picker"></a>
+## Picking a model
+
+Both models are picked one step at a time, each its own short menu: **Provider** (Higgsfield, Higgsfield plan, Kling, Gemini, BytePlus ModelArk), **Model** (Kling, Seedance, Wan, Hailuo, Gemini Omni…), **Version** (3.0, 2.6, 2.5 Turbo…) and, where the version comes in more than one, **Variant** (Standard or Pro, 720p or 1080p, Motion Control…). A step with a single choice shows it greyed out. Changing a step keeps the steps after it where the new choice offers them: switching Kling 3.0 from Higgsfield to Kling keeps Kling 3.0. The first entry of **Provider** follows the default, and the button then shows the default's provider with **(default)**. The same picker chooses a scene's model on [Clips](clips.md#model) and a take's on [Capture](capture.md#performed).
+
 <a id="clip-length"></a>
 ## Clip length
 

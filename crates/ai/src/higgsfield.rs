@@ -49,7 +49,8 @@ const MAX_PROMPT_CHARS: usize = 2_500;
 /// told not to; the output takes the shape of the request (the image's).
 struct Spec {
     model: &'static str,
-    name: &'static str,
+    /// Model, version and variant.
+    name: [&'static str; 3],
     durations: fn() -> ClipDurations,
     fixed: fn() -> Value,
 }
@@ -57,43 +58,43 @@ struct Spec {
 const CATALOG: &[Spec] = &[
     Spec {
         model: DEFAULT_MODEL,
-        name: "Kling 3.0 Standard",
+        name: ["Kling", "3.0", "Standard"],
         durations: || ClipDurations::Range { min: 3, max: 15 },
         fixed: || json!({ "sound": "off" }),
     },
     Spec {
         model: "kling-video/v2.6/pro/image-to-video",
-        name: "Kling 2.6 Pro",
+        name: ["Kling", "2.6", "Pro"],
         durations: || ClipDurations::Choices(vec![5, 10]),
         fixed: || json!({ "sound": "off", "aspect_ratio": "16:9" }),
     },
     Spec {
         model: "kling-video/v2.5-turbo/standard/image-to-video",
-        name: "Kling 2.5 Turbo Standard",
+        name: ["Kling", "2.5 Turbo", "Standard"],
         durations: || ClipDurations::Choices(vec![5, 10]),
         fixed: || json!({}),
     },
     Spec {
         model: "bytedance/seedance-2.0/image-to-video",
-        name: "Seedance 2.0",
+        name: ["Seedance", "2.0", ""],
         durations: || ClipDurations::Range { min: 4, max: 15 },
         fixed: || json!({ "resolution": "1080p", "generate_audio": false }),
     },
     Spec {
         model: "wan/v2.6/image-to-video",
-        name: "Wan 2.6",
+        name: ["Wan", "2.6", ""],
         durations: || ClipDurations::Choices(vec![5, 10, 15]),
         fixed: || json!({ "resolution": "1080p" }),
     },
     Spec {
         model: "minimax/h3/image-to-video",
-        name: "MiniMax H3",
+        name: ["MiniMax", "H3", ""],
         durations: || ClipDurations::Range { min: 5, max: 15 },
         fixed: || json!({}),
     },
     Spec {
         model: "minimax/hailuo-2.3/standard/image-to-video",
-        name: "Hailuo 2.3 Standard",
+        name: ["Hailuo", "2.3", "Standard"],
         durations: || ClipDurations::Choices(vec![6, 10]),
         fixed: || json!({}),
     },
@@ -106,7 +107,7 @@ pub fn models() -> Vec<ClipModel> {
         .map(|spec| ClipModel {
             id: ClipModelRef::new(Provider::Higgsfield, spec.model)
                 .expect("catalog models are valid"),
-            name: spec.name.to_owned(),
+            name: bardo_domain::ModelName::new(spec.name[0], spec.name[1], spec.name[2]),
             durations: (spec.durations)(),
         })
         .collect()
@@ -134,7 +135,8 @@ enum TakeKind {
 /// pages (checked on 2026-10-23).
 struct TakeSpec {
     model: &'static str,
-    name: &'static str,
+    /// Model, version and variant.
+    name: [&'static str; 3],
     kind: TakeKind,
     modes: &'static [TakeMode],
     /// The draft's resolution, for a model with a cheap tier.
@@ -151,7 +153,7 @@ struct TakeSpec {
 const TAKE_CATALOG: &[TakeSpec] = &[
     TakeSpec {
         model: DEFAULT_TAKE_MODEL,
-        name: "Kling 3.0 Motion Control",
+        name: ["Kling", "3.0", "Motion Control"],
         kind: TakeKind::MotionControl,
         modes: &[TakeMode::Recording],
         draft: None,
@@ -165,7 +167,7 @@ const TAKE_CATALOG: &[TakeSpec] = &[
     },
     TakeSpec {
         model: SEEDANCE_VIDEO_EDIT,
-        name: "Seedance 2.5 Video Edit",
+        name: ["Seedance", "2.5", "Video Edit"],
         kind: TakeKind::VideoEdit,
         modes: &[TakeMode::Mesh, TakeMode::Depth],
         draft: Some(("480p", 480)),
@@ -186,7 +188,7 @@ pub fn take_models() -> Vec<TakeModel> {
         .map(|spec| TakeModel {
             id: ClipModelRef::new(Provider::Higgsfield, spec.model)
                 .expect("catalog models are valid"),
-            name: spec.name.to_owned(),
+            name: bardo_domain::ModelName::new(spec.name[0], spec.name[1], spec.name[2]),
             modes: spec.modes.to_vec(),
             draft: spec.draft.map(|(resolution, height)| TakeTier {
                 resolution: Some(resolution.to_owned()),

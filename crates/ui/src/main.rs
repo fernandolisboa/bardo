@@ -21,6 +21,7 @@ mod kit;
 mod layout;
 mod metrics;
 mod missed;
+mod model_picker;
 mod network_accounts;
 mod parts;
 mod performance;

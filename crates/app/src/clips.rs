@@ -2236,7 +2236,7 @@ mod tests {
         let used = |index: usize| {
             let scene: &SceneClipView = &view.scenes[index];
             (
-                scene.model.as_ref().unwrap().name.as_str(),
+                scene.model.as_ref().unwrap().name.to_string(),
                 scene.replaces.as_deref(),
             )
         };
@@ -2247,10 +2247,13 @@ mod tests {
             Some("Veo 3.1 Fast 720p"),
             "the panel says which model the channel had"
         );
-        assert_eq!(used(0), ("Gemini Omni 1.2 Flash 720p", None));
+        assert_eq!(used(0), ("Gemini Omni 1.2 Flash 720p".to_owned(), None));
         assert_eq!(
             used(1),
-            ("Gemini Omni 1.2 Flash 1080p", Some("Veo 3.1 Lite 1080p")),
+            (
+                "Gemini Omni 1.2 Flash 1080p".to_owned(),
+                Some("Veo 3.1 Lite 1080p")
+            ),
             "the scene keeps its resolution and says what it had"
         );
         assert_eq!(view.missing, [0, 1, 2], "every scene can be animated");

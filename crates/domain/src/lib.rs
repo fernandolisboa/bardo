@@ -75,6 +75,7 @@ mod market;
 mod media;
 mod metadata;
 mod mix;
+mod model_name;
 mod motion;
 mod music_prompt;
 mod music_track;
@@ -267,6 +268,9 @@ pub use metadata::{
 pub use mix::{
     AudioLane, DEFAULT_DUCK, DUCK_ATTACK, DUCK_HOLD, DUCK_RANGE, DUCK_RELEASE, Decibels, Dip,
     DuckEnvelope, Ducking, GAIN_RANGE, LaneMix, Mix,
+};
+pub use model_name::{
+    LevelChoices, LevelPick, ModelLevel, ModelName, ModelOption, model_levels, pick_model,
 };
 pub use motion::{
     MOTION_VARIED, Motion, MotionDefault, MotionKind, MotionPattern, MotionStrength, MotionView,

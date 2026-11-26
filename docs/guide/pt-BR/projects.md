@@ -15,6 +15,11 @@ Um projeto de vídeo é um vídeo no caminho entre uma ideia aprovada e uma publ
 
 O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos do canal; escolha um para trocar. Um projeto de anúncio aparece marcado como **Anúncio** nesse menu, e a linha sob o nome dele começa com **Anúncio de** e o produto que ele anuncia. Um anúncio cujo produto era uma *ideia* quando o projeto começou é um conceito: ele aparece marcado como **Conceito** nesse menu e ao lado do nome, e continua com essa marca mesmo que o produto mude de tipo depois ([Uma imagem de conceito para uma ideia](products.md#concept)). O seletor de canal ao lado de **Projetos** lista os projetos de outro canal.
 
+<a id="settings"></a>
+## As configurações do vídeo
+
+Sob o nome do projeto, uma barra reúne o que o vídeo é e como ele é feito. **Vídeo** tem o [narrador](#narrator), o [formato](#format), a [duração](#length) e o [estilo visual](#style); **Produção e gasto** tem o [modo](#mode), o [teto](#mode) e quanto o vídeo inteiro vai custar. Cada configuração tem o rótulo em cima e um ⓘ que a explica. Numa janela com menos de 1000 pixels de largura, a barra fica compacta, com os rótulos ao lado dos campos e sem os nomes dos grupos, para a etapa embaixo continuar aparecendo. O que o teto tem a dizer (o teto padrão oferecido, um vídeo acima do teto, um teto salvo) aparece sob a barra, na largura dela.
+
 <a id="narrator"></a>
 ## O narrador
 
@@ -23,7 +28,7 @@ O narrador é a persona que lê a narração do vídeo, e o tom e o estilo de ro
 <a id="format"></a>
 ## Short ou longo
 
-**Formato**, ao lado do nome do projeto, diz se este vídeo é um Short (vertical, menos de um minuto) ou um vídeo longo (16:9, de 8 a 10 minutos). **Do canal** segue o [formato do vídeo](channels.md#format) do canal; escolha **Short** ou **Longo** para fazer só este vídeo do outro tipo.
+**Formato**, na barra de configurações, diz se este vídeo é um Short (vertical, menos de um minuto) ou um vídeo longo (16:9, de 8 a 10 minutos). **Do canal** segue o [formato do vídeo](channels.md#format) do canal; escolha **Short** ou **Longo** para fazer só este vídeo do outro tipo.
 
 O formato vale para o que for feito depois: o tamanho do próximo roteiro, o formato das próximas imagens e clipes das cenas, um corte novo no editor e o [preset de render](render.md#targets) do YouTube. O que já foi feito mantém o formato, então, depois de trocar, escreva o roteiro de novo e desenhe as cenas de novo para ter um vídeo coerente.
 
@@ -44,7 +49,7 @@ O estilo vale para o que for desenhado a seguir: o próximo plano de cenas, as p
 <a id="mode"></a>
 ## Como é produzido, e quanto vai custar
 
-**Modo**, ao lado da duração, diz como este vídeo é feito: quais cenas viram clipes de IA e com qual modelo. As outras cenas ficam em imagens paradas, com o [movimento nas imagens](channels.md#defaults) do canal.
+**Modo**, em **Produção e gasto**, diz como este vídeo é feito: quais cenas viram clipes de IA e com qual modelo. As outras cenas ficam em imagens paradas, com o [movimento nas imagens](channels.md#defaults) do canal.
 
 - **Econômico**: imagens com movimento, sem clipes de IA. O mais barato.
 - **Gancho animado**: imagens com movimento, e as cenas que começam nos primeiros 10 segundos animadas pelo Kling 2.6 em 720p, para prender quem assiste. Canais novos começam assim.
@@ -52,7 +57,7 @@ O estilo vale para o que for desenhado a seguir: o próximo plano de cenas, as p
 - **Tudo animado, premium**: todas as cenas animadas pelo Kling 3.0 em 1080p.
 - **Tudo animado, modelo do canal**: todas as cenas animadas pelo [modelo de vídeo](channels.md#defaults) do canal, como fazem os canais criados antes dos modos.
 
-**Do canal** segue o [modo de produção](channels.md#production) do canal. Cada opção do menu mostra quanto o vídeo inteiro custaria naquele modo, e a linha ao lado mostra o total do modo escolhido e quanto já foi gasto. A estimativa soma o que falta fazer (roteiro, narração, plano de cenas, imagens e retratos, e os clipes que o modo faz) pela [tabela de preços](bardo:go/costs), então ela cai conforme o vídeo é feito. Antes de existir roteiro, ela supõe a [duração](#length) do vídeo, ou um minuto para um Short e oito para um vídeo longo; depois, quanto o roteiro dura lido. Com a tabela de preços que vem com o Bardo, um Short inteiro custa cerca de US$ 1,65 no Econômico, US$ 2,45 com o gancho animado, US$ 5,85 tudo animado e US$ 8,35 no premium; um vídeo longo, cerca de US$ 9, US$ 10, US$ 43 e US$ 63. Um vídeo de 30 segundos custa cerca de US$ 1,05 no Econômico e US$ 1,90 com o gancho animado; um de 3 minutos, cerca de US$ 3,85 e US$ 4,70. O Kling 2.6 faz clipes de 5 ou 10 segundos, então uma cena de 6 segundos paga por 10.
+**Do canal** segue o [modo de produção](channels.md#production) do canal. Cada opção do menu mostra quanto o vídeo inteiro custaria naquele modo, e a linha embaixo mostra o total do modo escolhido e quanto já foi gasto. A estimativa soma o que falta fazer (roteiro, narração, plano de cenas, imagens e retratos, e os clipes que o modo faz) pela [tabela de preços](bardo:go/costs), então ela cai conforme o vídeo é feito. Antes de existir roteiro, ela supõe a [duração](#length) do vídeo, ou um minuto para um Short e oito para um vídeo longo; depois, quanto o roteiro dura lido. Com a tabela de preços que vem com o Bardo, um Short inteiro custa cerca de US$ 1,65 no Econômico, US$ 2,45 com o gancho animado, US$ 5,85 tudo animado e US$ 8,35 no premium; um vídeo longo, cerca de US$ 9, US$ 10, US$ 43 e US$ 63. Um vídeo de 30 segundos custa cerca de US$ 1,05 no Econômico e US$ 1,90 com o gancho animado; um de 3 minutos, cerca de US$ 3,85 e US$ 4,70. O Kling 2.6 faz clipes de 5 ou 10 segundos, então uma cena de 6 segundos paga por 10.
 
 Um modo cujos clipes precisam de uma chave que você não salvou avisa no menu: os modos do Kling precisam de uma chave Kling em [Configurações › Chaves de API](bardo:go/settings/keys). Trocar o modo vale para o que for animado depois: na etapa Clipes, **Animar cenas sem clipe** (ou **Animar o gancho**) anima só as cenas que o modo anima, clipes já feitos ficam, e qualquer cena ainda pode ser animada à mão com qualquer modelo.
 

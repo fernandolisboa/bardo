@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    ApiKey, ClipHandle, ClipModelRef, GeneratedClip, Metered, Money, Provider, ProviderFailure,
-    TakeMode,
+    ApiKey, ClipHandle, ClipModelRef, GeneratedClip, Metered, ModelName, Money, Provider,
+    ProviderFailure, TakeMode,
 };
 
 /// Which of a take model's results.
@@ -68,8 +68,8 @@ pub struct TakeTier {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TakeModel {
     pub id: ClipModelRef,
-    /// How people call it, e.g. "Kling 3.0 Motion Control".
-    pub name: String,
+    /// How people call it, in parts: Kling · 3.0 · Motion Control.
+    pub name: ModelName,
     /// The control video modes it takes, its default first.
     pub modes: Vec<TakeMode>,
     /// Its cheap tier, when it has one.
