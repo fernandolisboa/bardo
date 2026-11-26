@@ -4,6 +4,77 @@ What changed in each version of Bardo, newest first. Each version is a
 [release on GitHub](https://github.com/fernandolisboa/bardo/releases) with the
 installer, and its notes there are the section below.
 
+## 0.4.0
+
+### Ads for a product
+
+Make an ad for a product from a brief and its pictures (#272).
+
+- **Products** (#273): a library of things to advertise (digital, physical,
+  a service or an idea), each with a brief, the facts you stand behind, up to
+  three images and a logo.
+- **Product sheet** (#274): Claude researches the product on the web (at most
+  8 searches and 5 pages) or writes from your brief, and every claim it finds
+  waits for you to confirm or reject it. An ad states only confirmed claims.
+- **Ad angles** (#275): Claude proposes angles for a channel's audience, the
+  decision engine ranks them, and approving one starts an ad project at its
+  new **Brief** stage.
+- **Ad script** (#276): its own template, a claims check that marks any
+  sentence no confirmed claim backs, and a new 15-second length.
+- **Product shots** (#278, #285): scenes of the real product are composed by
+  Bardo from your photo, with layouts and plain or drawn backdrops; your photo
+  never goes to a model for them.
+- **Product in use** (#279): drawn with the photo as a reference, and checked
+  by you against it before its clip and the render.
+- **Concept image** (#280): an idea with no photo gets a drawn concept image,
+  marked **Concept** wherever it shows.
+- **End card** (#281): call to action, link, offer and logo composed from a
+  design per project.
+- **Commercial disclosure** (#282): each post says whether the product is your
+  brand or a paid partnership, as each network documents it, and the upload
+  review lists every sensitive claim and unchecked text to acknowledge first.
+- **Exports for ad managers** (#283): the cut in 4:5 and 1:1 besides the
+  video's own shape, with ad texts of 125 and 40 characters.
+
+### Scenes and clips
+
+- **Storyboard** (#258): the scene plan tells one story with recurring places,
+  and each image is drawn from the ones before it, so scenes follow on.
+- **Visual styles** (#259): 26 styles, a default per channel and an optional
+  one per video, added by Bardo to every image, portrait and thumbnail.
+- **No scene without its portraits** (#269): a scene whose person has no
+  portrait in the video's style is not drawn and costs nothing.
+- **Shorter clips** (#260): a scene a little longer than a clip length gets the
+  shorter clip, slowed to fit, up to the channel's stretch limit.
+- **Google clips** (#298): Veo was shut down in the Gemini API; Google clips
+  are Gemini Omni 1.2 Flash at 720p or 1080p, and a retired model is replaced
+  by the one of the same resolution.
+- **Higgsfield plan** (#255): spend your higgsfield.ai plan credits on clips by
+  signing in under Settings › API keys › Plans you sign in to.
+- **Video length** (#253): 30 seconds, 1 minute or 3 minutes per video.
+- **Default video model** (#251): follows a provider whose key is saved.
+
+### Spending
+
+- **Spend cap per video** (#268): a new video starts with a cap of US$ 5
+  (Short) or US$ 20 (long). A model with no known price always asks first, and
+  a retry checks the cap again for what it still pays for.
+- **Paid calls sent once** (#263, #264, #265, #266, #270, #271, #289, #290):
+  a paid call is never sent twice, a lost answer is recorded in Costs, a
+  stopping job keeps what it saved, and a retry leaves what a job delivered.
+- **Long plans and stopped requests** (#267, #295, #309): long videos' scene
+  plans stream, a cancelled job gives up its Claude request, and a paid answer
+  is kept until it is applied.
+- **Narration again** (#262): remaking the narration keeps paid scenes.
+
+### Upgrading from 0.3.0
+
+Projects, keys and connections carry over, and the database updates itself on
+the first start. Channels keep their look under **From the channel's notes**.
+A video made before this version keeps its spend cap and is offered the
+default once. A channel or scene set to a Veo model uses Gemini Omni 1.2
+Flash.
+
 ## 0.3.0
 
 ### Cost of a video
