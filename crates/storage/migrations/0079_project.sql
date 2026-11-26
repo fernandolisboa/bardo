@@ -59,7 +59,8 @@ SELECT c.id, c.profile_id, c.name,
            WHEN 6 THEN 'orange'
            ELSE 'slate'
        END,
-       CAST(ROUND((julianday(c.created_at) - 2440587.5) * 86400000) AS INTEGER)
+       COALESCE(CAST(ROUND((julianday(c.created_at) - 2440587.5) * 86400000) AS INTEGER),
+                CAST(ROUND((julianday('now') - 2440587.5) * 86400000) AS INTEGER))
 FROM channel c
 WHERE c.id IN (SELECT project_id FROM temp.channel_group);
 

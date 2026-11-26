@@ -186,6 +186,18 @@ impl CostsScreen {
         }
     }
 
+    /// Projects were made or archived: the filter lists them as they are
+    /// now, and keeps its project while it is still listed.
+    pub fn projects_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let choices = kit::filter_choices(self.bardo.read(cx));
+        if !choices.iter().any(|choice| choice.value == self.filter) {
+            self.filter = self.bardo.read(cx).starting_filter();
+            self.load(cx);
+            cx.notify();
+        }
+        kit::refill_filter(&self.filter_select, choices, self.filter, window, cx);
+    }
+
     /// Another project opened: the filter starts on it, and lists the
     /// projects as they are now.
     pub fn project_switched(&mut self, window: &mut Window, cx: &mut Context<Self>) {

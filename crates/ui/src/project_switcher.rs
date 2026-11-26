@@ -9,6 +9,8 @@
 //! `switch_project`, `create_project`); this file draws them and tells
 //! the shell when the open project changed, so the screens re-read it.
 
+use std::collections::HashMap;
+
 use bardo_app::bardo_domain::{Project, ProjectColor, ProjectDraft, ProjectId};
 use bardo_app::{Bardo, Control, Text, TourAnchor};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -276,6 +278,7 @@ impl ProjectSwitcher {
     fn row(
         &self,
         project: &Project,
+        count: usize,
         open: Option<ProjectId>,
         favorite_at: Option<usize>,
         starrable: bool,
@@ -284,7 +287,6 @@ impl ProjectSwitcher {
         let t = look(cx).tokens;
         let bardo = self.bardo.read(cx);
         let id = project.id;
-        let count = bardo.project_channels(id).map(|c| c.len()).unwrap_or(0);
         let starred = project.favorite.is_some();
         let selected = open == Some(id);
         let key = id.to_string();
@@ -399,6 +401,12 @@ impl ProjectSwitcher {
             }
         };
         let none_at_all = bardo.projects().map(|all| all.is_empty()).unwrap_or(true);
+        // Counted once for every row, rather than reading the channels per row.
+        let mut counts: HashMap<ProjectId, usize> = HashMap::new();
+        for channel in bardo.all_channels().unwrap_or_default() {
+            *counts.entry(channel.project).or_default() += 1;
+        }
+        let count = |id: ProjectId| counts.get(&id).copied().unwrap_or(0);
         let favorites: Vec<AnyElement> = list
             .favorites
             .iter()
@@ -406,18 +414,18 @@ impl ProjectSwitcher {
             // Reordering only makes sense on the whole list.
             .map(|(at, project)| {
                 let at = self.query.trim().is_empty().then_some(at);
-                self.row(project, open, at, true, cx)
+                self.row(project, count(project.id), open, at, true, cx)
             })
             .collect();
         let recent: Vec<AnyElement> = list
             .recent
             .iter()
-            .map(|project| self.row(project, open, None, true, cx))
+            .map(|project| self.row(project, count(project.id), open, None, true, cx))
             .collect();
         let all: Vec<AnyElement> = list
             .all
             .iter()
-            .map(|project| self.row(project, open, None, true, cx))
+            .map(|project| self.row(project, count(project.id), open, None, true, cx))
             .collect();
         let bardo = self.bardo.read(cx);
         let empty = if none_at_all {

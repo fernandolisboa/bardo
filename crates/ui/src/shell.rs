@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use bardo_app::bardo_domain::{BudgetLevel, TourId, VideoProjectId};
+use bardo_app::bardo_domain::{BudgetLevel, ProjectId, TourId, VideoProjectId};
 use bardo_app::{
     Bardo, Destination, GuidePlace, GuideRef, ScreenTour, SettingsTab, SetupTarget, SpendSummary,
     Stage, Text, TourMove, TourPlace,
@@ -63,6 +63,9 @@ pub struct Shell {
     settings: Entity<SettingsScreen>,
     /// The title bar's project switcher.
     switcher: Entity<ProjectSwitcher>,
+    /// The project open when the screens last loaded: a first channel or
+    /// a settings file can open one without the switcher.
+    open_project: Option<ProjectId>,
     /// Kept alive while closed, so the navigation's count stays current.
     jobs: Entity<JobsPanel>,
     jobs_open: bool,
@@ -243,6 +246,7 @@ impl Shell {
         });
         let update_checks = crate::updates::check_daily(bardo.downgrade(), cx);
         let privacy_upkeep = crate::privacy::upkeep_daily(bardo.downgrade(), cx);
+        let open_project = open_project_of(&bardo, cx);
         let mut shell = Self {
             bardo,
             screen: Destination::START,
@@ -258,6 +262,7 @@ impl Shell {
             costs,
             settings,
             switcher,
+            open_project,
             jobs,
             jobs_open: false,
             missed,
@@ -284,6 +289,7 @@ impl Shell {
     /// Re-reads every screen that shows the open project, and starts Jobs
     /// and Costs on it.
     fn project_switched(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_project = open_project_of(&self.bardo, cx);
         self.channels
             .update(cx, |channels, cx| channels.reload(window, cx));
         self.accounts
@@ -318,6 +324,15 @@ impl Shell {
     /// Goes to `place`; Jobs opens or closes its panel beside the screen,
     /// Guide its menu.
     fn pick(&mut self, place: Destination, window: &mut Window, cx: &mut Context<Self>) {
+        if open_project_of(&self.bardo, cx) != self.open_project {
+            self.project_switched(window, cx);
+        } else if matches!(place, Destination::Jobs | Destination::Costs) {
+            // Projects made elsewhere (a settings file) join the filters.
+            self.jobs
+                .update(cx, |jobs, cx| jobs.projects_changed(window, cx));
+            self.costs
+                .update(cx, |costs, cx| costs.projects_changed(window, cx));
+        }
         if place == Destination::Jobs {
             self.jobs_open = !self.jobs_open;
             cx.notify();
@@ -1084,4 +1099,14 @@ impl Shell {
                 .iter()
                 .any(|job| job.state().is_active())
     }
+}
+
+/// The project open now, if any.
+fn open_project_of(bardo: &Entity<Bardo>, cx: &App) -> Option<ProjectId> {
+    bardo
+        .read(cx)
+        .open_project()
+        .ok()
+        .flatten()
+        .map(|project| project.id)
 }

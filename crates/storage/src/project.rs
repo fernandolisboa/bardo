@@ -165,10 +165,12 @@ impl ProjectRepository for Database {
     }
 }
 
-/// A subquery, to join as `origin`, that finds the project, channel and
-/// video of the video id `video` (an SQL expression) or, without one, of
-/// the channel id `channel`: columns `project_id`, `project_name`,
-/// `channel_name` and `video_title`. No row when neither names a channel.
+/// A subquery, to join as `origin`, that finds the project and channel of
+/// the channel id `channel` (an SQL expression) or, without one, of the
+/// video id `video`'s channel, with that video's title either way (a
+/// version names its source video and the channel it is made for):
+/// columns `project_id`, `project_name`, `channel_name` and `video_title`.
+/// No row when neither names a channel.
 pub(crate) fn origin_of(video: &str, channel: &str) -> String {
     format!(
         "(SELECT p.id AS project_id, p.name AS project_name, c.name AS channel_name,
@@ -176,7 +178,7 @@ pub(crate) fn origin_of(video: &str, channel: &str) -> String {
           FROM channel c
           JOIN project p ON p.id = c.owner_project_id
           LEFT JOIN video_project v ON v.id = ({video})
-          WHERE c.id = COALESCE(v.channel_id, ({channel})))"
+          WHERE c.id = COALESCE(({channel}), v.channel_id))"
     )
 }
 
@@ -423,6 +425,63 @@ mod tests {
                 project_name: Some("Space".into()),
                 channel_name: Some("Space EN".into()),
                 video_title: None,
+            }
+        );
+    }
+    #[test]
+    fn a_job_naming_a_channel_is_that_channels_even_with_another_channels_video() {
+        use bardo_domain::{Job, JobKind, JobRepository, VideoProjectId};
+
+        let (db, owner) = database_with_profile();
+        let space = project(owner, "Space");
+        db.save_project(&space).unwrap();
+        let channel = |name: &str| {
+            let channel = Channel::new(
+                owner,
+                space.id,
+                ChannelDetails::validate(ChannelDraft {
+                    name: name.into(),
+                    ..ChannelDraft::default()
+                })
+                .unwrap(),
+            );
+            ChannelRepository::save(&db, &channel).unwrap();
+            channel
+        };
+        let english = channel("Space EN");
+        let portuguese = channel("Space PT");
+        let video = VideoProjectId::new();
+        db.conn()
+            .execute_batch(&format!(
+                "INSERT INTO theme (id, profile_id, channel_id, niche, title, angle, status,
+                     suggested_at, position)
+                 VALUES ('t', '{owner}', '{english}', 'space', 'Apollo', '', 'approved', 0, 0);
+                 INSERT INTO video_project (id, profile_id, channel_id, theme_id, niche, title,
+                     created_at)
+                 VALUES ('{video}', '{owner}', '{english}', 't', 'space', 'Apollo', 1);",
+                english = english.id,
+            ))
+            .unwrap();
+
+        // A version of the English video, made for the Portuguese channel.
+        let job = Job::new(
+            owner,
+            JobKind::Localization,
+            format!(
+                "{{\"project\":\"{video}\",\"channel\":\"{}\"}}",
+                portuguese.id
+            ),
+        );
+        JobRepository::save(&db, &job).unwrap();
+
+        let jobs = JobRepository::list(&db, owner).unwrap();
+        assert_eq!(
+            jobs[0].origin(),
+            &WorkOrigin {
+                project: Some(space.id),
+                project_name: Some("Space".into()),
+                channel_name: Some("Space PT".into()),
+                video_title: Some("Apollo".into()),
             }
         );
     }

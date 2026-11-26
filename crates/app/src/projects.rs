@@ -230,8 +230,16 @@ impl Bardo {
             .iter()
             .map(|project| project.name().to_lowercase())
             .collect();
+        let name = name.trim();
+        let numbered = |n: usize| {
+            // Room for the number, so the name stays within the limit.
+            let suffix = format!(" {n}");
+            let keep = ProjectDetails::MAX_NAME_CHARS.saturating_sub(suffix.chars().count());
+            let base: String = name.chars().take(keep).collect();
+            format!("{}{suffix}", base.trim_end())
+        };
         let name = std::iter::once(name.to_owned())
-            .chain((2..).map(|n| format!("{name} {n}")))
+            .chain((2..).map(numbered))
             .find(|candidate| !taken.contains(&candidate.to_lowercase()))
             .unwrap_or_else(|| name.to_owned());
         let details = ProjectDetails::validate(ProjectDraft {
@@ -525,6 +533,21 @@ mod tests {
         let channel = channel(&app, "cooking");
         let open = app.open_project().unwrap().unwrap();
         assert_eq!(open.name(), "cooking 2");
+        assert_eq!(channel.project, open.id);
+    }
+
+    #[test]
+    fn a_numbered_project_name_stays_within_the_limit() {
+        let (app, db) = app();
+        let long = "a".repeat(ProjectDetails::MAX_NAME_CHARS);
+        let mut archived = app.create_project(draft(&long)).unwrap();
+        archived.state = ProjectState::Archived;
+        db.save_project(&archived).unwrap();
+
+        let channel = channel(&app, &long);
+        let open = app.open_project().unwrap().unwrap();
+        let expected = format!("{} 2", "a".repeat(ProjectDetails::MAX_NAME_CHARS - 2));
+        assert_eq!(open.name(), expected);
         assert_eq!(channel.project, open.id);
     }
 

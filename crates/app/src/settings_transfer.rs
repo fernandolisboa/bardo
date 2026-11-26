@@ -2029,11 +2029,13 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        app.create_channel(ChannelDraft {
-            name: "Segundo".into(),
-            ..ChannelDraft::default()
-        })
-        .unwrap();
+        for name in ["Segundo", "Terceiro"] {
+            app.create_channel(ChannelDraft {
+                name: name.into(),
+                ..ChannelDraft::default()
+            })
+            .unwrap();
+        }
         let path = export(&app, &ticked(&app.settings_to_export()), dir.path());
         let target = Harness::new();
         let mut other = target.start();
@@ -2073,7 +2075,10 @@ mod tests {
             "Arquivos do Espaço"
         );
         assert_eq!(project_of("Segundo").id, mine.id);
-        assert_ne!(brand.id, mine.id);
+        // A channel new here arrives in its own project's name, not its own.
+        let terceiro = project_of("Terceiro");
+        assert_eq!(terceiro.name(), brand.name());
+        assert_ne!(terceiro.id, mine.id);
         assert_eq!(other.open_project().unwrap().unwrap().id, mine.id);
     }
 

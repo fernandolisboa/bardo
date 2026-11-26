@@ -67,7 +67,7 @@ pub fn channel_pick(picker: impl IntoElement, channels: &[Channel], cx: &App) ->
 /// One choice of a project filter (Jobs, Costs).
 #[derive(Clone)]
 pub struct FilterChoice {
-    value: ProjectFilter,
+    pub value: ProjectFilter,
     title: SharedString,
 }
 
