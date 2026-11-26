@@ -287,7 +287,7 @@ fn measured(loudness: bardo_media::ffmpeg::Loudness) -> MeasuredLoudness {
 /// equal fingerprints, on any machine and Rust version. Its media go by
 /// their names in the project folder, so a data folder that moves (a
 /// backup restored, another Windows account) keeps its renders current.
-fn fingerprint(plan: &RenderPlan) -> String {
+pub(crate) fn fingerprint(plan: &RenderPlan) -> String {
     let name = |path: &mut PathBuf| {
         if let Some(name) = path.file_name() {
             *path = PathBuf::from(name);

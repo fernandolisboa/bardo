@@ -62,7 +62,7 @@ impl ShotComposer for ProductShots {
     fn compose(&self, image: &[u8], recipe: &ShotRecipe<'_>) -> Result<ComposedPicture, ShotError> {
         let picture = read(image)?;
         let layout = ShotLayout::of(
-            recipe.aspect,
+            recipe.shape,
             (picture.width(), picture.height()),
             standing(&picture, recipe.layout),
             recipe.placement,
@@ -83,7 +83,7 @@ impl ShotComposer for ProductShots {
             (Some((bytes, layout)), Some(room)) => {
                 let picture = read(bytes)?;
                 let layout = ShotLayout::in_room(
-                    recipe.aspect,
+                    recipe.shape,
                     room,
                     (picture.width(), picture.height()),
                     standing(&picture, layout),
@@ -594,7 +594,7 @@ fn corner_cover(x: u32, y: u32, width: u32, height: u32, radius: u32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use bardo_domain::{AspectRatio, CAPTION_BAND, CaptionStyle, ShotPlacement, shot_frame};
+    use bardo_domain::{CaptionStyle, FrameShape, ShotPlacement, caption_band, shot_frame};
     use image::codecs::jpeg::JpegEncoder;
     use image::codecs::webp::WebPEncoder;
     use image::{Rgba, RgbaImage};
@@ -643,9 +643,9 @@ mod tests {
         bytes
     }
 
-    fn recipe(aspect: AspectRatio, layout: ProductLayout) -> ShotRecipe<'static> {
+    fn recipe(aspect: FrameShape, layout: ProductLayout) -> ShotRecipe<'static> {
         ShotRecipe {
-            aspect,
+            shape: aspect,
             layout,
             placement: ShotPlacement::Center,
             backdrop: BackdropPaint::Auto,
@@ -658,11 +658,11 @@ mod tests {
         image::load_from_memory(&shot.png).unwrap().into_rgb8()
     }
 
-    fn composed(bytes: &[u8], aspect: AspectRatio) -> RgbImage {
+    fn composed(bytes: &[u8], aspect: FrameShape) -> RgbImage {
         composed_as(bytes, &recipe(aspect, ProductLayout::Card))
     }
 
-    fn card_of(aspect: AspectRatio, picture: (u32, u32)) -> ShotLayout {
+    fn card_of(aspect: FrameShape, picture: (u32, u32)) -> ShotLayout {
         ShotLayout::of(aspect, picture, ProductLayout::Card, ShotPlacement::Center)
     }
 
@@ -678,7 +678,7 @@ mod tests {
         use bardo_domain::{CardLayout, CardLogoPlace, CardTextPlace};
         let source = pattern(1200, 800);
         let logo = pattern(400, 200);
-        for aspect in AspectRatio::ALL {
+        for aspect in FrameShape::ALL {
             let layout = CardLayout::of(
                 aspect,
                 CardTextPlace::Above,
@@ -689,7 +689,7 @@ mod tests {
             let bytes = png(&source);
             let logo_bytes = png(&logo);
             let recipe = CardRecipe {
-                aspect,
+                shape: aspect,
                 layout,
                 backdrop: BackdropPaint::Plain {
                     from: ShotColor([10, 20, 30]),
@@ -757,7 +757,7 @@ mod tests {
 
     #[test]
     fn a_shot_holds_the_images_pixels_scaled_and_a_plain_backdrop() {
-        for aspect in AspectRatio::ALL {
+        for aspect in FrameShape::ALL {
             for (width, height) in [(1200, 800), (900, 1500)] {
                 let source = pattern(width, height);
                 let shot = composed(&png(&source), aspect);
@@ -809,23 +809,23 @@ mod tests {
     #[test]
     fn jpeg_and_webp_images_are_composed_too() {
         let source = pattern(800, 800);
-        let from_png = composed(&png(&source), AspectRatio::Vertical);
+        let from_png = composed(&png(&source), FrameShape::Vertical);
 
         let mut webp = Vec::new();
         WebPEncoder::new_lossless(&mut webp)
             .write_image(source.as_raw(), 800, 800, ExtendedColorType::Rgb8)
             .unwrap();
         assert!(webp.starts_with(b"RIFF"));
-        assert_eq!(composed(&webp, AspectRatio::Vertical), from_png);
+        assert_eq!(composed(&webp, FrameShape::Vertical), from_png);
 
         let mut jpeg = Vec::new();
         JpegEncoder::new_with_quality(&mut jpeg, 95)
             .write_image(source.as_raw(), 800, 800, ExtendedColorType::Rgb8)
             .unwrap();
-        let from_jpeg = composed(&jpeg, AspectRatio::Vertical);
+        let from_jpeg = composed(&jpeg, FrameShape::Vertical);
         assert_eq!(from_jpeg.dimensions(), from_png.dimensions());
         // The same picture, but for what JPEG itself loses.
-        let layout = card_of(AspectRatio::Vertical, (800, 800));
+        let layout = card_of(FrameShape::Vertical, (800, 800));
         let middle = (
             layout.card.x + layout.card.width / 2,
             layout.card.y + layout.card.height / 2,
@@ -844,8 +844,8 @@ mod tests {
             true => Rgba([200, 30, 30, 255]),
             false => Rgba([0, 255, 0, 0]),
         });
-        let shot = composed(&png_rgba(&source), AspectRatio::Landscape);
-        let card = card_of(AspectRatio::Landscape, (1000, 1000)).card;
+        let shot = composed(&png_rgba(&source), FrameShape::Landscape);
+        let card = card_of(FrameShape::Landscape, (1000, 1000)).card;
         let backdrop = *shot.get_pixel(0, 0);
         let row = card.y + card.height / 2;
         assert_eq!(
@@ -873,15 +873,15 @@ mod tests {
         };
         // A light image, bluish: a deep blue backdrop.
         let pale = RgbImage::from_pixel(700, 700, Rgb([200, 220, 250]));
-        let backdrop = *composed(&png(&pale), AspectRatio::Vertical).get_pixel(0, 0);
+        let backdrop = *composed(&png(&pale), FrameShape::Vertical).get_pixel(0, 0);
         assert!(light(backdrop) < 80.0, "{backdrop:?}");
         assert!(backdrop[2] > backdrop[0], "it keeps the image's color");
         // A dark image: a pale backdrop.
         let dark = RgbImage::from_pixel(700, 700, Rgb([20, 24, 40]));
-        let backdrop = *composed(&png(&dark), AspectRatio::Vertical).get_pixel(0, 0);
+        let backdrop = *composed(&png(&dark), FrameShape::Vertical).get_pixel(0, 0);
         assert!(light(backdrop) > 200.0, "{backdrop:?}");
         // The same image always gets the same picture.
-        let card = recipe(AspectRatio::Vertical, ProductLayout::Card);
+        let card = recipe(FrameShape::Vertical, ProductLayout::Card);
         assert_eq!(
             ProductShots.compose(&png(&dark), &card).unwrap(),
             ProductShots.compose(&png(&dark), &card).unwrap()
@@ -892,7 +892,7 @@ mod tests {
     fn a_file_that_is_no_picture_is_refused() {
         for bytes in [&b""[..], b"not an image", b"\x89PNG\r\n\x1a\ncut short"] {
             assert!(matches!(
-                ProductShots.compose(bytes, &recipe(AspectRatio::Vertical, ProductLayout::Card)),
+                ProductShots.compose(bytes, &recipe(FrameShape::Vertical, ProductLayout::Card)),
                 Err(ShotError::Unreadable(_))
             ));
         }
@@ -916,7 +916,7 @@ mod tests {
             (ProductLayout::Device, opaque(1080, 2340)),
             (ProductLayout::Device, opaque(1920, 1080)),
         ];
-        for aspect in AspectRatio::ALL {
+        for aspect in FrameShape::ALL {
             for (layout, source) in &pictures {
                 for placement in ShotPlacement::ALL {
                     let recipe = ShotRecipe {
@@ -960,7 +960,7 @@ mod tests {
 
     #[test]
     fn a_cut_out_photo_stands_on_the_backdrop_with_a_soft_shadow() {
-        let aspect = AspectRatio::Vertical;
+        let aspect = FrameShape::Vertical;
         let source = cut_out(1000, 1000);
         let shot = composed_as(&png_rgba(&source), &recipe(aspect, ProductLayout::Cutout));
         let at = ShotLayout::of(
@@ -996,7 +996,7 @@ mod tests {
             ((1920, 1080), DeviceKind::Browser),
         ] {
             let source = opaque(picture.0, picture.1);
-            let aspect = AspectRatio::Vertical;
+            let aspect = FrameShape::Vertical;
             let shot = composed_as(&png_rgba(&source), &recipe(aspect, ProductLayout::Device));
             let at = ShotLayout::of(
                 aspect,
@@ -1026,7 +1026,7 @@ mod tests {
                     to,
                     direction,
                 },
-                ..recipe(AspectRatio::Landscape, ProductLayout::Card)
+                ..recipe(FrameShape::Landscape, ProductLayout::Card)
             };
             let shot = composed_as(&png_rgba(&source), &recipe);
             let (w, h) = shot.dimensions();
@@ -1050,7 +1050,7 @@ mod tests {
                 to: from,
                 direction: BackdropDirection::Down,
             },
-            ..recipe(AspectRatio::Vertical, ProductLayout::Card)
+            ..recipe(FrameShape::Vertical, ProductLayout::Card)
         };
         let shot = composed_as(&png_rgba(&source), &recipe);
         assert_eq!(shot.get_pixel(0, 0).0, from.0);
@@ -1061,7 +1061,7 @@ mod tests {
     fn a_drawn_backdrop_covers_the_frame_whatever_its_shape() {
         let backdrop = png(&RgbImage::from_pixel(1920, 1080, Rgb([90, 140, 60])));
         let source = opaque(600, 600);
-        for aspect in AspectRatio::ALL {
+        for aspect in FrameShape::ALL {
             let recipe = ShotRecipe {
                 backdrop: BackdropPaint::Picture(&backdrop),
                 ..recipe(aspect, ProductLayout::Card)
@@ -1079,14 +1079,14 @@ mod tests {
             let strip = png(&RgbImage::from_pixel(size.0, size.1, Rgb([200, 40, 40])));
             let recipe = ShotRecipe {
                 backdrop: BackdropPaint::Picture(&strip),
-                ..recipe(AspectRatio::Vertical, ProductLayout::Card)
+                ..recipe(FrameShape::Vertical, ProductLayout::Card)
             };
             let shot = composed_as(&png_rgba(&source), &recipe);
             assert_eq!(shot.get_pixel(0, 0).0, [200, 40, 40], "{size:?}");
         }
         let recipe = ShotRecipe {
             backdrop: BackdropPaint::Picture(b"nothing"),
-            ..recipe(AspectRatio::Vertical, ProductLayout::Card)
+            ..recipe(FrameShape::Vertical, ProductLayout::Card)
         };
         assert!(matches!(
             ProductShots.compose(&png_rgba(&source), &recipe),
@@ -1103,7 +1103,7 @@ mod tests {
         let shot = ProductShots
             .compose(
                 &png(&source),
-                &recipe(AspectRatio::Vertical, ProductLayout::Card),
+                &recipe(FrameShape::Vertical, ProductLayout::Card),
             )
             .unwrap();
         let picture = image::load_from_memory(&shot.png).unwrap().into_rgb8();
@@ -1118,18 +1118,18 @@ mod tests {
         assert!(red && blue, "{:?}", shot.tones);
     }
 
-    /// The band composed pictures keep clear ([`CAPTION_BAND`]) is what
+    /// The band composed pictures keep clear ([`caption_band`]) is what
     /// the caption styles take: from each style's lift, two lines of its
     /// letters in a vertical frame and one in a wide one, with its outline
     /// or band around them.
     #[test]
     fn every_caption_style_fits_the_band_a_shot_keeps_clear() {
-        for aspect in AspectRatio::ALL {
+        for aspect in FrameShape::ALL {
             let (width, height) = shot_frame(aspect);
             let short = width.min(height) as f32;
             let lines = match aspect {
-                AspectRatio::Vertical => 2.0,
-                AspectRatio::Landscape => 1.0,
+                FrameShape::Landscape => 1.0,
+                _ => 2.0,
             };
             for style in CaptionStyle::ALL {
                 let look = caption_look(style);
@@ -1140,7 +1140,7 @@ mod tests {
                     .unwrap_or(0.0);
                 let top = look.lift + (lines * look.size + 2.0 * around) * short / height as f32;
                 assert!(
-                    f64::from(top) <= CAPTION_BAND,
+                    f64::from(top) <= caption_band(aspect),
                     "{style:?} in {aspect}: {top}"
                 );
             }

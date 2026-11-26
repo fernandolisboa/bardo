@@ -322,6 +322,7 @@ retry = "Tentar de novo"
 waits_until = "Aguarda até {when}"
 
 [job.kind]
+placement_export = "Exportação para anúncios"
 render = "Render final"
 countdown = "Contagem de teste"
 niche_research = "Pesquisa de nicho"
@@ -3455,7 +3456,7 @@ body = "Revisar envio mostra exatamente o que vai para o YouTube, o Instagram, o
 
 [tour.publish.export]
 title = "Exportar"
-body = "Exportar grava uma pasta por rede com o arquivo renderizado e os metadados, para publicar à mão, em qualquer uma das cinco redes."
+body = "Exportar grava uma pasta por rede com o arquivo renderizado e os metadados, para publicar à mão, em qualquer uma das cinco redes. Um anúncio também exporta para anúncios: 4:5, 1:1 e o outro formato, com os textos para o gerenciador de anúncios."
 
 [tour.publish.post]
 title = "O post"
@@ -4813,3 +4814,50 @@ all_backed = "Cada afirmação nos textos do post tem uma afirmação que a sust
 unbacked = "O que nenhuma afirmação sustenta:"
 save_first = "Salve ou desfaça as edições antes: a checagem lê os textos salvos."
 stopped = "A última checagem dos textos do post parou. Confira de novo."
+
+[ad_export]
+title = "Exportar para anúncios"
+hint = "Renderiza o corte nos formatos que os gerenciadores de anúncios pedem, cada um na sua pasta com o vídeo e o ad.txt, os textos para colar. O Bardo nunca envia nada a um gerenciador de anúncios."
+shape = "{shape} ({size})"
+texts_title = "Textos para o gerenciador de anúncios"
+texts_hint = "Escritos uma vez para todos os formatos pelo job que escreve os textos dos posts, e conferidos com as afirmações junto com eles."
+texts_none = "Gere os textos dos posts primeiro: o mesmo job escreve estes."
+primary = "Texto principal"
+headline = "Título"
+count = "{n} de {max} caracteres"
+texts_save = "Salvar textos"
+primary_empty = "Escreva um texto principal."
+primary_too_long = "O texto principal passa de {max} caracteres."
+headline_empty = "Escreva um título."
+headline_too_long = "O título passa de {max} caracteres."
+windows_title = "Janela por clipe"
+windows_hint = "Cada imagem desenhada e cada clipe preenche o quadro por uma janela, centralizada a menos que você a mova aqui. As fotos do produto e o cartão final são compostos de novo para o formato."
+whole_with_bars = "Em 16:9 cada imagem aparece inteira, com faixas onde não alcança o quadro."
+scene = "Cena {n}"
+footage = "Gravação"
+left = "Esquerda"
+right = "Direita"
+up = "Acima"
+down = "Abaixo"
+center = "Centralizar"
+moved = "Movida"
+start = "Exportar para anúncios"
+running = "Exportando para anúncios: {done} de {total} formatos"
+failed = "A última exportação para anúncios parou. Exporte de novo para terminar os formatos que faltam."
+current = "Exportado"
+outdated = "Desatualizado: o corte, uma imagem composta ou os textos mudaram"
+never = "Não exportado"
+show_folder = "Mostrar na pasta"
+
+[ad_export.error]
+texts = "Os textos para o gerenciador de anúncios faltam, estão vazios ou longos demais."
+nothing_chosen = "Escolha pelo menos um formato."
+pictures_wait = "Uma foto do produto ou o cartão final espera ser composto de novo: abra a etapa Cenas."
+already_running = "Este projeto já está exportando para anúncios."
+
+[ad_export.file]
+video = "Vídeo: {file} ({size}, {shape})"
+call = "Chamada para ação"
+link = "Link"
+commercial = "Divulgação comercial: {disclosure}. Ative o rótulo correspondente no gerenciador de anúncios ao criar o anúncio."
+synthetic = "Este vídeo mostra conteúdo gerado por IA: marque isso onde o gerenciador de anúncios pedir."

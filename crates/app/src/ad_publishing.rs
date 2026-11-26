@@ -14,7 +14,7 @@ use bardo_domain::{
 };
 
 use crate::ad_briefs::ScriptBrief;
-use crate::claims_check::{CheckBrief, CheckPayload, UnbackedStatement, millis, posts_of};
+use crate::claims_check::{CheckBrief, CheckPayload, UnbackedStatement, millis, project_posts};
 use crate::costs::{BudgetConsent, SpendEstimate};
 use crate::jobs::Work;
 use crate::{Bardo, ExportError, KeyState, Text};
@@ -144,7 +144,7 @@ impl Bardo {
                 &mut items,
             );
         }
-        let posts_text = posts_of(&self.exports.video_metadata(project.id)?);
+        let posts_text = project_posts(&*self.ads, &*self.exports, project.id)?;
         let posts_check = self.ads.claims_check(project.id, CheckedScript::Posts)?;
         let mut posts = None;
         if let Some(text) = &posts_text {
@@ -236,8 +236,8 @@ impl Bardo {
         let Some(brief) = self.script_brief(&project)? else {
             return Err(ExportError::NotAnAd);
         };
-        let text =
-            posts_of(&self.exports.video_metadata(project.id)?).ok_or(ExportError::NoMetadata)?;
+        let text = project_posts(&*self.ads, &*self.exports, project.id)?
+            .ok_or(ExportError::NoMetadata)?;
         if self.work_busy(&Work::Metadata(project.id.to_string())) {
             return Err(ExportError::Busy);
         }

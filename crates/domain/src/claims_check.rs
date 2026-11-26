@@ -136,9 +136,10 @@ impl ClaimsCheck {
 }
 
 /// The post texts of a project as a check reads them: each network's
-/// title and text, in `posts` order, each part a sentence of its own.
+/// title and text, in `posts` order, each part a sentence of its own,
+/// then the ad's primary text and headline for an ad manager (#283).
 /// Empty when no network has any text.
-pub fn posts_text(posts: &[(Network, &str, &str)]) -> String {
+pub fn posts_text(posts: &[(Network, &str, &str)], ad: Option<&crate::AdTexts>) -> String {
     let sentence = |text: &str| {
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
         match text.chars().last() {
@@ -147,12 +148,14 @@ pub fn posts_text(posts: &[(Network, &str, &str)]) -> String {
             Some(_) => Some(format!("{text}.")),
         }
     };
+    let line = |name: &str, title: &str, text: &str| {
+        let parts: Vec<String> = [title, text].into_iter().filter_map(sentence).collect();
+        (!parts.is_empty()).then(|| format!("{name}: {}", parts.join(" ")))
+    };
     posts
         .iter()
-        .filter_map(|(network, title, text)| {
-            let parts: Vec<String> = [*title, *text].into_iter().filter_map(sentence).collect();
-            (!parts.is_empty()).then(|| format!("{}: {}", network_name(*network), parts.join(" ")))
-        })
+        .filter_map(|(network, title, text)| line(network_name(*network), title, text))
+        .chain(ad.and_then(|ad| line("Ad manager", ad.headline(), ad.primary())))
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -307,22 +310,31 @@ mod tests {
 
     #[test]
     fn the_post_texts_read_as_sentences_of_each_network() {
-        let text = posts_text(&[
-            (
-                Network::YouTube,
-                "A lamp that folds",
-                "It folds flat!  Order yours",
-            ),
-            (Network::TikTok, "", ""),
-            (Network::X, "", "Lights up your desk"),
-        ]);
+        let text = posts_text(
+            &[
+                (
+                    Network::YouTube,
+                    "A lamp that folds",
+                    "It folds flat!  Order yours",
+                ),
+                (Network::TikTok, "", ""),
+                (Network::X, "", "Lights up your desk"),
+            ],
+            None,
+        );
         assert_eq!(
             text,
             "YouTube: A lamp that folds. It folds flat! Order yours.\n\nX: Lights up your desk."
         );
-        assert_eq!(posts_text(&[(Network::Kick, " ", "")]), "");
+        assert_eq!(posts_text(&[(Network::Kick, " ", "")], None), "");
         let sentences = crate::script::script_sentences(&text);
         assert!(sentences.len() >= 3, "{sentences:?}");
+        // An ad's texts for an ad manager come last (#283).
+        let ad = crate::AdTexts::new("Folds flat, lights a desk", "The folding lamp");
+        assert_eq!(
+            posts_text(&[(Network::X, "", "Lights up your desk")], Some(&ad)),
+            "X: Lights up your desk.\n\nAd manager: The folding lamp. Folds flat, lights a desk."
+        );
     }
 
     #[test]

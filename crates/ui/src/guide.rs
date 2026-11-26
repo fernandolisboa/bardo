@@ -232,6 +232,7 @@ pub mod refs {
     pub const YOUTUBE_KEPT_PRIVATE: GuideRef = at("platform-audits", "youtube-private");
     pub const UPLOADING_POST: GuideRef = at("uploading", "post");
     pub const EXPORTING_OUTDATED: GuideRef = at("exporting", "outdated");
+    pub const EXPORTING_ADS: GuideRef = at("exporting", "ads");
     pub const YOUTUBE_UPLOAD: GuideRef = at("connect-youtube", "upload");
     pub const INSTAGRAM_UPLOAD: GuideRef = at("connect-instagram", "upload");
     pub const INSTAGRAM_TOKEN: GuideRef = at("connect-instagram", "token");
@@ -252,7 +253,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 124] = [
+    pub const ALL: [GuideRef; 125] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -359,6 +360,7 @@ pub mod refs {
         YOUTUBE_KEPT_PRIVATE,
         UPLOADING_POST,
         EXPORTING_OUTDATED,
+        EXPORTING_ADS,
         YOUTUBE_UPLOAD,
         INSTAGRAM_UPLOAD,
         INSTAGRAM_TOKEN,

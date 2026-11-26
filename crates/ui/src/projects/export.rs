@@ -156,6 +156,7 @@ impl ProjectsScreen {
         });
         self.fill_metadata(window, cx);
         self.load_upload(cx);
+        self.load_placements(id, window, cx);
     }
 
     /// The network in the inspector: the picked one, else the first.
@@ -496,6 +497,7 @@ impl ProjectsScreen {
         if let Some(ad) = &view.ad {
             let writing = is_running(view.metadata_job.as_ref());
             parts.content.push(self.ad_review_card(ad, writing, cx));
+            parts.content.extend(self.placement_card(cx));
         }
         parts.inspector = self
             .shown_network(view)

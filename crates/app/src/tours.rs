@@ -1213,7 +1213,7 @@ pub const PUBLISH: Tour = {
     const NETWORK: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Publish,
-        version: 4,
+        version: 5,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "networks", TourAnchor::Collection).learn(PAGE, "networks"),

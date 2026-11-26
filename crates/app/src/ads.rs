@@ -39,6 +39,20 @@ pub(crate) fn with_concept_rules(instructions: &str) -> String {
     format!("{}\n\n{CONCEPT_RULES}", instructions.trim_end())
 }
 
+/// What an ad's metadata request is told after its rules (#283): the
+/// texts an ad manager asks for, written once for every shape.
+pub(crate) const AD_TEXTS_RULES: &str = "\
+Also write the ad's texts for an ad manager, in the language of the first network's post, in `ad`:
+- `primary_text`: what shows above the video, at most 125 characters.
+- `headline`: what shows beside the button, at most 40 characters.
+They follow every rule above, and state only what the claims allow.";
+
+/// `instructions`, an ad's metadata request, with what it writes for an
+/// ad manager after them.
+pub(crate) fn with_ad_texts_rules(instructions: &str) -> String {
+    format!("{}\n\n{AD_TEXTS_RULES}", instructions.trim_end())
+}
+
 /// `text` as a prompt carries what the user typed or a page said: no
 /// `<` is left in it, so it cannot close the tag it is placed in and go
 /// on as if it were the prompt's own words.

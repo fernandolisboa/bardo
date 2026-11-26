@@ -235,7 +235,7 @@ impl ExportRepository for Database {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::time::{Duration, SystemTime};
 
     use bardo_domain::{
@@ -251,7 +251,7 @@ mod tests {
         SystemTime::UNIX_EPOCH + Duration::from_millis(millis)
     }
 
-    fn project(db: &Database) -> VideoProject {
+    pub(crate) fn project(db: &Database) -> VideoProject {
         let profile = UserProfile::new(UiLanguage::EnUs);
         ProfileRepository::save(db, &profile).unwrap();
         let details = ChannelDetails::validate(ChannelDraft {

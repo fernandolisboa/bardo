@@ -660,6 +660,39 @@ pub trait ExportFiles: Send + Sync {
 
     /// The network's folder in the package, for "Show in folder".
     fn folder(&self, package: &str, network: Network) -> std::path::PathBuf;
+
+    /// Copies what `source` reads in as `name` in the folder of `shape` of
+    /// the package's export for ads (#283), `<package>/Ads/<shape>`, as
+    /// [`ExportFiles::copy_from`] does.
+    fn copy_ad_from(
+        &self,
+        package: &str,
+        shape: crate::FrameShape,
+        name: &str,
+        source: &mut dyn std::io::Read,
+    ) -> Result<(), ProjectFileError>;
+
+    /// Writes the whole file in the folder of `shape` of the export for
+    /// ads, as [`ExportFiles::write`] does.
+    fn write_ad(
+        &self,
+        package: &str,
+        shape: crate::FrameShape,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<(), ProjectFileError>;
+
+    /// Removes a file of the folder of `shape`; one already gone is not
+    /// an error.
+    fn remove_ad(
+        &self,
+        package: &str,
+        shape: crate::FrameShape,
+        name: &str,
+    ) -> Result<(), ProjectFileError>;
+
+    /// The folder of `shape` of the export for ads, for "Show in folder".
+    fn ad_folder(&self, package: &str, shape: crate::FrameShape) -> std::path::PathBuf;
 }
 
 impl<T: ExportFiles + ?Sized> ExportFiles for Arc<T> {
@@ -693,6 +726,39 @@ impl<T: ExportFiles + ?Sized> ExportFiles for Arc<T> {
 
     fn folder(&self, package: &str, network: Network) -> std::path::PathBuf {
         (**self).folder(package, network)
+    }
+
+    fn copy_ad_from(
+        &self,
+        package: &str,
+        shape: crate::FrameShape,
+        name: &str,
+        source: &mut dyn std::io::Read,
+    ) -> Result<(), ProjectFileError> {
+        (**self).copy_ad_from(package, shape, name, source)
+    }
+
+    fn write_ad(
+        &self,
+        package: &str,
+        shape: crate::FrameShape,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<(), ProjectFileError> {
+        (**self).write_ad(package, shape, name, bytes)
+    }
+
+    fn remove_ad(
+        &self,
+        package: &str,
+        shape: crate::FrameShape,
+        name: &str,
+    ) -> Result<(), ProjectFileError> {
+        (**self).remove_ad(package, shape, name)
+    }
+
+    fn ad_folder(&self, package: &str, shape: crate::FrameShape) -> std::path::PathBuf {
+        (**self).ad_folder(package, shape)
     }
 }
 

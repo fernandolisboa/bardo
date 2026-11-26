@@ -41,6 +41,7 @@ macro_rules! uuid_id {
 
 mod ad_angle;
 mod ad_brief;
+mod ad_export;
 mod ad_framework;
 mod ad_review;
 mod agent_task;
@@ -136,6 +137,10 @@ pub use ad_brief::{
     AdBrief, AdBriefRecord, BriefClaim, BriefClaimError, BriefFieldError, BriefNotReady, BriefText,
     ClaimDrift, ClaimSeen,
 };
+pub use ad_export::{
+    AD_HEADLINE_MAX, AD_PRIMARY_MAX, AdExport, AdExportRepository, AdTextProblem, AdTexts,
+    AdWindow, ad_clip_key,
+};
 pub use ad_framework::AdFramework;
 pub use ad_review::{
     AdPostReview, AdReviewItem, CommercialDisclosure, DisclosureStep, MAX_SPONSORS, SponsorError,
@@ -157,8 +162,8 @@ pub use byteplus::{
 };
 pub use caption::{
     CAPTION_BAND, Caption, CaptionHighlight, CaptionStyle, Captions, LINE_RULES, LineRules,
-    MAX_CAPTION_CHARS, SavedCaptions, UnknownCaptionHighlight, UnknownCaptionStyle, caption_lines,
-    caption_text,
+    MAX_CAPTION_CHARS, SavedCaptions, UnknownCaptionHighlight, UnknownCaptionStyle, caption_band,
+    caption_lines, caption_text,
 };
 pub use capture::{
     BoundaryError, BoundaryMove, CAPTURE_EXTENSIONS, Capture, CaptureConfirmation, CaptureId,
@@ -226,7 +231,10 @@ pub use end_card::{
 };
 pub use files::{ProjectFileError, ProjectFiles};
 pub use format::{AD_TAIL, UnknownVideoFormat, UnknownVideoLength, VideoFormat, VideoLength};
-pub use framing::{CROP_STEPS, CropPosition, CropRect, Framing, PictureSize, crop_window};
+pub use framing::{
+    CROP_STEPS, CropPosition, CropRect, FrameShape, Framing, PictureSize, UnknownFrameShape,
+    crop_window,
+};
 pub use generation::{Generation, GenerationId, TemplateUsed};
 pub use image::{
     GeneratedImage, ImageFormat, ImageGenerator, ImageRequest, ImageShape, ReferenceImage,

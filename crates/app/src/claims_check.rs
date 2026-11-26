@@ -29,7 +29,7 @@ use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate
 use crate::jobs::Work;
 use crate::scripts::{ScriptHandler, or_not_set};
 use crate::{Bardo, KeyState, ScriptError};
-use bardo_domain::{AdRepository, RepositoryError};
+use bardo_domain::{AdRepository, AdTexts, RepositoryError};
 
 /// What the checker is told, whatever the script says.
 pub(crate) const CHECK_INSTRUCTIONS: &str = "\
@@ -349,12 +349,25 @@ impl CheckRun<'_> {
 /// The post texts of `metadata` as a check reads them: each network's
 /// title and text as written, without the account's footer. `None` when
 /// no network has any.
-pub(crate) fn posts_of(metadata: &[VideoMetadata]) -> Option<ScriptText> {
+pub(crate) fn posts_of(metadata: &[VideoMetadata], ad: Option<&AdTexts>) -> Option<ScriptText> {
     let posts: Vec<(Network, &str, &str)> = metadata
         .iter()
         .map(|one| (one.network, one.title(), one.description()))
         .collect();
-    ScriptText::new(&posts_text(&posts)).ok()
+    ScriptText::new(&posts_text(&posts, ad)).ok()
+}
+
+/// The post texts of `project` as they read now: its networks' and its
+/// texts for an ad manager (#283).
+pub(crate) fn project_posts(
+    ads: &dyn AdRepository,
+    exports: &dyn ExportRepository,
+    project: VideoProjectId,
+) -> Result<Option<ScriptText>, RepositoryError> {
+    Ok(posts_of(
+        &exports.video_metadata(project)?,
+        ads.ad_texts(project)?.as_ref(),
+    ))
 }
 
 /// Whether the post texts of `project` read as `text` and `job` has yet
@@ -366,7 +379,7 @@ fn posts_left(
     text: &ScriptText,
     job: JobId,
 ) -> Result<bool, RepositoryError> {
-    let now = posts_of(&exports.video_metadata(project)?);
+    let now = project_posts(ads, exports, project)?;
     Ok(now.as_ref() == Some(text)
         && !ads
             .claims_check(project, CheckedScript::Posts)?
@@ -388,7 +401,7 @@ pub(crate) fn check_posts(
     job: JobId,
     stop: &Stop,
 ) -> Result<(), JobFailure> {
-    let Some(text) = posts_of(&exports.video_metadata(project).map_err(unexpected)?) else {
+    let Some(text) = project_posts(ads, exports, project).map_err(unexpected)? else {
         return Ok(());
     };
     if !posts_left(ads, exports, project, &text, job).map_err(unexpected)? {
@@ -396,7 +409,7 @@ pub(crate) fn check_posts(
     }
     let (statements, model) = run.run(project, &text, CheckedScript::Posts, check, job, stop)?;
     // An edit while Claude read them: the check is not these texts'.
-    let now = posts_of(&exports.video_metadata(project).map_err(unexpected)?);
+    let now = project_posts(ads, exports, project).map_err(unexpected)?;
     if now.as_ref() != Some(&text) {
         return Ok(());
     }
@@ -634,7 +647,7 @@ impl Bardo {
         let project = payload.project_id().ok()?;
         if payload.posts {
             // The post texts as they read now, which a run checks.
-            let text = posts_of(&self.exports.video_metadata(project).ok()?)?;
+            let text = project_posts(&*self.ads, &*self.exports, project).ok()??;
             return posts_left(&*self.ads, &*self.exports, project, &text, job.id())
                 .ok()?
                 .then(|| {
