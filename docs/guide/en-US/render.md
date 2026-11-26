@@ -49,6 +49,7 @@ Each check is marked **Blocks** or **Warning**.
 
 - **Blocks** keeps that network out of the render until you fix it: a cut longer than the network takes, or no encoder on this computer for the preset's codec. The other networks still render.
 - In an ad, a scene of the [product in use](scenes.md#product-check) whose product you have not checked keeps the whole video from rendering: the review lists those scenes. Check each one on Scenes, or use the real image there.
+- In an ad, an [end card](scenes.md#end-card) not yet composed with its current design, brief offer and logo keeps the whole video from rendering. Compose it on Scenes: it is free.
 - **Warning** lets it render as it is: captions off, clips with no media (they render black), a silent mix, a mix far from the network's loudness (the render changes it that much), peaks the render has to limit, or a YouTube video over 15 minutes, which YouTube takes only from a [verified account](https://www.youtube.com/verify). When the cut's frame differs from the network's, a 9:16 file takes each clip through its crop window, and a 16:9 file shows each picture whole, a tall one with bars at the sides.
 
 A network's state sums it up: **Ready**, **n to check** (warnings), **Blocked**, or **Checking** while the checks run.

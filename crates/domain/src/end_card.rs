@@ -20,6 +20,9 @@ use crate::{
 pub const MAX_CARD_HEADLINE: usize = 40;
 /// The longest second line, in characters.
 pub const MAX_CARD_SECOND_LINE: usize = 60;
+/// The longest offer the card shows: a longer one is not cut, which
+/// could drop its conditions, so the card leaves it out.
+pub const MAX_CARD_OFFER: usize = 60;
 /// How long the card stays after the narration's last word.
 pub const END_CARD_TAIL: Duration = Duration::from_millis(1500);
 /// The least time the card is on screen.
@@ -133,6 +136,34 @@ fn readable_link(link: &str) -> String {
     link.trim_end_matches('/').to_owned()
 }
 
+/// A link as a viewer reads it, within `max` characters and still a link
+/// that works: past the limit, without its query and fragment, then
+/// without its last path parts; a host longer than the limit leaves the
+/// line empty, never cut mid-way. A handle or text with spaces is cut at
+/// a word.
+fn short_link(link: &str, max: usize) -> String {
+    let link = readable_link(link);
+    if link.chars().count() <= max {
+        return link;
+    }
+    if link.contains(' ') {
+        return fitted(&link, max);
+    }
+    let mut short = link
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/')
+        .to_owned();
+    while short.chars().count() > max {
+        match short.rfind('/') {
+            Some(at) => short.truncate(at),
+            None => return String::new(),
+        }
+    }
+    short
+}
+
 /// What the user decides about the card, always valid. The headline and
 /// the second line are the user's own text and are not read by the
 /// claims check; the offer line can only show the Brief stage's offer.
@@ -193,8 +224,8 @@ impl CardDesign {
         };
         Self {
             headline,
-            second_line: fitted(&readable_link(brief.link()), MAX_CARD_SECOND_LINE),
-            offer: !brief.offer().is_empty(),
+            second_line: short_link(brief.link(), MAX_CARD_SECOND_LINE),
+            offer: Self::offer_fits(brief),
             look: ThumbnailLook::default(),
             text_place: CardTextPlace::default(),
             logo_place: CardLogoPlace::default(),
@@ -210,10 +241,17 @@ impl CardDesign {
         &self.second_line
     }
 
+    /// Whether the card can show the Brief stage's offer: there is one,
+    /// within [`MAX_CARD_OFFER`] characters.
+    pub fn offer_fits(brief: &BriefText) -> bool {
+        let offer = brief.offer();
+        !offer.is_empty() && offer.chars().count() <= MAX_CARD_OFFER
+    }
+
     /// The offer line the card shows: the Brief stage's offer, when the
-    /// design shows it and there is one.
+    /// design shows it and it fits the card.
     pub fn offer_line<'a>(&self, brief: &'a BriefText) -> Option<&'a str> {
-        (self.offer && !brief.offer().is_empty()).then(|| brief.offer())
+        (self.offer && Self::offer_fits(brief)).then(|| brief.offer())
     }
 
     /// What the card says, as it is composed.
@@ -500,6 +538,25 @@ mod tests {
         assert_eq!(plain.headline(), "Follow @loom");
         assert_eq!(plain.second_line(), "");
         assert!(!plain.offer);
+
+        // A long link is shortened to one that still works, never cut
+        // mid-way.
+        let long = |link: &str| {
+            CardDesign::start(&brief("", "Buy", link))
+                .second_line()
+                .to_owned()
+        };
+        assert_eq!(
+            long(
+                "https://pocketloom.com/collections/winter-sale-2026?utm_source=tiktok&utm_medium=ad"
+            ),
+            "pocketloom.com/collections/winter-sale-2026"
+        );
+        assert_eq!(
+            long("https://pocketloom.com/collections/winter/sale/2026/notebooks/refills/a5-dotted"),
+            "pocketloom.com/collections/winter/sale/2026/notebooks"
+        );
+        assert_eq!(long(&format!("https://{}.com/a", "x".repeat(70))), "");
     }
 
     #[test]
@@ -516,6 +573,11 @@ mod tests {
         assert_eq!(off.offer_line(&with), None);
         // On, with no offer in the brief: no line.
         assert_eq!(card.offer_line(&brief("", "Buy", "")), None);
+        // An offer too long for the card is left out whole, never cut.
+        let long = brief(&"Free shipping on every order ".repeat(3), "Buy", "");
+        assert!(!CardDesign::offer_fits(&long));
+        assert_eq!(card.offer_line(&long), None);
+        assert!(!CardDesign::start(&long).offer);
     }
 
     #[test]

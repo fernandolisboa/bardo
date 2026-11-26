@@ -87,14 +87,14 @@ Whatever the look, the product's image is only scaled: never stretched, cut or r
 The last scene of an ad is its end card, made like a [thumbnail](uploading.md#thumbnail) and never by a model: the backdrop, the product image the scene shows (whole, only scaled), the product's [logo](products.md#pictures) when it has one, and up to three lines drawn in Bardo's fonts. A product with no image gets a card of text, with its logo if it has one. Composing it costs nothing and needs no key, and none of it is sent anywhere. Its editor sits in the scene's inspector, under **Scene kind**:
 
 - **Headline**: starts as the brief's call to action; type your own, up to 40 characters.
-- **Second line**: starts as the brief's link or handle, kept as you type it; up to 60 characters, and it may be empty. **Save card** saves both lines.
-- **Show the offer**: the offer line only ever shows the [brief's offer](brief.md), so a new offer there shows on the card at once. With no offer in the brief there is no offer line. What you type on the card is yours: the [claims check](script.md#claims) does not read it.
+- **Second line**: starts as the brief's link or handle, kept as you type it; up to 60 characters, and it may be empty. A longer link starts without its query, then without its last path parts, so it still works. **Save card** saves both lines; the other choices save at once and keep lines you have not saved yet in their fields.
+- **Show the offer**: the offer line only ever shows the [brief's offer](brief.md), so while it is on, a new offer there shows on the card at once. With no offer in the brief there is no offer line, and an offer longer than 60 characters is left out whole rather than cut. What you type on the card is yours: the [claims check](script.md#claims) does not read it.
 - **Look**: **Bold**, **Yellow** or **Banner**, the thumbnail looks.
-- **Text**: **Above the image** or **Below the image**. **Logo**: **In the corner** or **With the text**. Every place keeps clear of the networks' buttons and captions, in 9:16 and in 16:9.
+- **Text**: **Above the image** or **Below the image**; a card of text sets its lines in the middle. The lines shrink to fit their place. **Logo**: **In the corner** or **With the text**. Every place keeps clear of the networks' buttons and captions, in 9:16 and in 16:9.
 
 Every change composes the card again, for free. Until it is, the inspector says **The picture shows an older design** and the scene reads **To compose**: the video does not [render](render.md#gates) with an older card. The card is composed for the shape the video is cut in, and again when that changes.
 
-In the cut, the card shows from the first word of the call to action until 1.5 seconds after the last word, and for at least 2.5 seconds; the music runs under it, no caption shows over it, and it [holds still](editor.md#motion). To turn it off, make the last scene a drawn scene or a product shot under **Scene kind**: the cut then ends with the narration. Making it **End card** again brings the card back with the design you saved.
+In the cut, the card shows from the first word of the call to action until 1.5 seconds after the last word, and for at least 2.5 seconds; the music runs under it, no caption shows over it, and it [holds still](editor.md#motion). To turn it off, make the last scene another kind under **Scene kind**: the cut then ends with the narration. Making it **End card** again brings the card back with the design you saved.
 
 <a id="redraw"></a>
 ## Drawing again

@@ -488,6 +488,13 @@ impl ProjectsScreen {
                 .into_any_element(),
             );
         }
+        // The end card waits to be composed with its design (#281).
+        if review.end_card_waits {
+            notices.push(
+                kit::notice(Tone::Danger, tr(bardo, Text::RenderEndCardOutOfDate), cx)
+                    .into_any_element(),
+            );
+        }
         notices.extend(review.gates.iter().map(|gate| gate_line(bardo, gate, cx)));
         if review.targets.is_empty() {
             notices.push(muted(cx, tr(bardo, Text::RenderNoAccounts)));

@@ -87,14 +87,14 @@ Seja qual for a aparência, a imagem do produto só é redimensionada: nunca est
 A última cena de um anúncio é o cartão final, feito como uma [thumbnail](uploading.md#thumbnail) e nunca por um modelo: o fundo, a imagem do produto que a cena mostra (inteira, só redimensionada), o [logo](products.md#pictures) do produto quando ele tem um, e até três linhas desenhadas nas fontes do Bardo. Um produto sem imagem recebe um cartão de texto, com o logo se tiver. Compor não custa nada e não exige chave, e nada disso é enviado para lugar nenhum. O editor fica no inspetor da cena, abaixo de **Tipo de cena**:
 
 - **Título**: começa como a chamada para ação do briefing; digite o seu, com até 40 caracteres.
-- **Segunda linha**: começa como o link ou @ do briefing, mantido como você digitar; até 60 caracteres, e pode ficar vazia. **Salvar cartão final** salva as duas linhas.
-- **Mostrar a oferta**: a linha de oferta só mostra a [oferta do briefing](brief.md), então uma oferta nova lá aparece no cartão na hora. Sem oferta no briefing, não há linha de oferta. O que você digita no cartão é seu: a [checagem de afirmações](script.md#claims) não lê.
+- **Segunda linha**: começa como o link ou @ do briefing, mantido como você digitar; até 60 caracteres, e pode ficar vazia. Um link mais longo começa sem os parâmetros e depois sem as últimas partes do caminho, para continuar funcionando. **Salvar cartão final** salva as duas linhas; as outras escolhas salvam na hora e mantêm nos campos as linhas que você ainda não salvou.
+- **Mostrar a oferta**: a linha de oferta só mostra a [oferta do briefing](brief.md), então, enquanto **Mostrar a oferta** estiver ligado, uma oferta nova lá aparece no cartão na hora. Sem oferta no briefing, não há linha de oferta, e uma oferta com mais de 60 caracteres fica de fora inteira em vez de ser cortada. O que você digita no cartão é seu: a [checagem de afirmações](script.md#claims) não lê esse texto.
 - **Visual**: **Forte**, **Amarelo** ou **Faixa**, os visuais das thumbnails.
-- **Texto**: **Acima da imagem** ou **Abaixo da imagem**. **Logo**: **No canto** ou **Junto ao texto**. Todo lugar fica longe dos botões e das legendas das redes, em 9:16 e em 16:9.
+- **Texto**: **Acima da imagem** ou **Abaixo da imagem**; um cartão de texto põe as linhas no meio. As linhas diminuem para caber no lugar. **Logo**: **No canto** ou **Junto ao texto**. Todo lugar fica longe dos botões e das legendas das redes, em 9:16 e em 16:9.
 
 Toda mudança compõe o cartão de novo, de graça. Até lá, o inspetor diz **A imagem mostra um design anterior** e a cena mostra **A compor**: o vídeo não é [renderizado](render.md#gates) com um cartão antigo. O cartão é composto no formato em que o vídeo é cortado, e de novo quando ele muda.
 
-No corte, o cartão aparece da primeira palavra da chamada para ação até 1,5 segundo depois da última palavra, e por pelo menos 2,5 segundos; a música continua por baixo, nenhuma legenda aparece sobre ele e ele [fica parado](editor.md#motion). Para desligar, faça da última cena uma cena desenhada ou uma foto do produto em **Tipo de cena**: o corte então termina com a narração. Voltar a cena para **Cartão final** traz o cartão de volta com o design que você salvou.
+No corte, o cartão aparece da primeira palavra da chamada para ação até 1,5 segundo depois da última palavra, e por pelo menos 2,5 segundos; a música continua por baixo, nenhuma legenda aparece sobre ele e ele [fica parado](editor.md#motion). Para desligar, faça da última cena outro tipo em **Tipo de cena**: o corte então termina com a narração. Voltar a cena para **Cartão final** traz o cartão de volta com o design que você salvou.
 
 <a id="redraw"></a>
 ## Desenhar de novo

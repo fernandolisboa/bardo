@@ -876,6 +876,11 @@ impl ProjectsScreen {
         self.metadata_loaded = None;
         self.brief_loaded = None;
         self.brief_errors.clear();
+        // Nor what was typed or said on another project's end card.
+        self.end_card = None;
+        self.card_loaded = None;
+        self.card_errors.clear();
+        self.card_notice = None;
         self.brief_error = None;
         self.brief_notice = None;
         self.reset_post(window, cx);

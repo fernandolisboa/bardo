@@ -2126,6 +2126,7 @@ cancelled = "Render cancelled. Resume renders the files left; finished ones stay
 resume = "Resume"
 product_unchecked = "Check the product in every scene of the product in use on Scenes, or use the real image there, before rendering."
 product_unchecked_scenes = "The product is not checked in: scene {scenes}. Check it on Scenes, or use the real image there."
+end_card_out_of_date = "The end card shows an older design, or is not composed yet. Compose it on Scenes before rendering: it is free."
 
 [render.figure]
 length = "Length"
@@ -4663,6 +4664,7 @@ second_line_hint = "A link or handle, kept as you type it. May be empty."
 show_offer = "Show the offer"
 offer_is = "The offer line shows the brief's offer: {offer}"
 no_offer = "The brief has no offer, so there is no offer line. Write one on the Brief stage."
+offer_too_long = "The brief's offer is longer than 60 characters, so the card leaves it out rather than cut it. Shorten it on the Brief stage to show it."
 look = "Look"
 text_place = "Text"
 logo_place = "Logo"
@@ -4670,7 +4672,7 @@ no_logo = "The product has no logo. Add one on the Products screen to show it on
 save = "Save card"
 saved = "Card saved. Its picture is composed again, for free."
 out_of_date = "The picture shows an older design. It is composed again before the video is rendered."
-off = "To turn the end card off, make this scene a drawn scene or a product shot: the cut then ends with the narration."
+off = "To turn the end card off, make this scene another kind under Scene kind: the cut then ends with the narration."
 
 [scenes.end_card.text_place_name]
 above = "Above the image"

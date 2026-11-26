@@ -407,11 +407,13 @@ impl SceneHandler {
         let Ok(scene) = plan.scene(index) else {
             return Ok(());
         };
-        if !scene.needs_shot(aspect) {
-            return Ok(());
-        }
+        // An end card first brings its wanted design up to date: its
+        // picture may match the scene and still show an older one (#281).
         if scene.is_end_card() {
             return self.compose_end_card(project, plan_id, index, aspect, product);
+        }
+        if !scene.needs_shot(aspect) {
+            return Ok(());
         }
         let Some(wanted) = scene.product_image() else {
             return Ok(());
@@ -2678,6 +2680,32 @@ mod ad_tests {
         let view = app.end_card(project.id).unwrap().unwrap();
         assert!(view.has_logo && !view.out_of_date);
         assert!(last_card(&h).1.logo.is_some());
+
+        // A design that changed while the card could not be composed
+        // again (a scene job was running) waits, holds the render back,
+        // and is composed with the other missing pictures.
+        use bardo_domain::EndCardRepository as _;
+        let changed = bardo_domain::CardDesign::new(
+            "Last chance",
+            "",
+            false,
+            ThumbnailLook::Bold,
+            CardTextPlace::Above,
+            CardLogoPlace::Corner,
+        )
+        .unwrap();
+        h.db.save_end_card(&bardo_domain::EndCard {
+            project: project.id,
+            design: changed,
+        })
+        .unwrap();
+        assert!(app.end_card(project.id).unwrap().unwrap().out_of_date);
+        assert_eq!(app.scenes(project.id).unwrap().missing_shots, [3]);
+        assert!(app.end_card_waits(project.id).unwrap());
+        done(&app, app.compose_missing_shots(project.id).unwrap());
+        assert_eq!(last_card(&h).0.headline, "Last chance");
+        assert!(!app.end_card(project.id).unwrap().unwrap().out_of_date);
+        assert!(!app.end_card_waits(project.id).unwrap());
     }
 
     #[test]

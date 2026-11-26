@@ -352,7 +352,10 @@ impl Timeline {
                     .max()
                     .unwrap_or(narration.duration);
                 let start = frame_time(nearest_frame(plan.scenes()[index].start));
+                // Never before the narration's file ends: its silence
+                // after the last word would play over black.
                 nearest_frame(crate::end_card_end(start, last_word))
+                    .max(nearest_frame(narration.duration))
             }
             None => plan
                 .scenes()

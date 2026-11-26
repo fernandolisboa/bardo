@@ -68,25 +68,51 @@ impl ProjectsScreen {
         })
     }
 
-    /// Saves the design as `change` leaves the one on screen, and
-    /// composes the card again.
-    fn save_card(
+    /// Saves the lines as typed, and composes the card again.
+    fn save_card_lines(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(draft) = self.card_draft(cx) {
+            self.save_card(draft, true, window, cx);
+        }
+    }
+
+    /// Saves the stored design as `change` leaves it: lines typed and
+    /// not saved stay in their fields, for Save.
+    fn save_card_choice(
         &mut self,
         change: impl FnOnce(&mut CardDraft),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (Some(id), Some(mut draft)) = (self.project, self.card_draft(cx)) else {
+        let Some(view) = self.end_card.as_ref() else {
             return;
         };
+        let mut draft = CardDraft::from(&view.design);
         change(&mut draft);
+        self.save_card(draft, false, window, cx);
+    }
+
+    /// Saves `draft`, and composes the card again; `draft_lines_saved`
+    /// when its lines are the ones typed.
+    fn save_card(
+        &mut self,
+        draft: CardDraft,
+        draft_lines_saved: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(id) = self.project else {
+            return;
+        };
         match self.bardo.read(cx).save_end_card(id, &draft) {
             Ok(_) => {
                 self.card_errors.clear();
                 self.card_notice = Some(Text::EndCardSaved);
                 self.scenes_error = None;
-                // Shown again as stored: trimmed.
-                self.card_loaded = None;
+                // Shown again as stored: trimmed. Lines typed and not
+                // saved stay when a choice was saved.
+                if draft_lines_saved {
+                    self.card_loaded = None;
+                }
             }
             Err(error) => {
                 self.card_errors = card_field_errors(&error).to_vec();
@@ -146,32 +172,47 @@ impl ProjectsScreen {
                         .disabled(locked && !shown)
                         .when(!shown, |button| {
                             button.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                this.save_card(|draft| draft.look = look, window, cx);
+                                this.save_card_choice(|draft| draft.look = look, window, cx);
                             }))
                         })
                 })
                 .collect(),
         );
-        let text_place = choices(
-            Text::EndCardTextPlace,
-            CardTextPlace::ALL
-                .into_iter()
-                .map(|place| {
-                    let shown = place == design.text_place;
-                    Button::new(("card-text-place", place as usize))
-                        .xsmall()
-                        .outline()
-                        .label(tr(bardo, Text::CardTextPlaceName(place)))
-                        .selected(shown)
-                        .disabled(locked && !shown)
-                        .when(!shown, |button| {
-                            button.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                this.save_card(|draft| draft.text_place = place, window, cx);
-                            }))
-                        })
-                })
-                .collect(),
-        );
+        // A card of text sets its lines in the middle: no place to pick.
+        let has_image = self
+            .scenes
+            .as_ref()
+            .and_then(|view| view.plan.as_ref())
+            .and_then(|plan| plan.scene(index).ok())
+            .is_some_and(|scene| scene.product_image().is_some());
+        let text_place = has_image.then(|| {
+            choices(
+                Text::EndCardTextPlace,
+                CardTextPlace::ALL
+                    .into_iter()
+                    .map(|place| {
+                        let shown = place == design.text_place;
+                        Button::new(("card-text-place", place as usize))
+                            .xsmall()
+                            .outline()
+                            .label(tr(bardo, Text::CardTextPlaceName(place)))
+                            .selected(shown)
+                            .disabled(locked && !shown)
+                            .when(!shown, |button| {
+                                button.on_click(cx.listener(
+                                    move |this, _: &ClickEvent, window, cx| {
+                                        this.save_card_choice(
+                                            |draft| draft.text_place = place,
+                                            window,
+                                            cx,
+                                        );
+                                    },
+                                ))
+                            })
+                    })
+                    .collect(),
+            )
+        });
         let logo_place = match view.has_logo {
             true => choices(
                 Text::EndCardLogoPlace,
@@ -188,7 +229,7 @@ impl ProjectsScreen {
                             .when(!shown, |button| {
                                 button.on_click(cx.listener(
                                     move |this, _: &ClickEvent, window, cx| {
-                                        this.save_card(
+                                        this.save_card_choice(
                                             |draft| draft.logo_place = place,
                                             window,
                                             cx,
@@ -203,9 +244,10 @@ impl ProjectsScreen {
             false => muted(cx, tr(bardo, Text::EndCardNoLogo)).into_any_element(),
         };
         // The offer line only ever shows the brief's offer.
-        let offer = match view.offer.is_empty() {
-            true => muted(cx, tr(bardo, Text::EndCardNoOffer)).into_any_element(),
-            false => {
+        let offer = match (view.offer.is_empty(), view.offer_fits) {
+            (true, _) => muted(cx, tr(bardo, Text::EndCardNoOffer)).into_any_element(),
+            (false, false) => muted(cx, tr(bardo, Text::EndCardOfferTooLong)).into_any_element(),
+            (false, true) => {
                 let on = design.offer;
                 v_flex()
                     .gap_1()
@@ -218,7 +260,7 @@ impl ProjectsScreen {
                             .selected(on)
                             .disabled(locked)
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                this.save_card(|draft| draft.offer = !on, window, cx);
+                                this.save_card_choice(|draft| draft.offer = !on, window, cx);
                             })),
                     )
                     .child(muted(
@@ -275,14 +317,14 @@ impl ProjectsScreen {
                         .label(tr(bardo, Text::EndCardSave))
                         .disabled(locked || !self.card_dirty(cx))
                         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                            this.save_card(|_| {}, window, cx);
+                            this.save_card_lines(window, cx);
                         })),
                 ),
             )
             .children(notice)
             .child(offer)
             .child(look)
-            .child(text_place)
+            .children(text_place)
             .child(logo_place)
             .child(muted(cx, tr(bardo, Text::EndCardOff)));
         Some(kit::anchor(TourAnchor::Control(Control::EndCard), editor).into_any_element())

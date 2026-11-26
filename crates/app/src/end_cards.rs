@@ -70,6 +70,8 @@ pub struct EndCardView {
     /// The Brief stage's offer, which the offer line shows; empty when
     /// the brief has none.
     pub offer: String,
+    /// That offer fits the card: one too long is left out whole.
+    pub offer_fits: bool,
     /// The product has a logo, which the card shows.
     pub has_logo: bool,
     /// The card scene, when the plan's last scene is one.
@@ -305,6 +307,24 @@ impl Bardo {
         Ok(missing)
     }
 
+    /// Whether `project`'s end card waits to be composed for the video's
+    /// shape: its picture is missing or shows another design than the
+    /// one saved, brief and logo as they are now. The video is not
+    /// rendered until it is composed (#281).
+    pub(crate) fn end_card_waits(&self, project: VideoProjectId) -> Result<bool, RepositoryError> {
+        let Some(video) = self.themes.project(project)? else {
+            return Ok(false);
+        };
+        let Some(plan) = self.scene_plans.scene_plan(project)? else {
+            return Ok(false);
+        };
+        let Some(index) = plan.end_card() else {
+            return Ok(false);
+        };
+        let aspect = self.video_format(&video)?.aspect();
+        Ok(self.missing_shots(&video, &plan, aspect)?.contains(&index))
+    }
+
     /// The end card of an ad project, for its editor; `None` for a
     /// project that is no ad.
     pub fn end_card(&self, project: VideoProjectId) -> Result<Option<EndCardView>, SceneError> {
@@ -324,6 +344,7 @@ impl Bardo {
         };
         Ok(Some(EndCardView {
             offer: inputs.brief.text().offer().to_owned(),
+            offer_fits: CardDesign::offer_fits(inputs.brief.text()),
             has_logo: inputs.logo.is_some(),
             design: inputs.design,
             scene,

@@ -2126,6 +2126,7 @@ cancelled = "Render cancelado. Retomar renderiza os arquivos que faltam; os pron
 resume = "Retomar"
 product_unchecked = "Confira o produto em cada cena do produto em uso, em Cenas, ou use ali a imagem real antes de renderizar."
 product_unchecked_scenes = "O produto não foi conferido em: cena {scenes}. Confira em Cenas, ou use ali a imagem real."
+end_card_out_of_date = "O cartão final mostra um design anterior, ou ainda não foi composto. Componha em Cenas antes de renderizar: é grátis."
 
 [render.figure]
 length = "Duração"
@@ -4656,13 +4657,14 @@ discard = "Descartar"
 
 [scenes.end_card]
 title = "Cartão final"
-hint = "A última cena do anúncio, composta pelo Bardo como uma thumbnail: o fundo, a imagem do produto quando a cena mostra uma, o logo e estas linhas, nas fontes do Bardo. Grátis, e nunca vai para um modelo. Fica na tela da chamada para ação até 1,5 s depois da última palavra, com a música por baixo e sem legendas."
+hint = "A última cena do anúncio, composta pelo Bardo como uma thumbnail: o fundo, a imagem do produto quando a cena mostra uma, o logo e estas linhas, nas fontes do Bardo. De graça, e nunca vai para um modelo. Fica na tela da chamada para ação até 1,5 s depois da última palavra, com a música por baixo e sem legendas."
 headline = "Título"
 second_line = "Segunda linha"
 second_line_hint = "Um link ou @, mantido como você digitar. Pode ficar vazia."
 show_offer = "Mostrar a oferta"
 offer_is = "A linha de oferta mostra a oferta do briefing: {offer}"
 no_offer = "O briefing não tem oferta, então não há linha de oferta. Escreva uma na etapa Briefing."
+offer_too_long = "A oferta do briefing passa de 60 caracteres, então o cartão a deixa de fora em vez de cortá-la. Encurte-a na etapa Briefing para mostrá-la."
 look = "Visual"
 text_place = "Texto"
 logo_place = "Logo"
@@ -4670,7 +4672,7 @@ no_logo = "O produto não tem logo. Adicione um na tela Produtos para mostrá-lo
 save = "Salvar cartão final"
 saved = "Cartão final salvo. A imagem é composta de novo, de graça."
 out_of_date = "A imagem mostra um design anterior. Ela é composta de novo antes de o vídeo ser renderizado."
-off = "Para desligar o cartão final, faça desta cena uma cena desenhada ou uma foto do produto: o corte então termina com a narração."
+off = "Para desligar o cartão final, faça desta cena outro tipo em Tipo de cena: o corte então termina com a narração."
 
 [scenes.end_card.text_place_name]
 above = "Acima da imagem"

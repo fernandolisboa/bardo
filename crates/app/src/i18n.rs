@@ -999,6 +999,7 @@ pub enum Text {
     /// Placeholder: `{offer}`.
     EndCardOfferIs,
     EndCardNoOffer,
+    EndCardOfferTooLong,
     EndCardLook,
     EndCardTextPlace,
     EndCardLogoPlace,
@@ -2912,6 +2913,7 @@ pub enum Text {
     /// A render refused while scenes of the product in use wait for their check (#279).
     RenderProductUnchecked,
     RenderProductUncheckedScenes,
+    RenderEndCardOutOfDate,
     ProductCheckRefused,
     ProductUncheckedClip,
     ProductCheckTitle,
@@ -4178,6 +4180,7 @@ impl Text {
             Text::EndCardShowOffer => "scenes.end_card.show_offer",
             Text::EndCardOfferIs => "scenes.end_card.offer_is",
             Text::EndCardNoOffer => "scenes.end_card.no_offer",
+            Text::EndCardOfferTooLong => "scenes.end_card.offer_too_long",
             Text::EndCardLook => "scenes.end_card.look",
             Text::EndCardTextPlace => "scenes.end_card.text_place",
             Text::EndCardLogoPlace => "scenes.end_card.logo_place",
@@ -6081,6 +6084,7 @@ impl Text {
                 BackdropDirection::Diagonal => "scenes.look.direction.diagonal",
             },
             Text::RenderProductUnchecked => "render.product_unchecked",
+            Text::RenderEndCardOutOfDate => "render.end_card_out_of_date",
             Text::RenderProductUncheckedScenes => "render.product_unchecked_scenes",
             Text::ProductCheckRefused => "scenes.product.check_refused",
             Text::ProductUncheckedClip => "scenes.product.unchecked_clip",
@@ -7664,6 +7668,7 @@ mod tests {
             Text::EndCardShowOffer,
             Text::EndCardOfferIs,
             Text::EndCardNoOffer,
+            Text::EndCardOfferTooLong,
             Text::EndCardLook,
             Text::EndCardTextPlace,
             Text::EndCardLogoPlace,
@@ -8343,6 +8348,7 @@ mod tests {
         texts.extend(ShotPlacement::ALL.map(Text::ShotPlacementName));
         texts.extend(BackdropDirection::ALL.map(Text::BackdropDirectionName));
         texts.push(Text::RenderProductUnchecked);
+        texts.push(Text::RenderEndCardOutOfDate);
         texts.push(Text::RenderProductUncheckedScenes);
         texts.push(Text::ProductCheckRefused);
         texts.push(Text::ProductUncheckedClip);
