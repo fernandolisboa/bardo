@@ -137,8 +137,17 @@ impl ProjectFolders for LocalProjectFolders {
         }
         // A rename moves it whole on one volume. It fails across volumes,
         // and onto a folder a copy cut short left: then it is copied.
-        if !self.force_copy && !to.exists() && fs::rename(from, to).is_ok() {
-            return Ok(FolderMove::Renamed);
+        if !self.force_copy && !to.exists() {
+            match fs::rename(from, to) {
+                Ok(()) => return Ok(FolderMove::Renamed),
+                // A file in it is open (a preview playing, an antivirus
+                // scan): copying would duplicate it all and still fail to
+                // remove the original. Tried again at the next move.
+                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                    return Err(error.into());
+                }
+                Err(_) => {}
+            }
         }
         let files = files_under(from)?;
         let total: u64 = files.iter().map(|(_, size)| size).sum();
@@ -148,8 +157,13 @@ impl ProjectFolders for LocalProjectFolders {
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
-            // Whole from a run cut short: copied before, never half.
-            if fs::metadata(&target).is_ok_and(|meta| meta.len() == *size) {
+            // Whole from a run cut short: copied before, never half, and
+            // not changed since.
+            let source_changed = fs::metadata(from.join(relative)).and_then(|meta| meta.modified());
+            if fs::metadata(&target).is_ok_and(|meta| {
+                meta.len() == *size
+                    && matches!((meta.modified(), &source_changed), (Ok(copied), Ok(changed)) if copied >= *changed)
+            }) {
                 copied += size;
                 if !progress(copied, total) {
                     return Err(FolderMoveError::Stopped);
@@ -175,7 +189,12 @@ impl ProjectFolders for LocalProjectFolders {
                 return Err(FolderMoveError::Mismatch(relative.display().to_string()));
             }
         }
-        fs::remove_dir_all(from)?;
+        // The copy is whole: it is the media now, even if a file of the
+        // original cannot go yet (one left open); what is left is only
+        // a leftover in the old place.
+        if let Err(error) = fs::remove_dir_all(from) {
+            tracing::warn!("could not remove all of {}: {error}", from.display());
+        }
         Ok(FolderMove::Copied)
     }
 }

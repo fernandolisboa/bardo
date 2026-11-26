@@ -340,8 +340,19 @@ impl Bardo {
         if self.role != RunnerRole::App {
             return None;
         }
+        // Only media that can go somewhere now: its project has a folder
+        // and both ends are reachable. Else the move would hold the
+        // database for nothing.
+        let unreachable = self.folder_book.watch.unreachable();
         let waiting = match self.folder_book.folders.videos_to_move(self.profile.id) {
-            Ok(videos) => !videos.is_empty(),
+            Ok(videos) => videos.iter().any(|video| {
+                !unreachable.contains(&video.to)
+                    && video
+                        .from
+                        .as_ref()
+                        .is_none_or(|from| !unreachable.contains(&from.project))
+                    && self.project_folder(video.to).is_some()
+            }),
             Err(error) => {
                 tracing::warn!("could not read where the media is: {error}");
                 return None;
@@ -497,6 +508,16 @@ fn unexpected(error: impl std::fmt::Display) -> JobFailure {
 impl JobHandler for MoveMediaHandler {
     fn run(&self, _payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
         let cx = &*cx;
+        // Other jobs end before the hold is taken, so a long render does
+        // not keep every other job from starting meanwhile.
+        loop {
+            if !self.others_running(cx)? {
+                break;
+            }
+            if !cx.sleep(self.tick) {
+                return Ok(());
+            }
+        }
         self.renew_hold()?;
         let moved = self.wait_for_others(cx).and_then(|free| match free {
             true => self.move_all(cx),
@@ -519,6 +540,16 @@ impl MoveMediaHandler {
         }
     }
 
+    /// Whether another job of this profile runs.
+    fn others_running(&self, cx: &JobContext) -> Result<bool, JobFailure> {
+        Ok(self
+            .jobs
+            .list(self.owner)
+            .map_err(unexpected)?
+            .iter()
+            .any(|job| job.id() != cx.id() && job.state() == bardo_domain::JobState::Running))
+    }
+
     /// Waits, under the hold, until no other job runs and the background
     /// agent stopped. False when told to stop.
     fn wait_for_others(&self, cx: &JobContext) -> Result<bool, JobFailure> {
@@ -528,12 +559,7 @@ impl MoveMediaHandler {
         loop {
             self.renew_hold()?;
             let now = SystemTime::now();
-            let running = self
-                .jobs
-                .list(self.owner)
-                .map_err(unexpected)?
-                .iter()
-                .any(|job| job.id() != cx.id() && job.state() == bardo_domain::JobState::Running);
+            let running = self.others_running(cx)?;
             let agent = self
                 .jobs
                 .runners(now.checked_sub(RUNNER_ALIVE).unwrap_or(now))

@@ -14,8 +14,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use bardo_domain::{
     BackupError, BackupInfo, BackupOptions, BackupStore, DUE_GRACE, FolderPlaces, GLOBAL_DIR,
-    JobFailureKind, MediaSize, Network, Progress, ProgressReport, Provider, RestoreOutcome,
-    SavedBackup,
+    JobFailureKind, MediaSize, Network, PROJECT_MANIFEST, Progress, ProgressReport,
+    ProjectManifest, Provider, RestoreOutcome, SavedBackup,
 };
 use rusqlite::Connection;
 use rusqlite::backup::{Backup, StepResult};
@@ -413,17 +413,59 @@ impl LocalBackups {
         Ok(files)
     }
 
-    /// Where a restored folder goes: where it came from, or, when that
-    /// place is gone (a drive not here, another computer), under the base
-    /// folder.
-    fn restore_target(&self, folder: &BackedFolder) -> PathBuf {
-        match folder.origin.parent() {
-            Some(parent) if parent.is_dir() => folder.origin.clone(),
-            _ => match (self.base_folder(), folder.origin.file_name()) {
-                (Some(base), Some(name)) => base.join(name),
-                _ => folder.origin.clone(),
-            },
+    /// Where a restored folder goes: where it came from when that place is
+    /// free or already holds this same folder; else (a drive not here,
+    /// another computer, another folder there now) under the base folder.
+    /// A folder that is not this project's own is never replaced.
+    fn restore_target(&self, folder: &BackedFolder, taken: &[PathBuf]) -> PathBuf {
+        let base = self.base_folder();
+        let fits = |place: &Path| {
+            if taken.iter().any(|other| other == place) {
+                return false;
+            }
+            match &folder.project {
+                // The global folder goes only where the global folder goes.
+                None => base
+                    .as_ref()
+                    .is_some_and(|base| place == base.join(GLOBAL_DIR)),
+                Some(project) => {
+                    if !place.exists() {
+                        return true;
+                    }
+                    fs::read_to_string(place.join(PROJECT_MANIFEST))
+                        .ok()
+                        .and_then(|text| ProjectManifest::parse(&text))
+                        .is_some_and(|manifest| manifest.project.to_string() == *project)
+                }
+            }
+        };
+        let origin = &folder.origin;
+        // Only a whole path, deep enough to be a project folder, is trusted.
+        let sound = origin.is_absolute()
+            && origin.components().count() >= 3
+            && origin
+                .components()
+                .all(|part| !matches!(part, Component::ParentDir | Component::CurDir));
+        if sound && origin.parent().is_some_and(Path::is_dir) && fits(origin) {
+            return origin.clone();
         }
+        let Some(base) = base.clone() else {
+            return sibling(origin, ".bardo-restored");
+        };
+        if folder.project.is_none() {
+            return base.join(GLOBAL_DIR);
+        }
+        let name = origin
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty() && !name.eq_ignore_ascii_case(GLOBAL_DIR))
+            .unwrap_or_else(|| folder.key.clone());
+        let plain = base.join(&name);
+        if fits(&plain) {
+            return plain;
+        }
+        let short = folder.key.get(..8).unwrap_or(&folder.key);
+        base.join(format!("{name}-{short}"))
     }
 
     pub fn paths(&self) -> &DataPaths {
@@ -516,7 +558,8 @@ impl LocalBackups {
         let mut staged: Vec<(BackedFolder, StagedFolder)> = Vec::new();
         if manifest.media {
             for folder in &manifest.folders {
-                let target = self.restore_target(folder);
+                let taken: Vec<PathBuf> = staged.iter().map(|(_, s)| s.target.clone()).collect();
+                let target = self.restore_target(folder, &taken);
                 staged.push((
                     folder.clone(),
                     StagedFolder {
@@ -570,6 +613,21 @@ impl LocalBackups {
                 .sync_all()?;
         }
         prepare_restored(&incoming.join(DATABASE_ENTRY), SystemTime::now())?;
+        // A folder backed up by another copy of Bardo (a source build, the
+        // installed one) is this copy's once restored here.
+        if let Some(places) = &self.places {
+            for (_, folder) in &staged {
+                let file = folder.staged.join(PROJECT_MANIFEST);
+                if let Some(mut named) = fs::read_to_string(&file)
+                    .ok()
+                    .and_then(|text| ProjectManifest::parse(&text))
+                    && named.data_home != places.data_home
+                {
+                    named.data_home = places.data_home.clone();
+                    fs::write(&file, named.to_json())?;
+                }
+            }
+        }
         // A folder restored elsewhere than it came from: its project
         // points there.
         let moved: Vec<(&str, &Path)> = staged
@@ -2029,6 +2087,13 @@ mod tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, bytes).unwrap();
         }
+        let manifest = ProjectManifest {
+            project,
+            name: "Project".into(),
+            profile: owner,
+            data_home: "Bardo".into(),
+        };
+        fs::write(folder.join(PROJECT_MANIFEST), manifest.to_json()).unwrap();
         project
     }
 
@@ -2060,7 +2125,6 @@ mod tests {
             profile.id,
             &space,
             &[
-                ("bardo-project.json", b"{}"),
                 ("Videos/apollo-1a2b3c4d/clip-1.mp4", b"apollo"),
                 ("Videos/apollo-1a2b3c4d/proxy-clip-1.mp4.mkv", b"proxy"),
             ],
@@ -2081,10 +2145,10 @@ mod tests {
             places(&root),
         );
         let size = backups.media_size().unwrap();
-        assert_eq!(size.files, 5, "the preview copy is made again, not carried");
+        assert_eq!(size.files, 6, "the preview copy is made again, not carried");
         let to = install.out("full.zip");
         let info = backups.write(&to, WITH_MEDIA, &mut go_on()).unwrap();
-        assert_eq!(info.media_files, 5);
+        assert_eq!(info.media_files, 6);
         let names = entries(&to);
         for name in [
             format!("folders/{space_id}/bardo-project.json"),
@@ -2162,6 +2226,89 @@ mod tests {
         assert!(!root.join("E").exists());
         let db = Database::open(&paths.database).unwrap();
         assert_eq!(folder_of(&db, sea_id), Some(under_base));
+    }
+
+    #[test]
+    fn a_folder_of_another_project_where_one_was_is_never_replaced() {
+        let (install, profile) = Install::with_profile();
+        let root = install._dir.path().to_owned();
+        let sea = root.join("E").join("Sea");
+        let sea_id = project_folder(&install, profile.id, &sea, &[("World/kraken.png", b"k")]);
+        let backups = LocalBackups::with_places(
+            Arc::clone(&install.db),
+            install.paths.clone(),
+            places(&root),
+        );
+        let to = install.out("full.zip");
+        backups.write(&to, WITH_MEDIA, &mut go_on()).unwrap();
+        // Since the backup, another project's folder took the place, and
+        // the base folder already has a folder of that name too.
+        fs::remove_dir_all(&sea).unwrap();
+        let other = crate::project::test_project(&install.db, profile.id);
+        for place in [
+            sea.clone(),
+            root.join("Documents").join("Bardo").join("Sea"),
+        ] {
+            fs::create_dir_all(place.join("World")).unwrap();
+            fs::write(place.join("World/other.png"), b"other").unwrap();
+            let manifest = ProjectManifest {
+                project: other,
+                name: "Other".into(),
+                profile: profile.id,
+                data_home: "Bardo".into(),
+            };
+            fs::write(place.join(PROJECT_MANIFEST), manifest.to_json()).unwrap();
+        }
+        backups.stage(&to, &mut go_on()).unwrap();
+        drop(backups);
+        let Install { _dir, paths, db } = install;
+        drop(db);
+
+        assert!(apply_pending_restore(&paths).unwrap().succeeded());
+        clean_restore_leftovers(&paths);
+        assert_eq!(fs::read(sea.join("World/other.png")).unwrap(), b"other");
+        let base = root.join("Documents").join("Bardo");
+        assert_eq!(
+            fs::read(base.join("Sea/World/other.png")).unwrap(),
+            b"other"
+        );
+        let short = &sea_id.to_string()[..8];
+        let restored = base.join(format!("Sea-{short}"));
+        assert_eq!(fs::read(restored.join("World/kraken.png")).unwrap(), b"k");
+        let db = Database::open(&paths.database).unwrap();
+        assert_eq!(folder_of(&db, sea_id), Some(restored));
+    }
+
+    #[test]
+    fn a_folder_backed_up_by_another_copy_of_bardo_is_this_copys_once_restored() {
+        let (install, profile) = Install::with_profile();
+        let root = install._dir.path().to_owned();
+        let space = root.join("C").join("Space");
+        project_folder(&install, profile.id, &space, &[("World/a.png", b"a")]);
+        let to = install.out("full.zip");
+        LocalBackups::with_places(
+            Arc::clone(&install.db),
+            install.paths.clone(),
+            places(&root),
+        )
+        .write(&to, WITH_MEDIA, &mut go_on())
+        .unwrap();
+        let dev = FolderPlaces {
+            data_home: "Bardo Dev".into(),
+            ..places(&root)
+        };
+        let backups =
+            LocalBackups::with_places(Arc::clone(&install.db), install.paths.clone(), dev);
+        backups.stage(&to, &mut go_on()).unwrap();
+        drop(backups);
+        let Install { _dir, paths, db } = install;
+        drop(db);
+
+        assert!(apply_pending_restore(&paths).unwrap().succeeded());
+        let manifest =
+            ProjectManifest::parse(&fs::read_to_string(space.join(PROJECT_MANIFEST)).unwrap())
+                .unwrap();
+        assert_eq!(manifest.data_home, "Bardo Dev");
     }
 
     #[test]

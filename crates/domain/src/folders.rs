@@ -101,7 +101,8 @@ pub fn video_folder_name(title: &str, video: VideoProjectId) -> String {
 /// added when a folder of that name is `taken`.
 pub fn project_folder_name(name: &str, project: ProjectId, taken: impl Fn(&str) -> bool) -> String {
     let safe = safe_folder_name(name, MAX_PROJECT_FOLDER_CHARS, "Project");
-    if taken(&safe) {
+    // `Global` is the global folder's, beside the projects' folders.
+    if safe.eq_ignore_ascii_case(GLOBAL_DIR) || taken(&safe) {
         format!("{safe}-{}", short_id(project.as_uuid()))
     } else {
         safe
@@ -320,7 +321,8 @@ pub enum FolderMove {
     Nothing,
     /// Renamed, on the same volume.
     Renamed,
-    /// Copied, checked, and the original removed: another volume.
+    /// Copied and checked, and the original removed (what could go of it):
+    /// another volume.
     Copied,
 }
 
@@ -416,6 +418,11 @@ mod tests {
             "Space & Sea-feedbeef"
         );
         assert_eq!(project_folder_name("a?", id, |_| false), "a_");
+        // The global folder's name is never a project's.
+        assert_eq!(
+            project_folder_name("global", id, |_| false),
+            "global-feedbeef"
+        );
     }
 
     #[test]
