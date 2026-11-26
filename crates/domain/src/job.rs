@@ -11,7 +11,9 @@ use std::time::{Duration, SystemTime};
 
 use uuid::Uuid;
 
-use crate::{Holder, ProfileId, ProviderFailureKind, RepositoryError, RunnerRole, RunnerSeen};
+use crate::{
+    Holder, ProfileId, ProviderFailureKind, RepositoryError, RunnerRole, RunnerSeen, WorkOrigin,
+};
 
 /// Identifies a job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -669,6 +671,8 @@ pub struct JobRecord {
     pub failure: Option<JobFailure>,
     pub retry_at: Option<SystemTime>,
     pub run_at: Option<SystemTime>,
+    /// The project, channel and video it is for, as the store found them.
+    pub origin: WorkOrigin,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -695,6 +699,10 @@ pub struct Job {
     failure: Option<JobFailure>,
     retry_at: Option<SystemTime>,
     run_at: Option<SystemTime>,
+    /// The project, channel and video it is for, with their names when it
+    /// was queued: the store reads them from the payload's `project` (a
+    /// video) or `channel` when it first saves the job.
+    origin: WorkOrigin,
 }
 
 impl Job {
@@ -715,6 +723,7 @@ impl Job {
             failure: None,
             retry_at: None,
             run_at: None,
+            origin: WorkOrigin::default(),
         }
     }
 
@@ -760,7 +769,14 @@ impl Job {
             failure: record.failure,
             retry_at: record.retry_at,
             run_at: record.run_at,
+            origin: record.origin,
         })
+    }
+
+    /// The project, channel and video it is for, as the store found them
+    /// when the job was queued.
+    pub fn origin(&self) -> &WorkOrigin {
+        &self.origin
     }
 
     pub fn id(&self) -> JobId {
@@ -1050,6 +1066,7 @@ impl From<&Job> for JobRecord {
             failure: job.failure.clone(),
             retry_at: job.retry_at,
             run_at: job.run_at,
+            origin: job.origin.clone(),
         }
     }
 }

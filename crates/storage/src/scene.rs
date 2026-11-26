@@ -977,7 +977,7 @@ mod tests {
             ..ChannelDraft::default()
         })
         .unwrap();
-        let channel = Channel::new(profile.id, details);
+        let channel = Channel::new(profile.id, crate::project::test_project(&db, profile.id), details);
         ChannelRepository::save(&db, &channel).unwrap();
         let mut theme = Theme::suggested(
             profile.id,
@@ -1183,7 +1183,17 @@ mod tests {
             // then migrated.
             let mut conn = s.db.conn();
             conn.execute_batch(
-                "DROP TABLE ad_export; DROP TABLE ad_window; DROP TABLE ad_texts;
+                "DROP INDEX channel_project; ALTER TABLE channel DROP COLUMN owner_project_id;
+                 DROP TABLE project;
+                 DROP INDEX job_owner_project; ALTER TABLE job DROP COLUMN owner_project_id;
+                 ALTER TABLE job DROP COLUMN project_name; ALTER TABLE job DROP COLUMN channel_name;
+                 ALTER TABLE job DROP COLUMN video_title;
+                 DROP INDEX cost_record_owner_project;
+                 ALTER TABLE cost_record DROP COLUMN owner_project_id;
+                 ALTER TABLE cost_record DROP COLUMN project_name;
+                 ALTER TABLE cost_record DROP COLUMN channel_name;
+                 ALTER TABLE cost_record DROP COLUMN video_title;
+                 DROP TABLE ad_export; DROP TABLE ad_window; DROP TABLE ad_texts;
                  DROP TABLE export_ad_review;
                  DROP TABLE publication_ad_review;
                  ALTER TABLE scene DROP COLUMN shot_card;

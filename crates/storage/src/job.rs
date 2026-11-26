@@ -5,6 +5,8 @@ use bardo_domain::{
     Holder, Job, JobFailure, JobHeldElsewhere, JobId, JobRecord, JobRepository, ProfileId,
     Progress, RepositoryError, RunnerRole, RunnerSeen,
 };
+
+use crate::project::{OriginRow, origin_of};
 use rusqlite::{OptionalExtension, Row, params};
 use uuid::Uuid;
 
@@ -12,7 +14,8 @@ use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 /// The columns `JobRow::read` reads, in its order.
 const JOB_COLUMNS: &str = "id, profile_id, kind, payload, state, progress, attempts, checkpoint,
-     external_handle, failure_kind, failure_detail, retry_at, run_at, paid_call";
+     external_handle, failure_kind, failure_detail, retry_at, run_at, paid_call,
+     owner_project_id, project_name, channel_name, video_title";
 
 /// How long a runner that stopped saying it is up keeps its row.
 const FORGET_RUNNER_AFTER_MILLIS: i64 = 24 * 60 * 60 * 1000;
@@ -33,6 +36,7 @@ struct JobRow {
     retry_at: Option<i64>,
     run_at: Option<i64>,
     paid_call: Option<String>,
+    origin: OriginRow,
 }
 
 impl JobRow {
@@ -52,6 +56,7 @@ impl JobRow {
             retry_at: row.get(11)?,
             run_at: row.get(12)?,
             paid_call: row.get(13)?,
+            origin: OriginRow::read(row, 14)?,
         })
     }
 
@@ -78,6 +83,7 @@ impl JobRow {
             failure,
             retry_at: self.retry_at.map(from_unix_millis),
             run_at: self.run_at.map(from_unix_millis),
+            origin: self.origin.into_origin()?,
         };
         Job::restore(record).map_err(boxed)
     }
@@ -106,24 +112,35 @@ impl JobRepository for Database {
         let saved = self
             .conn()
             .execute(
-                "INSERT INTO job (id, profile_id, kind, payload, state, progress, attempts,
-                                  checkpoint, external_handle, failure_kind, failure_detail,
-                                  retry_at, run_at, paid_call)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?16)
-                 ON CONFLICT (id) DO UPDATE SET
-                     state = excluded.state,
-                     progress = excluded.progress,
-                     attempts = excluded.attempts,
-                     checkpoint = excluded.checkpoint,
-                     external_handle = excluded.external_handle,
-                     failure_kind = excluded.failure_kind,
-                     failure_detail = excluded.failure_detail,
-                     retry_at = excluded.retry_at,
-                     run_at = excluded.run_at,
-                     paid_call = excluded.paid_call,
-                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                 WHERE job.leased_by IS NULL OR job.leased_by = ?14
-                       OR job.leased_until <= ?15",
+                &format!(
+                    "INSERT INTO job (id, profile_id, kind, payload, state, progress, attempts,
+                                      checkpoint, external_handle, failure_kind, failure_detail,
+                                      retry_at, run_at, paid_call, owner_project_id, project_name,
+                                      channel_name, video_title)
+                     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?16,
+                            origin.project_id, origin.project_name, origin.channel_name,
+                            origin.video_title
+                     FROM (SELECT 1) LEFT JOIN {} origin ON 1
+                     WHERE 1
+                     ON CONFLICT (id) DO UPDATE SET
+                         state = excluded.state,
+                         progress = excluded.progress,
+                         attempts = excluded.attempts,
+                         checkpoint = excluded.checkpoint,
+                         external_handle = excluded.external_handle,
+                         failure_kind = excluded.failure_kind,
+                         failure_detail = excluded.failure_detail,
+                         retry_at = excluded.retry_at,
+                         run_at = excluded.run_at,
+                         paid_call = excluded.paid_call,
+                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     WHERE job.leased_by IS NULL OR job.leased_by = ?14
+                           OR job.leased_until <= ?15",
+                    origin_of(
+                        "CASE WHEN json_valid(?4) THEN json_extract(?4, '$.project') END",
+                        "CASE WHEN json_valid(?4) THEN json_extract(?4, '$.channel') END",
+                    ),
+                ),
                 params![
                     job.id().to_string(),
                     job.owner().to_string(),

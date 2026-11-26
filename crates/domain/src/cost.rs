@@ -12,7 +12,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::{ChannelId, JobId, ProfileId, Provider, RepositoryError, TokenUsage, VideoProjectId};
+use crate::{
+    ChannelId, JobId, ProfileId, Provider, RepositoryError, TokenUsage, VideoProjectId, WorkOrigin,
+};
 
 uuid_id!(
     /// Identifies one cost record.
@@ -743,6 +745,9 @@ pub struct CostRecord {
     /// The job that made the call.
     pub job: Option<JobId>,
     pub at: SystemTime,
+    /// The project, channel and video it was for, with their names when it
+    /// was recorded: the store fills it in from `project` or `channel`.
+    pub origin: WorkOrigin,
 }
 
 impl CostRecord {
@@ -1400,6 +1405,7 @@ mod tests {
             project,
             job: None,
             at: SystemTime::UNIX_EPOCH,
+            origin: WorkOrigin::default(),
         }
     }
 
