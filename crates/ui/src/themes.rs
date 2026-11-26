@@ -25,6 +25,7 @@ use gpui_kit::{
     AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px,
 };
 
+use crate::appearance::look;
 use crate::kit::{self, Tone};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts};
 use crate::shell::tr;
@@ -648,47 +649,63 @@ impl ThemesScreen {
                     ))))
             }));
 
-        // In a narrow card the tags go under the title rather than squeeze
-        // it to a word per line.
-        let header = h_flex()
-            .flex_wrap()
-            .gap_x_3()
-            .gap_y_1()
-            .justify_between()
-            .items_start()
-            .child(
-                h_flex()
-                    .flex_grow(1.)
-                    .flex_basis(px(IDEA_TITLE_MIN_WIDTH))
-                    .gap_2()
-                    .min_w_0()
-                    .items_start()
-                    .child(
+        // The rank in a badge, then the title with its tags; in a narrow
+        // card the tags go under the title rather than squeeze it to a word
+        // per line. The title keeps its own minimum width (no flex basis),
+        // so the card measures the same wrapped inside the tour's anchor
+        // as outside it (#328).
+        let t = &look(cx).tokens;
+        let (badge_ink, badge_tint) = if approved {
+            (t.success, t.success_bg)
+        } else if idea.ranking().is_some() {
+            (t.accent_text, t.selected)
+        } else {
+            (t.text2, t.sunken)
+        };
+        let badge = div()
+            .flex_none()
+            .size(px(28.))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(badge_tint)
+            .text_color(badge_ink)
+            .text_sm()
+            .font_semibold()
+            .child(SharedString::from((ix + 1).to_string()));
+        let header = h_flex().w_full().gap_3().items_start().child(badge).child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .w_full()
+                        .flex_wrap()
+                        .gap_x_3()
+                        .gap_y_1()
+                        .items_start()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(IDEA_TITLE_MIN_WIDTH))
+                                .text_base()
+                                .font_semibold()
+                                .child(SharedString::from(idea.idea().title().to_owned())),
+                        )
+                        .child(tags),
+                )
+                .when(!idea.idea().angle().is_empty(), |text| {
+                    text.child(
                         div()
+                            .w_full()
                             .text_sm()
                             .text_color(theme.muted_foreground)
-                            .child(SharedString::from(format!("{}.", ix + 1))),
+                            .child(SharedString::from(idea.idea().angle().to_owned())),
                     )
-                    .child(
-                        v_flex()
-                            .gap_0p5()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .font_medium()
-                                    .child(SharedString::from(idea.idea().title().to_owned())),
-                            )
-                            .when(!idea.idea().angle().is_empty(), |text| {
-                                text.child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(theme.muted_foreground)
-                                        .child(SharedString::from(idea.idea().angle().to_owned())),
-                                )
-                            }),
-                    ),
-            )
-            .child(tags);
+                }),
+        );
 
         let reasons: AnyElement = match idea.ranking() {
             Some(ranking) => h_flex()
@@ -778,9 +795,11 @@ impl ThemesScreen {
                 }
             };
 
+        // The tour's wrappers take the card's full width, so what they
+        // hold lays out as it does on every other card.
         let tagged = |anchor: TourAnchor, part: AnyElement| -> AnyElement {
             if ix == 0 {
-                kit::anchor(anchor, part).into_any_element()
+                kit::anchor(anchor, part).w_full().into_any_element()
             } else {
                 part
             }
@@ -791,17 +810,21 @@ impl ThemesScreen {
         );
         let reasons = tagged(TourAnchor::Control(Control::ThemeReasons), reasons);
         let body = if reviewable {
-            kit::anchor(TourAnchor::Control(Control::ThemeActions), body).into_any_element()
+            kit::anchor(TourAnchor::Control(Control::ThemeActions), body)
+                .w_full()
+                .into_any_element()
         } else {
             body
         };
+        // Reasons and actions line up under the title, past the badge; an
+        // approved idea's card has a success border.
         kit::card(cx)
             .id(("theme", ix))
-            .p_3()
-            .gap_2()
+            .when(approved, |card| card.border_color(t.success))
+            .p_4()
+            .gap_3()
             .child(header)
-            .child(reasons)
-            .child(body)
+            .child(v_flex().pl(px(40.)).gap_3().child(reasons).child(body))
             .into_any_element()
     }
 

@@ -71,7 +71,8 @@ const PAGES: usize = 5;
 struct Spec {
     id: &'static str,
     model: &'static str,
-    name: &'static str,
+    /// Model, version and variant.
+    name: [&'static str; 3],
     durations: fn() -> ClipDurations,
     fixed: fn() -> Value,
 }
@@ -80,42 +81,42 @@ const CATALOG: &[Spec] = &[
     Spec {
         id: DEFAULT_MODEL,
         model: "kling3_0",
-        name: "Kling 3.0 Standard",
+        name: ["Kling", "3.0", "Standard"],
         durations: || ClipDurations::Range { min: 3, max: 15 },
         fixed: || json!({ "mode": "std", "sound": "off" }),
     },
     Spec {
         id: "kling3_0/pro",
         model: "kling3_0",
-        name: "Kling 3.0 Pro",
+        name: ["Kling", "3.0", "Pro"],
         durations: || ClipDurations::Range { min: 3, max: 15 },
         fixed: || json!({ "mode": "pro", "sound": "off" }),
     },
     Spec {
         id: "kling2_6",
         model: "kling2_6",
-        name: "Kling 2.6",
+        name: ["Kling", "2.6", ""],
         durations: || ClipDurations::Choices(vec![5, 10]),
         fixed: || json!({ "sound": false }),
     },
     Spec {
         id: "seedance_2_0/1080p",
         model: "seedance_2_0",
-        name: "Seedance 2.0",
+        name: ["Seedance", "2.0", ""],
         durations: || ClipDurations::Range { min: 4, max: 15 },
         fixed: || json!({ "resolution": "1080p", "generate_audio": false }),
     },
     Spec {
         id: "wan2_7/1080p",
         model: "wan2_7",
-        name: "Wan 2.7",
+        name: ["Wan", "2.7", ""],
         durations: || ClipDurations::Range { min: 2, max: 15 },
         fixed: || json!({ "resolution": "1080p" }),
     },
     Spec {
         id: "minimax_hailuo/2.3",
         model: "minimax_hailuo",
-        name: "Hailuo 2.3",
+        name: ["Hailuo", "2.3", ""],
         durations: || ClipDurations::Choices(vec![6, 10]),
         fixed: || json!({ "variant": "minimax-2.3", "resolution": "768" }),
     },
@@ -132,7 +133,7 @@ pub fn models() -> Vec<ClipModel> {
         .map(|spec| ClipModel {
             id: ClipModelRef::new(Provider::HiggsfieldPlan, spec.id)
                 .expect("catalog models are valid"),
-            name: spec.name.to_owned(),
+            name: bardo_domain::ModelName::new(spec.name[0], spec.name[1], spec.name[2]),
             durations: (spec.durations)(),
         })
         .collect()

@@ -15,6 +15,11 @@ A video project is one video on its way from an approved idea to a published pos
 
 The project's name heads the screen, with a menu beside it that lists the channel's other projects; pick one to switch. An ad project is marked **Ad** in that menu, and the line under its name starts with **Ad for** and the product it advertises. An ad whose product was an *idea* when the project started is a concept: it is marked **Concept** in that menu and beside its name, and keeps that mark even if the product changes kind later ([A concept image for an idea](products.md#concept)). The channel picker next to **Projects** lists another channel's projects.
 
+<a id="settings"></a>
+## The video's settings
+
+Under the project's name, one bar holds what the video is and how it is made. **Video** has the [narrator](#narrator), the [format](#format), the [length](#length) and the [visual style](#style); **Production and spend** has the [mode](#mode), the [cap](#mode) and what the whole video will cost. Each setting has its label above it and an ⓘ that explains it. In a narrow window the settings wrap to the next line. What the cap has to say (the default cap offered, a video over its cap, a cap saved) shows under the bar, across its width.
+
 <a id="narrator"></a>
 ## The narrator
 
@@ -23,7 +28,7 @@ The narrator is the persona that reads the video's narration, and its tone and s
 <a id="format"></a>
 ## Short or long
 
-**Format** beside the project's name says whether this video is a Short (vertical, under a minute) or a long video (16:9, 8 to 10 minutes). **Channel's** follows the channel's [video format](channels.md#format); pick **Short** or **Long** to make this one video the other kind.
+**Format**, in the settings bar, says whether this video is a Short (vertical, under a minute) or a long video (16:9, 8 to 10 minutes). **Channel's** follows the channel's [video format](channels.md#format); pick **Short** or **Long** to make this one video the other kind.
 
 The format applies to what is made next: the next script's length, the shape of the next scene images and clips, a new cut in the editor and YouTube's [render preset](render.md#targets). What was already made keeps its shape, so after switching, write the script again and draw the scenes again for a video that matches.
 
@@ -44,7 +49,7 @@ The style applies to what is drawn next: the next scene plan, scene images, cast
 <a id="mode"></a>
 ## How it is produced, and what it will cost
 
-**Mode** beside the length says how this video is made: which scenes become AI clips and with which model. The other scenes stay still pictures, moved by the channel's [motion on stills](channels.md#defaults).
+**Mode**, under **Production and spend**, says how this video is made: which scenes become AI clips and with which model. The other scenes stay still pictures, moved by the channel's [motion on stills](channels.md#defaults).
 
 - **Economy**: stills with motion, no AI clips. The cheapest.
 - **Animated hook**: stills with motion, and the scenes that start in the first 10 seconds animated by Kling 2.6 at 720p, to hold the viewer. New channels start here.
@@ -52,7 +57,7 @@ The style applies to what is drawn next: the next scene plan, scene images, cast
 - **All animated, premium**: every scene animated by Kling 3.0 at 1080p.
 - **All animated, channel's model**: every scene animated by the channel's [video model](channels.md#defaults), as channels made before modes do.
 
-**Channel's** follows the channel's [production mode](channels.md#production). Each choice in the menu shows what the whole video would cost in that mode, and the line beside it shows the total for the mode picked and what was spent so far. The estimate counts what is left to make (script, narration, scene plan, images and portraits, and the clips the mode makes) from the [rate table](bardo:go/costs), so it drops as the video gets made. Before a script exists it assumes the video's [length](#length), or a minute for a Short and eight for a long video; once a script exists, how long it reads. With the rate table as Bardo ships it, a whole Short costs about US$ 1.65 in Economy, US$ 2.45 with the hook animated, US$ 5.85 all animated and US$ 8.35 premium; a long video about US$ 9, US$ 10, US$ 43 and US$ 63. A 30-second video costs about US$ 1.05 in Economy and US$ 1.90 with the hook animated; a 3-minute one about US$ 3.85 and US$ 4.70. Kling 2.6 makes clips of 5 or 10 seconds, so a 6-second scene pays for 10.
+**Channel's** follows the channel's [production mode](channels.md#production). Each choice in the menu shows what the whole video would cost in that mode, and the line under it shows the total for the mode picked and what was spent so far. The estimate counts what is left to make (script, narration, scene plan, images and portraits, and the clips the mode makes) from the [rate table](bardo:go/costs), so it drops as the video gets made. Before a script exists it assumes the video's [length](#length), or a minute for a Short and eight for a long video; once a script exists, how long it reads. With the rate table as Bardo ships it, a whole Short costs about US$ 1.65 in Economy, US$ 2.45 with the hook animated, US$ 5.85 all animated and US$ 8.35 premium; a long video about US$ 9, US$ 10, US$ 43 and US$ 63. A 30-second video costs about US$ 1.05 in Economy and US$ 1.90 with the hook animated; a 3-minute one about US$ 3.85 and US$ 4.70. Kling 2.6 makes clips of 5 or 10 seconds, so a 6-second scene pays for 10.
 
 A mode whose clips need a key you have not saved says so in the menu: Kling's modes need a Kling key under [Settings › API keys](bardo:go/settings/keys). Changing the mode applies to what is animated next: on the Clips stage, **Animate scenes without a clip** (or **Animate the hook**) animates only the scenes the mode animates, clips made already stay, and any scene can still be animated by hand with any model.
 

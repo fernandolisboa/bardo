@@ -94,7 +94,7 @@ In Depth mode, **Set** picks where you appear: **Your room**, as recorded; a **S
 <a id="performed"></a>
 ## Performed clip
 
-Once a take's control video is approved, its take model makes the persona perform it: the persona's [look](personas.md#look) moves, speaks and turns as you do in the take. Takes go to the channel's take model ([Channels](channels.md#defaults)); **Take model** under the take picks another for that take alone. Each model is named with the provider it runs on, with your key there ([Your API keys](api-keys.md#providers)):
+Once a take's control video is approved, its take model makes the persona perform it: the persona's [look](personas.md#look) moves, speaks and turns as you do in the take. Takes go to the channel's take model ([Channels](channels.md#defaults)); **Take model** under the take picks another for that take alone, in steps: **Provider**, **Model**, **Version** and **Variant** ([Picking a model](channels.md#model-picker)); the channel's model is named under it. Each model is named with the provider it runs on, with your key there ([Your API keys](api-keys.md#providers)):
 
 - **Kling 3.0 Motion Control · Higgsfield**, the default, takes Recording takes of 3 to 30 seconds and makes the final straight away, at 1080p.
 - **Seedance 2.5 Video Edit · Higgsfield** takes Mesh and Depth takes of 4 to 30 seconds: a draft at 480p first, then the final at 1080p, made anew.

@@ -532,7 +532,8 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
     }
     let summed = !summary.is_empty();
     let briefs = summary.into_iter().map(|figure| brief(figure, cx));
-    h_flex()
+    let bar = header.bar;
+    let row = h_flex()
         .flex_none()
         .w_full()
         .flex_wrap()
@@ -542,8 +543,6 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
         .gap_x_3()
         .gap_y_1p5()
         .items_center()
-        .border_b(t.border_width)
-        .border_color(t.border)
         // The way here and the title, then the ⓘ and tour buttons, which
         // drop below the title when the line is too short for both: they
         // never cut the title (issue #142).
@@ -608,7 +607,15 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
                 .gap_2()
                 .items_center()
                 .children(header.actions),
-        )
+        );
+    // The settings bar runs the full width under the line (#330).
+    v_flex()
+        .flex_none()
+        .w_full()
+        .border_b(t.border_width)
+        .border_color(t.border)
+        .child(row)
+        .children(bar.map(|bar| div().px_4().pb_2().child(bar)))
         .tour_anchor(TourAnchor::Header, Side::Below, None)
         .into_any_element()
 }

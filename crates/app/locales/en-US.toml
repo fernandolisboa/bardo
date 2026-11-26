@@ -513,6 +513,12 @@ placeholder = "AIza…"
 name = "X API"
 purpose = "Posts on X, billed per post from your X app's credits. Reached through the connected X account, with no API key."
 
+[model_level]
+provider = "Provider"
+model = "Model"
+version = "Version"
+variant = "Variant"
+
 [key_check]
 valid = "The key works."
 rejected = "The provider rejected this key. Check that it was copied in full and is still active."
@@ -629,6 +635,8 @@ title_too_long = "Keep the title to at most 120 characters."
 angle_too_long = "Keep the angle to at most 500 characters."
 
 [projects]
+settings_video = "Video"
+settings_production = "Production and spend"
 switch = "Switch project"
 nav = "Projects"
 title = "Video projects"
@@ -3147,7 +3155,7 @@ body = "How the image moves: one camera move and at most one simple action. Clau
 
 [tour.clips.model]
 title = "Video model"
-body = "Each scene uses the channel's video model unless you pick another one for it here. Models differ in look, length and price."
+body = "Each scene uses the channel's video model unless you pick another one for it here, one step at a time: provider, model, version and variant. Models differ in look, length and price."
 
 [tour.clips.review]
 title = "Review a new clip"
@@ -3367,7 +3375,7 @@ body = "Shorts are vertical and under a minute, and fit every network. Long vide
 
 [tour.channels.defaults]
 title = "Video model, captions and transitions"
-body = "The model that animates the channel's scene images into clips, and whether a clip a little shorter than its scene is slowed to fit, and by how much, so you pay for fewer seconds. Then the look of the captions in its new projects and the color their spoken word lights up in, and the transition the editor puts on a cut. Any scene can pick another model, any project other captions, and any cut another transition."
+body = "The model that animates the channel's scene images into clips, picked by provider, model, version and variant, and whether a clip a little shorter than its scene is slowed to fit, and by how much, so you pay for fewer seconds. Then the look of the captions in its new projects and the color their spoken word lights up in, and the transition the editor puts on a cut. Any scene can pick another model, any project other captions, and any cut another transition."
 
 [tour.channels.accounts]
 title = "Network accounts"

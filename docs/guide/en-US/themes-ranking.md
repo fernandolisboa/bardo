@@ -27,7 +27,7 @@ A ranking is made from YouTube data, so it goes with that data 30 days after it 
 <a id="ranking"></a>
 ## Priority and confidence
 
-Ideas are listed by **priority**, from 0 to 100, highest first. **Confidence** is how sure the decision engine was of its least certain answer: a high priority with low confidence is a good bet to check by hand.
+Ideas are listed by **priority**, from 0 to 100, highest first. Each card leads with the idea's place in a round badge, then its title and angle, its tags, its reasons and its actions: the badge is tinted for a ranked idea, grey for one waiting to be ranked, and green, with a green border around the card, for an approved one. **Confidence** is how sure the decision engine was of its least certain answer: a high priority with low confidence is a good bet to check by hand.
 
 <a id="reasons"></a>
 ## How an idea is ranked

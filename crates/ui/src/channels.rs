@@ -5,7 +5,7 @@
 
 use bardo_app::bardo_domain::{
     CaptionHighlight, CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipFit,
-    ClipModel, ClipModelRef, ContentLanguage, Country, MotionDefault, MotionPattern,
+    ClipModelRef, ContentLanguage, Country, ModelName, MotionDefault, MotionPattern,
     MotionStrength, PersonaId, ProductionMode, StretchLimit, StyleChoice, TakeModel, ThumbnailLook,
     Transition, TransitionKind, VideoFormat, frame_time,
 };
@@ -23,6 +23,7 @@ use gpui_kit::{
 };
 
 use crate::kit::{self, Tone};
+use crate::model_picker::{ModelPicker, OnModel};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
 use crate::{guide, layout};
@@ -80,28 +81,6 @@ fn persona_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<PersonaId>>> {
     )
 }
 
-/// The default take model first (a channel that keeps it follows the
-/// default), then every take model by name.
-fn take_model_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<ClipModelRef>>> {
-    let models = bardo.take_models();
-    let default = models.first().map(|model| Choice {
-        value: None,
-        title: SharedString::from(bardo.text_with(
-            Text::ChannelClipModelDefault,
-            &[("model", &take_model_title(bardo, model))],
-        )),
-    });
-    SearchableVec::new(
-        default
-            .into_iter()
-            .chain(models.iter().map(|model| Choice {
-                title: SharedString::from(take_model_title(bardo, model)),
-                value: Some(model.id.clone()),
-            }))
-            .collect::<Vec<_>>(),
-    )
-}
-
 /// A take model by name and provider: Seedance 2.5 comes through
 /// Higgsfield and from BytePlus.
 pub(crate) fn take_model_title(bardo: &Bardo, model: &TakeModel) -> String {
@@ -109,35 +88,6 @@ pub(crate) fn take_model_title(bardo: &Bardo, model: &TakeModel) -> String {
         "{} · {}",
         model.name,
         bardo.text(Text::ProviderName(model.id.provider()))
-    )
-}
-
-/// The provider's default model first (a channel that keeps it follows the
-/// default), then every model by name and provider. The provider is always
-/// named: the same Kling model comes through Higgsfield and from Kling.
-fn clip_model_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<ClipModelRef>>> {
-    let models = bardo.clip_models();
-    let title = |model: &ClipModel| {
-        format!(
-            "{} · {}",
-            model.name,
-            bardo.text(Text::ProviderName(model.id.provider()))
-        )
-    };
-    let default = models.first().map(|model| Choice {
-        value: None,
-        title: SharedString::from(
-            bardo.text_with(Text::ChannelClipModelDefault, &[("model", &title(model))]),
-        ),
-    });
-    SearchableVec::new(
-        default
-            .into_iter()
-            .chain(models.iter().map(|model| Choice {
-                title: SharedString::from(title(model)),
-                value: Some(model.id.clone()),
-            }))
-            .collect::<Vec<_>>(),
     )
 }
 
@@ -300,8 +250,9 @@ pub struct ChannelsScreen {
     language: ChoiceSelect<ContentLanguage>,
     country: ChoiceSelect<Country>,
     persona: ChoiceSelect<Option<PersonaId>>,
-    clip_model: ChoiceSelect<Option<ClipModelRef>>,
-    take_model: ChoiceSelect<Option<ClipModelRef>>,
+    /// The picked clip and take models; `None` follows the default.
+    clip_model: Option<ClipModelRef>,
+    take_model: Option<ClipModelRef>,
     caption_style: ChoiceSelect<CaptionStyle>,
     caption_highlight: ChoiceSelect<CaptionHighlight>,
     thumbnail_look: ChoiceSelect<ThumbnailLook>,
@@ -334,13 +285,12 @@ impl ChannelsScreen {
         let aesthetic_notes = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 10));
 
         let defaults = ChannelDraft::default();
-        let (languages, countries, personas, clip_models, caption_styles) = {
+        let (languages, countries, personas, caption_styles) = {
             let bardo = bardo.read(cx);
             (
                 language_choices(bardo),
                 country_choices(bardo),
                 persona_choices(bardo),
-                clip_model_choices(bardo),
                 caption_style_choices(bardo),
             )
         };
@@ -367,11 +317,6 @@ impl ChannelsScreen {
         let persona = cx.new(|cx| {
             SelectState::new(personas, Some(IndexPath::new(0)), window, cx).searchable(true)
         });
-        let clip_model =
-            cx.new(|cx| SelectState::new(clip_models, Some(IndexPath::new(0)), window, cx));
-        let take_models = take_model_choices(bardo.read(cx));
-        let take_model =
-            cx.new(|cx| SelectState::new(take_models, Some(IndexPath::new(0)), window, cx));
         let caption_style = cx.new(|cx| {
             let selected = index_of(&CaptionStyle::ALL, &defaults.caption_style);
             SelectState::new(caption_styles, selected, window, cx)
@@ -467,8 +412,8 @@ impl ChannelsScreen {
             language,
             country,
             persona,
-            clip_model,
-            take_model,
+            clip_model: None,
+            take_model: None,
             caption_style,
             caption_highlight,
             thumbnail_look,
@@ -514,8 +459,6 @@ impl ChannelsScreen {
         let languages = language_choices(bardo);
         let countries = country_choices(bardo);
         let personas = persona_choices(bardo);
-        let clip_models = clip_model_choices(bardo);
-        let take_models = take_model_choices(bardo);
         let caption_styles = caption_style_choices(bardo);
         let caption_highlights = caption_highlight_choices(bardo);
         let thumbnail_looks = thumbnail_look_choices(bardo);
@@ -552,16 +495,6 @@ impl ChannelsScreen {
             }
         });
         Self::set_persona_items(&self.persona, personas, window, cx);
-        self.clip_model.update(cx, |select, cx| {
-            let selected = select.selected_value().cloned().flatten();
-            select.set_items(clip_models, window, cx);
-            select.set_selected_value(&selected, window, cx);
-        });
-        self.take_model.update(cx, |select, cx| {
-            let selected = select.selected_value().cloned().flatten();
-            select.set_items(take_models, window, cx);
-            select.set_selected_value(&selected, window, cx);
-        });
         self.caption_style.update(cx, |select, cx| {
             let selected = select.selected_value().copied();
             select.set_items(caption_styles, window, cx);
@@ -646,6 +579,18 @@ impl ChannelsScreen {
                 select.set_selected_value(&value, window, cx);
             }
         });
+        // A model no longer offered (its provider's key removed meanwhile)
+        // goes back to the default, as a select dropped it before (#329).
+        let bardo = self.bardo.read(cx);
+        let (clips, takes) = (bardo.clip_models(), bardo.take_models());
+        self.clip_model = self
+            .clip_model
+            .take()
+            .filter(|model| clips.iter().any(|offered| offered.id == *model));
+        self.take_model = self
+            .take_model
+            .take()
+            .filter(|model| takes.iter().any(|offered| offered.id == *model));
         cx.notify();
     }
 
@@ -697,24 +642,25 @@ impl ChannelsScreen {
         self.persona.update(cx, |select, cx| {
             select.set_selected_value(&draft.default_persona, window, cx)
         });
-        // A model its provider retired shows as the one that took its place.
-        let clip_model = draft
+        // A model its provider retired shows as the one that took its
+        // place; a model no longer offered shows as the default, and saving
+        // keeps the form's choice.
+        let bardo = self.bardo.read(cx);
+        self.clip_model = draft
             .clip_model
             .as_ref()
-            .map(|model| self.bardo.read(cx).clip_model_now(model));
-        self.clip_model.update(cx, |select, cx| {
-            select.set_selected_value(&clip_model, window, cx);
-            // A model no longer offered shows as the default; saving keeps
-            // the form's choice.
-            if select.selected_value().is_none() {
-                select.set_selected_value(&None, window, cx);
-            }
-        });
-        self.take_model.update(cx, |select, cx| {
-            select.set_selected_value(&draft.take_model, window, cx);
-            if select.selected_value().is_none() {
-                select.set_selected_value(&None, window, cx);
-            }
+            .map(|model| bardo.clip_model_now(model))
+            .filter(|model| {
+                bardo
+                    .clip_models()
+                    .iter()
+                    .any(|offered| offered.id == *model)
+            });
+        self.take_model = draft.take_model.clone().filter(|model| {
+            bardo
+                .take_models()
+                .iter()
+                .any(|offered| offered.id == *model)
         });
         self.caption_style.update(cx, |select, cx| {
             select.set_selected_value(&draft.caption_style, window, cx)
@@ -784,8 +730,8 @@ impl ChannelsScreen {
                 .copied()
                 .unwrap_or_default(),
             default_persona: self.persona.read(cx).selected_value().copied().flatten(),
-            clip_model: self.clip_model.read(cx).selected_value().cloned().flatten(),
-            take_model: self.take_model.read(cx).selected_value().cloned().flatten(),
+            clip_model: self.clip_model.clone(),
+            take_model: self.take_model.clone(),
             caption_style: self
                 .caption_style
                 .read(cx)
@@ -962,7 +908,65 @@ impl ChannelsScreen {
         collection
     }
 
+    /// The clip and take model pickers (#329): provider, model, version
+    /// and variant, the default first.
+    fn model_pickers(&self, cx: &mut Context<Self>) -> (AnyElement, AnyElement) {
+        let screen = cx.entity().downgrade();
+        let pick = |take: bool| -> OnModel {
+            let screen = screen.clone();
+            Rc::new(move |model, _, cx| {
+                let _ = screen.update(cx, |this, cx| {
+                    if take {
+                        this.take_model = model;
+                    } else {
+                        this.clip_model = model;
+                    }
+                    if matches!(this.notice, Some(Notice::Saved)) {
+                        this.notice = None;
+                    }
+                    cx.notify();
+                });
+            })
+        };
+        let bardo = self.bardo.read(cx);
+        let clips: Vec<(ClipModelRef, ModelName)> = bardo
+            .clip_models()
+            .into_iter()
+            .map(|model| (model.id, model.name))
+            .collect();
+        let takes: Vec<(ClipModelRef, ModelName)> = bardo
+            .take_models()
+            .into_iter()
+            .map(|model| (model.id, model.name))
+            .collect();
+        let picker = |id: &'static str,
+                      models: Vec<(ClipModelRef, ModelName)>,
+                      value: Option<ClipModelRef>,
+                      on_pick: OnModel| {
+            // The first model is the provider's default.
+            let default = models.first().map(|(id, _)| id.clone());
+            ModelPicker::new(id, models, value, on_pick)
+                .follow(Text::ChannelClipModelDefault, default)
+                .render(bardo, cx)
+        };
+        (
+            picker(
+                "channel-clip-model",
+                clips,
+                self.clip_model.clone(),
+                pick(false),
+            ),
+            picker(
+                "channel-take-model",
+                takes,
+                self.take_model.clone(),
+                pick(true),
+            ),
+        )
+    }
+
     fn render_form(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let (clip_picker, take_picker) = self.model_pickers(cx);
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let error_for = |fields: &[ChannelFieldError]| -> Option<AnyElement> {
@@ -1118,7 +1122,7 @@ impl ChannelsScreen {
                             Text::ChannelClipModel,
                             Text::ChannelClipModelHint,
                             guide::refs::CHANNELS_DEFAULTS,
-                            Select::new(&self.clip_model).into_any_element(),
+                            clip_picker,
                         ))
                         .child(explained(
                             "channel-clip-fit-info",
@@ -1144,7 +1148,7 @@ impl ChannelsScreen {
                             Text::ChannelTakeModel,
                             Text::ChannelTakeModelHint,
                             guide::refs::CHANNELS_DEFAULTS,
-                            Select::new(&self.take_model).into_any_element(),
+                            take_picker,
                         ))
                         .child(
                             h_flex()

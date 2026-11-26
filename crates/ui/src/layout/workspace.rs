@@ -508,9 +508,10 @@ fn screen_header(header: Header, cx: &App) -> AnyElement {
         }
         trail.push(crumb);
     }
+    let bar = header.bar;
     // The title's column never gets narrower than TITLE_MIN_WIDTH: in a
     // narrow window the actions drop below it instead (issue #142).
-    h_flex()
+    let row = h_flex()
         .flex_none()
         .flex_wrap()
         .px_6()
@@ -568,7 +569,12 @@ fn screen_header(header: Header, cx: &App) -> AnyElement {
                 .gap_2()
                 .items_center()
                 .children(header.actions),
-        )
+        );
+    // The settings bar runs the full width under the title (#330).
+    v_flex()
+        .flex_none()
+        .child(row)
+        .children(bar.map(|bar| div().px_6().pb_3().child(bar)))
         .tour_anchor(TourAnchor::Header, Side::Below, None)
         .into_any_element()
 }

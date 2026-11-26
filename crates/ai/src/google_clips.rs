@@ -74,7 +74,8 @@ const OMNI_FRAMING: &str = "Animate this image, starting on it as the first fram
 /// own price in the rate table.
 struct Spec {
     id: &'static str,
-    name: &'static str,
+    /// Model, version and variant.
+    name: [&'static str; 3],
 }
 
 /// Omni Flash makes any whole number of seconds from 3 to 15.
@@ -87,11 +88,11 @@ fn durations() -> ClipDurations {
 const CATALOG: &[Spec] = &[
     Spec {
         id: DEFAULT_MODEL,
-        name: "Gemini Omni 1.2 Flash 720p",
+        name: ["Gemini Omni", "1.2 Flash", "720p"],
     },
     Spec {
         id: MODEL_1080P,
-        name: "Gemini Omni 1.2 Flash 1080p",
+        name: ["Gemini Omni", "1.2 Flash", "1080p"],
     },
 ];
 
@@ -150,7 +151,7 @@ pub fn models() -> Vec<ClipModel> {
         .iter()
         .map(|spec| ClipModel {
             id: model_ref(spec.id),
-            name: spec.name.to_owned(),
+            name: bardo_domain::ModelName::new(spec.name[0], spec.name[1], spec.name[2]),
             durations: durations(),
         })
         .collect()

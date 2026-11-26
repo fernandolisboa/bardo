@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use crate::{AdAnglesMissing, Destination, GuideGroup, Pillar, Stage, UploadBlock};
 
+use bardo_domain::ModelLevel;
 use bardo_domain::ProductionMode;
 use bardo_domain::SceneKind;
 use bardo_domain::VideoLength;
@@ -79,6 +80,9 @@ pub enum Text {
     ChannelClipModel,
     /// Placeholder: `{model}`.
     ChannelClipModelDefault,
+    /// The settings bar's groups on an open project (#330).
+    ProjectSettingsVideo,
+    ProjectSettingsProduction,
     ChannelClipModelHint,
     ChannelTakeModel,
     ChannelTakeModelHint,
@@ -411,6 +415,8 @@ pub enum Text {
     SetupCopied,
     ProviderKeysHint,
     ProviderName(Provider),
+    /// A level of a model picker: Provider, Model, Version, Variant (#329).
+    ModelLevelName(ModelLevel),
     BytePlusFieldLabel(BytePlusField),
     BytePlusFieldError(BytePlusFieldError),
     BytePlusFieldsInvalid,
@@ -3131,6 +3137,8 @@ impl Text {
             Text::ChannelPersonaNotFound => "channel.error.persona_not_found",
             Text::ChannelClipModel => "channel.clip_model",
             Text::ChannelClipModelDefault => "channel.clip_model_default",
+            Text::ProjectSettingsVideo => "projects.settings_video",
+            Text::ProjectSettingsProduction => "projects.settings_production",
             Text::ChannelClipModelHint => "channel.clip_model_hint",
             Text::ChannelTakeModel => "channel.take_model",
             Text::ChannelTakeModelHint => "channel.take_model_hint",
@@ -3555,6 +3563,9 @@ impl Text {
             Text::ProviderKeysHint => "provider_keys.hint",
             Text::ProviderName(provider) => {
                 return format!("provider.{}.name", provider.code()).into();
+            }
+            Text::ModelLevelName(level) => {
+                return format!("model_level.{}", level.code()).into();
             }
             Text::ProviderPurpose(provider) => {
                 return format!("provider.{}.purpose", provider.code()).into();
@@ -6678,6 +6689,8 @@ mod tests {
             Text::ChannelPersonaNotFound,
             Text::ChannelClipModel,
             Text::ChannelClipModelDefault,
+            Text::ProjectSettingsVideo,
+            Text::ProjectSettingsProduction,
             Text::ChannelClipModelHint,
             Text::ChannelTakeModel,
             Text::ChannelTakeModelHint,
@@ -7702,6 +7715,7 @@ mod tests {
         ];
         texts.extend(NicheSeedError::ALL.map(Text::NicheSeedError));
         texts.extend(Provider::ALL.map(Text::ProviderName));
+        texts.extend(ModelLevel::ALL.map(Text::ModelLevelName));
         texts.extend(Provider::ALL.map(Text::ProviderPurpose));
         texts.extend(Provider::with_keys().map(Text::ProviderKeyPlaceholder));
         texts.extend(KeyCheckOutcome::ALL.map(Text::KeyCheckOutcome));

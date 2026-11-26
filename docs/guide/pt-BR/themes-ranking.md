@@ -27,7 +27,7 @@ Um ranqueamento é feito com dados do YouTube, então vai embora junto com eles 
 <a id="ranking"></a>
 ## Prioridade e confiança
 
-As ideias aparecem pela **prioridade**, de 0 a 100, da maior para a menor. A **confiança** é o quanto o motor de decisão teve certeza da sua resposta menos segura: uma prioridade alta com confiança baixa merece uma conferida sua.
+As ideias aparecem pela **prioridade**, de 0 a 100, da maior para a menor. Cada card começa pela posição da ideia num selo redondo, depois o título e o ângulo, as etiquetas, os motivos e as ações: o selo fica colorido numa ideia ranqueada, cinza numa que espera ranqueamento, e verde, com o card contornado de verde, numa aprovada. A **confiança** é o quanto o motor de decisão teve certeza da sua resposta menos segura: uma prioridade alta com confiança baixa merece uma conferida sua.
 
 <a id="reasons"></a>
 ## Como uma ideia é ranqueada

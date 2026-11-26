@@ -1977,111 +1977,126 @@ impl ProjectsScreen {
             None,
             cx,
         );
-        header.actions = vec![
-            kit::anchor(
-                TourAnchor::Control(Control::ProjectNarrator),
+        // The video's settings in one bar under the title (#330): what the
+        // video is (narrator, format, length, look), then how it is made
+        // and what it may spend.
+        let muted = cx.theme().muted_foreground;
+        let setting = |label: Text,
+                       info: (&'static str, Text, bardo_app::GuideRef),
+                       width: f32,
+                       control: AnyElement| {
+            let (id, hint, at) = info;
+            v_flex()
+                .gap_1()
+                .w(px(width))
+                .max_w_full()
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(bardo, label))
+                        .child(guide::info(bardo, id, tr(bardo, hint), at)),
+                )
+                .child(control)
+        };
+        let video = v_flex()
+            .gap_2()
+            .child(group_caption(bardo, Text::ProjectSettingsVideo, cx))
+            .child(
                 h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(bardo, Text::ProjectNarrator)),
-                    )
-                    .child(
-                        div().w(px(260.)).child(
+                    .flex_wrap()
+                    .gap_x_3()
+                    .gap_y_2()
+                    .items_start()
+                    .child(kit::anchor(
+                        TourAnchor::Control(Control::ProjectNarrator),
+                        setting(
+                            Text::ProjectNarrator,
+                            (
+                                "project-narrator-info",
+                                Text::ProjectNarratorHint,
+                                guide::refs::PROJECTS_NARRATOR,
+                            ),
+                            220.,
                             Select::new(&self.narrator_select)
                                 .small()
-                                .search_placeholder(tr(bardo, Text::PersonasTitle)),
+                                .search_placeholder(tr(bardo, Text::PersonasTitle))
+                                .into_any_element(),
                         ),
-                    )
-                    .child(guide::info(
-                        bardo,
-                        "project-narrator-info",
-                        tr(bardo, Text::ProjectNarratorHint),
-                        guide::refs::PROJECTS_NARRATOR,
+                    ))
+                    .child(kit::anchor(
+                        TourAnchor::Control(Control::ProjectFormat),
+                        // The format's tour step covers the length and the
+                        // look too: they sit beside it.
+                        h_flex()
+                            .flex_wrap()
+                            .gap_x_3()
+                            .gap_y_2()
+                            .items_start()
+                            .child(setting(
+                                Text::ProjectFormat,
+                                (
+                                    "project-format-info",
+                                    Text::ProjectFormatHint,
+                                    guide::refs::PROJECTS_FORMAT,
+                                ),
+                                170.,
+                                Select::new(&self.format_select).small().into_any_element(),
+                            ))
+                            .child(setting(
+                                Text::ProjectLength,
+                                (
+                                    "project-length-info",
+                                    Text::ProjectLengthHint,
+                                    guide::refs::PROJECTS_LENGTH,
+                                ),
+                                190.,
+                                Select::new(&self.length_select).small().into_any_element(),
+                            ))
+                            .child(setting(
+                                Text::ProjectStyle,
+                                (
+                                    "project-style-info",
+                                    Text::ProjectStyleHint,
+                                    guide::refs::PROJECTS_STYLE,
+                                ),
+                                220.,
+                                Select::new(&self.style_select)
+                                    .small()
+                                    .search_placeholder(tr(bardo, Text::ChannelStyle))
+                                    .into_any_element(),
+                            )),
                     )),
-            )
-            .into_any_element(),
-            kit::anchor(
-                TourAnchor::Control(Control::ProjectFormat),
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(bardo, Text::ProjectFormat)),
-                    )
-                    .child(
-                        div()
-                            .w(px(180.))
-                            .child(Select::new(&self.format_select).small()),
-                    )
-                    .child(guide::info(
-                        bardo,
-                        "project-format-info",
-                        tr(bardo, Text::ProjectFormatHint),
-                        guide::refs::PROJECTS_FORMAT,
-                    )),
-            )
-            .into_any_element(),
-            // The format's tour step covers it.
-            h_flex()
+            );
+        let (production, notices) = mode.unwrap_or_default();
+        header.bar = Some(
+            v_flex()
+                .w_full()
                 .gap_2()
-                .items_center()
                 .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(bardo, Text::ProjectLength)),
-                )
-                .child(
-                    div()
-                        .w(px(220.))
-                        .child(Select::new(&self.length_select).small()),
-                )
-                .child(guide::info(
-                    bardo,
-                    "project-length-info",
-                    tr(bardo, Text::ProjectLengthHint),
-                    guide::refs::PROJECTS_LENGTH,
-                ))
-                .into_any_element(),
-            // The format's tour step covers it too.
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(bardo, Text::ProjectStyle)),
-                )
-                .child(
-                    div().w(px(300.)).child(
-                        Select::new(&self.style_select)
-                            .small()
-                            .search_placeholder(tr(bardo, Text::ChannelStyle)),
+                    kit::card(cx).w_full().px_3().py_2().child(
+                        h_flex()
+                            .w_full()
+                            .flex_wrap()
+                            .gap_x_8()
+                            .gap_y_3()
+                            .items_start()
+                            .child(video)
+                            .children(production),
                     ),
                 )
-                .child(guide::info(
-                    bardo,
-                    "project-style-info",
-                    tr(bardo, Text::ProjectStyleHint),
-                    guide::refs::PROJECTS_STYLE,
-                ))
+                .children(notices)
                 .into_any_element(),
-        ];
-        header.actions.extend(mode);
+        );
         header
     }
 
     /// The production mode, what the whole video costs in it, and the
-    /// video's spend cap (#248).
-    fn render_mode(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// video's spend cap (#248), as a group of the settings bar; then what
+    /// the cap has to say, each a notice the bar's full width (#330).
+    fn render_mode(&self, cx: &mut Context<Self>) -> Option<(Option<AnyElement>, Vec<AnyElement>)> {
         let production = self.production.as_ref()?;
         let save = cx.listener(|this, _: &ClickEvent, window, cx| this.save_spend_cap(window, cx));
         let answer = |accept: bool| {
@@ -2175,46 +2190,27 @@ impl ProjectsScreen {
         let note = self
             .spend_cap_note
             .map(|(tone, text)| kit::notice(tone, tr(bardo, text), cx).text_xs());
-        kit::anchor(
-            TourAnchor::Control(Control::ProjectMode),
+        let field = |label: Text, control: AnyElement| {
             v_flex()
-                .max_w_full()
                 .gap_1()
                 .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(tr(bardo, label)),
+                )
+                .child(control)
+        };
+        let group = kit::anchor(
+            TourAnchor::Control(Control::ProjectMode),
+            v_flex()
+                .gap_2()
+                .max_w_full()
+                .child(
                     h_flex()
-                        .gap_2()
+                        .gap_1()
                         .items_center()
-                        .flex_wrap()
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.muted_foreground)
-                                .child(tr(bardo, Text::ProjectMode)),
-                        )
-                        .child(
-                            div()
-                                .w(px(280.))
-                                .child(Select::new(&self.mode_select).small().menu_width(px(560.))),
-                        )
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.muted_foreground)
-                                .child(tr(bardo, Text::SpendCap)),
-                        )
-                        .child(
-                            div()
-                                .w(px(90.))
-                                .child(Input::new(&self.spend_cap_input).small()),
-                        )
-                        .child(
-                            Button::new("save-spend-cap")
-                                .ghost()
-                                .small()
-                                .label(tr(bardo, Text::SaveSpendCap))
-                                .on_click(save),
-                        )
-                        .children(default)
+                        .child(group_caption(bardo, Text::ProjectSettingsProduction, cx))
                         .child(guide::info(
                             bardo,
                             "project-mode-info",
@@ -2228,19 +2224,59 @@ impl ProjectsScreen {
                         )),
                 )
                 .child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_x_3()
+                        .gap_y_2()
+                        .items_end()
+                        .child(
+                            field(
+                                Text::ProjectMode,
+                                Select::new(&self.mode_select)
+                                    .small()
+                                    .menu_width(px(560.))
+                                    .into_any_element(),
+                            )
+                            .w(px(280.))
+                            .max_w_full(),
+                        )
+                        .child(field(
+                            Text::SpendCap,
+                            h_flex()
+                                .gap_1()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .w(px(90.))
+                                        .child(Input::new(&self.spend_cap_input).small()),
+                                )
+                                .child(
+                                    Button::new("save-spend-cap")
+                                        .ghost()
+                                        .small()
+                                        .label(tr(bardo, Text::SaveSpendCap))
+                                        .on_click(save),
+                                )
+                                .children(default)
+                                .into_any_element(),
+                        )),
+                )
+                .child(
                     div()
                         .text_xs()
                         .text_color(theme.muted_foreground)
                         .child(estimate),
-                )
-                .children(offer)
-                .children(over)
-                .children(note),
+                ),
         )
-        // No wider than the header, so the offer's text wraps.
         .max_w_full()
-        .into_any_element()
-        .into()
+        .into_any_element();
+        let notices = offer
+            .map(IntoElement::into_any_element)
+            .into_iter()
+            .chain(over.map(IntoElement::into_any_element))
+            .chain(note.map(IntoElement::into_any_element))
+            .collect();
+        Some((Some(group), notices))
     }
 
     /// The Script stage: the script, a new version to review, where it
@@ -3223,6 +3259,17 @@ impl ProjectsScreen {
             )
             .into_any_element()
     }
+}
+
+/// The caption over a group of the settings bar: "Video", "Production
+/// and spend".
+fn group_caption(bardo: &Bardo, text: Text, cx: &App) -> AnyElement {
+    div()
+        .text_xs()
+        .font_semibold()
+        .text_color(cx.theme().muted_foreground)
+        .child(tr(bardo, text).to_uppercase())
+        .into_any_element()
 }
 
 fn muted(cx: &App, text: SharedString) -> AnyElement {

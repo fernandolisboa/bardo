@@ -77,7 +77,7 @@ const MAX_DETAIL_CHARS: usize = 300;
 pub fn take_models() -> Vec<TakeModel> {
     vec![TakeModel {
         id: ClipModelRef::new(Provider::BytePlus, MODEL).expect("the model id is valid"),
-        name: "Seedance 2.5 Video Edit".to_owned(),
+        name: bardo_domain::ModelName::new("Seedance", "2.5", "Video Edit"),
         // It refuses real faces, so only control videos that show none.
         modes: vec![TakeMode::Mesh, TakeMode::Depth],
         draft: Some(TakeTier {

@@ -55,7 +55,8 @@ const INLINE: &str = "inline";
 /// scene is one shot.
 struct Spec {
     id: &'static str,
-    name: &'static str,
+    /// Model, version and variant.
+    name: [&'static str; 3],
     durations: fn() -> ClipDurations,
     fixed: fn() -> Value,
 }
@@ -83,37 +84,37 @@ fn no_settings() -> Value {
 const CATALOG: &[Spec] = &[
     Spec {
         id: DEFAULT_MODEL,
-        name: "Kling 3.0 720p",
+        name: ["Kling", "3.0", "720p"],
         durations: kling_3,
         fixed: kling_3_settings,
     },
     Spec {
         id: "kling-3.0/1080p",
-        name: "Kling 3.0 1080p",
+        name: ["Kling", "3.0", "1080p"],
         durations: kling_3,
         fixed: kling_3_settings,
     },
     Spec {
         id: "kling-2.6/720p",
-        name: "Kling 2.6 720p",
+        name: ["Kling", "2.6", "720p"],
         durations: five_or_ten,
         fixed: kling_2_6_settings,
     },
     Spec {
         id: "kling-2.6/1080p",
-        name: "Kling 2.6 1080p",
+        name: ["Kling", "2.6", "1080p"],
         durations: five_or_ten,
         fixed: kling_2_6_settings,
     },
     Spec {
         id: "kling-2.5-turbo/720p",
-        name: "Kling 2.5 Turbo 720p",
+        name: ["Kling", "2.5 Turbo", "720p"],
         durations: five_or_ten,
         fixed: no_settings,
     },
     Spec {
         id: "kling-2.5-turbo/1080p",
-        name: "Kling 2.5 Turbo 1080p",
+        name: ["Kling", "2.5 Turbo", "1080p"],
         durations: five_or_ten,
         fixed: no_settings,
     },
@@ -125,7 +126,7 @@ pub fn models() -> Vec<ClipModel> {
         .iter()
         .map(|spec| ClipModel {
             id: ClipModelRef::new(Provider::Kling, spec.id).expect("catalog models are valid"),
-            name: spec.name.to_owned(),
+            name: bardo_domain::ModelName::new(spec.name[0], spec.name[1], spec.name[2]),
             durations: (spec.durations)(),
         })
         .collect()

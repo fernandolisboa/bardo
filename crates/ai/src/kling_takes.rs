@@ -51,13 +51,13 @@ const MAX_PROMPT_CHARS: usize = 2_500;
 /// Motion Control docs give (checked on 2026-10-25).
 pub fn take_models() -> Vec<TakeModel> {
     [
-        (TAKE_MODEL_720P, "Kling 3.0 Motion Control 720p", 720),
-        (TAKE_MODEL_1080P, "Kling 3.0 Motion Control 1080p", 1080),
+        (TAKE_MODEL_720P, "Motion Control 720p", 720),
+        (TAKE_MODEL_1080P, "Motion Control 1080p", 1080),
     ]
     .into_iter()
-    .map(|(id, name, height)| TakeModel {
+    .map(|(id, variant, height)| TakeModel {
         id: ClipModelRef::new(Provider::Kling, id).expect("catalog models are valid"),
-        name: name.to_owned(),
+        name: bardo_domain::ModelName::new("Kling", "3.0", variant),
         // It takes the performer's own video.
         modes: vec![TakeMode::Recording],
         draft: Some(TakeTier {

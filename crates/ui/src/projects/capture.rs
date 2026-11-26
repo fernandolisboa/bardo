@@ -1802,37 +1802,43 @@ impl ProjectsScreen {
                 )),
         );
 
-        // Its take model, the channel's marked.
-        let channel = performed.channel_model.as_ref().map(|model| &model.id);
-        let mut models = h_flex()
-            .gap_x_3()
-            .gap_y_1()
-            .flex_wrap()
-            .items_center()
-            .child(small(tr(bardo, Text::TakeModelLabel)).text_color(muted));
-        for (number, model) in performed.models.iter().enumerate() {
-            let title = crate::channels::take_model_title(bardo, model);
-            let label = if Some(&model.id) == channel {
-                bardo.text_with(Text::TakeModelChannelTag, &[("model", &title)])
-            } else {
-                title
-            };
-            let picked = view.model.as_ref().is_some_and(|own| own.id == model.id);
-            let id = model.id.clone();
-            models = models.child(
-                Radio::new(SharedString::from(format!("take-model-{index}-{number}")))
-                    .label(SharedString::from(label))
-                    .xsmall()
-                    .checked(picked)
-                    .disabled(busy)
-                    .on_click(cx.listener(move |this, checked: &bool, window, cx| {
-                        if *checked {
-                            this.set_take_model(index, Some(id.clone()), window, cx);
-                        }
-                    })),
-            );
-        }
-        section = section.child(models);
+        // Its take model (#329): provider, model, version and variant; the
+        // channel's named under it.
+        let screen = cx.entity().downgrade();
+        let on_pick: crate::model_picker::OnModel = std::rc::Rc::new(move |model, window, cx| {
+            if let Some(model) = model {
+                let _ = screen.update(cx, |this, cx| {
+                    this.set_take_model(index, Some(model), window, cx);
+                });
+            }
+        });
+        let picker = crate::model_picker::ModelPicker::new(
+            format!("take-model-{index}"),
+            performed
+                .models
+                .iter()
+                .map(|model| (model.id.clone(), model.name.clone()))
+                .collect(),
+            view.model.as_ref().map(|model| model.id.clone()),
+            on_pick,
+        )
+        .disabled(busy)
+        .compact()
+        .render(bardo, cx);
+        let channel = performed.channel_model.as_ref().map(|model| {
+            small(SharedString::from(bardo.text_with(
+                Text::TakeModelChannelTag,
+                &[("model", &crate::channels::take_model_title(bardo, model))],
+            )))
+            .text_color(muted)
+        });
+        section = section.child(
+            v_flex()
+                .gap_1()
+                .child(small(tr(bardo, Text::TakeModelLabel)).text_color(muted))
+                .child(picker)
+                .children(channel),
+        );
         if let Some(block) = view.block {
             section = section.child(kit::notice(
                 Tone::Warning,
