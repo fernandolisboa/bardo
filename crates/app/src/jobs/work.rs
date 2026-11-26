@@ -27,6 +27,8 @@ pub(crate) enum Work {
     Chapters(String),
     Thumbnail(String),
     MusicPrompt(String),
+    /// The project's post texts: written, or an ad's checked against its
+    /// brief's claims.
     Metadata(String),
     /// The ideas proposed and ranked for the channel.
     Themes(String),
@@ -67,6 +69,9 @@ struct WorksOn {
     position: Option<u32>,
     #[serde(default)]
     product: Option<String>,
+    /// A claims check of an ad's post texts, rather than its script.
+    #[serde(default)]
+    posts: bool,
 }
 
 impl Work {
@@ -98,6 +103,8 @@ impl Work {
         }
         let on: WorksOn = serde_json::from_str(job.payload()).ok()?;
         Some(match kind {
+            // A check of the post texts works on the metadata it reads.
+            JobKind::ClaimsCheck if on.posts => Self::Metadata(on.project?),
             JobKind::ScriptGeneration | JobKind::ClaimsCheck => Self::Script(on.project?),
             // With a channel it makes a version of the project for it;
             // without, it adapts the version's script again.
@@ -202,6 +209,14 @@ mod tests {
                 serde_json::json!({"project": "p", "channel": "c", "version": "v"})
             ),
             Some(Work::Versions("p".into()))
+        );
+        // A check of an ad's post texts works on the metadata it reads.
+        assert_eq!(
+            work(
+                JobKind::ClaimsCheck,
+                serde_json::json!({"project": "p", "posts": true})
+            ),
+            Some(Work::Metadata("p".into()))
         );
         for kind in [JobKind::ThemeSuggestion, JobKind::ThemeRanking] {
             assert_eq!(

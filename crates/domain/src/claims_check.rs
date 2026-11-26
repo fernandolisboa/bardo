@@ -8,24 +8,31 @@
 
 use std::time::SystemTime;
 
-use crate::{AdBrief, ClaimId, JobId, ScriptText, VideoProjectId};
+use crate::{AdBrief, ClaimId, JobId, Network, ScriptText, VideoProjectId};
 
-/// Which of a project's scripts a check read: the current one, or a
-/// regenerated one waiting for review beside it.
+/// Which of a project's texts a check read: the current script, a
+/// regenerated one waiting for review beside it, or the post texts every
+/// network gets (#282).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CheckedScript {
     Current,
     Pending,
+    Posts,
 }
 
 impl CheckedScript {
-    pub const ALL: [CheckedScript; 2] = [CheckedScript::Current, CheckedScript::Pending];
+    pub const ALL: [CheckedScript; 3] = [
+        CheckedScript::Current,
+        CheckedScript::Pending,
+        CheckedScript::Posts,
+    ];
 
     /// The stable code it is stored under.
     pub fn code(self) -> &'static str {
         match self {
             CheckedScript::Current => "current",
             CheckedScript::Pending => "pending",
+            CheckedScript::Posts => "posts",
         }
     }
 
@@ -125,6 +132,39 @@ impl ClaimsCheck {
     pub fn accepted(mut self) -> Self {
         self.of = CheckedScript::Current;
         self
+    }
+}
+
+/// The post texts of a project as a check reads them: each network's
+/// title and text, in `posts` order, each part a sentence of its own.
+/// Empty when no network has any text.
+pub fn posts_text(posts: &[(Network, &str, &str)]) -> String {
+    let sentence = |text: &str| {
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        match text.chars().last() {
+            None => None,
+            Some('.' | '!' | '?' | '…') => Some(text),
+            Some(_) => Some(format!("{text}.")),
+        }
+    };
+    posts
+        .iter()
+        .filter_map(|(network, title, text)| {
+            let parts: Vec<String> = [*title, *text].into_iter().filter_map(sentence).collect();
+            (!parts.is_empty()).then(|| format!("{}: {}", network_name(*network), parts.join(" ")))
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// The network's name as a check of its text reads it.
+fn network_name(network: Network) -> &'static str {
+    match network {
+        Network::YouTube => "YouTube",
+        Network::TikTok => "TikTok",
+        Network::InstagramReels => "Instagram",
+        Network::X => "X",
+        Network::Kick => "Kick",
     }
 }
 
@@ -263,6 +303,26 @@ mod tests {
             &sheet,
             changed_at,
         )
+    }
+
+    #[test]
+    fn the_post_texts_read_as_sentences_of_each_network() {
+        let text = posts_text(&[
+            (
+                Network::YouTube,
+                "A lamp that folds",
+                "It folds flat!  Order yours",
+            ),
+            (Network::TikTok, "", ""),
+            (Network::X, "", "Lights up your desk"),
+        ]);
+        assert_eq!(
+            text,
+            "YouTube: A lamp that folds. It folds flat! Order yours.\n\nX: Lights up your desk."
+        );
+        assert_eq!(posts_text(&[(Network::Kick, " ", "")]), "");
+        let sentences = crate::script::script_sentences(&text);
+        assert!(sentences.len() >= 3, "{sentences:?}");
     }
 
     #[test]

@@ -52,6 +52,7 @@ use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 use crate::{guide, layout};
 
+mod ad_review;
 mod brief;
 mod capture;
 mod claims;
@@ -328,6 +329,18 @@ pub struct ProjectsScreen {
     upload_cover: Entity<InputState>,
     /// Why the typed cover time cannot be used.
     cover_problem: Option<Text>,
+    /// The keys of an ad's review items the user ticked on the Publish
+    /// stage, for its export and every upload review.
+    ad_acknowledged: Vec<String>,
+    /// The commercial disclosure picked in an ad's open upload review;
+    /// `None` keeps its default.
+    ad_disclosure: Option<bardo_app::bardo_domain::CommercialDisclosure>,
+    /// A paid Reel's brand accounts as the user types them.
+    ad_sponsors: Entity<InputState>,
+    /// Why the typed brand accounts cannot go.
+    sponsor_problem: Option<Text>,
+    /// Checking an ad's post texts would pass Claude's budget: asked first.
+    posts_check_ask: Option<SpendEstimate>,
     /// "Change time" or "Cancel schedule" was clicked on a scheduled upload.
     schedule_edit: Option<upload::ScheduleEdit>,
     /// The change being sent to the network.
@@ -399,6 +412,7 @@ impl ProjectsScreen {
         let schedule_date = cx.new(|cx| InputState::new(window, cx));
         let schedule_time = cx.new(|cx| InputState::new(window, cx));
         let upload_cover = cx.new(|cx| InputState::new(window, cx));
+        let ad_sponsors = cx.new(|cx| InputState::new(window, cx).placeholder("17841400000000000"));
         let brief_offer = cx.new(|cx| InputState::new(window, cx));
         let brief_call_to_action = cx.new(|cx| InputState::new(window, cx));
         let brief_link = cx.new(|cx| InputState::new(window, cx));
@@ -664,6 +678,11 @@ impl ProjectsScreen {
             schedule_time,
             schedule_problem: None,
             upload_cover,
+            ad_acknowledged: Vec::new(),
+            ad_disclosure: None,
+            ad_sponsors,
+            sponsor_problem: None,
+            posts_check_ask: None,
             cover_problem: None,
             schedule_edit: None,
             schedule_task: None,
@@ -834,6 +853,8 @@ impl ProjectsScreen {
         self.scenes_ask = None;
         self.script_ask = None;
         self.claims_ask = None;
+        self.ad_acknowledged.clear();
+        self.posts_check_ask = None;
         self.versions_error = None;
         self.version_ask = None;
         self.narration_ask = None;

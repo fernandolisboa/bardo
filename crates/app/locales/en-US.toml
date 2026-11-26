@@ -1179,6 +1179,7 @@ ad_angles = "Ad angles"
 ad_script = "Ad script"
 ad_scene_plan = "Ad scene plan"
 concept_prompt = "Concept prompt"
+ad_metadata = "Ad metadata"
 
 [templates.variable]
 channel_name = "The channel's name."
@@ -1224,6 +1225,7 @@ must_say = "What every ad for the product must say, from the product's brief."
 never_say = "What no ad for the product may say, from the product's brief."
 product_images = "The product's images, numbered from 0, one per line: whether each is a photo or a screen, and its size (\"none\" when the product has no image)."
 scene_kinds = "The kinds a scene of this ad may be, one per line, by what the product's images allow: a product shot needs an image, the product in use a photo."
+link = "The link or handle the ad sends viewers to, from the Brief stage (\"not set\" when empty)."
 
 [templates.error]
 not_saved = "Could not save the template. Try again."
@@ -3449,7 +3451,7 @@ body = "When the narrator's voice is a realistic synthetic one, each network ask
 
 [tour.publish.upload]
 title = "The upload review"
-body = "Review upload shows exactly what goes to YouTube, Instagram, TikTok or X: the file, the account, the text, the thumbnail, your choices and when it goes. Nothing is sent until you confirm it."
+body = "Review upload shows exactly what goes to YouTube, Instagram, TikTok or X: the file, the account, the text, the thumbnail, your choices and when it goes. An ad's review also has its commercial disclosure and the items you acknowledge first. Nothing is sent until you confirm it."
 
 [tour.publish.export]
 title = "Export"
@@ -4750,3 +4752,57 @@ not_saved = "The concept image could not be saved. Try again."
 [projects.concept]
 badge = "Concept"
 hint = "This video presents an idea, not a product that exists: its product was an idea when the project started."
+
+[ad_publishing]
+items_heading = "Before posting this ad, keep in mind:"
+not_acknowledged = "Acknowledge each item of the ad's review first."
+review_title = "Before this ad goes out"
+review_hint = "Bardo lists what this ad says that needs your care. You decide; acknowledge each item to go on. The acknowledgements are kept with the post."
+acknowledge = "Acknowledged"
+acknowledge_all = "Acknowledge all"
+acknowledge_left = "{n} left to acknowledge"
+studio_link = "Open in YouTube Studio"
+
+[ad_publishing.item]
+sensitive = "Sensitive claim used: \"{claim}\". Make sure you can back it."
+unbacked_script = "The script states \"{says}\", which no claim of the brief backs."
+unbacked_posts = "The post texts state \"{says}\", which no claim of the brief backs."
+script_not_checked = "The script was not checked against the claims as it reads now."
+posts_not_checked = "The post texts were not checked against the claims as they read now."
+unconfirmed = "The product no longer confirms a claim this ad uses: \"{claim}\"."
+category = "The product is in a category the networks have their own rules for: {category}. Check each network's ad rules."
+concept = "This video shows an idea, not a product that exists. Say so where you post it."
+
+[ad_publishing.commercial]
+title = "Commercial disclosure"
+hint = "Whether this post promotes your own brand or a client's product, apart from the synthetic-content disclosure. It starts from whose the product is; you decide."
+in_studio = "YouTube's upload cannot set it: once the video is up, open it in YouTube Studio and tick \"Includes paid promotion\" under Details."
+tiktok_your_brand = "The draft goes to your TikTok inbox, which takes no disclosure: before posting, turn on \"Disclose post content\" and pick \"Your brand\"."
+tiktok_branded = "The draft goes to your TikTok inbox, which takes no disclosure: before posting, turn on \"Disclose post content\" and pick \"Branded content\". TikTok does not allow branded content on a private post."
+reminder = "Commercial disclosure: {disclosure}. Set it on {network} when you post, as the network asks."
+change_note = "A change here applies to this upload only; it is kept with the post."
+
+[ad_publishing.commercial.name]
+none = "None"
+your_brand = "Your brand"
+paid_partnership = "Paid partnership"
+
+[ad_publishing.commercial.sent]
+instagram_reels = "Bardo sends Instagram's \"Paid partnership\" label with the Reel. If Instagram refuses it, Bardo shows why and never posts without the label."
+x = "Bardo sends X's paid partnership label with the post."
+
+[ad_publishing.sponsors]
+label = "Brand accounts (optional)"
+hint = "Up to two Instagram account ids of the brands, separated by commas. They are tagged as the paid partners."
+not_an_id = "Type Instagram account ids: digits only, separated by commas."
+too_many = "Instagram takes up to two brand accounts."
+
+[ad_publishing.posts_check]
+title = "Claims in the post texts"
+hint = "Claude reads every network's title and text and ties each statement about the product to a claim of the Brief stage. Writing the metadata checks them; check again after your edits."
+run = "Check the post texts"
+running = "Claude is checking the post texts…"
+none = "The post texts were not checked yet."
+outdated = "The post texts or the brief changed since the check. Check again."
+all_backed = "Every statement in the post texts is backed by a claim."
+unbacked = "Not backed by any claim:"

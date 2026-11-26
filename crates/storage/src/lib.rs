@@ -5,6 +5,7 @@
 //! updates.
 
 mod ad;
+mod ad_review;
 mod agent_task;
 mod backup;
 mod capture;

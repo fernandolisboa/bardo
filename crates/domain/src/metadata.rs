@@ -12,8 +12,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::{
-    Generation, Network, NetworkAccountId, ProfileId, ProjectFileError, RenderId, RepositoryError,
-    VideoProjectId, Visibility,
+    AdPostReview, Generation, Network, NetworkAccountId, ProfileId, ProjectFileError, RenderId,
+    RepositoryError, VideoProjectId, Visibility,
 };
 
 /// Where a network takes a post's tags.
@@ -715,6 +715,22 @@ pub trait ExportRepository: Send + Sync {
     /// Saves an export, replacing the project's earlier one for the same
     /// network.
     fn save_export(&self, export: &Export) -> Result<(), RepositoryError>;
+
+    /// What a network's last export of an ad was reviewed with (#282).
+    fn export_ad_review(
+        &self,
+        project: VideoProjectId,
+        network: Network,
+    ) -> Result<Option<AdPostReview>, RepositoryError>;
+
+    /// Keeps what a network's export of an ad was reviewed with, in place
+    /// of the earlier export's.
+    fn save_export_ad_review(
+        &self,
+        project: VideoProjectId,
+        network: Network,
+        review: &AdPostReview,
+    ) -> Result<(), RepositoryError>;
 }
 
 impl<T: ExportRepository + ?Sized> ExportRepository for Arc<T> {
@@ -735,6 +751,23 @@ impl<T: ExportRepository + ?Sized> ExportRepository for Arc<T> {
 
     fn save_export(&self, export: &Export) -> Result<(), RepositoryError> {
         (**self).save_export(export)
+    }
+
+    fn export_ad_review(
+        &self,
+        project: VideoProjectId,
+        network: Network,
+    ) -> Result<Option<AdPostReview>, RepositoryError> {
+        (**self).export_ad_review(project, network)
+    }
+
+    fn save_export_ad_review(
+        &self,
+        project: VideoProjectId,
+        network: Network,
+        review: &AdPostReview,
+    ) -> Result<(), RepositoryError> {
+        (**self).save_export_ad_review(project, network, review)
     }
 }
 

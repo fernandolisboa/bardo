@@ -42,6 +42,7 @@ macro_rules! uuid_id {
 mod ad_angle;
 mod ad_brief;
 mod ad_framework;
+mod ad_review;
 mod agent_task;
 mod appearance;
 mod backup;
@@ -136,6 +137,10 @@ pub use ad_brief::{
     ClaimDrift, ClaimSeen,
 };
 pub use ad_framework::AdFramework;
+pub use ad_review::{
+    AdPostReview, AdReviewItem, CommercialDisclosure, DisclosureStep, MAX_SPONSORS, SponsorError,
+    ad_synthetic_default, disclosure_step, sponsor_ids, unacknowledged,
+};
 pub use agent_task::{AgentTask, AgentTaskError};
 pub use appearance::{
     LayoutId, ThemeFamily, ThemeMode, UiTheme, UiThemePreference, UnknownLayout, UnknownUiTheme,
@@ -172,7 +177,7 @@ pub use chapters::{
 };
 pub use claims_check::{
     CheckedScript, CheckedStatement, ClaimsAnswerError, ClaimsCheck, checked_statements,
-    claims_check_schema,
+    claims_check_schema, posts_text,
 };
 pub use clip::{
     ClipDurations, ClipFit, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel,

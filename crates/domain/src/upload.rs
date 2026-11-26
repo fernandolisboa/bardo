@@ -503,6 +503,13 @@ pub struct VideoUpload {
     pub share_to_feed: bool,
     /// The frame of the video its cover shows (Instagram's `thumb_offset`).
     pub cover: Duration,
+    /// Whether the post carries a paid-partnership label where the
+    /// network takes one with the upload (Instagram's
+    /// `is_paid_partnership`, X's `paid_partnership`). Only an ad's (#282).
+    pub paid_partnership: bool,
+    /// The brand accounts a paid-partnership Reel names (Instagram's
+    /// `branded_content_sponsor_ids`), up to two.
+    pub sponsors: Vec<String>,
 }
 
 impl VideoUpload {
@@ -1164,6 +1171,8 @@ mod tests {
             publish_at: None,
             share_to_feed: true,
             cover: Duration::ZERO,
+            paid_partnership: false,
+            sponsors: Vec::new(),
         };
         assert!(!video.is_late(at(100)), "not scheduled");
         video.publish_at = Some(at(100));

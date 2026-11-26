@@ -22,17 +22,22 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, CaptureVoice, Cost, CostPurpose, Export, ExportFiles, ExportRepository, Generation,
-    GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, METADATA_FILE, MetadataProblem,
-    NarrationSource, Network, NetworkAccount, NetworkAccountId, Post, ProfileId, Progress,
-    ProjectFiles, Provider, Render, RenderId, RenderRepository, RenderedPrompt, RepositoryError,
-    SecretStore, Stop, TagPlacement, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
-    TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest,
-    UiLanguage, VideoMetadata, VideoMetadataDraft, VideoProject, VideoProjectId, Visibility,
-    package_folder, problems_with, video_file_name,
+    AdPostReview, AdRepository, ApiKey, CaptureVoice, CommercialDisclosure, Cost, CostPurpose,
+    Export, ExportFiles, ExportRepository, Generation, GenerationId, Job, JobFailure,
+    JobFailureKind, JobId, JobKind, METADATA_FILE, MetadataProblem, NarrationSource, Network,
+    NetworkAccount, NetworkAccountId, Post, ProfileId, Progress, ProjectFiles, Provider, Render,
+    RenderId, RenderRepository, RenderedPrompt, RepositoryError, SecretStore, Stop, TagPlacement,
+    TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
+    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, UiLanguage,
+    VideoMetadata, VideoMetadataDraft, VideoProject, VideoProjectId, Visibility, package_folder,
+    problems_with, unacknowledged, video_file_name,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::ad_briefs::ScriptBrief;
+use crate::ad_publishing::AdPublishing;
+use crate::ads::{as_data, with_ad_rules, with_concept_rules};
+use crate::claims_check::{CheckBrief, CheckRun, check_call_ahead, check_posts};
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler, Work};
 use crate::render::RenderError;
@@ -99,6 +104,12 @@ pub enum ExportError {
     /// rewritten while they are copied.
     #[error("the project is rendering")]
     Rendering,
+    /// Only an ad's post texts are checked against claims.
+    #[error("the project is not an ad")]
+    NotAnAd,
+    /// An ad's review asks for acknowledgements the user did not give.
+    #[error("the ad's review is not acknowledged")]
+    NotAcknowledged,
     #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
@@ -119,6 +130,8 @@ impl ExportError {
             ExportError::Blocked => Text::ExportBlocked,
             ExportError::AlreadyExporting => Text::ExportAlreadyRunning,
             ExportError::Rendering => Text::ExportWhileRendering,
+            ExportError::NotAnAd => Text::ProjectNotFound,
+            ExportError::NotAcknowledged => Text::AdNotAcknowledged,
             ExportError::Template(error) => error.message(),
             ExportError::Repository(_) => Text::ExportNotLoaded,
         }
@@ -242,6 +255,8 @@ pub struct ExportView {
     pub package: String,
     /// Where metrics syncing stands for the project's posts.
     pub metrics: MetricsStatus,
+    /// An ad's publishing (#282); `None` for any other project.
+    pub ad: Option<AdPublishing>,
 }
 
 impl ExportView {
@@ -300,6 +315,16 @@ struct MetadataPayload {
     instructions: String,
     prompt: String,
     networks: Vec<String>,
+    /// What an ad's post texts are checked against once written (#282).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    check: Option<CheckBrief>,
+    /// When the ad's brief last changed, in Unix milliseconds.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    brief_at: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 impl MetadataPayload {
@@ -355,6 +380,16 @@ struct ExportOrder {
     /// `thumbnail.jpg`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     thumbnail: Option<String>,
+    /// What an ad's export was reviewed with, kept with the export.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ad: Option<OrderReview>,
+}
+
+/// What an ad's export of one network was reviewed with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct OrderReview {
+    disclosure: String,
+    acknowledged: Vec<String>,
 }
 
 /// The thumbnail's name in a network's export folder.
@@ -404,7 +439,12 @@ pub(crate) fn unix_millis(time: SystemTime) -> u64 {
 
 /// What an export was made from, besides its render: the post, whether
 /// the disclosure reminder was written with it, and the thumbnail.
-fn export_stamp(post: &Post, disclosure: bool, thumbnail: Option<&str>) -> String {
+fn export_stamp(
+    post: &Post,
+    disclosure: bool,
+    thumbnail: Option<&str>,
+    ad: Option<&AdPublishing>,
+) -> String {
     let mut stamp = post.fingerprint();
     if disclosure {
         stamp.push_str("+disclosure");
@@ -412,6 +452,10 @@ fn export_stamp(post: &Post, disclosure: bool, thumbnail: Option<&str>) -> Strin
     if let Some(thumbnail) = thumbnail {
         stamp.push_str("+thumbnail:");
         stamp.push_str(thumbnail);
+    }
+    if let Some(ad) = ad {
+        stamp.push('+');
+        stamp.push_str(&ad.stamp());
     }
     stamp
 }
@@ -489,6 +533,8 @@ fn clock(length: Duration) -> String {
 pub(crate) struct MetadataHandler {
     pub(crate) owner: ProfileId,
     pub(crate) exports: Arc<dyn ExportRepository>,
+    /// Where an ad's check of its post texts is kept.
+    pub(crate) ads: Arc<dyn AdRepository>,
     pub(crate) text: Arc<dyn TextGenerator>,
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) costs: CostBook,
@@ -508,11 +554,46 @@ impl MetadataHandler {
             .ok_or_else(|| JobFailure::new(JobFailureKind::MissingKey, "no Claude key is saved"))
     }
 
-    /// Generates the metadata `job` asked for and saves it in place of
-    /// the networks' metadata.
+    /// Generates the metadata `job` asked for, saves it in place of the
+    /// networks' metadata and, for an ad, checks its post texts against
+    /// the brief's claims (#282). A run again after the texts were saved
+    /// pays for the check alone, and for nothing once both are done.
     fn generate(&self, payload: &str, job: JobId, stop: &Stop) -> Result<(), JobFailure> {
         let payload: MetadataPayload = parse(payload)?;
         let project: VideoProjectId = id(&payload.project)?;
+        let check = payload.check.clone();
+        let brief_at = crate::claims_check::from_millis(payload.brief_at);
+        self.write(payload, project, job, stop)?;
+        let Some(check) = check else {
+            return Ok(());
+        };
+        let key = self.key()?;
+        let run = CheckRun {
+            text: &*self.text,
+            costs: &self.costs,
+            key: &key,
+        };
+        check_posts(
+            &*self.ads,
+            &*self.exports,
+            &run,
+            project,
+            &check,
+            brief_at,
+            job,
+            stop,
+        )
+    }
+
+    /// Writes the metadata `payload` asks for, unless this job saved it
+    /// already.
+    fn write(
+        &self,
+        payload: MetadataPayload,
+        project: VideoProjectId,
+        job: JobId,
+        stop: &Stop,
+    ) -> Result<(), JobFailure> {
         // An earlier attempt may have saved and stopped before the queue
         // recorded it as done.
         let saved = self.exports.video_metadata(project).map_err(unexpected)?;
@@ -731,7 +812,19 @@ impl ExportHandler {
             post: order.post.clone(),
             exported_at: SystemTime::now(),
         };
-        self.exports.save_export(&export).map_err(unexpected)
+        self.exports.save_export(&export).map_err(unexpected)?;
+        if let Some(review) = &order.ad {
+            let review = AdPostReview {
+                disclosure: CommercialDisclosure::from_code(&review.disclosure)
+                    .unwrap_or(CommercialDisclosure::PaidPartnership),
+                sponsors: Vec::new(),
+                acknowledged: review.acknowledged.clone(),
+            };
+            self.exports
+                .save_export_ad_review(project, network, &review)
+                .map_err(unexpected)?;
+        }
+        Ok(())
     }
 }
 
@@ -788,19 +881,66 @@ impl Bardo {
         Ok(values)
     }
 
+    /// The template a project's metadata is written from: the ad metadata
+    /// template for an ad, the metadata template for every other project.
+    fn metadata_template(&self, project: &VideoProject) -> Result<TemplateVersion, ExportError> {
+        Ok(self.current_template(if project.is_ad() {
+            TemplateKind::AdMetadata
+        } else {
+            TemplateKind::Metadata
+        })?)
+    }
+
+    /// The project's metadata template filled with its facts. An ad's
+    /// request carries the rules of every ad after the template's
+    /// instructions (and a concept's for a concept), and the claims it may
+    /// state whatever the template says; with it, what it read of the
+    /// ad's brief.
     fn render_metadata_prompt(
         &self,
         project: &VideoProject,
         accounts: &[NetworkAccount],
         template: &TemplateVersion,
-    ) -> Result<RenderedPrompt, ExportError> {
-        template
-            .body
-            .render(&self.metadata_values(project, accounts)?)
-            .map_err(|missing| {
-                // Every metadata variable has a value above.
-                ExportError::Repository(RepositoryError(Box::new(missing)))
-            })
+    ) -> Result<(RenderedPrompt, Option<ScriptBrief>), ExportError> {
+        let mut values = self.metadata_values(project, accounts)?;
+        let brief = self.script_brief(project)?;
+        if project.is_ad() {
+            let script = values.remove(&TemplateVariable::Script).unwrap_or_default();
+            let networks = values
+                .remove(&TemplateVariable::Networks)
+                .unwrap_or_default();
+            values = self.ad_script_values(project, brief.as_ref())?;
+            values.insert(TemplateVariable::Script, as_data(&script));
+            values.insert(TemplateVariable::Networks, as_data(&networks));
+        }
+        let mut rendered = template.body.render(&values).map_err(|missing| {
+            // Every metadata variable has a value above.
+            ExportError::Repository(RepositoryError(Box::new(missing)))
+        })?;
+        if project.is_ad() {
+            rendered.instructions = with_ad_rules(&rendered.instructions);
+            if brief.as_ref().is_some_and(ScriptBrief::is_concept) {
+                rendered.instructions = with_concept_rules(&rendered.instructions);
+            }
+            let fixed = brief
+                .as_ref()
+                .map(|brief| brief.fixed_for(&template.body))
+                .unwrap_or_default();
+            if !fixed.is_empty() {
+                rendered.prompt = format!("{}\n\n{fixed}", rendered.prompt);
+            }
+        }
+        Ok((rendered, brief))
+    }
+
+    /// The calls writing an ad's metadata makes: the text, then the check
+    /// of what it wrote.
+    fn metadata_calls(rendered: &RenderedPrompt, brief: Option<&ScriptBrief>) -> Vec<PlannedCall> {
+        let mut calls = vec![metadata_call(rendered)];
+        if brief.is_some() {
+            calls.push(check_call_ahead());
+        }
+        calls
     }
 
     /// Whether posts of the project need a synthetic-content disclosure:
@@ -808,10 +948,12 @@ impl Bardo {
     /// voice, and the narration speaks with it, generated or a capture
     /// voiced with it (a recording the user imported, or a capture left in
     /// their own voice, is their own voice); or its cut shows a performed
-    /// clip of a look that reads as a real person (#192).
+    /// clip of a look that reads as a real person (#192); or, for an ad, a
+    /// *product in use* scene drawn in a photographic style or one Bardo
+    /// cannot tell (#282).
     pub fn needs_disclosure(&self, project: VideoProjectId) -> Result<bool, ExportError> {
         let project = self.export_project(project)?;
-        if self.cut_performs_realistic_look(project.id)? {
+        if self.cut_performs_realistic_look(project.id)? || self.ad_needs_synthetic(&project)? {
             return Ok(true);
         }
         let own_voice = self
@@ -933,6 +1075,7 @@ impl Bardo {
         let metadata = self.exports.video_metadata(project.id)?;
         let exports = self.exports.exports(project.id)?;
         let disclosure = self.needs_disclosure(project.id)?;
+        let ad = self.ad_publishing(&project)?;
         let youtube = accounts
             .iter()
             .any(|account| account.network == Network::YouTube);
@@ -988,7 +1131,8 @@ impl Bardo {
                         .as_ref()
                         .is_some_and(|render| render.id == last.render)
                         && post.as_ref().is_some_and(|post| {
-                            export_stamp(post, disclosure, thumbnail.as_deref()) == last.post
+                            export_stamp(post, disclosure, thumbnail.as_deref(), ad.as_ref())
+                                == last.post
                         })
                 });
                 ExportTarget {
@@ -1012,8 +1156,8 @@ impl Bardo {
                 }
             })
             .collect::<Vec<_>>();
-        let template = self.current_template(TemplateKind::Metadata)?;
-        let rendered = self.render_metadata_prompt(&project, &accounts, &template)?;
+        let template = self.metadata_template(&project)?;
+        let (rendered, brief) = self.render_metadata_prompt(&project, &accounts, &template)?;
         let metadata_job = self.latest_job_of(JobKind::Metadata, project.id);
         let metadata_cost = targets
             .iter()
@@ -1024,12 +1168,13 @@ impl Bardo {
             disclosure,
             metadata_job,
             export_job: self.latest_job_of(JobKind::Export, project.id),
-            estimate: self.estimate(&[metadata_call(&rendered)])?,
+            estimate: self.estimate(&Self::metadata_calls(&rendered, brief.as_ref()))?,
             template,
             metadata_cost,
             package: package_folder(&project.title, project.id),
             targets,
             metrics,
+            ad,
         })
     }
 
@@ -1059,11 +1204,13 @@ impl Bardo {
         if self.provider_key(Provider::Claude).state == KeyState::NotSet {
             return Err(ExportError::MissingKey(Provider::Claude));
         }
-        let template = self.current_template(TemplateKind::Metadata)?;
-        let rendered = self.render_metadata_prompt(&project, &accounts, &template)?;
-        if let Err(estimate) =
-            self.check_video_budget(project.id, &[metadata_call(&rendered)], consent)?
-        {
+        let template = self.metadata_template(&project)?;
+        let (rendered, brief) = self.render_metadata_prompt(&project, &accounts, &template)?;
+        if let Err(estimate) = self.check_video_budget(
+            project.id,
+            &Self::metadata_calls(&rendered, brief.as_ref()),
+            consent,
+        )? {
             return Err(ExportError::OverBudget(estimate));
         }
         let payload = MetadataPayload {
@@ -1076,6 +1223,10 @@ impl Bardo {
                 .iter()
                 .map(|account| account.network.code().to_owned())
                 .collect(),
+            check: brief.as_ref().map(CheckBrief::of),
+            brief_at: brief.as_ref().map_or(0, |brief| {
+                crate::claims_check::millis(brief.brief.changed_at())
+            }),
         };
         let job = Job::new(self.profile.id, JobKind::Metadata, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
@@ -1113,6 +1264,20 @@ impl Bardo {
         view: &ExportView,
         chosen: &[Network],
     ) -> Result<JobId, ExportError> {
+        self.start_ad_export(view, chosen, &[])
+    }
+
+    /// [`Bardo::start_export`] for an ad, with the keys of the review's
+    /// items the user `acknowledged` (#282): an ad with any left out does
+    /// not start. They are kept with each network's export, and its
+    /// metadata file carries the commercial disclosure reminder and the
+    /// lists.
+    pub fn start_ad_export(
+        &self,
+        view: &ExportView,
+        chosen: &[Network],
+        acknowledged: &[String],
+    ) -> Result<JobId, ExportError> {
         let project = self.export_project(view.project)?;
         if self
             .latest_job_of(JobKind::Export, project.id)
@@ -1139,6 +1304,16 @@ impl Bardo {
         if targets.iter().any(|target| !target.can_export()) {
             return Err(ExportError::Blocked);
         }
+        let ad = now.ad.as_ref();
+        if let Some(ad) = ad
+            && !unacknowledged(&ad.items, acknowledged).is_empty()
+        {
+            return Err(ExportError::NotAcknowledged);
+        }
+        let review = ad.map(|ad| OrderReview {
+            disclosure: ad.disclosure.code().to_owned(),
+            acknowledged: ad.keys(),
+        });
         let orders = targets
             .iter()
             .map(|target| {
@@ -1156,9 +1331,11 @@ impl Bardo {
                         render,
                         &video_file,
                         now.disclosure,
+                        ad,
                     ),
-                    post: export_stamp(&post, now.disclosure, target.thumbnail.as_deref()),
+                    post: export_stamp(&post, now.disclosure, target.thumbnail.as_deref(), ad),
                     thumbnail: target.thumbnail.clone(),
+                    ad: review.clone(),
                     previous: target
                         .last
                         .as_ref()
@@ -1203,6 +1380,7 @@ impl Bardo {
         render: &Render,
         video_file: &str,
         disclosure: bool,
+        ad: Option<&AdPublishing>,
     ) -> String {
         let (width, height) = render.preset.dimensions();
         let mut blocks = vec![
@@ -1248,6 +1426,23 @@ impl Bardo {
         ));
         if disclosure {
             blocks.push(self.disclosure_text(target.network));
+        }
+        if let Some(ad) = ad {
+            if ad.disclosure != CommercialDisclosure::None {
+                blocks.push(self.commercial_reminder(target.network, ad.disclosure));
+            }
+            if !ad.items.is_empty() {
+                let lines: Vec<String> = ad
+                    .items
+                    .iter()
+                    .map(|item| format!("- {}", self.ad_item_text(item)))
+                    .collect();
+                blocks.push(format!(
+                    "{}\n{}",
+                    self.text(Text::AdItemsHeading),
+                    lines.join("\n")
+                ));
+            }
         }
         let mut text = blocks.join("\n\n");
         text.push('\n');

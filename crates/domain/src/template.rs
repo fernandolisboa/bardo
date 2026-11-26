@@ -59,10 +59,14 @@ pub enum TemplateKind {
     /// The prompt a concept image is drawn from, written from the brief of
     /// a product of kind *idea* (#280).
     ConceptPrompt,
+    /// Each network's title, caption and tags for an ad project (#282):
+    /// opened by the hook, from the Brief stage's claims only, ending on
+    /// the call to action. Every other project's come from `Metadata`.
+    AdMetadata,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 13] = [
+    pub const ALL: [TemplateKind; 14] = [
         TemplateKind::Script,
         TemplateKind::ImagePrompt,
         TemplateKind::MusicPrompt,
@@ -76,6 +80,7 @@ impl TemplateKind {
         TemplateKind::AdScript,
         TemplateKind::AdScenePlan,
         TemplateKind::ConceptPrompt,
+        TemplateKind::AdMetadata,
     ];
 
     /// Stable name stored in the database.
@@ -94,6 +99,7 @@ impl TemplateKind {
             TemplateKind::AdScript => "ad_script",
             TemplateKind::AdScenePlan => "ad_scene_plan",
             TemplateKind::ConceptPrompt => "concept_prompt",
+            TemplateKind::AdMetadata => "ad_metadata",
         }
     }
 
@@ -237,6 +243,23 @@ impl TemplateKind {
             TemplateKind::ConceptPrompt => {
                 &[TemplateVariable::Product, TemplateVariable::ProductAudience]
             }
+            TemplateKind::AdMetadata => &[
+                TemplateVariable::ChannelName,
+                TemplateVariable::ChannelNiche,
+                TemplateVariable::Language,
+                TemplateVariable::Country,
+                TemplateVariable::Product,
+                TemplateVariable::ProductConcept,
+                TemplateVariable::ThemeTitle,
+                TemplateVariable::ThemeAngle,
+                TemplateVariable::AdHook,
+                TemplateVariable::BriefClaims,
+                TemplateVariable::Offer,
+                TemplateVariable::CallToAction,
+                TemplateVariable::Link,
+                TemplateVariable::Script,
+                TemplateVariable::Networks,
+            ],
         }
     }
 }
@@ -360,10 +383,13 @@ pub enum TemplateVariable {
     /// The kinds the scenes of an ad may be, by what its product's images
     /// allow.
     SceneKinds,
+    /// The link or handle an ad sends viewers to, as its Brief stage has
+    /// it.
+    Link,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 43] = [
+    pub const ALL: [TemplateVariable; 44] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -407,6 +433,7 @@ impl TemplateVariable {
         TemplateVariable::NeverSay,
         TemplateVariable::ProductImages,
         TemplateVariable::SceneKinds,
+        TemplateVariable::Link,
     ];
 
     /// The name written between the braces.
@@ -455,6 +482,7 @@ impl TemplateVariable {
             TemplateVariable::NeverSay => "never_say",
             TemplateVariable::ProductImages => "product_images",
             TemplateVariable::SceneKinds => "scene_kinds",
+            TemplateVariable::Link => "link",
         }
     }
 

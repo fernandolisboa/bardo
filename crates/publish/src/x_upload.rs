@@ -15,7 +15,8 @@
 //!   `pending`, `in_progress`, `succeeded` or `failed`, with
 //!   `check_after_secs`. No `processing_info` means it is ready.
 //! - `POST /2/tweets` with the text, `media.media_ids` and, for synthetic
-//!   content, `made_with_ai` makes the post. X bills it (US$ 0.015, or
+//!   content, `made_with_ai` makes the post; a paid partnership (#282)
+//!   adds `paid_partnership` (checked 2026-11-26). X bills it (US$ 0.015, or
 //!   US$ 0.20 with a link in the text); the upload itself is not billed.
 //!   A video over the account's length limit is refused there with 403,
 //!   even after a finalize that went through.
@@ -476,6 +477,9 @@ impl<T: Transport> VideoUploader for XUploader<T> {
         });
         if video.synthetic {
             post["made_with_ai"] = Value::Bool(true);
+        }
+        if video.paid_partnership {
+            post["paid_partnership"] = Value::Bool(true);
         }
         let request =
             HttpRequest::post_json(format!("{}/2/tweets", self.endpoints.api), post.to_string());

@@ -82,6 +82,31 @@ Uma conta conectada oferece **Revisar envio**. O botão fica desligado, com o mo
 
 Confirmar inicia o envio como tarefa, com o progresso aqui e em Tarefas. O YouTube aplica a miniatura assim que tem o vídeo; se recusar, o vídeo continua no ar e o post diz por quê. O mais comum é o canal não estar verificado para miniaturas personalizadas: verifique em youtube.com/verify. Em qualquer caso você pode aplicar a imagem no YouTube Studio a partir do arquivo exportado. Se o render, o corte, os metadados ou a miniatura mudarem com a revisão aberta, o Bardo fecha a revisão e pede que você revise de novo. O guia de cada rede tem os detalhes: [YouTube](connect-youtube.md#upload), [Instagram](connect-instagram.md#upload), [TikTok](connect-tiktok.md#draft), [X](connect-x.md#upload).
 
+<a id="commercial"></a>
+## Divulgação comercial
+
+Um post que promove algo diz isso, à parte do selo de [conteúdo sintético](#disclosure). A revisão do envio de um anúncio tem **Divulgação comercial**: **Nenhuma**, **Sua marca** (a sua própria marca ou negócio) ou **Parceria paga** (o produto de outra pessoa, promovido para ela). Ela começa por de quem é o produto na [página do produto](products.md): um produto seu começa em Sua marca, o de um cliente em Parceria paga. Quem decide é você; a mudança vale para aquele envio e fica guardada com o post. Cada rede recebe isso do seu jeito:
+
+| Rede | Sua marca | Parceria paga |
+| --- | --- | --- |
+| YouTube | nada a marcar | marque **Inclui promoção paga** no YouTube Studio: o envio não consegue marcar, então o post traz **Abrir no YouTube Studio** quando o vídeo estiver no ar |
+| Instagram | nada a marcar | o Bardo envia o selo **Parceria paga** com o Reel, com até duas contas de marca (o id da conta no Instagram); se o Instagram recusar o selo, o Bardo mostra o motivo e nunca publica sem ele |
+| TikTok | ative **Divulgar conteúdo da publicação** e escolha **Sua marca** no app, antes de publicar o rascunho | o mesmo, escolhendo **Conteúdo de marca**; o TikTok não permite conteúdo de marca num post privado |
+| X | nada a marcar | o Bardo envia o selo de parceria paga do X com o post |
+| Kick | sem selo | sem selo |
+
+A exportação de um anúncio escreve a divulgação no `metadata.txt` de cada rede, com onde marcá-la ([Exportar](exporting.md#folder)).
+
+<a id="ad-review"></a>
+## Antes de um anúncio ir ao ar
+
+A etapa Publicar de um anúncio tem um cartão **Antes de este anúncio sair**, abaixo das redes:
+
+- **Afirmações nos textos do post.** Escrever os metadados de um anúncio usa o [modelo](templates.md) Metadados de anúncio, e depois o Claude lê o título e o texto de cada rede e liga cada afirmação sobre o produto a uma afirmação da etapa [Briefing](brief.md), como a [checagem de afirmações](script.md#claims) faz com o roteiro. O cartão lista o que nenhuma afirmação sustenta. Depois que você edita os textos, ou o briefing muda, ele avisa: **Conferir os textos do post** confere de novo, mostrando o custo antes.
+- **Os itens a confirmar**: cada afirmação sensível que o roteiro ou os textos usam, cada afirmação que nenhuma afirmação do briefing sustenta, um roteiro ou textos não conferidos como estão agora, uma afirmação que o produto não confirma mais, um produto numa categoria em que as redes têm regras próprias de anúncio, e um produto que é só uma ideia. Marque cada um, ou **Confirmar todos**.
+
+**Exportar** e o **Enviar** de cada rede ficam desligados até cada item ser confirmado; a revisão do envio lista os mesmos itens, marcados juntos. Um item que mudou (uma afirmação editada, uma frase nova) pede uma nova marcação. O que você confirmou fica guardado com o envio ou a exportação. O Bardo lembra e sugere padrões; cada decisão é sua.
+
 <a id="states"></a>
 ## Estados do envio
 

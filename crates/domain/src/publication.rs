@@ -27,9 +27,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    ApiKey, ChannelId, Insights, InvalidUploadTransition, Money, Network, NetworkAccountId,
-    NetworkPost, OwnerMetrics, PostNumbers, ProfileId, ProviderFailure, RenderId, RepositoryError,
-    RetentionCurve, SCHEDULE_GRACE, SecretText, Upload, UploadStatus, VideoProjectId, Visibility,
+    AdPostReview, ApiKey, ChannelId, Insights, InvalidUploadTransition, Money, Network,
+    NetworkAccountId, NetworkPost, OwnerMetrics, PostNumbers, ProfileId, ProviderFailure, RenderId,
+    RepositoryError, RetentionCurve, SCHEDULE_GRACE, SecretText, Upload, UploadStatus,
+    VideoProjectId, Visibility,
 };
 
 uuid_id!(
@@ -1057,6 +1058,17 @@ pub trait PublicationRepository: Send + Sync {
     /// Removes a publication and its snapshots.
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError>;
 
+    /// What an ad's upload was reviewed with (#282); `None` for any other
+    /// publication.
+    fn ad_review(&self, id: PublicationId) -> Result<Option<AdPostReview>, RepositoryError>;
+
+    /// Keeps what an ad's upload was reviewed with, with its publication.
+    fn save_ad_review(
+        &self,
+        id: PublicationId,
+        review: &AdPostReview,
+    ) -> Result<(), RepositoryError>;
+
     /// Saves a sync's outcome in one transaction: the publications it
     /// checked and the snapshots it took.
     fn save_sync(
@@ -1137,6 +1149,18 @@ impl<T: PublicationRepository + ?Sized> PublicationRepository for Arc<T> {
 
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError> {
         (**self).remove_publication(id)
+    }
+
+    fn ad_review(&self, id: PublicationId) -> Result<Option<AdPostReview>, RepositoryError> {
+        (**self).ad_review(id)
+    }
+
+    fn save_ad_review(
+        &self,
+        id: PublicationId,
+        review: &AdPostReview,
+    ) -> Result<(), RepositoryError> {
+        (**self).save_ad_review(id, review)
     }
 
     fn save_sync(
