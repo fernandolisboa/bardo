@@ -43,6 +43,13 @@ Um produto salvo pode ter até três imagens: PNG, JPEG ou WebP, de 600 a 6.000 
 
 Cada imagem é uma **Foto** (o produto, a embalagem, um lugar) ou uma **Tela** (uma captura de tela de um app ou site). O Bardo só mostra uma tela como ela é e nunca a redesenha. Uma foto salva com transparência (um PNG ou WebP com canal alfa) é tratada como já recortada e marcada como **Recortada**, pronta para ir sobre outros fundos. O Bardo segue o que o arquivo diz, então só salve uma imagem assim quando o fundo dela for mesmo transparente. **Remover**, embaixo de uma imagem, pergunta antes de tirar a imagem e a confirmação dela. Um produto também pode não ter imagens: os anúncios dele usam então cenas desenhadas e um cartão final só com texto.
 
+<a id="concept"></a>
+## Uma imagem de conceito para uma ideia
+
+Um produto do tipo **Ideia** ainda não existe, então não tem foto. Enquanto ele não tem imagem própria, **Imagem de conceito**, embaixo das imagens, pode desenhar uma a partir da descrição: **Desenhar um conceito** mostra a estimativa, depois o Claude escreve um prompt de imagem com o modelo [Prompt de conceito](templates.md) e o gerador de imagens desenha. Diga o modelo o que disser, o prompt sempre pede um produto original, sem marca, logo ou identidade visual que já existam, e sem nenhum texto. As duas chamadas são pagas, conferidas antes com o seu orçamento e registradas em [Custos](costs.md) sem canal; é preciso uma chave do Claude e uma do Gemini. Se parar depois de o Claude escrever o prompt, **Tentar de novo** em [Tarefas](jobs.md) paga só a imagem; **Desenhar de novo** começa do zero e paga as duas. Um desenho que não seria mais usado (o produto ganhou uma imagem ou mudou de tipo no meio) para antes da próxima chamada paga, e o produto não pode ser excluído enquanto um é desenhado.
+
+Um desenho novo espera revisão: **Manter** faz dele a imagem de conceito do produto, no lugar da anterior, e **Descartar** joga fora. **Desenhar de novo** desenha outro. A imagem mantida fica no lugar de uma foto: nas cenas de produto e como referência de uma cena com o [produto em uso](scenes.md#product-check), que você confere com ela do mesmo jeito. Ela aparece marcada como **Imagem de conceito** onde estiver. Quando o produto tem imagem própria, ou deixa de ser uma ideia, essa imagem é usada e a de conceito não.
+
 <a id="logo"></a>
 ## O logo
 
@@ -116,4 +123,4 @@ Os ângulos de anúncio aparecem aqui e não em [Temas](themes-ranking.md), e um
 <a id="archive"></a>
 ## Duplicar, arquivar e excluir
 
-**Duplicar** salva as alterações que você fez e depois copia o briefing, as imagens, o logo e a ficha com um novo nome, para uma variação do mesmo produto. **Arquivar** esconde da lista e de novos anúncios um produto que você não anuncia mais; **Restaurar** traz ele de volta. **Excluir…** remove o produto com as imagens, o logo e a ficha depois que você confirma, e é recusado enquanto algum vídeo usa o produto (arquive em vez disso), enquanto uma execução preenche a ficha, ou enquanto os ângulos dele são propostos ou ranqueados.
+**Duplicar** salva as alterações que você fez e depois copia o briefing, as imagens, a imagem de conceito mantida, o logo e a ficha com um novo nome, para uma variação do mesmo produto. **Arquivar** esconde da lista e de novos anúncios um produto que você não anuncia mais; **Restaurar** traz ele de volta. **Excluir…** remove o produto com as imagens, a imagem de conceito, o logo e a ficha depois que você confirma, e é recusado enquanto algum vídeo usa o produto (arquive em vez disso), enquanto uma execução preenche a ficha, enquanto os ângulos dele são propostos ou ranqueados, ou enquanto a imagem de conceito dele é desenhada.

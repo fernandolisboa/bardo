@@ -2905,6 +2905,31 @@ pub enum Text {
     ClipProductCheckHint,
     ClipProductMatches,
     ClipProductCheckedNote,
+    /// A product of kind idea's drawn concept image (#280).
+    ConceptTitle,
+    ConceptHint,
+    DrawConcept,
+    DrawConceptAgain,
+    ConceptDrawingNow,
+    ConceptNewTitle,
+    KeepConcept,
+    DiscardConcept,
+    ConceptKeptNote,
+    ConceptUnusedNote,
+    ConceptNotOffered,
+    ConceptMissingClaudeKey,
+    ConceptMissingImageKey,
+    ConceptBusy,
+    ConceptNothingWaiting,
+    ConceptNotSaved,
+    ConceptBadge,
+    ConceptBadgeHint,
+    ConceptStopped,
+    ConceptFailed,
+    ConceptKept,
+    ConceptCheckTitle,
+    ConceptCheckHint,
+    ConceptUseImage,
 }
 
 impl Text {
@@ -5637,6 +5662,7 @@ impl Text {
             Text::ProductImageKindName(value) => match value {
                 ProductImageKind::Photo => "product.pictures.kind.photo",
                 ProductImageKind::Screen => "product.pictures.kind.screen",
+                ProductImageKind::Concept => "product.pictures.kind.concept",
             },
             Text::ProductFieldError(value) => match value {
                 ProductFieldError::NameRequired => "product.error.name_required",
@@ -6022,6 +6048,30 @@ impl Text {
             Text::ClipProductCheckHint => "clips.product.check_hint",
             Text::ClipProductMatches => "clips.product.matches",
             Text::ClipProductCheckedNote => "clips.product.checked",
+            Text::ConceptTitle => "product.concept.title",
+            Text::ConceptHint => "product.concept.hint",
+            Text::DrawConcept => "product.concept.draw",
+            Text::DrawConceptAgain => "product.concept.draw_again",
+            Text::ConceptDrawingNow => "product.concept.drawing",
+            Text::ConceptNewTitle => "product.concept.new",
+            Text::KeepConcept => "product.concept.keep",
+            Text::DiscardConcept => "product.concept.discard",
+            Text::ConceptKeptNote => "product.concept.kept",
+            Text::ConceptUnusedNote => "product.concept.unused",
+            Text::ConceptNotOffered => "product.concept.error.not_offered",
+            Text::ConceptMissingClaudeKey => "product.concept.error.claude_key",
+            Text::ConceptMissingImageKey => "product.concept.error.image_key",
+            Text::ConceptBusy => "product.concept.error.busy",
+            Text::ConceptNothingWaiting => "product.concept.error.nothing_waiting",
+            Text::ConceptNotSaved => "product.concept.error.not_saved",
+            Text::ConceptBadge => "projects.concept.badge",
+            Text::ConceptBadgeHint => "projects.concept.hint",
+            Text::ConceptStopped => "product.concept.stopped",
+            Text::ConceptFailed => "product.concept.failed",
+            Text::ConceptKept => "product.concept.kept_notice",
+            Text::ConceptCheckTitle => "scenes.product.concept_check_title",
+            Text::ConceptCheckHint => "scenes.product.concept_check_hint",
+            Text::ConceptUseImage => "scenes.product.use_concept",
         };
         Cow::Borrowed(key)
     }
@@ -7939,6 +7989,7 @@ mod tests {
         texts.extend(ProductKind::ALL.map(Text::ProductKindName));
         texts.extend(ProductOwnership::ALL.map(Text::ProductOwnershipName));
         texts.extend(ProductImageKind::ALL.map(Text::ProductImageKindName));
+        texts.push(Text::ProductImageKindName(ProductImageKind::Concept));
         texts.extend(ProductFieldError::ALL.map(Text::ProductFieldError));
         texts.extend(
             [
@@ -8238,6 +8289,30 @@ mod tests {
         texts.push(Text::ClipProductCheckHint);
         texts.push(Text::ClipProductMatches);
         texts.push(Text::ClipProductCheckedNote);
+        texts.push(Text::ConceptTitle);
+        texts.push(Text::ConceptHint);
+        texts.push(Text::DrawConcept);
+        texts.push(Text::DrawConceptAgain);
+        texts.push(Text::ConceptDrawingNow);
+        texts.push(Text::ConceptNewTitle);
+        texts.push(Text::KeepConcept);
+        texts.push(Text::DiscardConcept);
+        texts.push(Text::ConceptKeptNote);
+        texts.push(Text::ConceptUnusedNote);
+        texts.push(Text::ConceptNotOffered);
+        texts.push(Text::ConceptMissingClaudeKey);
+        texts.push(Text::ConceptMissingImageKey);
+        texts.push(Text::ConceptBusy);
+        texts.push(Text::ConceptNothingWaiting);
+        texts.push(Text::ConceptNotSaved);
+        texts.push(Text::ConceptBadge);
+        texts.push(Text::ConceptBadgeHint);
+        texts.push(Text::ConceptStopped);
+        texts.push(Text::ConceptFailed);
+        texts.push(Text::ConceptKept);
+        texts.push(Text::ConceptCheckTitle);
+        texts.push(Text::ConceptCheckHint);
+        texts.push(Text::ConceptUseImage);
         texts.extend(Stage::ALL.map(Text::StageName));
         texts.extend(Stage::ALL.map(Text::StageAfter));
         texts.push(Text::RenderNoCut);

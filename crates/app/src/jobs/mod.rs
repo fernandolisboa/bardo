@@ -62,6 +62,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) thumbnails: ThumbnailHandler,
     pub(crate) looks: PersonaLookHandler,
     pub(crate) sheets: crate::product_sheets::ProductSheetHandler,
+    pub(crate) concepts: crate::product_concepts::ProductConceptHandler,
     pub(crate) ad_angles: crate::ad_angles::AdAngleHandler,
     pub(crate) chapters: ChaptersHandler,
     pub(crate) renders: RenderHandler,
@@ -101,6 +102,7 @@ pub(crate) fn built_in_handlers(
         thumbnails,
         looks,
         sheets,
+        concepts,
         ad_angles,
         chapters,
         renders,
@@ -145,6 +147,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::ThumbnailImage, thumbnails);
     handlers.insert(JobKind::PersonaLook, Arc::new(looks));
     handlers.insert(JobKind::ProductResearch, Arc::new(sheets));
+    handlers.insert(JobKind::ProductConcept, Arc::new(concepts));
     let ad_angles = Arc::new(ad_angles);
     handlers.insert(JobKind::AdAngleSuggestion, Arc::clone(&ad_angles) as _);
     handlers.insert(JobKind::AdAngleRanking, ad_angles);
@@ -361,6 +364,10 @@ impl Bardo {
         // Nor do a product's ad angles: Claude's proposal, when the job
         // has yet to save one, and the ranking of what waits for it.
         if let Some(calls) = self.ad_angle_calls_left(&job) {
+            return Ok(self.check_budget(&calls, consent)?.err());
+        }
+        // Nor does a product's concept image (#280).
+        if let Some(calls) = self.concept_calls_left(&job) {
             return Ok(self.check_budget(&calls, consent)?.err());
         }
         let Some((project, calls)) = self

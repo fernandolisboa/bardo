@@ -95,10 +95,7 @@ impl ProductPictures {
         match kind {
             SceneKind::Drawn | SceneKind::EndCard => true,
             SceneKind::ProductShot => !self.0.is_empty(),
-            SceneKind::ProductInUse => self
-                .0
-                .iter()
-                .any(|(_, kind)| *kind == ProductImageKind::Photo),
+            SceneKind::ProductInUse => self.0.iter().any(|(_, kind)| kind.is_photo()),
         }
     }
 

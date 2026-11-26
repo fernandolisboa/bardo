@@ -39,6 +39,10 @@ pub enum ProductError {
     /// keeps.
     #[error("ad angles are being proposed for the product")]
     AnglesBusy,
+    /// A job is drawing the product's concept image: it stays until the
+    /// job ends, so the drawing is not paid for nothing.
+    #[error("a concept image is being drawn for the product")]
+    ConceptBusy,
     /// The user did not confirm they may use the image or logo and the
     /// brand it shows.
     #[error("the right to use the image was not confirmed")]
@@ -71,6 +75,7 @@ impl ProductError {
             ProductError::InUse(_) => Some(Text::ProductInUse),
             ProductError::SheetBusy => Some(Text::SheetBusy),
             ProductError::AnglesBusy => Some(Text::AdAnglesBusy),
+            ProductError::ConceptBusy => Some(Text::ConceptBusy),
             ProductError::NotConfirmed => Some(Text::ProductImageNotConfirmed),
             ProductError::TooManyImages => Some(Text::ProductTooManyImages),
             ProductError::Image(_) => Some(Text::ProductImageRefused),
@@ -204,6 +209,10 @@ impl Bardo {
             if let Some(logo) = self.products.logo(original.id)? {
                 self.products.save_logo(&logo.for_product(copy.id))?;
             }
+            // Its kept concept image too (#280): it was paid for once.
+            if let Some(concept) = self.products.concept(original.id)? {
+                self.products.save_concept(&concept.for_product(copy.id))?;
+            }
             // The sheet too, with every claim as the user left it: the
             // research was paid for once.
             match self.products.sheet(original.id)? {
@@ -237,7 +246,8 @@ impl Bardo {
 
     /// Deletes the product with its images, logo and sheet. Refused while
     /// a video project uses it (archiving hides it instead) and while a
-    /// job fills its sheet or proposes or ranks its ad angles.
+    /// job fills its sheet, proposes or ranks its ad angles, or draws its
+    /// concept image.
     pub fn delete_product(&self, id: ProductId) -> Result<(), ProductError> {
         let product = self.own_product(id)?;
         if self.sheet_is_busy(id) {
@@ -245,6 +255,9 @@ impl Bardo {
         }
         if self.ad_angles_busy(id) {
             return Err(ProductError::AnglesBusy);
+        }
+        if self.work_busy(&crate::jobs::Work::Concept(id.to_string())) {
+            return Err(ProductError::ConceptBusy);
         }
         let projects = self.products.projects_using(id)?;
         product
@@ -302,6 +315,11 @@ impl Bardo {
         kind: ProductImageKind,
     ) -> Result<(), ProductError> {
         self.own_product(id)?;
+        // Only a drawing Bardo made is a concept image: no imported
+        // picture is found to mark as one.
+        if !ProductImageKind::ALL.contains(&kind) {
+            return Err(ProductError::ImageNotFound);
+        }
         if self.products.set_image_kind(id, image, kind)? {
             Ok(())
         } else {
@@ -849,6 +867,36 @@ mod tests {
         }
         fn remove_logo(&self, product: ProductId) -> Result<bool, RepositoryError> {
             self.0.remove_logo(product)
+        }
+        fn concept(
+            &self,
+            product: ProductId,
+        ) -> Result<Option<bardo_domain::ProductConcept>, RepositoryError> {
+            self.0.concept(product)
+        }
+        fn pending_concept(
+            &self,
+            product: ProductId,
+        ) -> Result<Option<bardo_domain::ProductConcept>, RepositoryError> {
+            self.0.pending_concept(product)
+        }
+        fn save_pending_concept(
+            &self,
+            concept: &bardo_domain::ProductConcept,
+        ) -> Result<(), RepositoryError> {
+            self.0.save_pending_concept(concept)
+        }
+        fn keep_pending_concept(&self, product: ProductId) -> Result<bool, RepositoryError> {
+            self.0.keep_pending_concept(product)
+        }
+        fn remove_pending_concept(&self, product: ProductId) -> Result<bool, RepositoryError> {
+            self.0.remove_pending_concept(product)
+        }
+        fn save_concept(
+            &self,
+            concept: &bardo_domain::ProductConcept,
+        ) -> Result<(), RepositoryError> {
+            self.0.save_concept(concept)
         }
     }
 

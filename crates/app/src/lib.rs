@@ -43,6 +43,7 @@ mod persona_package;
 mod personas;
 mod plans;
 mod product_checks;
+mod product_concepts;
 mod product_sheets;
 mod production;
 mod products;
@@ -184,6 +185,7 @@ pub use plans::{
     PlanCheck, PlanCheckResult, PlanConnect, PlanConnectResult, PlanConsent, PlanError, PlanState,
     PlanStatus,
 };
+pub use product_concepts::{ConceptError, ConceptView};
 pub use product_sheets::{SheetError, SheetRun, SheetView};
 pub use production::{ModeEstimate, ProductionView};
 pub use products::ProductError;
@@ -997,6 +999,15 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let concept_handler = crate::product_concepts::ProductConceptHandler {
+            owner: profile.id,
+            products: Arc::clone(&products),
+            text: Arc::clone(&providers.text),
+            images: Arc::clone(&providers.images),
+            media: Arc::clone(&providers.media),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let chapters_handler = crate::chapters::ChaptersHandler {
             owner: profile.id,
             chapters: Arc::clone(&chapters),
@@ -1109,6 +1120,7 @@ impl Bardo {
                     thumbnails: thumbnail_handler,
                     looks: look_handler,
                     sheets: sheet_handler,
+                    concepts: concept_handler,
                     ad_angles: ad_angle_handler,
                     chapters: chapters_handler,
                     renders: render_handler,
@@ -2061,6 +2073,8 @@ pub(crate) mod testing {
         pub(crate) delay: Mutex<Duration>,
         /// Portraits come back over the look's file limit.
         pub(crate) oversized: std::sync::atomic::AtomicBool,
+        /// What every drawing comes back as instead, when set.
+        pub(crate) drawing: Mutex<Option<Vec<u8>>>,
     }
 
     impl FakeImages {
@@ -2108,7 +2122,9 @@ pub(crate) mod testing {
                     format!("blocked: {word}"),
                 ));
             }
-            let bytes = if request.shape == bardo_domain::ImageShape::Portrait {
+            let bytes = if let Some(drawing) = self.drawing.lock().unwrap().clone() {
+                drawing
+            } else if request.shape == bardo_domain::ImageShape::Portrait {
                 let mut look = LOOK_IMAGE.to_vec();
                 if self.oversized.load(std::sync::atomic::Ordering::SeqCst) {
                     look.resize(bardo_domain::LOOK_MAX_BYTES as usize + 1, 0);

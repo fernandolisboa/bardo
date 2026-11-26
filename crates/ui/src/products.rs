@@ -30,6 +30,7 @@ use gpui_kit::{
 use crate::ad_angles::{AnglesSection, OpenProject};
 use crate::kit::{self, Tone};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
+use crate::product_concept::ConceptSection;
 use crate::product_sheet::SheetSection;
 use crate::shell::tr;
 use crate::{guide, layout};
@@ -157,6 +158,9 @@ pub struct ProductsScreen {
     angles: Entity<AnglesSection>,
     /// As `sheet_pending`, for the Ad angles tab.
     angles_pending: bool,
+    /// The concept image of an idea (#280), under the images; it reads
+    /// with them.
+    concept: Entity<ConceptSection>,
     name: Entity<InputState>,
     kind: ProductKind,
     description: Entity<TextareaState>,
@@ -238,6 +242,7 @@ impl ProductsScreen {
 
         let form_scroll = ScrollHandle::new();
         let sheet = cx.new(|cx| SheetSection::new(bardo.clone(), form_scroll.clone(), window, cx));
+        let concept = cx.new(|cx| ConceptSection::new(bardo.clone(), cx));
         let angles =
             cx.new(|cx| AnglesSection::new(bardo.clone(), form_scroll.clone(), window, cx));
         let mut subscriptions = subscriptions;
@@ -258,6 +263,7 @@ impl ProductsScreen {
             sheet_pending: true,
             angles,
             angles_pending: true,
+            concept,
             name,
             kind: ProductKind::default(),
             description,
@@ -355,6 +361,9 @@ impl ProductsScreen {
     /// keep their decoding; the ones that left free theirs.
     fn load_pictures(&mut self, cx: &mut Context<Self>) {
         self.pictures_pending = false;
+        let editing = self.editing;
+        self.concept
+            .update(cx, |concept, cx| concept.show(editing, cx));
         let mut kept: Vec<ShownImage> = std::mem::take(&mut self.images);
         let old_logo = self.logo.take();
         let read = self.editing.map(|id| {
@@ -567,6 +576,11 @@ impl ProductsScreen {
                 if created {
                     self.pictures_pending = true;
                 }
+                // A kind or a description saved changes whether a concept
+                // image is offered and what drawing one costs.
+                let editing = self.editing;
+                self.concept
+                    .update(cx, |concept, cx| concept.show(editing, cx));
                 self.notice = Some(Notice::Saved);
                 true
             }
@@ -1720,7 +1734,8 @@ impl ProductsScreen {
                         actions,
                         scroll,
                     ))
-                    .child(pictures),
+                    .child(pictures)
+                    .child(self.concept.clone()),
             )
             .into_any_element()
     }

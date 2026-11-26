@@ -225,6 +225,10 @@ pub struct AdBrief {
     changed_at: SystemTime,
     /// When the user last said the script still holds after a change.
     script_kept_at: Option<SystemTime>,
+    /// Whether the project is a concept (#280): its product was of kind
+    /// *idea* when the project started. It keeps that, whatever the
+    /// product becomes.
+    concept: bool,
 }
 
 /// Every stored field of a brief, for adapters that rebuild one.
@@ -238,6 +242,7 @@ pub struct AdBriefRecord {
     pub confirmed_at: Option<SystemTime>,
     pub changed_at: SystemTime,
     pub script_kept_at: Option<SystemTime>,
+    pub concept: bool,
 }
 
 impl AdBrief {
@@ -263,6 +268,7 @@ impl AdBrief {
             confirmed_at: None,
             changed_at: now,
             script_kept_at: None,
+            concept: brief.kind() == crate::ProductKind::Idea,
         }
     }
 
@@ -276,7 +282,15 @@ impl AdBrief {
             confirmed_at: record.confirmed_at,
             changed_at: record.changed_at,
             script_kept_at: record.script_kept_at,
+            concept: record.concept,
         }
+    }
+
+    /// Whether the project is a concept: its product was of kind *idea*
+    /// when it started (#280). Its header and the project list show a
+    /// *Concept* badge.
+    pub fn is_concept(&self) -> bool {
+        self.concept
     }
 
     pub fn text(&self) -> &BriefText {
@@ -745,6 +759,23 @@ mod tests {
     }
 
     #[test]
+    fn a_project_is_a_concept_when_its_product_starts_as_an_idea() {
+        let mut product = product();
+        let (sheet, _, _) = sheet(&product);
+        assert!(!brief(&product, &sheet).is_concept());
+        let mut draft = ProductDraft::from(&product.brief);
+        draft.kind = crate::ProductKind::Idea;
+        product.brief = ProductBrief::validate(draft).unwrap();
+        let started = brief(&product, &sheet);
+        assert!(started.is_concept());
+        // The brief keeps it, whatever the product becomes later.
+        let mut draft = ProductDraft::from(&product.brief);
+        draft.kind = crate::ProductKind::Physical;
+        product.brief = ProductBrief::validate(draft).unwrap();
+        assert!(started.is_concept());
+    }
+
+    #[test]
     fn a_brief_round_trips_through_its_record() {
         let product = product();
         let (mut sheet, folds, _) = sheet(&product);
@@ -763,6 +794,7 @@ mod tests {
             confirmed_at: brief.confirmed_at(),
             changed_at: brief.changed_at(),
             script_kept_at: brief.script_kept_at(),
+            concept: brief.is_concept(),
         };
         assert_eq!(AdBrief::restore(record), brief);
     }

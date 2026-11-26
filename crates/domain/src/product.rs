@@ -9,8 +9,8 @@ use std::time::SystemTime;
 
 use crate::persona::numbered_copy;
 use crate::{
-    ImageFormat, ProductSheet, ProfileId, RepositoryError, image_declares_transparency,
-    image_dimensions,
+    ImageFormat, JobId, ProductSheet, ProfileId, RepositoryError, TemplateUsed,
+    image_declares_transparency, image_dimensions,
 };
 
 uuid_id!(
@@ -665,9 +665,15 @@ pub enum ProductImageKind {
     /// A screenshot of an app or a site. It is only ever shown as it is:
     /// never drawn again, and never a reference for a drawing.
     Screen,
+    /// A concept image (#280): drawn by the image generator for a product
+    /// of kind *idea*, never imported. It stands where a photo would, and
+    /// is marked as drawn wherever it is kept so nothing takes it for a
+    /// photo of something that exists. Never a choice of the user's.
+    Concept,
 }
 
 impl ProductImageKind {
+    /// What the user marks an imported image as.
     pub const ALL: [ProductImageKind; 2] = [ProductImageKind::Photo, ProductImageKind::Screen];
 
     /// Stable name stored in the database.
@@ -675,11 +681,21 @@ impl ProductImageKind {
         match self {
             ProductImageKind::Photo => "photo",
             ProductImageKind::Screen => "screen",
+            ProductImageKind::Concept => "concept",
         }
     }
 
     pub fn from_code(code: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|kind| kind.code() == code)
+        Self::ALL
+            .into_iter()
+            .chain([ProductImageKind::Concept])
+            .find(|kind| kind.code() == code)
+    }
+
+    /// Whether it may be drawn from: a photo, or a concept image standing
+    /// for one. A screen never is.
+    pub fn is_photo(self) -> bool {
+        matches!(self, ProductImageKind::Photo | ProductImageKind::Concept)
     }
 }
 
@@ -714,7 +730,7 @@ impl ProductImage {
     /// Whether the picture is taken as already cut out of its background:
     /// a photo whose file carries transparency.
     pub fn cut_out(&self) -> bool {
-        self.kind == ProductImageKind::Photo && self.picture.transparent()
+        self.kind.is_photo() && self.picture.transparent()
     }
 
     /// The same image on another product (a duplicate), under an id of
@@ -745,6 +761,78 @@ impl ProductLogo {
             ..self.clone()
         }
     }
+}
+
+/// How a concept image was drawn (#280): Claude's prompt, written through
+/// the concept prompt template, and the models that wrote and drew it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ConceptDrawing {
+    pub prompt: String,
+    pub template: Option<TemplateUsed>,
+    pub writer_model: String,
+    pub image_model: String,
+    /// The job that drew it: run again, it draws nothing.
+    pub job: Option<JobId>,
+}
+
+/// A concept image (#280): drawn for a product of kind *idea* that has no
+/// image of its own. A new one waits for the user's review; the kept one
+/// stands where a photo would.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProductConcept {
+    /// Its id as a product image: a scene that shows it names it so.
+    pub id: ProductImageId,
+    pub product: ProductId,
+    pub picture: ProductPicture,
+    pub drawing: ConceptDrawing,
+    pub drawn_at: SystemTime,
+}
+
+impl ProductConcept {
+    /// The concept image as a product image of kind
+    /// [`ProductImageKind::Concept`], under the same id, so a scene that
+    /// shows it names it as it names a photo.
+    pub fn as_image(&self) -> ProductImage {
+        ProductImage {
+            id: self.id,
+            product: self.product,
+            picture: self.picture.clone(),
+            kind: ProductImageKind::Concept,
+            confirmed_at: self.drawn_at,
+        }
+    }
+
+    /// The same concept on another product (a duplicate), under an id of
+    /// its own.
+    pub fn for_product(&self, product: ProductId) -> Self {
+        Self {
+            id: ProductImageId::new(),
+            product,
+            ..self.clone()
+        }
+    }
+}
+
+/// Whether a concept image may be drawn for a product of `kind` with
+/// `images` of its own (#280): only for an idea with none. A service or a
+/// product with no image has ads of drawn scenes and a text end card.
+pub fn may_draw_concept(kind: ProductKind, images: usize) -> bool {
+    kind == ProductKind::Idea && images == 0
+}
+
+/// The images an ad of the product may show and be drawn from: its own,
+/// else, for an idea with none, its kept concept image (#280). A concept
+/// image is never used once the product has an image of its own, nor once
+/// it is no longer an idea.
+pub fn ad_images(
+    kind: ProductKind,
+    images: Vec<ProductImage>,
+    concept: Option<&ProductConcept>,
+) -> Vec<ProductImage> {
+    if !images.is_empty() || kind != ProductKind::Idea {
+        return images;
+    }
+    concept.map(ProductConcept::as_image).into_iter().collect()
 }
 
 /// Persistence port for products, their images and logos.
@@ -807,6 +895,29 @@ pub trait ProductRepository: Send + Sync {
     /// Saves the sheet whole, in place of the product's earlier one: its
     /// text, its claims in their order and the pages it was read from.
     fn save_sheet(&self, sheet: &ProductSheet) -> Result<(), RepositoryError>;
+
+    /// The product's kept concept image (#280), when it has one.
+    fn concept(&self, product: ProductId) -> Result<Option<ProductConcept>, RepositoryError>;
+
+    /// The concept image waiting for the user's review, when one does.
+    fn pending_concept(
+        &self,
+        product: ProductId,
+    ) -> Result<Option<ProductConcept>, RepositoryError>;
+
+    /// Puts `concept` up for review, in place of any waiting.
+    fn save_pending_concept(&self, concept: &ProductConcept) -> Result<(), RepositoryError>;
+
+    /// Makes the concept waiting for review the product's concept image,
+    /// in place of the kept one, in one step. Returns whether one waited.
+    fn keep_pending_concept(&self, product: ProductId) -> Result<bool, RepositoryError>;
+
+    /// Drops the concept waiting for review. Returns whether one waited.
+    fn remove_pending_concept(&self, product: ProductId) -> Result<bool, RepositoryError>;
+
+    /// Makes `concept` the product's kept concept image, in place of any
+    /// (a duplicate's copy).
+    fn save_concept(&self, concept: &ProductConcept) -> Result<(), RepositoryError>;
 }
 
 impl<T: ProductRepository + ?Sized> ProductRepository for Arc<T> {
@@ -877,6 +988,33 @@ impl<T: ProductRepository + ?Sized> ProductRepository for Arc<T> {
 
     fn save_sheet(&self, sheet: &ProductSheet) -> Result<(), RepositoryError> {
         (**self).save_sheet(sheet)
+    }
+
+    fn concept(&self, product: ProductId) -> Result<Option<ProductConcept>, RepositoryError> {
+        (**self).concept(product)
+    }
+
+    fn pending_concept(
+        &self,
+        product: ProductId,
+    ) -> Result<Option<ProductConcept>, RepositoryError> {
+        (**self).pending_concept(product)
+    }
+
+    fn save_pending_concept(&self, concept: &ProductConcept) -> Result<(), RepositoryError> {
+        (**self).save_pending_concept(concept)
+    }
+
+    fn keep_pending_concept(&self, product: ProductId) -> Result<bool, RepositoryError> {
+        (**self).keep_pending_concept(product)
+    }
+
+    fn remove_pending_concept(&self, product: ProductId) -> Result<bool, RepositoryError> {
+        (**self).remove_pending_concept(product)
+    }
+
+    fn save_concept(&self, concept: &ProductConcept) -> Result<(), RepositoryError> {
+        (**self).save_concept(concept)
     }
 }
 
@@ -1216,6 +1354,48 @@ mod tests {
         bytes.extend(&(width - 1).to_le_bytes()[..3]);
         bytes.extend(&(height - 1).to_le_bytes()[..3]);
         bytes
+    }
+
+    #[test]
+    fn a_concept_image_stands_for_a_photo_only_for_an_idea_with_no_image() {
+        let product = ProductId::new();
+        let picture = ProductPicture::image(png(800, 800, false)).unwrap();
+        let concept = ProductConcept {
+            id: ProductImageId::new(),
+            product,
+            picture: picture.clone(),
+            drawing: ConceptDrawing::default(),
+            drawn_at: SystemTime::UNIX_EPOCH,
+        };
+        let photo = ProductImage::new(
+            product,
+            picture,
+            ProductImageKind::Photo,
+            SystemTime::UNIX_EPOCH,
+        );
+
+        assert!(may_draw_concept(ProductKind::Idea, 0));
+        assert!(!may_draw_concept(ProductKind::Idea, 1));
+        assert!(!may_draw_concept(ProductKind::Service, 0));
+
+        let used = ad_images(ProductKind::Idea, Vec::new(), Some(&concept));
+        assert_eq!(used.len(), 1);
+        assert_eq!(used[0].id, concept.id);
+        assert_eq!(used[0].kind, ProductImageKind::Concept);
+        assert!(used[0].kind.is_photo());
+        // Its own image wins, and a product that is no idea has none.
+        let own = ad_images(ProductKind::Idea, vec![photo.clone()], Some(&concept));
+        assert_eq!(own, vec![photo]);
+        assert!(ad_images(ProductKind::Physical, Vec::new(), Some(&concept)).is_empty());
+        assert!(ad_images(ProductKind::Idea, Vec::new(), None).is_empty());
+
+        // Marked as drawn wherever it is kept, and never a user's choice.
+        assert_eq!(
+            ProductImageKind::from_code("concept"),
+            Some(ProductImageKind::Concept)
+        );
+        assert!(!ProductImageKind::ALL.contains(&ProductImageKind::Concept));
+        assert!(!ProductImageKind::Screen.is_photo());
     }
 
     #[test]

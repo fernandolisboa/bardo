@@ -51,10 +51,11 @@ impl ProductLayout {
     /// the backdrop; a screen goes in a device; every image may be a card.
     pub fn offered(kind: ProductImageKind, cut_out: bool) -> Vec<ProductLayout> {
         match kind {
-            ProductImageKind::Photo if cut_out => {
+            // A concept image stands where a photo would (#280).
+            ProductImageKind::Photo | ProductImageKind::Concept if cut_out => {
                 vec![ProductLayout::Cutout, ProductLayout::Card]
             }
-            ProductImageKind::Photo => vec![ProductLayout::Card],
+            ProductImageKind::Photo | ProductImageKind::Concept => vec![ProductLayout::Card],
             ProductImageKind::Screen => vec![ProductLayout::Device, ProductLayout::Card],
         }
     }

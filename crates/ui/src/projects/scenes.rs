@@ -1721,13 +1721,27 @@ impl ProjectsScreen {
                 .min_w_0()
                 .child(thumb(bardo.scene_image_path(image), "product-check-drawn"))
         });
+        // An idea's reference is its drawn concept image (#280): said so.
+        let concept = view.kinds.photo_is_concept;
         let real = view.kinds.photo.clone().map(|path| {
             v_flex()
                 .flex_1()
                 .min_w_0()
                 .gap_1()
                 .child(thumb(path, "product-check-real"))
-                .child(muted(cx, tr(bardo, Text::ProductRealImage)))
+                .child(muted(
+                    cx,
+                    tr(
+                        bardo,
+                        if concept {
+                            Text::ProductImageKindName(
+                                bardo_app::bardo_domain::ProductImageKind::Concept,
+                            )
+                        } else {
+                            Text::ProductRealImage
+                        },
+                    ),
+                ))
         });
         let estimate = view
             .image_estimates
@@ -1746,11 +1760,25 @@ impl ProjectsScreen {
                         h_flex()
                             .gap_1()
                             .items_center()
-                            .child(field_label(tr(bardo, Text::ProductCheckTitle)))
+                            .child(field_label(tr(
+                                bardo,
+                                if concept {
+                                    Text::ConceptCheckTitle
+                                } else {
+                                    Text::ProductCheckTitle
+                                },
+                            )))
                             .child(guide::info(
                                 bardo,
                                 ("product-check-info", index),
-                                tr(bardo, Text::ProductCheckHint),
+                                tr(
+                                    bardo,
+                                    if concept {
+                                        Text::ConceptCheckHint
+                                    } else {
+                                        Text::ProductCheckHint
+                                    },
+                                ),
                                 guide::refs::SCENES_PRODUCT_CHECK,
                             )),
                     )
@@ -1803,7 +1831,14 @@ impl ProjectsScreen {
                                 Button::new(("product-use-real", index))
                                     .xsmall()
                                     .ghost()
-                                    .label(tr(bardo, Text::ProductUseRealImage))
+                                    .label(tr(
+                                        bardo,
+                                        if concept {
+                                            Text::ConceptUseImage
+                                        } else {
+                                            Text::ProductUseRealImage
+                                        },
+                                    ))
                                     .disabled(locked)
                                     .on_click(cx.listener(
                                         move |this, _: &ClickEvent, window, cx| {

@@ -23,7 +23,7 @@ const SELECT_ANGLE: &str = "SELECT id, profile_id, product_id, channel_id, title
     FROM ad_angle";
 
 const SELECT_BRIEF: &str = "SELECT project_id, product_id, angle_id, offer, call_to_action, link,
-        confirmed_at, changed_at, script_kept_at
+        confirmed_at, changed_at, script_kept_at, concept
     FROM ad_brief";
 
 #[derive(Debug, thiserror::Error)]
@@ -265,6 +265,7 @@ struct BriefRow {
     confirmed_at: Option<i64>,
     changed_at: i64,
     script_kept_at: Option<i64>,
+    concept: bool,
 }
 
 impl BriefRow {
@@ -279,6 +280,7 @@ impl BriefRow {
             confirmed_at: row.get(6)?,
             changed_at: row.get(7)?,
             script_kept_at: row.get(8)?,
+            concept: row.get(9)?,
         })
     }
 
@@ -332,6 +334,7 @@ impl BriefRow {
             confirmed_at: self.confirmed_at.map(from_unix_millis),
             changed_at: from_unix_millis(self.changed_at),
             script_kept_at: self.script_kept_at.map(from_unix_millis),
+            concept: self.concept,
         }))
     }
 }
@@ -342,15 +345,16 @@ fn write_brief(tx: &Transaction<'_>, brief: &AdBrief) -> Result<(), RepositoryEr
     let text = brief.text();
     tx.execute(
         "INSERT INTO ad_brief (project_id, product_id, angle_id, offer, call_to_action, link,
-             confirmed_at, changed_at, script_kept_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             confirmed_at, changed_at, script_kept_at, concept)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT (project_id) DO UPDATE SET
              offer = excluded.offer,
              call_to_action = excluded.call_to_action,
              link = excluded.link,
              confirmed_at = excluded.confirmed_at,
              changed_at = excluded.changed_at,
-             script_kept_at = excluded.script_kept_at",
+             script_kept_at = excluded.script_kept_at,
+             concept = excluded.concept",
         params![
             project,
             brief.product.to_string(),
@@ -361,6 +365,7 @@ fn write_brief(tx: &Transaction<'_>, brief: &AdBrief) -> Result<(), RepositoryEr
             brief.confirmed_at().map(to_unix_millis),
             to_unix_millis(brief.changed_at()),
             brief.script_kept_at().map(to_unix_millis),
+            brief.is_concept(),
         ],
     )
     .map_err(boxed)?;
@@ -1102,6 +1107,22 @@ mod tests {
         );
         assert_eq!(stored.text().link(), "@lumen");
         assert!(stored.is_confirmed());
+        assert!(!stored.is_concept());
+
+        // A concept's brief keeps that it is one (#280).
+        let concept = AdBrief::restore(bardo_domain::AdBriefRecord {
+            project: brief.project,
+            product: brief.product,
+            angle: brief.angle,
+            text: brief.text().clone(),
+            claims: brief.claims().to_vec(),
+            confirmed_at: brief.confirmed_at(),
+            changed_at: brief.changed_at(),
+            script_kept_at: brief.script_kept_at(),
+            concept: true,
+        });
+        s.db.save_brief(&concept).unwrap();
+        assert!(s.db.brief(start.project.id).unwrap().unwrap().is_concept());
     }
 
     fn check(s: &Setup, project: VideoProjectId, of: CheckedScript, text: &str) -> ClaimsCheck {

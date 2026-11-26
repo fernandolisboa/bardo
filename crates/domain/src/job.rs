@@ -165,6 +165,10 @@ pub enum JobKind {
     /// Has the image provider draw a backdrop for an ad's product shots
     /// (#285); it waits for the user to keep it.
     ShotBackdrop,
+    /// Has Claude write a concept image's prompt for a product of kind
+    /// *idea* and the image provider draw it (#280); it waits for the
+    /// user's review.
+    ProductConcept,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -193,7 +197,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 39] = [
+    pub const ALL: [JobKind; 40] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -233,6 +237,7 @@ impl JobKind {
         JobKind::AdAngleRanking,
         JobKind::ClaimsCheck,
         JobKind::ShotBackdrop,
+        JobKind::ProductConcept,
     ];
 
     /// Stable name stored in the database.
@@ -277,6 +282,7 @@ impl JobKind {
             JobKind::AdAngleRanking => "ad_angle_ranking",
             JobKind::ClaimsCheck => "claims_check",
             JobKind::ShotBackdrop => "shot_backdrop",
+            JobKind::ProductConcept => "product_concept",
         }
     }
 }

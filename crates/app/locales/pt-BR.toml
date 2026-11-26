@@ -361,6 +361,7 @@ ad_angle_suggestion = "Sugestão de ângulos de anúncio"
 ad_angle_ranking = "Ranqueamento de ângulos de anúncio"
 claims_check = "Checagem de afirmações"
 shot_backdrop = "Fundo de foto do produto"
+product_concept = "Imagem de conceito"
 
 [job.state]
 queued = "Na fila"
@@ -1177,6 +1178,7 @@ take_prompt = "Prompt da tomada"
 ad_angles = "Ângulos de anúncio"
 ad_script = "Roteiro de anúncio"
 ad_scene_plan = "Plano de cenas de anúncio"
+concept_prompt = "Prompt de conceito"
 
 [templates.variable]
 channel_name = "O nome do canal."
@@ -3203,7 +3205,7 @@ body = "Meu ou de um cliente: isso define como os posts dos anúncios são ident
 
 [tour.products.pictures]
 title = "Imagens"
-body = "Até três imagens, cada uma uma foto do produto ou uma tela do app. Antes de cada uma você confirma que pode usá-la. Uma foto com fundo transparente é usada como recorte."
+body = "Até três imagens, cada uma uma foto do produto ou uma tela do app. Antes de cada uma você confirma que pode usá-la. Uma foto com fundo transparente é usada como recorte. Um produto do tipo Ideia sem imagem pode ter uma imagem de conceito desenhada logo abaixo, revisada antes de ser usada."
 
 [tour.products.logo]
 title = "Logo"
@@ -4249,6 +4251,7 @@ client = "De um cliente"
 [product.pictures.kind]
 photo = "Foto"
 screen = "Tela"
+concept = "Imagem de conceito"
 
 [product.pictures.reason]
 not_an_image = "Use um arquivo PNG, JPEG ou WebP."
@@ -4678,9 +4681,39 @@ use_real = "Usar a imagem real"
 not_drawn = "Esta imagem foi desenhada sem a foto do produto. Desenhe com o produto para mostrá-lo em uso."
 real = "O produto de verdade"
 to_check = "Conferir produto"
+concept_check_title = "O produto está igual à imagem de conceito?"
+concept_check_hint = "Esta cena foi desenhada com a imagem de conceito do produto como referência: um desenho de uma ideia, não uma foto. Compare as duas: formato, cores e proporções. Ela não é animada nem renderizada até você conferir. Desenhar de novo é pago; usar a imagem de conceito faz dela uma cena de produto, de graça."
+use_concept = "Usar a imagem de conceito no lugar"
 
 [clips.product]
 check_title = "O produto continua igual o clipe todo?"
 check_hint = "Assista ao clipe e observe o produto: formato, cores e rótulo não podem mudar. Até você conferir, o corte mostra a imagem conferida no lugar."
 matches = "Continua igual"
 checked = "Clipe conferido"
+
+[product.concept]
+title = "Imagem de conceito"
+hint = "Um produto do tipo Ideia ainda não existe. Enquanto ele não tem imagem própria, o Bardo pode desenhar uma imagem de conceito dele a partir da descrição. O Claude escreve o prompt e o gerador de imagens desenha um produto original, sem marca, logo ou texto. A imagem mantida fica no lugar de uma foto nos anúncios deste produto, marcada como desenhada. Desenhar é pago; manter é de graça. Quando o produto tiver uma imagem própria, ela é usada no lugar."
+draw = "Desenhar um conceito"
+draw_again = "Desenhar de novo"
+drawing = "Desenhando a imagem de conceito…"
+new = "Nova imagem de conceito para revisar"
+keep = "Manter"
+discard = "Descartar"
+kept = "Usada no lugar de uma foto nos anúncios deste produto."
+unused = "Não é usada: este produto tem uma imagem própria ou não é mais uma ideia."
+stopped = "O último desenho parou."
+failed = "Não foi possível desenhar a imagem de conceito. Veja o motivo em Tarefas."
+kept_notice = "Imagem de conceito mantida."
+
+[product.concept.error]
+not_offered = "Uma imagem de conceito só é desenhada para um produto do tipo Ideia sem imagem própria."
+claude_key = "Adicione uma chave do Claude em Configurações para desenhar uma imagem de conceito: o Claude escreve o prompt."
+image_key = "Adicione uma chave do Gemini em Configurações para desenhar uma imagem de conceito."
+busy = "Uma imagem de conceito já está sendo desenhada para este produto."
+nothing_waiting = "Nenhuma imagem de conceito está esperando revisão."
+not_saved = "Não foi possível salvar a imagem de conceito. Tente de novo."
+
+[projects.concept]
+badge = "Conceito"
+hint = "Este vídeo apresenta uma ideia, não um produto que existe: o produto era uma ideia quando o projeto começou."

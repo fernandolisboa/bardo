@@ -898,7 +898,7 @@ pub const PRODUCTS: Tour = {
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Products,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "library", TourAnchor::Collection).learn(PAGE, "library"),

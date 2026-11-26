@@ -1,7 +1,8 @@
 use bardo_domain::{
-    MAX_PRODUCT_IMAGES, Product, ProductBrief, ProductDraft, ProductId, ProductImage,
-    ProductImageId, ProductImageKind, ProductKind, ProductLogo, ProductOwnership, ProductPicture,
-    ProductRepository, ProductSheet, ProfileId, RepositoryError,
+    ConceptDrawing, JobId, MAX_PRODUCT_IMAGES, Product, ProductBrief, ProductConcept, ProductDraft,
+    ProductId, ProductImage, ProductImageId, ProductImageKind, ProductKind, ProductLogo,
+    ProductOwnership, ProductPicture, ProductRepository, ProductSheet, ProfileId, RepositoryError,
+    TemplateUsed, TemplateVersionId,
 };
 use rusqlite::{OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -410,6 +411,177 @@ impl ProductRepository for Database {
     fn save_sheet(&self, sheet: &ProductSheet) -> Result<(), RepositoryError> {
         self.write_product_sheet(sheet)
     }
+
+    fn concept(&self, product: ProductId) -> Result<Option<ProductConcept>, RepositoryError> {
+        self.concept_in(product, KEPT)
+    }
+
+    fn pending_concept(
+        &self,
+        product: ProductId,
+    ) -> Result<Option<ProductConcept>, RepositoryError> {
+        self.concept_in(product, PENDING)
+    }
+
+    fn save_pending_concept(&self, concept: &ProductConcept) -> Result<(), RepositoryError> {
+        self.save_concept_in(concept, PENDING)
+    }
+
+    fn keep_pending_concept(&self, product: ProductId) -> Result<bool, RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        let product = product.to_string();
+        let waiting: Option<String> = tx
+            .query_row(
+                "SELECT id FROM product_concept WHERE product_id = ?1 AND slot = 'pending'",
+                [&product],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(boxed)?;
+        if waiting.is_none() {
+            return Ok(false);
+        }
+        tx.execute(
+            "DELETE FROM product_concept WHERE product_id = ?1 AND slot = 'kept'",
+            [&product],
+        )
+        .map_err(boxed)?;
+        tx.execute(
+            "UPDATE product_concept SET slot = 'kept' WHERE product_id = ?1 AND slot = 'pending'",
+            [&product],
+        )
+        .map_err(boxed)?;
+        tx.commit().map_err(boxed)?;
+        Ok(true)
+    }
+
+    fn remove_pending_concept(&self, product: ProductId) -> Result<bool, RepositoryError> {
+        let removed = self
+            .conn()
+            .execute(
+                "DELETE FROM product_concept WHERE product_id = ?1 AND slot = 'pending'",
+                [product.to_string()],
+            )
+            .map_err(boxed)?;
+        Ok(removed > 0)
+    }
+
+    fn save_concept(&self, concept: &ProductConcept) -> Result<(), RepositoryError> {
+        self.save_concept_in(concept, KEPT)
+    }
+}
+
+/// Where a concept image sits: kept, or waiting for review.
+const KEPT: &str = "kept";
+const PENDING: &str = "pending";
+
+impl Database {
+    fn concept_in(
+        &self,
+        product: ProductId,
+        slot: &str,
+    ) -> Result<Option<ProductConcept>, RepositoryError> {
+        type ConceptRow = (
+            String,
+            Vec<u8>,
+            String,
+            Option<String>,
+            Option<i64>,
+            String,
+            String,
+            Option<String>,
+            i64,
+        );
+        let row: Option<ConceptRow> = self
+            .conn()
+            .query_row(
+                "SELECT id, image, prompt, template_id, template_number, writer_model,
+                        image_model, job_id, drawn_at
+                 FROM product_concept WHERE product_id = ?1 AND slot = ?2",
+                params![product.to_string(), slot],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(boxed)?;
+        let Some((id, image, prompt, template_id, template_number, writer, drawer, job, at)) = row
+        else {
+            return Ok(None);
+        };
+        let uuid = |text: &str| Uuid::parse_str(text).map_err(boxed);
+        Ok(Some(ProductConcept {
+            id: ProductImageId::from(uuid(&id)?),
+            product,
+            // Through the domain's checks, as an imported image is.
+            picture: ProductPicture::image(image).map_err(boxed)?,
+            drawing: ConceptDrawing {
+                prompt,
+                template: match (template_id, template_number) {
+                    (Some(id), Some(number)) => Some(TemplateUsed {
+                        id: TemplateVersionId::from(uuid(&id)?),
+                        number: u32::try_from(number).map_err(boxed)?,
+                    }),
+                    _ => None,
+                },
+                writer_model: writer,
+                image_model: drawer,
+                job: job
+                    .as_deref()
+                    .map(|id| uuid(id).map(JobId::from))
+                    .transpose()?,
+            },
+            drawn_at: from_unix_millis(at),
+        }))
+    }
+
+    /// Puts `concept` in `slot`, in place of the one there.
+    fn save_concept_in(&self, concept: &ProductConcept, slot: &str) -> Result<(), RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        let product = concept.product.to_string();
+        tx.execute(
+            "DELETE FROM product_concept WHERE (product_id = ?1 AND slot = ?2) OR id = ?3",
+            params![product, slot, concept.id.to_string()],
+        )
+        .map_err(boxed)?;
+        let drawing = &concept.drawing;
+        tx.execute(
+            "INSERT INTO product_concept (id, product_id, slot, image, format, width, height,
+                 prompt, template_id, template_number, writer_model, image_model, job_id,
+                 drawn_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                concept.id.to_string(),
+                product,
+                slot,
+                concept.picture.bytes(),
+                concept.picture.format().mime(),
+                concept.picture.width(),
+                concept.picture.height(),
+                drawing.prompt,
+                drawing.template.map(|used| used.id.to_string()),
+                drawing.template.map(|used| used.number),
+                drawing.writer_model,
+                drawing.image_model,
+                drawing.job.map(|job| job.to_string()),
+                to_unix_millis(concept.drawn_at),
+            ],
+        )
+        .map_err(boxed)?;
+        tx.commit().map_err(boxed)
+    }
 }
 
 #[cfg(test)]
@@ -465,6 +637,62 @@ mod tests {
             kind,
             at(1_795_000_000 + u64::from(mark)),
         )
+    }
+
+    fn concept(product: ProductId, mark: u8) -> ProductConcept {
+        ProductConcept {
+            id: ProductImageId::new(),
+            product,
+            picture: ProductPicture::image(png(1024, 1024, mark)).unwrap(),
+            drawing: ConceptDrawing {
+                prompt: format!("A folding lamp, drawing {mark}"),
+                template: Some(TemplateUsed {
+                    id: TemplateVersionId::new(),
+                    number: 2,
+                }),
+                writer_model: "writer".into(),
+                image_model: "drawer".into(),
+                job: Some(JobId::new()),
+            },
+            drawn_at: at(1_795_000_000 + u64::from(mark)),
+        }
+    }
+
+    #[test]
+    fn a_concept_waits_for_review_then_is_kept_in_place_of_the_last() {
+        let (db, owner) = database_with_profile();
+        let saved = product(owner, "Lamp");
+        ProductRepository::save(&db, &saved).unwrap();
+        assert_eq!(db.concept(saved.id).unwrap(), None);
+
+        let first = concept(saved.id, 1);
+        db.save_pending_concept(&first).unwrap();
+        assert_eq!(db.pending_concept(saved.id).unwrap(), Some(first.clone()));
+        assert_eq!(db.concept(saved.id).unwrap(), None);
+        // Drawn again, the new one waits in its place.
+        let second = concept(saved.id, 2);
+        db.save_pending_concept(&second).unwrap();
+        assert_eq!(db.pending_concept(saved.id).unwrap(), Some(second.clone()));
+
+        assert!(db.keep_pending_concept(saved.id).unwrap());
+        assert_eq!(db.concept(saved.id).unwrap(), Some(second.clone()));
+        assert_eq!(db.pending_concept(saved.id).unwrap(), None);
+        assert!(!db.keep_pending_concept(saved.id).unwrap());
+
+        // A later one kept replaces it; a discarded one leaves it.
+        let third = concept(saved.id, 3);
+        db.save_pending_concept(&third).unwrap();
+        assert!(db.remove_pending_concept(saved.id).unwrap());
+        assert!(!db.remove_pending_concept(saved.id).unwrap());
+        assert_eq!(db.concept(saved.id).unwrap(), Some(second));
+        db.save_pending_concept(&third).unwrap();
+        db.keep_pending_concept(saved.id).unwrap();
+        assert_eq!(db.concept(saved.id).unwrap(), Some(third));
+
+        // Not one of its own images, and gone with the product.
+        assert_eq!(db.image_count(saved.id).unwrap(), 0);
+        ProductRepository::delete(&db, saved.id).unwrap();
+        assert_eq!(db.concept(saved.id).unwrap(), None);
     }
 
     #[test]
