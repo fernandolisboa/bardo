@@ -318,7 +318,9 @@ impl Bardo {
                 // for each of its sentences.
                 let typical: Vec<(Duration, Duration, bool)> = match project.product {
                     Some(product) => {
-                        let has_image = self.products.image_count(product)? > 0;
+                        let has_image =
+                            !crate::ad_scenes::ad_product_images(self.products.as_ref(), product)?
+                                .is_empty();
                         match &narration {
                             Some(narration) => ad_scenes_on(narration, has_image),
                             None => typical_ad_scenes(length, has_image),

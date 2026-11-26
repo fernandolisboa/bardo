@@ -1156,7 +1156,8 @@ mod tests {
             // then migrated.
             let mut conn = s.db.conn();
             conn.execute_batch(
-                "ALTER TABLE scene DROP COLUMN product_checks;
+                "DROP TABLE product_concept;
+                 ALTER TABLE scene DROP COLUMN product_checks;
                  DROP TABLE shot_backdrop;
                  ALTER TABLE scene DROP COLUMN shot_tones;
                  ALTER TABLE scene DROP COLUMN shot_look;

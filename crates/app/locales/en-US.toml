@@ -361,6 +361,7 @@ ad_angle_suggestion = "Ad angle suggestion"
 ad_angle_ranking = "Ad angle ranking"
 claims_check = "Claims check"
 shot_backdrop = "Product shot backdrop"
+product_concept = "Concept image"
 
 [job.state]
 queued = "Queued"
@@ -1177,6 +1178,7 @@ take_prompt = "Take prompt"
 ad_angles = "Ad angles"
 ad_script = "Ad script"
 ad_scene_plan = "Ad scene plan"
+concept_prompt = "Concept prompt"
 
 [templates.variable]
 channel_name = "The channel's name."
@@ -3203,7 +3205,7 @@ body = "Mine or a client's: it sets how the posts of its ads are disclosed. An a
 
 [tour.products.pictures]
 title = "Images"
-body = "Up to three images, each a photo of the product or a screen of the app. Before each one you confirm you may use it. A photo with a transparent background is used as a cut-out."
+body = "Up to three images, each a photo of the product or a screen of the app. Before each one you confirm you may use it. A photo with a transparent background is used as a cut-out. A product of kind Idea with no image can have a concept image drawn below, reviewed before it is used."
 
 [tour.products.logo]
 title = "Logo"
@@ -4249,6 +4251,7 @@ client = "A client's"
 [product.pictures.kind]
 photo = "Photo"
 screen = "Screen"
+concept = "Concept image"
 
 [product.pictures.reason]
 not_an_image = "Use a PNG, JPEG or WebP file."
@@ -4678,9 +4681,39 @@ use_real = "Use the real image instead"
 not_drawn = "This picture was drawn without the product's photo. Draw it with the product to show it in use."
 real = "The real product"
 to_check = "Check product"
+concept_check_title = "Does the product match its concept image?"
+concept_check_hint = "This scene was drawn with the product's concept image as a reference: a drawing of an idea, not a photo. Compare them: shape, colors and proportions. It is not animated or rendered until you check it. Drawing it again is paid; using the concept image makes it a product shot, for free."
+use_concept = "Use the concept image instead"
 
 [clips.product]
 check_title = "Does the product stay as it is all through the clip?"
 check_hint = "Play the clip and watch the product: its shape, colors and label must not change. Until you check it, the cut shows the checked picture instead."
 matches = "It stays the same"
 checked = "Clip checked"
+
+[product.concept]
+title = "Concept image"
+hint = "A product of kind Idea does not exist yet. While it has no image of its own, Bardo can draw a concept image of it from its description. Claude writes the prompt and the image generator draws an original product, with no brand, logo or text. The kept one stands where a photo would in this product's ads, marked as drawn. Drawing is paid; keeping it is free. Once the product has an image of its own, that image is used instead."
+draw = "Draw a concept"
+draw_again = "Draw again"
+drawing = "Drawing the concept image…"
+new = "New concept image to review"
+keep = "Keep"
+discard = "Discard"
+kept = "Used where a photo would be in this product's ads."
+unused = "Not used: this product has an image of its own, or is no longer an idea."
+stopped = "The last drawing stopped."
+failed = "The concept image could not be drawn. See Jobs for why."
+kept_notice = "Concept image kept."
+
+[product.concept.error]
+not_offered = "A concept image is drawn only for a product of kind Idea with no image of its own."
+claude_key = "Add a Claude key in Settings to draw a concept image: Claude writes its prompt."
+image_key = "Add a Gemini key in Settings to draw a concept image."
+busy = "A concept image is already being drawn for this product."
+nothing_waiting = "No concept image is waiting for review."
+not_saved = "The concept image could not be saved. Try again."
+
+[projects.concept]
+badge = "Concept"
+hint = "This video presents an idea, not a product that exists: its product was an idea when the project started."

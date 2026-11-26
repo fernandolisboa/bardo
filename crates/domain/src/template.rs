@@ -56,10 +56,13 @@ pub enum TemplateKind {
     /// the end card) and which product image a product shot shows. Every
     /// other project is planned from `ImagePrompt`.
     AdScenePlan,
+    /// The prompt a concept image is drawn from, written from the brief of
+    /// a product of kind *idea* (#280).
+    ConceptPrompt,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 12] = [
+    pub const ALL: [TemplateKind; 13] = [
         TemplateKind::Script,
         TemplateKind::ImagePrompt,
         TemplateKind::MusicPrompt,
@@ -72,6 +75,7 @@ impl TemplateKind {
         TemplateKind::AdAngles,
         TemplateKind::AdScript,
         TemplateKind::AdScenePlan,
+        TemplateKind::ConceptPrompt,
     ];
 
     /// Stable name stored in the database.
@@ -89,6 +93,7 @@ impl TemplateKind {
             TemplateKind::AdAngles => "ad_angles",
             TemplateKind::AdScript => "ad_script",
             TemplateKind::AdScenePlan => "ad_scene_plan",
+            TemplateKind::ConceptPrompt => "concept_prompt",
         }
     }
 
@@ -229,6 +234,9 @@ impl TemplateKind {
                 TemplateVariable::NarrationSentences,
                 TemplateVariable::FrameShape,
             ],
+            TemplateKind::ConceptPrompt => {
+                &[TemplateVariable::Product, TemplateVariable::ProductAudience]
+            }
         }
     }
 }

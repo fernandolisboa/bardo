@@ -409,6 +409,16 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         // The brief's claims and a short script in, a statement per
         // sentence as JSON out.
         CostPurpose::ClaimsCheck => tokens(1_200, 700),
+        // The brief in, one prompt out; then one drawing in a tall frame.
+        CostPurpose::ProductConcept => match provider {
+            Provider::Claude => tokens(900, 300),
+            _ => Metered {
+                input_tokens: 250,
+                output_tokens: 0,
+                image_tokens: 1_680,
+                ..Metered::default()
+            },
+        },
         CostPurpose::PersonaLook => match provider {
             Provider::Claude => tokens(700, 400),
             _ => Metered {

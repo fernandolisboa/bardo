@@ -43,6 +43,13 @@ A saved product can hold up to three images: PNG, JPEG or WebP, 600 to 6,000 px 
 
 Each image is a **Photo** (the product, its packaging, a place) or a **Screen** (a screenshot of an app or site). Bardo only ever shows a screen as it is and never redraws it. A photo saved with transparency (a PNG or WebP with an alpha channel) is taken as already cut out and marked **Cut out**, ready to place on other backgrounds. Bardo goes by what the file says, so save a picture that way only when its background really is transparent. **Remove**, under an image, asks before it drops the picture and its confirmation. A product can also have no images: its ads then use drawn scenes and an end card of text.
 
+<a id="concept"></a>
+## A concept image for an idea
+
+A product of kind **Idea** does not exist yet, so it has no photo. While it has no image of its own, **Concept image**, under the images, can draw one from its description: **Draw a concept** shows its estimate, then Claude writes an image prompt with the [Concept prompt](templates.md) template and the image generator draws it. Whatever the template says, the prompt always asks for an original product with no existing brand, logo or trade dress, and no text at all. Both calls are paid, checked against your budget first and recorded in [Costs](costs.md) with no channel; it needs a Claude key and a Gemini key. If it stops after Claude wrote the prompt, **Retry** on [Jobs](jobs.md) pays only for the image; **Draw again** starts over and pays for both. A drawing that would no longer be used (the product got an image or changed kind meanwhile) stops before its next paid call, and the product cannot be deleted while one is drawn.
+
+A new drawing waits for review: **Keep** makes it the product's concept image, replacing the last one, and **Discard** drops it. **Draw again** draws another. The kept image stands where a photo would: in product shots and as the reference of a scene with the [product in use](scenes.md#product-check), which you check against it the same way. It is marked **Concept image** wherever it shows. Once the product has an image of its own, or is no longer an idea, that image is used and the concept image is not.
+
 <a id="logo"></a>
 ## The logo
 
@@ -116,4 +123,4 @@ Ad angles show here and not on [Themes](themes-ranking.md), and an ad project do
 <a id="archive"></a>
 ## Duplicating, archiving and deleting
 
-**Duplicate** saves the changes you have made, then copies the brief, the images, the logo and the sheet under a new name, for a variant of the same product. **Archive** hides a product you no longer advertise from the list and from new ads; **Restore** brings it back. **Delete…** removes the product with its images, logo and sheet after you confirm, and is refused while any video uses the product (archive it instead), while a run fills its sheet, or while its angles are being proposed or ranked.
+**Duplicate** saves the changes you have made, then copies the brief, the images, the kept concept image, the logo and the sheet under a new name, for a variant of the same product. **Archive** hides a product you no longer advertise from the list and from new ads; **Restore** brings it back. **Delete…** removes the product with its images, concept image, logo and sheet after you confirm, and is refused while any video uses the product (archive it instead), while a run fills its sheet, while its angles are being proposed or ranked, or while its concept image is being drawn.

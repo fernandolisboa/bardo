@@ -48,6 +48,8 @@ pub(crate) enum Work {
     },
     /// A backdrop drawn for the project's product shots (#285).
     Backdrop(String),
+    /// A concept image drawn for the product (#280).
+    Concept(String),
 }
 
 /// The fields the payloads of these jobs name what they work on with.
@@ -90,6 +92,7 @@ impl Work {
                 | JobKind::AdAngleSuggestion
                 | JobKind::AdAngleRanking
                 | JobKind::ShotBackdrop
+                | JobKind::ProductConcept
         ) {
             return None;
         }
@@ -119,6 +122,7 @@ impl Work {
                 channel: on.channel?,
             },
             JobKind::ShotBackdrop => Self::Backdrop(on.project?),
+            JobKind::ProductConcept => Self::Concept(on.product?),
             _ => return None,
         })
     }

@@ -142,6 +142,8 @@ pub struct ProjectsScreen {
     spend_cap_note: Option<(Tone, Text)>,
     channel: Option<ChannelId>,
     projects: Vec<VideoProject>,
+    /// The listed projects that are concepts (#280), read as they load.
+    concepts: std::collections::HashSet<VideoProjectId>,
     project: Option<VideoProjectId>,
     /// The stage on screen.
     stage: Stage,
@@ -543,6 +545,7 @@ impl ProjectsScreen {
             spend_cap_note: None,
             channel: None,
             projects: Vec::new(),
+            concepts: Default::default(),
             project: None,
             stage: Stage::Script,
             selected_scene: None,
@@ -762,6 +765,13 @@ impl ProjectsScreen {
                 self.error = Some(Text::ProjectsNotLoaded);
             }
         }
+        let bardo = self.bardo.read(cx);
+        self.concepts = self
+            .projects
+            .iter()
+            .filter(|project| bardo.is_concept_project(project))
+            .map(|project| project.id)
+            .collect();
         if self
             .project
             .is_some_and(|id| !self.projects.iter().any(|p| p.id == id))
@@ -1793,16 +1803,20 @@ impl ProjectsScreen {
             return header;
         };
         let current = project.id;
+        let concept = self.concepts.contains(&current);
         let projects: Vec<(VideoProjectId, SharedString)> = self
             .projects
             .iter()
             .map(|project| {
-                // An ad says so in the list.
-                let title = if project.is_ad() {
+                // An ad says so in the list, and a concept too.
+                let mut title = if project.is_ad() {
                     format!("{} · {}", project.title, bardo.text(Text::ProjectAd))
                 } else {
                     project.title.clone()
                 };
+                if self.concepts.contains(&project.id) {
+                    title = format!("{title} · {}", bardo.text(Text::ConceptBadge));
+                }
                 (project.id, SharedString::from(title))
             })
             .collect();
@@ -1843,6 +1857,19 @@ impl ProjectsScreen {
                             .truncate()
                             .child(SharedString::from(project.title.clone())),
                     )
+                    .when(concept, |row| {
+                        let hint = tr(bardo, Text::ConceptBadgeHint);
+                        row.child(
+                            div()
+                                .id("project-concept-badge")
+                                .flex_none()
+                                .child(kit::status(Tone::Info, tr(bardo, Text::ConceptBadge), cx))
+                                .tooltip(move |window, cx| {
+                                    gpui_kit::component::tooltip::Tooltip::new(hint.clone())
+                                        .build(window, cx)
+                                }),
+                        )
+                    })
                     .child(switcher),
             )
             .min_w_0(),

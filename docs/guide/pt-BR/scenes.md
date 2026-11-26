@@ -62,7 +62,7 @@ Toda imagem do produto em uso espera a sua conferência: a cena mostra **Conferi
 - **Desenhar de novo** desenha uma imagem nova, paga, com a estimativa; a nova espera a revisão e depois a própria conferência.
 - **Usar a imagem real** torna a cena uma [foto do produto](#ad), composta a partir da imagem do próprio produto, de graça.
 
-O Bardo não julga a semelhança: a conferência é sua, a olho. Uma imagem desenhada de novo e usada perde a conferência. Uma cena esperando conferência bloqueia só o próprio clipe e a renderização, nunca as cenas ao redor.
+O Bardo não julga a semelhança: a conferência é sua, a olho. Uma imagem desenhada de novo e usada perde a conferência. Uma cena esperando conferência bloqueia só o próprio clipe e a renderização, nunca as cenas ao redor. Num produto do tipo *ideia*, a referência é a [imagem de conceito](products.md#concept) mantida, um desenho: o inspetor a chama de **Imagem de conceito**, pergunta se o produto está igual a ela e oferece **Usar a imagem de conceito no lugar**.
 
 <a id="shot-look"></a>
 ## A aparência de uma foto do produto

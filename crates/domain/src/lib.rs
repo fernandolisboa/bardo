@@ -304,6 +304,7 @@ pub use preflight::{
     BodyFraming, HALF_BODY_FACE, LookFace, MAX_FAST_FRAMES, MAX_OUT_OF_FRAME, MIN_PREFLIGHT_FACE,
     Preflight, PreflightCheck, PreflightOutcome, PreflightResult, preflight,
 };
+pub use product::{ConceptDrawing, ProductConcept, ad_images, may_draw_concept};
 pub use product::{
     MAX_PRODUCT_IMAGES, PRODUCT_IMAGE_MAX_BYTES, PRODUCT_IMAGE_MAX_RATIO, PRODUCT_IMAGE_MAX_SIDE,
     PRODUCT_IMAGE_MIN_SIDE, PRODUCT_LOGO_MAX_RATIO, PRODUCT_LOGO_MIN_LONG_SIDE,

@@ -62,7 +62,7 @@ Every picture of the product in use waits for your check: the scene reads **Chec
 - **Draw again** draws a new picture, paid, with its estimate; the new one waits for review, then for its own check.
 - **Use the real image instead** makes the scene a [product shot](#ad), composed from the product's own image, for free.
 
-Bardo does not judge likeness: the check is yours, by eye. A picture drawn again and used loses the check. A scene waiting for its check holds back only its own clip and the render, never the scenes around it.
+Bardo does not judge likeness: the check is yours, by eye. A picture drawn again and used loses the check. A scene waiting for its check holds back only its own clip and the render, never the scenes around it. For a product of kind *idea*, the reference is its kept [concept image](products.md#concept), a drawing: the inspector names it **Concept image**, asks whether the product matches it, and offers **Use the concept image instead**.
 
 <a id="shot-look"></a>
 ## How a product shot looks

@@ -58,22 +58,46 @@ pub(crate) fn product_reference_file(image: ProductImageId, extension: &str) -> 
     format!("product-{image}.{extension}")
 }
 
+/// The images the ads of `product` may show and be drawn from: its own,
+/// else, for an idea with none, its kept concept image (#280), marked as
+/// drawn. A concept image that cannot be read is left out.
+pub(crate) fn ad_product_images(
+    products: &dyn ProductRepository,
+    product: ProductId,
+) -> Result<Vec<ProductImage>, bardo_domain::RepositoryError> {
+    let images = products.images(product)?;
+    let Some(found) = products.get(product)? else {
+        return Ok(images);
+    };
+    let concept = match images.is_empty() {
+        true => products.concept(product).unwrap_or_else(|error| {
+            tracing::warn!(%error, "a stored concept image could not be read");
+            None
+        }),
+        false => None,
+    };
+    Ok(bardo_domain::ad_images(
+        found.brief.kind(),
+        images,
+        concept.as_ref(),
+    ))
+}
+
 /// The product's photo that its in-use scenes are drawn with and checked
 /// against (#279), copied into the project folder once: the file's name.
-/// Only a photo: a screen never goes to a model. The first photo of the
-/// product is the one used.
+/// Only a photo, or the concept image standing for one (#280): a screen
+/// never goes to a model. The first photo of the product is the one used.
 pub(crate) fn product_photo(
     files: &dyn ProjectFiles,
     products: &dyn ProductRepository,
     project: VideoProjectId,
     product: ProductId,
 ) -> Result<String, String> {
-    let images = products
-        .images(product)
+    let images = ad_product_images(products, product)
         .map_err(|error| format!("the product's images could not be read: {error}"))?;
     let photo = images
         .into_iter()
-        .find(|image| image.kind == ProductImageKind::Photo)
+        .find(|image| image.kind.is_photo())
         .ok_or_else(|| "the product has no photo to draw it from".to_owned())?;
     let file = product_reference_file(photo.id, photo.picture.format().extension());
     if !files.exists(project, &file) {
@@ -183,7 +207,7 @@ pub(crate) fn kind_lines(pictures: &ProductPictures) -> String {
             let what = match kind {
                 SceneKind::Drawn => "a picture the image model draws from the scene's prompt.",
                 SceneKind::ProductInUse => {
-                    "the product being used, drawn from the scene's prompt with the product's photo."
+                    "the product being used, drawn from the scene's prompt with the product's photo, or its concept image for an idea."
                 }
                 SceneKind::ProductShot => {
                     "one of the product's own images, shown as it is. Nothing is drawn."
@@ -213,6 +237,9 @@ pub(crate) fn image_lines(images: &[ProductImage]) -> String {
             let what = match image.kind {
                 ProductImageKind::Photo => "a photo of the product",
                 ProductImageKind::Screen => "a screen of the product, as a device shows it",
+                ProductImageKind::Concept => {
+                    "a concept image of the product: a drawing of an idea, not a photo"
+                }
             };
             let shape = match width.cmp(&height) {
                 std::cmp::Ordering::Greater => "wide",
@@ -369,9 +396,7 @@ impl SceneHandler {
         let look = scene.look();
         // An image that cannot be read is this scene's failure, not the
         // job's: the other scenes are still made.
-        let composed = self
-            .products
-            .images(product)
+        let composed = ad_product_images(self.products.as_ref(), product)
             .map_err(|error| {
                 JobFailure::new(
                     JobFailureKind::Files,
@@ -560,6 +585,9 @@ pub struct SceneKinds {
     /// The product's photo that its in-use scenes are drawn with and
     /// checked against (#279); `None` for a product without a photo.
     pub photo: Option<std::path::PathBuf>,
+    /// That photo is the drawn concept image of an idea (#280), not a
+    /// picture of a real product: the check says so.
+    pub photo_is_concept: bool,
 }
 
 /// One of the product's images as a product shot may show it.
@@ -641,7 +669,7 @@ impl Bardo {
                     .collect::<Vec<_>>()
                     .join(" "),
             ),
-            images: self.products.images(brief.product.id)?,
+            images: ad_product_images(self.products.as_ref(), brief.product.id)?,
         }))
     }
 
@@ -654,7 +682,10 @@ impl Bardo {
         let Some(product) = project.product else {
             return Ok(None);
         };
-        Ok(Some((product, self.products.images(product)?)))
+        Ok(Some((
+            product,
+            ad_product_images(self.products.as_ref(), product)?,
+        )))
     }
 
     /// The kinds the scenes of `project` may be and the product images a
@@ -701,6 +732,14 @@ impl Bardo {
                 )
                 .ok()
                 .map(|file| self.files.path(project.id, &file))
+            }),
+            photo_is_concept: project.product.is_some_and(|product| {
+                ad_product_images(self.products.as_ref(), product).is_ok_and(|images| {
+                    images
+                        .iter()
+                        .find(|image| image.kind.is_photo())
+                        .is_some_and(|image| image.kind == ProductImageKind::Concept)
+                })
             }),
         })
     }
@@ -2214,6 +2253,67 @@ mod ad_tests {
             std::time::SystemTime::now(),
         );
         assert_eq!(bare.scene(1).unwrap().look().backdrop, ShotBackdrop::Auto);
+    }
+
+    #[test]
+    fn a_concepts_drawn_image_stands_where_a_photo_would() {
+        let h = Harness::new();
+        let app = start(&h);
+        let (product, project, _) = narrated_ad(&h, &app, &[]);
+        assert!(app.scene_kinds(project.id).unwrap().images.is_empty());
+        // The product becomes an idea with a kept concept image (#280).
+        app.update_product(
+            product.id,
+            bardo_domain::ProductDraft {
+                kind: bardo_domain::ProductKind::Idea,
+                ..crate::ad_angles::testing::draft()
+            },
+        )
+        .unwrap();
+        let concept = bardo_domain::ProductConcept {
+            id: bardo_domain::ProductImageId::new(),
+            product: product.id,
+            picture: bardo_domain::ProductPicture::image(png(832, 1248, [90, 120, 200])).unwrap(),
+            drawing: bardo_domain::ConceptDrawing::default(),
+            drawn_at: std::time::SystemTime::now(),
+        };
+        bardo_domain::ProductRepository::save_concept(h.db.as_ref(), &concept).unwrap();
+        let kinds = app.scene_kinds(project.id).unwrap();
+        assert_eq!(kinds.images.len(), 1);
+        assert_eq!(kinds.images[0].id, concept.id);
+        assert_eq!(kinds.images[0].kind, ProductImageKind::Concept);
+        assert!(kinds.allowed.contains(&SceneKind::ProductInUse));
+        assert!(kinds.allowed.contains(&SceneKind::ProductShot));
+
+        plan_with(
+            &h,
+            &app,
+            &project,
+            answer([
+                ("drawn", -1),
+                ("product_shot", 0),
+                ("product_in_use", -1),
+                ("end_card", 0),
+            ]),
+        );
+        assert_eq!(plan_of(&app, &project, 1).product_image(), Some(concept.id));
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let requests = h.images.requests.lock().unwrap().clone();
+        let in_use = requests.last().unwrap();
+        assert_eq!(in_use.references[0].bytes, concept.picture.bytes());
+        assert!(plan_of(&app, &project, 2).product_drawn());
+        let shown = app.scene_kinds(project.id).unwrap();
+        assert!(shown.photo_is_concept, "its check says it is a drawing");
+        let photo = shown.photo.unwrap();
+        let name = photo.file_name().unwrap().to_str().unwrap();
+        assert_eq!(
+            h.files.read(project.id, name).unwrap(),
+            concept.picture.bytes()
+        );
     }
 
     #[test]
