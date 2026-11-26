@@ -47,7 +47,7 @@ Um anúncio tem uma segunda exportação na etapa Publicação, **Exportar para 
 
 A exportação espera pelas cenas do produto em uso que você ainda não conferiu e por uma imagem composta que precise ser feita de novo, e vai com os itens que você confirmou na revisão do anúncio. **Exportar para anúncios** roda um job, com o progresso na etapa e em Jobs; **Cancelar** o interrompe, e exportar de novo termina os formatos que faltam.
 
-Cada formato ganha uma pasta na pasta de exportação do projeto, `Ads/4x5`, `Ads/1x1` e `Ads/16x9` ou `Ads/9x16`, com o vídeo e o `ad.txt`: o arquivo, o tamanho e o formato dele, o texto principal, o título, a chamada para ação e o link do briefing, a divulgação comercial a marcar, o rótulo de mídia sintética quando a voz é sintética, e os itens que você confirmou. **Mostrar na pasta** a abre. Um formato aparece como **Exportado**, **Desatualizado** quando o corte, uma imagem composta ou os textos mudaram depois dele, ou **Não exportado**.
+Cada formato ganha uma pasta na pasta de exportação do projeto, `Ads/4x5`, `Ads/1x1` e `Ads/16x9` ou `Ads/9x16`, com o vídeo e o `ad.txt`: o arquivo, o tamanho e o formato dele, o texto principal, o título, a chamada para ação e o link do briefing, a divulgação comercial a marcar, o rótulo de conteúdo sintético quando o vídeo precisa dele ([Conteúdo sintético](uploading.md#disclosure)), e os itens que você confirmou. **Mostrar na pasta** a abre. Um formato aparece como **Exportado**, **Desatualizado** quando o corte, uma imagem composta ou os textos mudaram depois dele, ou **Não exportado**.
 
 <a id="post"></a>
 ## Depois de postar à mão

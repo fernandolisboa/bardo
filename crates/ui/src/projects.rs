@@ -951,7 +951,11 @@ impl ProjectsScreen {
                 self.script_ask = None;
                 self.claims_ask = None;
             }
+            let opened = self.stage != stage && stage == Stage::Publish;
             self.stage = stage;
+            if opened {
+                self.refresh_placements(cx);
+            }
             self.ensure_render_checked(cx);
             cx.notify();
         }

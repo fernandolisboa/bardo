@@ -494,7 +494,12 @@ mod tests {
             .rev()
             .find(|request| request.prompt.contains("The networks, one per line"))
             .unwrap();
-        assert!(request.instructions.ends_with(crate::ads::AD_RULES));
+        // The ad rules, then what it writes for an ad manager (#283).
+        assert!(request.instructions.ends_with(&format!(
+            "{}\n\n{}",
+            crate::ads::AD_RULES,
+            crate::ads::AD_TEXTS_RULES
+        )));
         assert!(request.instructions.contains("Open with the hook"));
         assert!(
             request

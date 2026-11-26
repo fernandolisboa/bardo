@@ -491,7 +491,7 @@ fn export_stamp(
 
 /// Whether two file names name the same file on Windows, whose names
 /// ignore case: a title changed only in case keeps the same file.
-fn same_file_name(a: &str, b: &str) -> bool {
+pub(crate) fn same_file_name(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
 

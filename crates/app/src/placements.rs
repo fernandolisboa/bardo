@@ -37,6 +37,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ad_publishing::AdPublishing;
 use crate::editor::{EditorView, PlanMedia, timeline_plan};
+use crate::export::same_file_name;
 use crate::jobs::{JobContext, JobHandler};
 use crate::render::fingerprint;
 use crate::scenes::{SceneHandler, id, parse, to_json};
@@ -161,6 +162,8 @@ pub struct PlacementShape {
     made_from: String,
     plan: RenderPlan,
     composed: Vec<ComposeOrder>,
+    /// The `ad.txt` it would write now.
+    ad_text: String,
 }
 
 /// What the export for ads shows on the Publishing stage of an ad.
@@ -225,8 +228,10 @@ fn composed_file(shape: FrameShape, source: &str) -> String {
 
 /// The file a shape renders to in the project folder, before it is copied
 /// to the export folder.
-fn rendered_file(shape: FrameShape) -> String {
-    format!("ad-export-{}.mp4", shape.folder())
+/// Where a run renders `shape` before copying it: one file per run, so a
+/// second run never copies or removes another's.
+fn rendered_file(shape: FrameShape, run: u64) -> String {
+    format!("ad-export-{}-{run}.mp4", shape.folder())
 }
 
 /// One shape of a job: the reviewed plan, what it composes first, and
@@ -253,6 +258,12 @@ struct PlacementPayload {
     product: String,
     loudness_tenths: i16,
     orders: Vec<ShapeOrder>,
+    /// When it was queued, in milliseconds since 1970: a shape exported
+    /// after it, by a later run, is left as that run wrote it.
+    queued_at: u64,
+    /// What the review went with, kept with each shape's export.
+    disclosure: String,
+    acknowledged: Vec<String>,
 }
 
 /// The shapes a job has written, by code.
@@ -344,6 +355,11 @@ impl Bardo {
         };
         let loudness = self.placement_loudness(project.id, cut)?;
         let sizes = self.footage_sizes(project.id)?;
+        let Some(brief) = self.script_brief(&project)? else {
+            return Ok(None);
+        };
+        let video_file = video_file_name(&project.title);
+        let no_texts = AdTexts::default();
         let mut shapes = Vec::new();
         for shape in FrameShape::for_ads(cut) {
             let Some(built) = self.shape_plan(
@@ -356,6 +372,21 @@ impl Bardo {
                 loudness,
             ) else {
                 return Err(PlacementError::NoCut);
+            };
+            // What `ad.txt` says counts too: the brief's call to action and
+            // link, the disclosure, the reminders and the review's items.
+            let ad_text = self.ad_file(
+                &project,
+                shape,
+                &video_file,
+                texts.as_ref().unwrap_or(&no_texts),
+                brief.brief.text(),
+                &publishing,
+            );
+            let built = PlacementShape {
+                made_from: hash(&[&built.made_from, &ad_text]),
+                ad_text,
+                ..built
             };
             let last = exports.iter().find(|export| export.shape == shape).cloned();
             let current = last
@@ -488,7 +519,13 @@ impl Bardo {
             }
             .or_else(|| {
                 let path = shown.and_then(|shown| shown.thumbnail.as_ref())?;
-                let bytes = std::fs::read(path).ok()?;
+                // The size is in the header: no need to read the picture.
+                let mut bytes = Vec::new();
+                std::io::Read::read_to_end(
+                    &mut std::io::Read::take(std::fs::File::open(path).ok()?, 256 * 1024),
+                    &mut bytes,
+                )
+                .ok()?;
                 image_dimensions(&bytes).map(|(width, height)| PictureSize::new(width, height))
             })
             .unwrap_or(PictureSize::new(1920, 1080));
@@ -526,6 +563,7 @@ impl Bardo {
             made_from,
             plan: render,
             composed,
+            ad_text: String::new(),
         })
     }
 
@@ -570,11 +608,15 @@ impl Bardo {
         if !project.is_ad() {
             return Err(PlacementError::NotAnAd);
         }
-        let texts = AdTexts::new(primary, headline);
-        if self.ads.ad_texts(project.id)?.as_ref() != Some(&texts) {
-            self.ads.save_ad_texts(project.id, &texts)?;
+        let texts = AdTexts::new(primary, headline).edited();
+        match self.ads.ad_texts(project.id)? {
+            // Saved as they were: Claude's stay Claude's.
+            Some(stored) if stored.same_words(&texts) => Ok(stored),
+            _ => {
+                self.ads.save_ad_texts(project.id, &texts)?;
+                Ok(texts)
+            }
         }
-        Ok(texts)
     }
 
     /// Queues the export for ads of the `chosen` shapes of `review`, with
@@ -604,10 +646,13 @@ impl Bardo {
         if now.pictures_wait {
             return Err(PlacementError::PicturesWait);
         }
-        let texts = match &now.texts {
-            Some(texts) if texts.problems().is_empty() => texts.clone(),
-            _ => return Err(PlacementError::Texts),
-        };
+        if !now
+            .texts
+            .as_ref()
+            .is_some_and(|texts| texts.problems().is_empty())
+        {
+            return Err(PlacementError::Texts);
+        }
         if !unacknowledged(&now.publishing.items, acknowledged).is_empty() {
             return Err(PlacementError::NotAcknowledged);
         }
@@ -631,9 +676,6 @@ impl Bardo {
         }
         let project = self.export_project(review.project)?;
         let product = project.product.ok_or(PlacementError::NotAnAd)?;
-        let brief = self
-            .script_brief(&project)?
-            .ok_or(PlacementError::NotAnAd)?;
         let video_file = video_file_name(&project.title);
         let orders = shapes
             .iter()
@@ -642,19 +684,12 @@ impl Bardo {
                 made_from: shape.made_from.clone(),
                 plan: shape.plan.clone(),
                 composed: shape.composed.clone(),
-                ad_text: self.ad_file(
-                    &project,
-                    shape.shape,
-                    &video_file,
-                    &texts,
-                    brief.brief.text(),
-                    &now.publishing,
-                ),
+                ad_text: shape.ad_text.clone(),
                 previous: shape
                     .last
                     .as_ref()
                     .map(|last| last.file.clone())
-                    .filter(|file| *file != video_file),
+                    .filter(|file| !same_file_name(file, &video_file)),
                 video_file: video_file.clone(),
             })
             .collect();
@@ -664,6 +699,15 @@ impl Bardo {
             product: product.to_string(),
             loudness_tenths: now.loudness.tenths(),
             orders,
+            queued_at: u64::try_from(
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis(),
+            )
+            .unwrap_or(u64::MAX),
+            disclosure: now.publishing.disclosure.code().to_owned(),
+            acknowledged: now.publishing.keys(),
         };
         let job = Job::new(self.profile.id, JobKind::PlacementExport, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
@@ -936,6 +980,10 @@ impl JobHandler for PlacementHandler {
             None => PlacementCheckpoint::default(),
         };
         let total = payload.orders.len();
+        let queued_at =
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(payload.queued_at);
+        let disclosure = CommercialDisclosure::from_code(&payload.disclosure)
+            .unwrap_or(CommercialDisclosure::PaidPartnership);
         for order in &payload.orders {
             if checkpoint.done.contains(&order.shape) {
                 continue;
@@ -947,15 +995,31 @@ impl JobHandler for PlacementHandler {
                 .shape
                 .parse()
                 .map_err(|_| JobFailure::unexpected("unknown shape"))?;
+            // A later run (this one retried after it) wrote the shape: its
+            // folder stays as that run left it.
+            let newer = self
+                .ad_exports
+                .ad_exports(project)
+                .map_err(unexpected)?
+                .iter()
+                .any(|export| export.shape == shape && export.exported_at > queued_at);
+            if newer {
+                checkpoint.done.push(order.shape.clone());
+                continue;
+            }
             self.compose(project, product, shape, &order.composed)?;
-            let rendered = rendered_file(shape);
+            let rendered = rendered_file(shape, payload.queued_at);
             let destination = self.files().path(project, &rendered);
             let monitor = ShapeMonitor {
                 cx,
                 done: checkpoint.done.len(),
                 total,
             };
-            match self.render(&order.plan, shape, loudness, &destination, &monitor) {
+            let rendering = self.render(&order.plan, shape, loudness, &destination, &monitor);
+            if rendering.is_err() {
+                let _ = self.files().remove(project, &rendered);
+            }
+            match rendering {
                 Ok(()) => {}
                 Err(MediaError::Cancelled) => return Ok(()),
                 Err(error) => return Err(media_failure(&order.shape, &error)),
@@ -967,11 +1031,6 @@ impl JobHandler for PlacementHandler {
             self.export_files
                 .write_ad(&payload.package, shape, AD_FILE, order.ad_text.as_bytes())
                 .map_err(unexpected)?;
-            if let Some(previous) = &order.previous {
-                self.export_files
-                    .remove_ad(&payload.package, shape, previous)
-                    .map_err(unexpected)?;
-            }
             let size_bytes = std::fs::metadata(&destination)
                 .map(|metadata| metadata.len())
                 .unwrap_or(0);
@@ -985,8 +1044,19 @@ impl JobHandler for PlacementHandler {
                     file: order.video_file.clone(),
                     size_bytes,
                     exported_at: SystemTime::now(),
+                    disclosure,
+                    acknowledged: payload.acknowledged.clone(),
                 })
                 .map_err(unexpected)?;
+            // Once the new one is recorded. A leftover only costs disk
+            // space: an old video open in a player stays.
+            if let Some(previous) = &order.previous
+                && let Err(error) = self
+                    .export_files
+                    .remove_ad(&payload.package, shape, previous)
+            {
+                tracing::warn!("the previous export for ads stays: {error}");
+            }
             checkpoint.done.push(order.shape.clone());
             let progress = Progress::of(checkpoint.done.len() as u64, total as u64);
             cx.save_checkpoint(to_json(&checkpoint), progress)
@@ -1216,11 +1286,17 @@ mod tests {
             "Tired of buying notebooks? This one refills."
         );
         assert_eq!(after.text_problems(), Some(Vec::new()));
+        assert!(!texts.is_edited(), "Claude's own");
+        // Saving them unchanged keeps them Claude's.
+        app.set_ad_texts(project.id, texts.primary(), texts.headline())
+            .unwrap();
+        assert!(!review(&app, &project).texts.unwrap().is_edited());
         // An edit is kept past its limit and puts the check out of date.
         let long = "x".repeat(41);
         app.set_ad_texts(project.id, texts.primary(), &long)
             .unwrap();
         let edited = review(&app, &project);
+        assert!(edited.texts.as_ref().unwrap().is_edited());
         assert_eq!(
             edited.text_problems(),
             Some(vec![AdTextProblem::HeadlineTooLong])
@@ -1319,7 +1395,13 @@ mod tests {
         for (call, shape) in calls.iter().zip(all) {
             let (width, height) = shape.size();
             assert_eq!(call.output.size, FrameSize::new(width, height));
-            assert!(call.destination.ends_with(rendered_file(shape)));
+            let rendered = call.destination.file_name().unwrap().to_string_lossy();
+            assert!(
+                rendered.starts_with(&format!("ad-export-{}-", shape.folder())),
+                "{rendered}"
+            );
+            // The project folder keeps no second copy.
+            assert!(!h.files.exists(project.id, &rendered));
             // The composed scenes show the shape's own pictures.
             for order in &self::shape(&review, shape).composed {
                 assert!(call.plan.video.iter().any(|clip| matches!(
@@ -1328,13 +1410,13 @@ mod tests {
                 )));
             }
         }
-        // The project folder keeps no second copy.
-        assert!(
-            !h.files
-                .exists(project.id, &rendered_file(FrameShape::Square))
-        );
-
         let after = self::review(&app, &project);
+        // Each shape keeps what its review went with.
+        for shape in &after.shapes {
+            let last = shape.last.as_ref().unwrap();
+            assert_eq!(last.acknowledged, review.publishing.keys());
+            assert_eq!(last.disclosure, review.publishing.disclosure);
+        }
         assert!(after.shapes.iter().all(|s| s.current), "{:?}", after.shapes);
         // New texts put every shape out of date.
         app.set_ad_texts(project.id, "Refill it, keep writing.", "Refill it")
@@ -1419,6 +1501,32 @@ mod tests {
             *exports.copied.lock().unwrap(),
             [FrameShape::Portrait, FrameShape::Square]
         );
+    }
+
+    #[test]
+    fn an_older_export_retried_leaves_a_shape_a_later_one_wrote() {
+        let h = Harness::new();
+        let exports: Arc<NotedExports> = Arc::default();
+        let (app, project) = ad(&h, &exports);
+        write_texts(&h, &app, &project);
+        let review = review(&app, &project);
+        let keys = review.publishing.keys();
+        exports.fail_square.store(true, Ordering::SeqCst);
+        let older = app
+            .start_placement_export(&review, &[FrameShape::Square], &keys)
+            .unwrap();
+        assert_eq!(wait_done(&app, older).state(), JobState::Failed);
+        exports.fail_square.store(false, Ordering::SeqCst);
+        let later = app
+            .start_placement_export(&review, &[FrameShape::Square], &keys)
+            .unwrap();
+        done(&app, later);
+        let renders = h.media.renders().len();
+
+        app.retry_job(older).unwrap();
+        done(&app, older);
+        assert_eq!(h.media.renders().len(), renders, "rendered nothing again");
+        assert!(shape(&self::review(&app, &project), FrameShape::Square).current);
     }
 
     #[test]

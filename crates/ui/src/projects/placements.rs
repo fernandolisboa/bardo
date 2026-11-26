@@ -14,7 +14,7 @@ use bardo_app::bardo_domain::{
     VideoProjectId, crop_window,
 };
 use bardo_app::{
-    Bardo, PlacementClip, PlacementError, PlacementReview, PlacementShape, Text,
+    Bardo, PlacementClip, PlacementError, PlacementReview, PlacementShape, Stage, Text,
     placement_job_shapes,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
@@ -41,8 +41,10 @@ const NUDGE: u16 = CROP_STEPS / 10;
 /// The export for ads as the Publish stage holds it.
 pub(super) struct Placements {
     review: Option<PlacementReview>,
-    /// What failed: reading the export, saving the texts or starting it.
+    /// What failed saving the texts, moving a window or starting it.
     error: Option<Text>,
+    /// What kept the export from being read.
+    load_error: Option<Text>,
     /// The shapes the user ticked or unticked; the others follow whether
     /// they are current.
     choices: Vec<(FrameShape, bool)>,
@@ -59,6 +61,7 @@ impl Placements {
         Placements {
             review: None,
             error: None,
+            load_error: None,
             choices: Vec::new(),
             shown: None,
             primary: cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 5)),
@@ -71,6 +74,7 @@ impl Placements {
     pub(super) fn reset(&mut self) {
         self.review = None;
         self.error = None;
+        self.load_error = None;
         self.choices.clear();
         self.shown = None;
         self.loaded = None;
@@ -88,7 +92,7 @@ impl Placements {
     fn dirty(&self, cx: &App) -> bool {
         self.loaded
             .as_ref()
-            .is_some_and(|(_, stored)| *stored != self.typed(cx))
+            .is_some_and(|(_, stored)| !stored.same_words(&self.typed(cx)))
     }
 
     fn chosen(&self, shape: &PlacementShape) -> bool {
@@ -127,30 +131,64 @@ fn heading(bardo: &Bardo, text: Text) -> gpui_kit::Div {
 }
 
 impl ProjectsScreen {
+    /// Whether the ad's texts for an ad manager are the user's, so writing
+    /// the post texts again asks first.
+    pub(super) fn ad_texts_edited(&self) -> bool {
+        self.placements
+            .review
+            .as_ref()
+            .and_then(|review| review.texts.as_ref())
+            .is_some_and(AdTexts::is_edited)
+    }
+
+    /// Reads the export for ads of `id` when it is an ad.
+    fn read_placements(&mut self, id: VideoProjectId, cx: &mut Context<Self>) {
+        let is_ad = self
+            .export_view
+            .as_ref()
+            .is_some_and(|view| view.ad.is_some());
+        let read = if is_ad {
+            self.bardo.read(cx).placement_review(id)
+        } else {
+            Ok(None)
+        };
+        self.placements.load_error = None;
+        match read {
+            Ok(review) => self.placements.review = review,
+            // Nothing to export before there is a cut.
+            Err(PlacementError::NoCut) => self.placements.review = None,
+            Err(error) => {
+                self.placements.review = None;
+                self.placements.load_error = Some(error.message());
+            }
+        }
+    }
+
+    /// Reads the export for ads again, as the Publish stage opens.
+    pub(super) fn refresh_placements(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self.project {
+            self.read_placements(id, cx);
+        }
+    }
+
+    /// What kept the export for ads from being read.
+    pub(super) fn placements_load_error(&self) -> Option<Text> {
+        self.placements.load_error
+    }
+
     /// Reads the export for ads of `id`, an ad, and fills the texts'
-    /// fields when the stored ones changed.
+    /// fields when the stored ones changed. Off the Publish stage it is
+    /// read once per project: it builds a plan per shape, and every job's
+    /// progress reloads the screen.
     pub(super) fn load_placements(
         &mut self,
         id: VideoProjectId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let is_ad = self
-            .export_view
-            .as_ref()
-            .is_some_and(|view| view.ad.is_some());
-        if !is_ad {
-            self.placements.review = None;
-            return;
-        }
-        match self.bardo.read(cx).placement_review(id) {
-            Ok(review) => self.placements.review = review,
-            // Nothing to export before there is a cut.
-            Err(PlacementError::NoCut) => self.placements.review = None,
-            Err(error) => {
-                self.placements.review = None;
-                self.placements.error = Some(error.message());
-            }
+        let read_for = self.placements.review.as_ref().map(|review| review.project);
+        if self.stage == Stage::Publish || read_for != Some(id) {
+            self.read_placements(id, cx);
         }
         let stored = self
             .placements
@@ -158,7 +196,15 @@ impl ProjectsScreen {
             .as_ref()
             .and_then(|review| review.texts.clone())
             .map(|texts| (id, texts));
-        if stored.is_some() && self.placements.loaded != stored {
+        // Unsaved typing stays; it is refilled once saved or the project
+        // changes.
+        let same_project = self
+            .placements
+            .loaded
+            .as_ref()
+            .is_some_and(|(loaded, _)| *loaded == id);
+        let keep = same_project && self.placements.dirty(cx);
+        if stored.is_some() && self.placements.loaded != stored && !keep {
             let (primary, headline) = stored
                 .as_ref()
                 .map(|(_, texts)| (texts.primary().to_owned(), texts.headline().to_owned()))
@@ -440,7 +486,8 @@ impl ProjectsScreen {
                     .outline()
                     .label(arrow)
                     .tooltip(tr(bardo, text))
-                    .disabled(busy || position == clip.position)
+                    // An axis with no room moves nothing on screen.
+                    .disabled(busy || crop_window(clip.source, shape, position) == rect)
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.move_window(shape, key.clone(), position, window, cx);
                     }))
@@ -612,6 +659,10 @@ impl ProjectsScreen {
         let mut row = h_flex().gap_2().flex_wrap().items_center();
         if left > 0 {
             row = row.child(muted(cx, tr(bardo, Text::AdNotAcknowledged)));
+        } else if unsaved {
+            row = row.child(muted(cx, tr(bardo, Text::PlacementSaveFirst)));
+        } else if chosen == 0 {
+            row = row.child(muted(cx, tr(bardo, Text::PlacementNothingChosen)));
         }
         row = row.child(
             Button::new("placement-start")

@@ -4,7 +4,9 @@
 CREATE TABLE ad_texts (
     project_id   TEXT PRIMARY KEY REFERENCES video_project (id) ON DELETE CASCADE,
     primary_text TEXT NOT NULL,
-    headline     TEXT NOT NULL
+    headline     TEXT NOT NULL,
+    -- 1 once the user wrote them: writing the post texts again asks first.
+    edited       INTEGER NOT NULL DEFAULT 0
 ) STRICT, WITHOUT ROWID;
 
 -- Where the user moved a clip's window in one shape of the export; a
@@ -30,5 +32,9 @@ CREATE TABLE ad_export (
     file        TEXT NOT NULL,
     size_bytes  INTEGER NOT NULL,
     exported_at INTEGER NOT NULL,
+    -- What its review went with (#282): the disclosure and the
+    -- acknowledged items' keys, one per line.
+    disclosure   TEXT NOT NULL,
+    acknowledged TEXT NOT NULL,
     PRIMARY KEY (project_id, shape)
 ) STRICT, WITHOUT ROWID;

@@ -7,7 +7,9 @@
 
 use std::time::{Duration, SystemTime};
 
-use crate::{CropPosition, FrameShape, Picture, RepositoryError, VideoProjectId};
+use crate::{
+    CommercialDisclosure, CropPosition, FrameShape, Picture, RepositoryError, VideoProjectId,
+};
 
 /// The most characters of an ad's primary text: what ad managers show
 /// before they cut it.
@@ -22,6 +24,9 @@ pub const AD_HEADLINE_MAX: usize = 40;
 pub struct AdTexts {
     primary: String,
     headline: String,
+    /// Whether the user wrote them, so writing the post texts again asks
+    /// before it replaces them.
+    edited: bool,
 }
 
 /// What keeps an ad's texts from going out.
@@ -46,7 +51,26 @@ impl AdTexts {
         Self {
             primary: one_line(primary),
             headline: one_line(headline),
+            edited: false,
         }
+    }
+
+    /// The same texts, as the user's own.
+    pub fn edited(self) -> Self {
+        Self {
+            edited: true,
+            ..self
+        }
+    }
+
+    /// Whether the user wrote them rather than Claude.
+    pub fn is_edited(&self) -> bool {
+        self.edited
+    }
+
+    /// Whether both say the same, whoever wrote them.
+    pub fn same_words(&self, other: &AdTexts) -> bool {
+        self.primary == other.primary && self.headline == other.headline
     }
 
     pub fn primary(&self) -> &str {
@@ -109,6 +133,10 @@ pub struct AdExport {
     pub file: String,
     pub size_bytes: u64,
     pub exported_at: SystemTime,
+    /// The commercial disclosure its `ad.txt` named.
+    pub disclosure: CommercialDisclosure,
+    /// The keys of the ad review's items the user acknowledged for it.
+    pub acknowledged: Vec<String>,
 }
 
 /// Persistence port for the windows and the files of an ad's export for
@@ -178,6 +206,9 @@ mod tests {
     fn texts_are_one_line_and_kept_past_their_limits() {
         let texts = AdTexts::new("  Brew   better\ncoffee ", "Try it");
         assert_eq!(texts.primary(), "Brew better coffee");
+        assert!(!texts.is_edited());
+        let edited = texts.clone().edited();
+        assert!(edited.is_edited() && edited.same_words(&texts) && edited != texts);
         assert!(texts.problems().is_empty());
         let long = AdTexts::new(&"a".repeat(126), &"b".repeat(41));
         assert_eq!(long.primary().len(), 126);

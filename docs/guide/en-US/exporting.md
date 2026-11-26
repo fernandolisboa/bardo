@@ -47,7 +47,7 @@ An ad has a second export at the Publish stage, **Export for ads**, for the ad m
 
 The export waits for the product-in-use scenes you have yet to check and for a composed picture that has to be made again, and goes with the items you acknowledged in the ad's review. **Export for ads** runs one job, with its progress on the stage and in Jobs; **Cancel** stops it, and exporting again finishes the shapes left.
 
-Each shape gets a folder in the project's export folder, `Ads/4x5`, `Ads/1x1` and `Ads/16x9` or `Ads/9x16`, with the video and `ad.txt`: the file, its size and shape, the primary text, the headline, the call to action and link from the brief, the commercial disclosure to set, the synthetic-media label when the voice is synthetic, and the items you acknowledged. **Show in folder** opens it. A shape reads **Exported**, **Out of date** once the cut, a composed picture or the texts changed after it, or **Not exported**.
+Each shape gets a folder in the project's export folder, `Ads/4x5`, `Ads/1x1` and `Ads/16x9` or `Ads/9x16`, with the video and `ad.txt`: the file, its size and shape, the primary text, the headline, the call to action and link from the brief, the commercial disclosure to set, the synthetic-content label when the video needs it ([Synthetic content](uploading.md#disclosure)), and the items you acknowledged. **Show in folder** opens it. A shape reads **Exported**, **Out of date** once the cut, a composed picture or the texts changed after it, or **Not exported**.
 
 <a id="post"></a>
 ## After posting by hand

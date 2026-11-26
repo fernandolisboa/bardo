@@ -7,6 +7,7 @@ use bardo_domain::{
 };
 use rusqlite::{OptionalExtension, params};
 
+use crate::ad_review::{disclosure_of, lines_of};
 use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 fn shape_of(code: &str) -> Result<FrameShape, RepositoryError> {
@@ -24,13 +25,15 @@ impl Database {
     ) -> Result<Option<AdTexts>, RepositoryError> {
         self.conn()
             .query_row(
-                "SELECT primary_text, headline FROM ad_texts WHERE project_id = ?1",
+                "SELECT primary_text, headline, edited FROM ad_texts WHERE project_id = ?1",
                 [project.to_string()],
                 |row| {
-                    Ok(AdTexts::new(
-                        &row.get::<_, String>(0)?,
-                        &row.get::<_, String>(1)?,
-                    ))
+                    let texts = AdTexts::new(&row.get::<_, String>(0)?, &row.get::<_, String>(1)?);
+                    Ok(if row.get::<_, i64>(2)? != 0 {
+                        texts.edited()
+                    } else {
+                        texts
+                    })
                 },
             )
             .optional()
@@ -44,10 +47,17 @@ impl Database {
     ) -> Result<(), RepositoryError> {
         self.conn()
             .execute(
-                "INSERT INTO ad_texts (project_id, primary_text, headline) VALUES (?1, ?2, ?3)
+                "INSERT INTO ad_texts (project_id, primary_text, headline, edited)
+                 VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT (project_id) DO UPDATE SET
-                     primary_text = excluded.primary_text, headline = excluded.headline",
-                params![project.to_string(), texts.primary(), texts.headline()],
+                     primary_text = excluded.primary_text, headline = excluded.headline,
+                     edited = excluded.edited",
+                params![
+                    project.to_string(),
+                    texts.primary(),
+                    texts.headline(),
+                    texts.is_edited()
+                ],
             )
             .map_err(boxed)?;
         Ok(())
@@ -127,7 +137,8 @@ impl AdExportRepository for Database {
         let conn = self.conn();
         let mut statement = conn
             .prepare(
-                "SELECT shape, made_from, file, size_bytes, exported_at FROM ad_export
+                "SELECT shape, made_from, file, size_bytes, exported_at, disclosure, acknowledged
+                 FROM ad_export
                  WHERE project_id = ?1 ORDER BY shape",
             )
             .map_err(boxed)?;
@@ -139,22 +150,28 @@ impl AdExportRepository for Database {
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, i64>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
                 ))
             })
             .map_err(boxed)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(boxed)?;
         rows.into_iter()
-            .map(|(shape, made_from, file, size, at)| {
-                Ok(AdExport {
-                    project,
-                    shape: shape_of(&shape)?,
-                    made_from,
-                    file,
-                    size_bytes: u64::try_from(size).unwrap_or(0),
-                    exported_at: from_unix_millis(at),
-                })
-            })
+            .map(
+                |(shape, made_from, file, size, at, disclosure, acknowledged)| {
+                    Ok(AdExport {
+                        project,
+                        shape: shape_of(&shape)?,
+                        made_from,
+                        file,
+                        size_bytes: u64::try_from(size).unwrap_or(0),
+                        exported_at: from_unix_millis(at),
+                        disclosure: disclosure_of(&disclosure),
+                        acknowledged: lines_of(&acknowledged),
+                    })
+                },
+            )
             .collect()
     }
 
@@ -162,11 +179,13 @@ impl AdExportRepository for Database {
         self.conn()
             .execute(
                 "INSERT INTO ad_export
-                     (project_id, shape, made_from, file, size_bytes, exported_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     (project_id, shape, made_from, file, size_bytes, exported_at,
+                      disclosure, acknowledged)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT (project_id, shape) DO UPDATE SET
                      made_from = excluded.made_from, file = excluded.file,
-                     size_bytes = excluded.size_bytes, exported_at = excluded.exported_at",
+                     size_bytes = excluded.size_bytes, exported_at = excluded.exported_at,
+                     disclosure = excluded.disclosure, acknowledged = excluded.acknowledged",
                 params![
                     export.project.to_string(),
                     export.shape.code(),
@@ -174,6 +193,8 @@ impl AdExportRepository for Database {
                     export.file,
                     i64::try_from(export.size_bytes).unwrap_or(i64::MAX),
                     to_unix_millis(export.exported_at),
+                    export.disclosure.code(),
+                    export.acknowledged.join("\n"),
                 ],
             )
             .map_err(boxed)?;
@@ -201,7 +222,10 @@ mod tests {
         let texts = AdTexts::new("Folds flat, lights a desk", "The folding lamp");
         db.save_ad_texts(project, &texts).unwrap();
         db.save_ad_texts(project, &texts).unwrap();
-        assert_eq!(db.ad_texts(project).unwrap(), Some(texts));
+        assert_eq!(db.ad_texts(project).unwrap(), Some(texts.clone()));
+        let edited = texts.edited();
+        db.save_ad_texts(project, &edited).unwrap();
+        assert_eq!(db.ad_texts(project).unwrap(), Some(edited));
 
         let window = AdWindow {
             shape: FrameShape::Portrait,
@@ -235,6 +259,8 @@ mod tests {
             file: "The lamp.mp4".into(),
             size_bytes: 42,
             exported_at: at,
+            disclosure: bardo_domain::CommercialDisclosure::YourBrand,
+            acknowledged: vec!["sensitive:2".into(), "concept".into()],
         };
         db.save_ad_export(&export).unwrap();
         let again = AdExport {
