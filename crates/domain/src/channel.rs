@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     CaptionHighlight, CaptionStyle, ClipFit, ClipModelRef, ContentLanguage, Country, Market,
-    MotionDefault, PersonaId, ProductionMode, ProfileId, RepositoryError, StretchLimit,
+    MotionDefault, PersonaId, ProductionMode, ProfileId, ProjectId, RepositoryError, StretchLimit,
     StyleChoice, ThumbnailLook, Transition, VideoFormat,
 };
 
@@ -352,20 +352,23 @@ fn normalize_themes(themes: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-/// A brand the user runs on one or more networks (CONTEXT.md). Network
-/// accounts arrive with their own slice.
+/// A brand the user runs on one or more networks (CONTEXT.md), in one
+/// project (ADR-0047).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Channel {
     pub id: ChannelId,
     pub owner: ProfileId,
+    /// The project that owns it, and through it its themes and videos.
+    pub project: ProjectId,
     pub details: ChannelDetails,
 }
 
 impl Channel {
-    pub fn new(owner: ProfileId, details: ChannelDetails) -> Self {
+    pub fn new(owner: ProfileId, project: ProjectId, details: ChannelDetails) -> Self {
         Self {
             id: ChannelId::new(),
             owner,
+            project,
             details,
         }
     }
@@ -574,9 +577,11 @@ mod tests {
     fn new_channels_get_distinct_ids_and_keep_their_owner() {
         let owner = ProfileId::new();
         let details = ChannelDetails::validate(draft("A")).unwrap();
-        let a = Channel::new(owner, details.clone());
-        let b = Channel::new(owner, details);
+        let project = ProjectId::new();
+        let a = Channel::new(owner, project, details.clone());
+        let b = Channel::new(owner, project, details);
         assert_ne!(a.id, b.id);
         assert_eq!(a.owner, owner);
+        assert_eq!(a.project, project);
     }
 }

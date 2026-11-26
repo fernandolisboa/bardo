@@ -318,7 +318,7 @@ mod tests {
             ..ChannelDraft::default()
         })
         .unwrap();
-        let channel = Channel::new(owner, details);
+        let channel = Channel::new(owner, crate::project::test_project(db, owner), details);
         ChannelRepository::save(db, &channel).unwrap();
         channel.id
     }

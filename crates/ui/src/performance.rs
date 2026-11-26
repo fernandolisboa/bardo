@@ -566,7 +566,11 @@ impl Render for PerformanceScreen {
         header.trail.push(
             div()
                 .w(px(200.))
-                .child(Select::new(&self.channel_select).xsmall())
+                .child(kit::channel_pick(
+                    Select::new(&self.channel_select).xsmall(),
+                    &self.channels,
+                    cx,
+                ))
                 .into_any_element(),
         );
         let mut parts = ScreenParts::new(header);

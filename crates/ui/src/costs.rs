@@ -8,11 +8,14 @@ use std::time::Duration;
 
 use bardo_app::bardo_domain::{BudgetLevel, Meter, Month, Provider};
 use bardo_app::{
-    Bardo, Control, CostsView, Destination, ProviderSpend, RateRow, SpendRow, Text, TourAnchor,
+    Bardo, Control, CostsView, Destination, ProjectFilter, ProviderSpend, RateRow, SpendRow, Text,
+    TourAnchor,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::progress::Progress;
+use gpui_kit::component::searchable_list::SearchableVec;
+use gpui_kit::component::select::{Select, SelectEvent};
 use gpui_kit::component::{
     ActiveTheme as _, IconName, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
@@ -25,7 +28,7 @@ use gpui_kit::{
 use crate::appearance::look;
 use crate::guide;
 use crate::icons::Lucide;
-use crate::kit::{self, Tone};
+use crate::kit::{self, FilterChoice, FilterSelect, Tone};
 use crate::layout;
 use crate::parts::{Figure, Header, ScreenParts, Section, Sections};
 use crate::shell::tr;
@@ -62,6 +65,9 @@ pub struct CostsScreen {
     bardo: Entity<Bardo>,
     month: Month,
     tab: CostsTab,
+    /// Whose channels and videos the breakdown shows (#333).
+    filter: ProjectFilter,
+    filter_select: FilterSelect,
     view: Option<CostsView>,
     /// Why the last change did not happen.
     error: Option<Text>,
@@ -99,9 +105,24 @@ impl CostsScreen {
                 }
             }
         });
-        let mut subscriptions = vec![cx.observe_in(&bardo, window, |this, _, window, cx| {
-            this.relabel(window, cx)
-        })];
+        let filter = bardo.read(cx).starting_filter();
+        let choices = kit::filter_choices(bardo.read(cx));
+        let filter_select = kit::filter_select(choices, filter, window, cx);
+        let mut subscriptions = vec![
+            cx.observe_in(&bardo, window, |this, _, window, cx| {
+                this.relabel(window, cx)
+            }),
+            cx.subscribe(
+                &filter_select,
+                |this, _, event: &SelectEvent<SearchableVec<FilterChoice>>, cx| {
+                    if let SelectEvent::Confirm(Some(filter)) = event {
+                        this.filter = *filter;
+                        this.load(cx);
+                        cx.notify();
+                    }
+                },
+            ),
+        ];
         for input in [&budget_input, &rate_input, &new_model, &new_price] {
             subscriptions.push(cx.subscribe_in(input, window, Self::on_input));
         }
@@ -111,6 +132,8 @@ impl CostsScreen {
             bardo,
             month,
             tab: CostsTab::Budgets,
+            filter,
+            filter_select,
             view: None,
             error: None,
             notice: None,
@@ -163,6 +186,28 @@ impl CostsScreen {
         }
     }
 
+    /// Projects were made or archived: the filter lists them as they are
+    /// now, and keeps its project while it is still listed.
+    pub fn projects_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let choices = kit::filter_choices(self.bardo.read(cx));
+        if !choices.iter().any(|choice| choice.value == self.filter) {
+            self.filter = self.bardo.read(cx).starting_filter();
+            self.load(cx);
+            cx.notify();
+        }
+        kit::refill_filter(&self.filter_select, choices, self.filter, window, cx);
+    }
+
+    /// Another project opened: the filter starts on it, and lists the
+    /// projects as they are now.
+    pub fn project_switched(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.filter = self.bardo.read(cx).starting_filter();
+        let choices = kit::filter_choices(self.bardo.read(cx));
+        kit::refill_filter(&self.filter_select, choices, self.filter, window, cx);
+        self.load(cx);
+        cx.notify();
+    }
+
     /// Re-reads the month's spend (jobs ran elsewhere meanwhile).
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         self.notice = None;
@@ -188,7 +233,7 @@ impl CostsScreen {
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {
-        match self.bardo.read(cx).costs(self.month) {
+        match self.bardo.read(cx).costs_for(self.month, self.filter) {
             Ok(view) => self.view = Some(view),
             Err(_) => {
                 self.view = None;
@@ -758,15 +803,59 @@ impl CostsScreen {
         .into_any_element()
     }
 
-    /// Spend by channel (with bars) and the videos that cost the most.
+    /// The month's spend by project, with the filter for the lists below.
+    fn by_project(&self, view: &CostsView, cx: &App) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let rows = view.projects.iter().map(|row| {
+            let name = match (&row.name, row.project) {
+                (Some(name), _) => SharedString::from(name.clone()),
+                (None, None) => tr(bardo, Text::FilterNoProject),
+                (None, Some(_)) => tr(bardo, Text::CostsUnknownProject),
+            };
+            h_flex()
+                .gap_2()
+                .py_1()
+                .items_center()
+                .child(match row.color {
+                    Some(color) => kit::project_swatch(color, px(8.)),
+                    None => div().size(px(8.)).flex_none(),
+                })
+                .child(div().flex_1().min_w_0().child(spend_line(
+                    cx,
+                    name,
+                    None,
+                    bardo.money(row.amount),
+                )))
+        });
+        kit::anchor(
+            TourAnchor::Control(Control::CostsProjects),
+            kit::card(cx)
+                .p_3()
+                .gap_2()
+                .child(section_title(cx, tr(bardo, Text::CostsByProject)))
+                .children(rows)
+                .child(kit::field(
+                    tr(bardo, Text::FilterProjectLabel),
+                    None,
+                    Select::new(&self.filter_select).small().into_any_element(),
+                    None,
+                )),
+        )
+        .into_any_element()
+    }
+
+    /// Spend by project, then by channel (with bars) and the videos that
+    /// cost the most.
     fn breakdown(&self, cx: &App) -> Vec<AnyElement> {
         let Some(view) = self.view.as_ref() else {
             return Vec::new();
         };
+        let projects = self.by_project(view, cx);
         let bardo = self.bardo.read(cx);
         let t = look(cx).tokens;
         if view.channels.is_empty() && view.videos.is_empty() {
             return vec![
+                projects,
                 kit::card(cx)
                     .p_4()
                     .child(hint(
@@ -834,6 +923,7 @@ impl CostsScreen {
         // The aside scrolls apart from the page in Studio, so the tour
         // lights these where they are, without scrolling.
         vec![
+            projects,
             kit::anchor(
                 TourAnchor::Control(Control::CostsChannels),
                 kit::card(cx)

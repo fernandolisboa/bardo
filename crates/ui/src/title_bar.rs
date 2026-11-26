@@ -1,6 +1,7 @@
 //! The window's title bar (issue #104), drawn by Bardo in the interface
-//! theme in place of the native caption: Bardo's mark and name, a drag
-//! area, and the minimize / maximize / close buttons.
+//! theme in place of the native caption: Bardo's mark and name, the
+//! project switcher (issue #333), a drag area, and the minimize /
+//! maximize / close buttons.
 //!
 //! On Windows every part declares what it is ([`WindowControlArea`]) and
 //! the system does the rest, as it does for its own caption: dragging,
@@ -78,15 +79,27 @@ pub struct TitleBar {
     colors: Colors,
     /// The chip after the name on a copy built from source.
     dev: Option<SharedString>,
+    /// The project switcher, after the mark; outside the drag area, so it
+    /// takes clicks.
+    switcher: Option<AnyElement>,
 }
 
 impl TitleBar {
     pub fn new(colors: Colors) -> Self {
-        Self { colors, dev: None }
+        Self {
+            colors,
+            dev: None,
+            switcher: None,
+        }
     }
 
     pub fn dev(mut self, label: Option<SharedString>) -> Self {
         self.dev = label;
+        self
+    }
+
+    pub fn switcher(mut self, switcher: Option<AnyElement>) -> Self {
+        self.switcher = switcher;
         self
     }
 }
@@ -97,7 +110,6 @@ struct Pressed(bool);
 impl RenderOnce for TitleBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = self.colors;
-        let windows = cfg!(target_os = "windows");
         let brand = h_flex()
             .pl_3()
             // Room for the traffic lights, which macOS keeps drawing.
@@ -115,41 +127,20 @@ impl RenderOnce for TitleBar {
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .child(label)
             }));
-        let drag = h_flex()
-            .id("title-bar-drag")
-            .flex_1()
-            .h_full()
-            .min_w_0()
-            .items_center()
+        let drag = drag_area("title-bar-drag", window, cx)
+            .flex_none()
             .child(brand);
-        let drag = if windows {
-            drag.window_control_area(WindowControlArea::Drag)
-        } else {
-            // Without the system's caption the bar moves the window itself,
-            // once the pointer moves, so a double click still reaches it.
-            let pressed = window.use_keyed_state("title-bar-pressed", cx, |_, _| Pressed(false));
-            let down = pressed.clone();
-            let up = pressed.clone();
-            let out = pressed.clone();
-            drag.on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                down.update(cx, |pressed, _| pressed.0 = true);
-            })
-            .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-                up.update(cx, |pressed, _| pressed.0 = false);
-            })
-            .on_mouse_down_out(move |_, _, cx| {
-                out.update(cx, |pressed, _| pressed.0 = false);
-            })
-            .on_mouse_move(move |_, window, cx| {
-                if pressed.update(cx, |pressed, _| std::mem::take(&mut pressed.0)) {
-                    window.start_window_move();
-                }
-            })
-            .on_double_click(|_, window, _| window.zoom_window())
-            .on_mouse_down(MouseButton::Right, |event, window, _| {
-                window.show_window_menu(event.position);
-            })
-        };
+        let switcher = self.switcher.map(|switcher| {
+            h_flex()
+                .flex_none()
+                .h_full()
+                .items_center()
+                .gap_2()
+                .pl_2()
+                .child(div().text_color(colors.border).child("/"))
+                .child(switcher)
+        });
+        let rest = drag_area("title-bar-drag-rest", window, cx).flex_1();
         h_flex()
             .id("title-bar")
             .flex_none()
@@ -160,9 +151,48 @@ impl RenderOnce for TitleBar {
             .border_color(colors.border)
             .text_color(colors.text)
             .child(drag)
+            .children(switcher)
+            .child(rest)
             .when(draws_buttons(window), |bar| {
                 bar.child(buttons(colors, window))
             })
+    }
+}
+
+/// A part of the bar that moves the window, as the system's caption does.
+fn drag_area(
+    id: &'static str,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let drag = h_flex().id(id).h_full().min_w_0().items_center();
+    if cfg!(target_os = "windows") {
+        drag.window_control_area(WindowControlArea::Drag)
+    } else {
+        // Without the system's caption the bar moves the window itself,
+        // once the pointer moves, so a double click still reaches it.
+        let pressed = window.use_keyed_state(id, cx, |_, _| Pressed(false));
+        let down = pressed.clone();
+        let up = pressed.clone();
+        let out = pressed.clone();
+        drag.on_mouse_down(MouseButton::Left, move |_, _, cx| {
+            down.update(cx, |pressed, _| pressed.0 = true);
+        })
+        .on_mouse_up(MouseButton::Left, move |_, _, cx| {
+            up.update(cx, |pressed, _| pressed.0 = false);
+        })
+        .on_mouse_down_out(move |_, _, cx| {
+            out.update(cx, |pressed, _| pressed.0 = false);
+        })
+        .on_mouse_move(move |_, window, cx| {
+            if pressed.update(cx, |pressed, _| std::mem::take(&mut pressed.0)) {
+                window.start_window_move();
+            }
+        })
+        .on_double_click(|_, window, _| window.zoom_window())
+        .on_mouse_down(MouseButton::Right, |event, window, _| {
+            window.show_window_menu(event.position);
+        })
     }
 }
 

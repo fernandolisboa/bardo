@@ -80,6 +80,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0076_end_card.sql"),
     include_str!("../migrations/0077_ad_post_review.sql"),
     include_str!("../migrations/0078_ad_export.sql"),
+    include_str!("../migrations/0079_project.sql"),
 ];
 
 /// The schema version this build migrates every database to (SQLite's
@@ -795,6 +796,217 @@ mod tests {
                 []
             )
             .is_err()
+        );
+    }
+
+    /// A database one step before projects, holding `rows`.
+    fn before_projects(rows: &str) -> Connection {
+        let before = MIGRATIONS
+            .iter()
+            .position(|sql| sql.contains("CREATE TABLE project ("))
+            .expect("the migration that adds projects");
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..before] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", before as i64)
+            .unwrap();
+        conn.execute_batch(rows).unwrap();
+        run(&mut conn).unwrap();
+        conn
+    }
+
+    /// `(channel, its project, the project's name)`, by channel.
+    fn channel_projects(conn: &Connection) -> Vec<(String, String, String)> {
+        conn.prepare(
+            "SELECT c.id, p.id, p.name FROM channel c
+             JOIN project p ON p.id = c.owner_project_id ORDER BY c.id",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    const CHANNELS: &str = "
+        INSERT INTO user_profile (id, ui_language) VALUES ('p', 'en-US');
+        INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country,
+            created_at)
+        VALUES ('en', 'p', 'Space EN', '', '', 'en', 'US', '2026-02-01T00:00:00.000Z'),
+               ('pt', 'p', 'Space PT', '', '', 'pt', 'BR', '2026-03-01T00:00:00.000Z'),
+               ('es', 'p', 'Space ES', '', '', 'es', 'ES', '2026-01-01T00:00:00.000Z'),
+               ('sea', 'p', 'Deep Sea', '', '', 'en', 'US', '2026-04-01T00:00:00.000Z');
+        INSERT INTO theme (id, profile_id, channel_id, niche, title, angle, status,
+            suggested_at, position)
+        VALUES ('t-en', 'p', 'en', 'space', 'Apollo', '', 'approved', 0, 0),
+               ('t-pt', 'p', 'pt', 'space', 'Apolo', '', 'approved', 0, 0),
+               ('t-pt2', 'p', 'pt', 'space', 'Gemini', '', 'approved', 0, 1),
+               ('t-es', 'p', 'es', 'space', 'Géminis', '', 'approved', 0, 0);
+        INSERT INTO video_project (id, profile_id, channel_id, theme_id, niche, title,
+            created_at)
+        VALUES ('v-en', 'p', 'en', 't-en', 'space', 'Apollo', 1),
+               ('v-pt', 'p', 'pt', 't-pt', 'space', 'Apolo', 1),
+               ('v-pt2', 'p', 'pt', 't-pt2', 'space', 'Gemini', 1),
+               ('v-es', 'p', 'es', 't-es', 'space', 'Géminis', 1);";
+
+    /// A localized version `version` made from `source`.
+    fn version(version: &str, source: &str) -> String {
+        format!(
+            "INSERT INTO localization (project_id, profile_id, source_project_id, source_title,
+                 source_language, source_country, source_length_ms, plan_id, aspect,
+                 caption_style, caption_highlight, captions_shown, duck_music,
+                 duck_depth_tenths, created_at)
+             VALUES ('{version}', 'p', '{source}', '', 'en', 'US', 1, 'plan', '9:16', 'clean',
+                 'off', 1, 1, 60, 1);"
+        )
+    }
+
+    #[test]
+    fn every_channel_becomes_a_project_of_its_own_name() {
+        let conn = before_projects(CHANNELS);
+        assert_eq!(
+            channel_projects(&conn),
+            [
+                ("en".into(), "en".into(), "Space EN".into()),
+                ("es".into(), "es".into(), "Space ES".into()),
+                ("pt".into(), "pt".into(), "Space PT".into()),
+                ("sea".into(), "sea".into(), "Deep Sea".into()),
+            ]
+        );
+        // Each starts active, unstarred and never opened, with its own
+        // color and its channel's creation time.
+        let (state, favorite, opened, created, colors): (
+            String,
+            Option<i64>,
+            Option<i64>,
+            i64,
+            i64,
+        ) = conn
+            .query_row(
+                "SELECT state, favorite_position, opened_at, created_at,
+                        (SELECT COUNT(DISTINCT color) FROM project)
+                 FROM project WHERE id = 'es'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!((state.as_str(), favorite, opened), ("active", None, None));
+        assert_eq!(created, 1_767_225_600_000, "2026-01-01 in milliseconds");
+        assert_eq!(colors, 4);
+    }
+
+    #[test]
+    fn channels_linked_by_a_localized_version_share_the_oldest_ones_project() {
+        // pt is a version of en, and es of pt's other video: one chain.
+        let conn = before_projects(&format!(
+            "{CHANNELS}{}{}",
+            version("v-pt", "v-en"),
+            version("v-es", "v-pt2")
+        ));
+        assert_eq!(
+            channel_projects(&conn),
+            [
+                ("en".into(), "es".into(), "Space ES".into()),
+                ("es".into(), "es".into(), "Space ES".into()),
+                ("pt".into(), "es".into(), "Space ES".into()),
+                ("sea".into(), "sea".into(), "Deep Sea".into()),
+            ]
+        );
+        let projects: i64 = conn
+            .query_row("SELECT COUNT(*) FROM project", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(projects, 2);
+    }
+
+    #[test]
+    fn jobs_and_costs_remember_their_project_channel_and_video() {
+        let conn = before_projects(&format!(
+            "{CHANNELS}{}
+             INSERT INTO job (id, profile_id, kind, payload, state, progress, attempts)
+             VALUES ('video', 'p', 'narration', '{{\"project\":\"v-pt\"}}', 'done', 1000, 1),
+                    ('channel', 'p', 'theme-suggestion', '{{\"channel\":\"sea\"}}', 'done',
+                        1000, 1),
+                    ('plain', 'p', 'countdown', 'plain', 'done', 1000, 1);
+             INSERT INTO cost_record (id, profile_id, provider, model, purpose, input_tokens,
+                 output_tokens, image_tokens, characters, basis, amount_micros, channel_id,
+                 project_id, at)
+             VALUES ('video', 'p', 'claude', 'm', 'script', 0, 0, 0, 0, 'estimated', 5, 'en',
+                        'v-en', 0),
+                    ('channel', 'p', 'claude', 'm', 'script', 0, 0, 0, 0, 'estimated', 5, 'sea',
+                        NULL, 0),
+                    ('none', 'p', 'claude', 'm', 'script', 0, 0, 0, 0, 'estimated', 5, NULL,
+                        NULL, 0);",
+            version("v-pt", "v-en")
+        ));
+        let origins = |table: &str| -> Vec<[Option<String>; 5]> {
+            conn.prepare(&format!(
+                "SELECT id, owner_project_id, project_name, channel_name, video_title
+                 FROM {table} ORDER BY id"
+            ))
+            .unwrap()
+            .query_map([], |row| {
+                Ok([
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ])
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+        };
+        let some = |text: &str| Some(text.to_owned());
+        assert_eq!(
+            origins("job"),
+            [
+                [
+                    some("channel"),
+                    some("sea"),
+                    some("Deep Sea"),
+                    some("Deep Sea"),
+                    None
+                ],
+                [some("plain"), None, None, None, None],
+                [
+                    some("video"),
+                    some("en"),
+                    some("Space EN"),
+                    some("Space PT"),
+                    some("Apolo")
+                ],
+            ]
+        );
+        assert_eq!(
+            origins("cost_record"),
+            [
+                [
+                    some("channel"),
+                    some("sea"),
+                    some("Deep Sea"),
+                    some("Deep Sea"),
+                    None
+                ],
+                [some("none"), None, None, None, None],
+                [
+                    some("video"),
+                    some("en"),
+                    some("Space EN"),
+                    some("Space EN"),
+                    some("Apollo")
+                ],
+            ]
         );
     }
 

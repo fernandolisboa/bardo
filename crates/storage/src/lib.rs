@@ -30,6 +30,7 @@ mod persona;
 mod product;
 mod product_sheet;
 mod profile;
+mod project;
 mod publication;
 mod render;
 mod research;

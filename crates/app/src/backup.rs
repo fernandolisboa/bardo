@@ -493,7 +493,7 @@ impl Bardo {
                 .map(|network| SetUpAgain::AppCredentials(*network)),
         );
         let connections = self.connection_book.connections();
-        for channel in self.channels().unwrap_or_default() {
+        for channel in self.all_channels().unwrap_or_default() {
             for account in self.network_accounts.list(channel.id).unwrap_or_default() {
                 if connections
                     .status(account.id)

@@ -15,6 +15,11 @@ Long work runs as a **job**: research, a script, a narration, images, clips, a r
 
 **Jobs** in the navigation opens a panel beside whatever screen you are on (over its right side, in a narrow window), and closes it again; the line beside it says how many jobs are running or waiting. The panel groups the jobs as **Running**, **Queued**, **Failed** and **Finished**, each card with what the job does and where it stands. A job that waits for its time, like a scheduled post, says when it goes.
 
+<a id="filter"></a>
+## Jobs by project
+
+Jobs run for the whole profile, whatever [project](your-projects.md) is open. The **Project** filter at the top of the panel shows one project's jobs, those for no project (a backup, an update, a persona's voice), or all of them; it starts on the open project. Each card says the project, channel and video the job is for, with the names they had when it was queued. The count beside **Jobs** in the navigation stays the whole profile's.
+
 <a id="progress"></a>
 ## Progress
 

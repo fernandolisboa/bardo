@@ -5,18 +5,136 @@
 
 use std::rc::Rc;
 
-use bardo_app::bardo_domain::ThemeFamily;
-use bardo_app::{Side, TourAnchor};
+use bardo_app::bardo_domain::{Channel, ProjectColor, ThemeFamily};
+use bardo_app::{Bardo, ProjectFilter, Side, Text, TourAnchor};
+use gpui_kit::component::IndexPath;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
+use gpui_kit::component::select::SelectState;
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Div, ElementId, Hsla, ScrollHandle, SharedString, Stateful, Window, div, px,
+    AnyElement, App, Div, ElementId, Entity, Hsla, ScrollHandle, SharedString, Stateful, Window,
+    div, px,
 };
 
 use crate::appearance::look;
 use crate::tour::Anchored as _;
+
+/// A project's color (#333): mid tones that read on light and dark
+/// grounds alike, the same in every theme so a project keeps its color.
+pub fn project_color(color: ProjectColor) -> Hsla {
+    let (hue, saturation, lightness) = match color {
+        ProjectColor::Amber => (38., 0.85, 0.52),
+        ProjectColor::Teal => (174., 0.62, 0.42),
+        ProjectColor::Violet => (262., 0.58, 0.6),
+        ProjectColor::Rose => (346., 0.7, 0.58),
+        ProjectColor::Sky => (199., 0.78, 0.5),
+        ProjectColor::Lime => (84., 0.6, 0.45),
+        ProjectColor::Orange => (24., 0.85, 0.55),
+        ProjectColor::Slate => (215., 0.18, 0.52),
+    };
+    gpui_kit::hsla(hue / 360., saturation, lightness, 1.)
+}
+
+/// A project's color as a small round swatch.
+pub fn project_swatch(color: ProjectColor, size: gpui_kit::Pixels) -> Div {
+    div()
+        .flex_none()
+        .size(size)
+        .rounded_full()
+        .bg(project_color(color))
+}
+
+/// A screen's channel picker (#333): the picker while the open project
+/// has several channels; with one, the channel's name alone, as there is
+/// nothing to pick.
+pub fn channel_pick(picker: impl IntoElement, channels: &[Channel], cx: &App) -> AnyElement {
+    match channels {
+        [only] => div()
+            .py_1()
+            .text_sm()
+            .font_weight(gpui_kit::FontWeight::MEDIUM)
+            .text_color(look(cx).tokens.text)
+            .truncate()
+            .child(SharedString::from(only.details.name().to_owned()))
+            .into_any_element(),
+        _ => picker.into_any_element(),
+    }
+}
+
+/// One choice of a project filter (Jobs, Costs).
+#[derive(Clone)]
+pub struct FilterChoice {
+    pub value: ProjectFilter,
+    title: SharedString,
+}
+
+impl SearchableListItem for FilterChoice {
+    type Value = ProjectFilter;
+
+    fn title(&self) -> SharedString {
+        self.title.clone()
+    }
+
+    fn value(&self) -> &ProjectFilter {
+        &self.value
+    }
+}
+
+pub type FilterSelect = Entity<SelectState<SearchableVec<FilterChoice>>>;
+
+/// All projects, each active project by name, then work for no project.
+pub fn filter_choices(bardo: &Bardo) -> Vec<FilterChoice> {
+    let text = |text: Text| SharedString::from(bardo.text(text).into_owned());
+    let mut projects = bardo.projects().unwrap_or_default();
+    projects.retain(|project| project.is_active());
+    projects.sort_by_key(|project| project.name().to_lowercase());
+    std::iter::once(FilterChoice {
+        value: ProjectFilter::All,
+        title: text(Text::FilterAllProjects),
+    })
+    .chain(projects.into_iter().map(|project| FilterChoice {
+        value: ProjectFilter::Project(project.id),
+        title: SharedString::from(project.name().to_owned()),
+    }))
+    .chain(std::iter::once(FilterChoice {
+        value: ProjectFilter::NoProject,
+        title: text(Text::FilterNoProject),
+    }))
+    .collect()
+}
+
+/// A project filter's picker, on `current`.
+pub fn filter_select<V: 'static>(
+    choices: Vec<FilterChoice>,
+    current: ProjectFilter,
+    window: &mut Window,
+    cx: &mut gpui_kit::Context<V>,
+) -> FilterSelect {
+    let selected = choices
+        .iter()
+        .position(|choice| choice.value == current)
+        .map(IndexPath::new);
+    cx.new(|cx| {
+        SelectState::new(SearchableVec::new(choices), selected, window, cx).searchable(true)
+    })
+}
+
+/// Lists the projects as they are now, on `current`.
+pub fn refill_filter(
+    select: &FilterSelect,
+    choices: Vec<FilterChoice>,
+    current: ProjectFilter,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    select.update(cx, |select, cx| {
+        select.set_items(SearchableVec::new(choices), window, cx);
+        select.set_selected_value(&current, window, cx);
+    });
+}
 
 /// A state's kind; picks the chip's colors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

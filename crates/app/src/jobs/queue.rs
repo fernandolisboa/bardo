@@ -872,6 +872,11 @@ impl JobQueue {
         let mut state = self.shared.state();
         self.shared.repository.save(&job)?;
         let id = job.id();
+        // The store fills in what the job is for (its project, channel and
+        // video, with their names) when it first saves it. The job is saved
+        // by now, so a failed re-read keeps the job as built rather than
+        // failing a job that will run anyway.
+        let job = self.shared.repository.job(id).ok().flatten().unwrap_or(job);
         state.jobs.push(job);
         self.shared.changed();
         self.shared.wake.notify_all();

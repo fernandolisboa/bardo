@@ -318,8 +318,14 @@ pub enum Control {
     CostsChannels,
     /// Costs: the videos that cost the most.
     CostsVideos,
+    /// Costs: spend by project and the project filter.
+    CostsProjects,
     /// Jobs: the panel and its groups.
     JobsPanel,
+    /// Jobs: the project filter.
+    JobsFilter,
+    /// The title bar's project switcher, on every screen.
+    OpenProject,
     /// Jobs: the first job's progress bar.
     JobProgress,
     /// Jobs: the first Cancel.
@@ -505,10 +511,12 @@ pub struct Tour {
 /// lives. Every step lights the navigation, which every screen shows.
 pub const WELCOME: Tour = Tour {
     id: TourId::Welcome,
-    version: 1,
+    version: 2,
     place: None,
     steps: &[
         TourStep::centered("intro").learn("what-bardo-is", "flow"),
+        TourStep::at("projects", TourAnchor::Control(Control::OpenProject))
+            .learn("your-projects", "switcher"),
         TourStep::at("strategy", TourAnchor::NavGroup(Pillar::Strategy))
             .learn("first-video", "research"),
         TourStep::at("production", TourAnchor::NavGroup(Pillar::Production))
@@ -1104,7 +1112,7 @@ pub const CHANNELS: Tour = {
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Channels,
-        version: 5,
+        version: 6,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "list", TourAnchor::Collection).learn(PAGE, "list"),
@@ -1282,7 +1290,7 @@ pub const COSTS: Tour = {
     const FIGURE: WhenMissing = WhenMissing::LightPart(TourAnchor::Summary);
     Tour {
         id: TourId::Costs,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "month", control(Control::CostsMonth)).learn(PAGE, "month"),
@@ -1298,6 +1306,9 @@ pub const COSTS: Tour = {
             on(AT, "videos", control(Control::CostsVideos))
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "videos"),
+            on(AT, "projects", control(Control::CostsProjects))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "projects"),
         ],
     }
 };
@@ -1311,10 +1322,13 @@ pub const JOBS: Tour = {
     const PANEL: WhenMissing = WhenMissing::LightPart(TourAnchor::Control(Control::JobsPanel));
     Tour {
         id: TourId::Jobs,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "panel", control(Control::JobsPanel)).learn(PAGE, "panel"),
+            on(AT, "filter", control(Control::JobsFilter))
+                .missing(PANEL)
+                .learn(PAGE, "filter"),
             on(AT, "progress", control(Control::JobProgress))
                 .missing(PANEL)
                 .learn(PAGE, "progress"),
@@ -2298,11 +2312,11 @@ mod tests {
     }
 
     #[test]
-    fn the_welcome_tour_has_eight_steps_over_the_navigation() {
-        assert_eq!(WELCOME.len(), 8);
+    fn the_welcome_tour_has_nine_steps_over_the_title_bar_and_navigation() {
+        assert_eq!(WELCOME.len(), 9);
         assert_eq!(WELCOME.steps[0].anchor, None, "a welcome in the middle");
         assert_eq!(
-            WELCOME.steps[7].anchor,
+            WELCOME.steps[8].anchor,
             Some(TourAnchor::NavPlace(Destination::Guide))
         );
         for step in WELCOME.steps {
@@ -2310,9 +2324,13 @@ mod tests {
             assert!(
                 matches!(
                     step.anchor,
-                    None | Some(TourAnchor::NavGroup(_) | TourAnchor::NavPlace(_))
+                    None | Some(
+                        TourAnchor::NavGroup(_)
+                            | TourAnchor::NavPlace(_)
+                            | TourAnchor::Control(Control::OpenProject)
+                    )
                 ),
-                "{}: lights the navigation, on every screen",
+                "{}: lights the title bar or the navigation, on every screen",
                 step.key
             );
         }
@@ -2387,7 +2405,7 @@ mod tests {
             .unwrap();
         assert_eq!(moved, TourMove::Show(None));
         let step = app.tour_step(false).unwrap();
-        assert_eq!((step.number, step.count), (1, 8));
+        assert_eq!((step.number, step.count), (1, 9));
         assert!(step.is_first() && !step.is_last());
         assert_eq!(step.title, Text::TourStepTitle(TourId::Welcome, "intro"));
         assert!(!app.tour_offer());
@@ -2429,7 +2447,7 @@ mod tests {
         assert_eq!(app.tour_step(false), None);
         assert_eq!(
             progress.state(TourId::Welcome),
-            Some((TourState::Completed, 7))
+            Some((TourState::Completed, 8))
         );
         assert_eq!(app.resumable_tour(), None);
         assert!(!app.tour_is_new(TourId::Welcome));
@@ -3034,6 +3052,9 @@ mod tests {
         run.next();
         assert_eq!(run.spot(shown), Spot::Center);
         run.next();
+        assert_eq!(run.spot(shown), Spot::Skip);
+        // Nor any project's spend.
+        assert!(run.step_over().is_some());
         assert_eq!(run.spot(shown), Spot::Skip);
         assert_eq!(run.step_over(), None, "the last step: done");
     }

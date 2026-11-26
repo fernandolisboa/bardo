@@ -326,6 +326,25 @@ mod tests {
     }
 
     #[test]
+    fn a_post_bardo_will_publish_later_keeps_its_channel_in_its_project() {
+        let s = ready();
+        schedule(&s, SystemTime::now() + 2 * DAY);
+        let target = s
+            .app
+            .create_project(bardo_domain::ProjectDraft {
+                name: "Elsewhere".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let blocks = s.app.move_channel_blocks(s.project.channel).unwrap();
+        assert!(blocks.contains(&crate::MoveBlock::ScheduledPost));
+        assert!(matches!(
+            s.app.move_channel(s.project.channel, target.id),
+            Err(crate::ProjectError::MoveBlocked(_))
+        ));
+    }
+
+    #[test]
     fn a_scheduled_reel_is_prepared_ahead_and_published_at_its_due_time() {
         let s = ready();
         let (job, due) = schedule_in(&s, Duration::from_millis(1500));

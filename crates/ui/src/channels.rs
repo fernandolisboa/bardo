@@ -11,7 +11,8 @@ use bardo_app::bardo_domain::{
 };
 use std::rc::Rc;
 
-use bardo_app::{Bardo, ChannelError, Control, Destination, GuideRef, Text, TourAnchor};
+use bardo_app::bardo_domain::ProjectId;
+use bardo_app::{Bardo, ChannelError, Control, Destination, GuideRef, MoveBlock, Text, TourAnchor};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
@@ -235,6 +236,17 @@ const AESTHETIC_NOTES_ERRORS: &[ChannelFieldError] = &[ChannelFieldError::Aesthe
 enum Notice {
     Saved,
     Error(Text),
+    /// The channel went to another project: the text says where.
+    Moved(SharedString),
+}
+
+/// Move to another project, while open under the form (#333).
+struct Moving {
+    /// What stops the move now; the picker shows only when nothing does.
+    blocks: Vec<MoveBlock>,
+    /// The other active projects; `None` until there is one.
+    target: Option<ChoiceSelect<ProjectId>>,
+    error: Option<Text>,
 }
 
 pub struct ChannelsScreen {
@@ -267,6 +279,7 @@ pub struct ChannelsScreen {
     motion_strength: ChoiceSelect<MotionStrength>,
     field_errors: Vec<ChannelFieldError>,
     notice: Option<Notice>,
+    moving: Option<Moving>,
     /// The form's scroll, so the tour brings its fields into view.
     form_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
@@ -428,6 +441,7 @@ impl ChannelsScreen {
             motion_strength,
             field_errors: Vec::new(),
             notice: None,
+            moving: None,
             form_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         };
@@ -592,6 +606,258 @@ impl ChannelsScreen {
             .take()
             .filter(|model| takes.iter().any(|offered| offered.id == *model));
         cx.notify();
+    }
+
+    /// Re-reads the open project's channels (another project may have
+    /// opened) and the persona choices. A channel being edited that is no
+    /// longer listed gives way to a new one.
+    pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.bardo.read(cx).channels() {
+            Ok(channels) => {
+                self.channels = channels;
+                self.load_failed = false;
+            }
+            Err(_) => self.load_failed = true,
+        }
+        self.reload_personas(window, cx);
+        let kept = self
+            .editing
+            .is_some_and(|id| self.channels.iter().any(|channel| channel.id == id));
+        if !kept && self.editing.is_some() {
+            let moved = match &self.notice {
+                Some(Notice::Moved(text)) => Some(Notice::Moved(text.clone())),
+                _ => None,
+            };
+            self.start_new(window, cx);
+            self.notice = moved;
+        }
+        cx.notify();
+    }
+
+    /// Opens Move to another project for the channel being edited, with
+    /// what stops it or the projects it can go to.
+    fn open_move(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.editing else {
+            return;
+        };
+        let bardo = self.bardo.read(cx);
+        let own = self
+            .channels
+            .iter()
+            .find(|channel| channel.id == id)
+            .map(|channel| channel.project);
+        let blocks = match bardo.move_channel_blocks(id) {
+            Ok(blocks) => blocks,
+            Err(error) => {
+                self.moving = Some(Moving {
+                    blocks: Vec::new(),
+                    target: None,
+                    error: Some(error.message()),
+                });
+                cx.notify();
+                return;
+            }
+        };
+        let others: Vec<Choice<ProjectId>> = bardo
+            .projects()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|project| project.is_active() && Some(project.id) != own)
+            .map(|project| Choice {
+                value: project.id,
+                title: SharedString::from(project.name().to_owned()),
+            })
+            .collect();
+        let target = (!others.is_empty() && blocks.is_empty()).then(|| {
+            cx.new(|cx| {
+                SelectState::new(
+                    SearchableVec::new(others),
+                    Some(IndexPath::new(0)),
+                    window,
+                    cx,
+                )
+                .searchable(true)
+            })
+        });
+        self.moving = Some(Moving {
+            blocks,
+            target,
+            error: None,
+        });
+        cx.notify();
+    }
+
+    fn confirm_move(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.editing else {
+            return;
+        };
+        let Some(target) = self
+            .moving
+            .as_ref()
+            .and_then(|moving| moving.target.as_ref())
+            .and_then(|target| target.read(cx).selected_value().copied())
+        else {
+            return;
+        };
+        let bardo = self.bardo.read(cx);
+        match bardo.move_channel(id, target) {
+            Ok(()) => {
+                let channel = self
+                    .channels
+                    .iter()
+                    .find(|channel| channel.id == id)
+                    .map(|channel| channel.details.name().to_owned())
+                    .unwrap_or_default();
+                let project = bardo
+                    .projects()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|project| project.id == target)
+                    .map(|project| project.name().to_owned())
+                    .unwrap_or_default();
+                let text = bardo.text_with(
+                    Text::MoveChannelDone,
+                    &[("channel", &channel), ("project", &project)],
+                );
+                self.moving = None;
+                self.notice = Some(Notice::Moved(SharedString::from(text)));
+                self.reload(window, cx);
+            }
+            Err(bardo_app::ProjectError::MoveBlocked(blocks)) => {
+                self.moving = Some(Moving {
+                    blocks,
+                    target: None,
+                    error: None,
+                });
+                cx.notify();
+            }
+            Err(error) => {
+                if let Some(moving) = &mut self.moving {
+                    moving.error = Some(error.message());
+                }
+                cx.notify();
+            }
+        }
+    }
+
+    /// The channel's project and Move to another project, under the form
+    /// of a channel being edited.
+    fn render_project(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let id = self.editing?;
+        let channel = self.channels.iter().find(|channel| channel.id == id)?;
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let project = bardo
+            .projects()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|project| project.id == channel.project)?;
+        let name = project.name().to_owned();
+        let line = h_flex()
+            .gap_2()
+            .items_center()
+            .child(kit::project_swatch(project.details.color(), px(10.)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_sm()
+                    .truncate()
+                    .child(SharedString::from(
+                        bardo.text_with(Text::ChannelProjectLabel, &[("project", &name)]),
+                    )),
+            )
+            .when(self.moving.is_none(), |line| {
+                line.child(
+                    Button::new("move-channel")
+                        .small()
+                        .label(tr(bardo, Text::MoveChannel))
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.open_move(window, cx)
+                        })),
+                )
+            });
+        let panel = self.moving.as_ref().map(|moving| {
+            let channel_name = channel.details.name().to_owned();
+            let mut body = v_flex().gap_3().child(
+                div()
+                    .text_sm()
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .child(SharedString::from(bardo.text_with(
+                        Text::MoveChannelTitle,
+                        &[("channel", &channel_name)],
+                    ))),
+            );
+            if !moving.blocks.is_empty() {
+                body = body.child(
+                    kit::notice(Tone::Warning, tr(bardo, Text::MoveChannelBlocked), cx).child(
+                        v_flex()
+                            .gap_1()
+                            .pt_1()
+                            .children(moving.blocks.iter().map(|block| {
+                                div()
+                                    .text_xs()
+                                    .child(tr(bardo, Text::MoveChannelBlock(*block)))
+                            })),
+                    ),
+                );
+            } else if let Some(target) = &moving.target {
+                body = body
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(tr(bardo, Text::MoveChannelHint)),
+                    )
+                    .child(kit::field(
+                        tr(bardo, Text::MoveChannelTarget),
+                        None,
+                        Select::new(target).into_any_element(),
+                        None,
+                    ));
+            } else if moving.error.is_none() {
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(tr(bardo, Text::MoveChannelNoOther)),
+                );
+            }
+            if let Some(error) = moving.error {
+                body = body.child(kit::notice(Tone::Danger, tr(bardo, error), cx));
+            }
+            body.child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("move-channel-cancel")
+                            .ghost()
+                            .small()
+                            .label(tr(bardo, Text::ProjectFormCancel))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.moving = None;
+                                cx.notify();
+                            })),
+                    )
+                    .when(moving.target.is_some(), |row| {
+                        row.child(
+                            Button::new("move-channel-confirm")
+                                .primary()
+                                .small()
+                                .label(tr(bardo, Text::MoveChannelConfirm))
+                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                    this.confirm_move(window, cx)
+                                })),
+                        )
+                    }),
+            )
+        });
+        Some(
+            v_flex()
+                .max_w(px(640.))
+                .child(kit::card(cx).p_4().gap_3().child(line).children(panel))
+                .into_any_element(),
+        )
     }
 
     /// Re-reads the persona choices; personas may have been created or
@@ -811,6 +1077,7 @@ impl ChannelsScreen {
         self.editing = None;
         self.field_errors.clear();
         self.notice = None;
+        self.moving = None;
         self.fill(&ChannelDraft::default(), window, cx);
         cx.notify();
     }
@@ -823,6 +1090,7 @@ impl ChannelsScreen {
         self.editing = Some(id);
         self.field_errors.clear();
         self.notice = None;
+        self.moving = None;
         self.fill(&draft, window, cx);
         cx.notify();
     }
@@ -1010,6 +1278,7 @@ impl ChannelsScreen {
         let notice = self.notice.as_ref().map(|notice| match notice {
             Notice::Saved => kit::notice(Tone::Success, tr(bardo, Text::ChannelSaved), cx),
             Notice::Error(text) => kit::notice(Tone::Danger, tr(bardo, *text), cx),
+            Notice::Moved(text) => kit::notice(Tone::Success, text.clone(), cx),
         });
 
         v_flex().max_w(px(640.)).child(
@@ -1235,6 +1504,7 @@ impl Render for ChannelsScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let collection = self.collection(cx);
         let form = self.render_form(cx).into_any_element();
+        let project = self.render_project(cx);
         let bardo = self.bardo.read(cx);
         let mut header = Header::place(bardo, Destination::Channels);
         header.info =
@@ -1257,7 +1527,7 @@ impl Render for ChannelsScreen {
         parts.collection = Some(collection);
         parts.inspector = Some(Inspector {
             title: Some(kit::section_heading(tr(bardo, title)).into_any_element()),
-            body: vec![form],
+            body: std::iter::once(form).chain(project).collect(),
             media: None,
             footer: None,
             scroll: None,

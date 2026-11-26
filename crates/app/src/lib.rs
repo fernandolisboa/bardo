@@ -50,6 +50,7 @@ mod product_concepts;
 mod product_sheets;
 mod production;
 mod products;
+mod projects;
 mod provider_keys;
 mod proxies;
 mod publications;
@@ -89,13 +90,13 @@ use bardo_domain::{
     KeyChecker, LayoutId, LocalizationRepository, MarketData, MediaAssetRepository, MusicGenerator,
     MusicPromptRepository, MusicTrackRepository, NarrationRepository, NetworkAccountRepository,
     NetworkConnectionRepository, NetworkSignIn, NicheResearchRepository, OwnerAnalytics, Persona,
-    PersonaRepository, ProductRepository, ProfileRepository, ProjectFiles, PublicationRepository,
-    RUNNER_ALIVE, Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository,
-    ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer, SpeechTranscriber,
-    StagingRepository, TemplateRepository, TextGenerator, ThemeRepository, ThumbnailRepository,
-    TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference, UserProfile,
-    VideoStats, VideoUploader, VoiceChanger, VoiceIsolator, VoiceLibrary, VoicePreviews,
-    VoiceSampleStore, YouTubeDataStore, Zone, running_since,
+    PersonaRepository, ProductRepository, ProfileRepository, ProjectFiles, ProjectRepository,
+    PublicationRepository, RUNNER_ALIVE, Redactor, RenderRepository, RepositoryError, RunnerRole,
+    ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer,
+    SpeechTranscriber, StagingRepository, TemplateRepository, TextGenerator, ThemeRepository,
+    ThumbnailRepository, TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference,
+    UserProfile, VideoStats, VideoUploader, VoiceChanger, VoiceIsolator, VoiceLibrary,
+    VoicePreviews, VoiceSampleStore, YouTubeDataStore, Zone, running_since,
 };
 use bardo_domain::{InstallerRunner, InstallerStore, PlanSignIn, ReleaseFeed, VisionModels};
 use bardo_media::{AudioOutput, MediaEngine};
@@ -139,8 +140,8 @@ pub use control_videos::{
     ControlPlayer, ControlStatus, ControlVideoView, SetChoice, SetPicture, SetScene,
 };
 pub use costs::{
-    BudgetConsent, CapReached, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow,
-    SpendEstimate, SpendRow, SpendSummary,
+    BudgetConsent, CapReached, CostError, CostsView, ProjectSpendRow, ProviderEstimate,
+    ProviderSpend, RateRow, SpendEstimate, SpendRow, SpendSummary,
 };
 pub use cut_suggestions::{
     CHUNK_LIMITS, CutSuggestionError, SuggestionState, SuggestionView, SuggestionsView,
@@ -197,6 +198,7 @@ pub use product_concepts::{ConceptError, ConceptView};
 pub use product_sheets::{SheetError, SheetRun, SheetView};
 pub use production::{ModeEstimate, ProductionView};
 pub use products::ProductError;
+pub use projects::{MoveBlock, ProjectError, ProjectFilter};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use publications::{
     ChannelMetricsView, ChannelPost, MetricsError, MetricsStatus, OwnerAccess, PublicationError,
@@ -284,6 +286,8 @@ pub enum AppError {
 pub struct Repositories {
     pub profiles: Box<dyn ProfileRepository>,
     pub channels: Arc<dyn ChannelRepository>,
+    /// The profile's projects, which own its channels.
+    pub projects: Arc<dyn ProjectRepository>,
     /// Shared with the job queue's worker threads.
     pub jobs: Arc<dyn JobRepository>,
     /// Niche research results and seeds. Shared with the job queue.
@@ -418,6 +422,7 @@ impl Repositories {
         Self {
             profiles: Box::new(Arc::clone(&db)),
             channels: Arc::clone(&db) as _,
+            projects: Arc::clone(&db) as _,
             jobs: Arc::clone(&db) as Arc<dyn JobRepository>,
             themes: Arc::clone(&db) as _,
             templates: Arc::clone(&db) as _,
@@ -614,6 +619,7 @@ fn live_releases() -> bardo_ai::GitHubReleases {
 pub struct Bardo {
     profiles: Box<dyn ProfileRepository>,
     channels: Arc<dyn ChannelRepository>,
+    projects: Arc<dyn ProjectRepository>,
     research: Arc<dyn NicheResearchRepository>,
     themes: Arc<dyn ThemeRepository>,
     templates: Arc<dyn TemplateRepository>,
@@ -737,6 +743,7 @@ impl Bardo {
         let Repositories {
             profiles,
             channels,
+            projects,
             jobs,
             research,
             themes,
@@ -1172,6 +1179,7 @@ impl Bardo {
         Ok(Self {
             profiles,
             channels,
+            projects,
             research,
             themes,
             templates,
@@ -1241,6 +1249,10 @@ impl Bardo {
                 .then(settings_transfer::SettingsOffer::default),
         })
         .inspect(|bardo| {
+            if bardo.role == RunnerRole::App {
+                // The app opens on a project, after the upgrade too.
+                let _ = bardo.open_some_project();
+            }
             bardo.mark_restored_connections();
             bardo.prune_installers();
             if bardo.role == RunnerRole::App {
@@ -3562,6 +3574,7 @@ mod tests {
             tours: Box::new(Arc::clone(&db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
             channels: Arc::clone(&db) as _,
+            projects: Arc::clone(&db) as _,
             jobs: Arc::clone(&db) as _,
             themes: Arc::clone(&db) as _,
             templates: Arc::clone(&db) as _,

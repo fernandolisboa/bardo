@@ -46,7 +46,7 @@ PT = "Portugal"
 
 [channels]
 title = "Channels"
-empty = "No channels yet. Create one to aim research and generation at its audience."
+empty = "This project has no channel yet. Create one to aim research and generation at its audience."
 not_loaded = "Could not load your channels. Restart Bardo to try again."
 new = "New channel"
 
@@ -539,7 +539,7 @@ not_byteplus_credentials = "Fill in all five BytePlus fields."
 
 [research]
 title = "Research"
-no_channels = "Create a channel first. Research uses its target country and content language."
+no_channels = "This project has no channel yet. Create one on Channels first: research uses its target country and content language."
 channel = "Channel"
 seeds = "Niches or keywords"
 seeds_placeholder = "space history\ncold war mysteries\ndeep sea creatures"
@@ -577,7 +577,7 @@ seed_too_long = "Keep each niche to at most 100 characters."
 
 [themes]
 title = "Themes"
-no_channels = "Create a channel first. Ideas are written for its niche, audience and style."
+no_channels = "This project has no channel yet. Create one on Channels first: ideas are written for its niche, audience and style."
 channel = "Channel"
 niche = "Niche"
 no_niche = "Give the channel a niche, or research niches for it first."
@@ -642,7 +642,7 @@ nav = "Projects"
 title = "Video projects"
 empty = "Approve an idea on Themes, or an ad angle on Products, to start a video project."
 started = "Video project started: {title}"
-no_channels = "Create a channel and approve one of its themes to start a video project."
+no_channels = "This project has no channel yet. Create one on Channels and approve one of its themes to start a video project."
 narrator = "Narrator"
 narrator_channel = "Channel default: {name}"
 narrator_channel_none = "Channel default (none set)"
@@ -2391,7 +2391,7 @@ insights_pending = "{network} numbers arrive with the next sync."
 [performance]
 info = "How the channel's posts perform. Link posts at a project's Publish stage. YouTube posts sync their public numbers, and with the channel's account connected also watch time, retention and revenue. Instagram and TikTok posts sync their numbers once the channel's account on that network is connected. X and Kick posts keep their link."
 empty = "No post linked on this channel yet. Mark an export as posted at a project's Publish stage."
-no_channels = "Create a channel to follow its posts here."
+no_channels = "This project has no channel yet. Create one on Channels to follow its posts here."
 history_title = "Channel views over time"
 history_empty = "The chart starts after two syncs."
 posts = "Posts"
@@ -2894,6 +2894,10 @@ name = "Welcome tour"
 title = "Welcome to Bardo"
 body = "In two minutes this tour shows where everything is. Use Next or the arrow keys to move, and Esc to leave at any time. Resume tour in the Guide brings you back to where you stopped."
 
+[tour.welcome.projects]
+title = "Your projects"
+body = "A project holds the channels of one brand, with their ideas and videos. The switcher by the logo opens another project, keeps your favorites and recent ones at hand, and creates new projects. The screens show the open project."
+
 [tour.welcome.strategy]
 title = "Strategy"
 body = "Research niches, rank video ideas and see how your published videos did. This is where you decide what to make next."
@@ -3355,7 +3359,7 @@ name = "Channels tour"
 
 [tour.channels.list]
 title = "Your channels"
-body = "Each channel is one niche for one market. Pick a channel to edit it, or start one with New channel; research, ideas, projects and network accounts all belong to a channel."
+body = "The open project's channels: each is one niche for one market. Pick a channel to edit it, or start one with New channel; research, ideas, video projects and network accounts all belong to a channel. Under a channel's form, Move to another project takes it, with its work, to another of your projects."
 
 [tour.channels.niche]
 title = "Niche, themes and look"
@@ -3520,12 +3524,20 @@ body = "What each channel's videos cost this month. A month with no spend says s
 title = "The most expensive videos"
 body = "The video projects that cost the most this month, with their channel."
 
+[tour.costs.projects]
+title = "By project"
+body = "What each project spent this month. The filter picks whose channels and videos the lists below show; it starts on the open project, and totals and budgets stay the whole profile's."
+
 [tour.jobs]
 name = "Jobs tour"
 
 [tour.jobs.panel]
 title = "The Jobs panel"
 body = "Long work runs as a job while you keep working. This panel opens beside any screen and groups the jobs: running, queued, failed and finished."
+
+[tour.jobs.filter]
+title = "Project filter"
+body = "Jobs run for the whole profile. The filter shows one project's jobs, those for no project, or all of them; it starts on the open project, and each job says the project, channel and video it is for."
 
 [tour.jobs.progress]
 title = "Progress"
@@ -4116,7 +4128,7 @@ same_audience = "Choose a channel in another language or country."
 already_made = "That channel already has a version of this video."
 no_narration = "Make the narration first: a version adapts its sentences."
 no_plan = "Plan the scenes on the current narration first: the version keeps them."
-no_channel = "No other channel speaks another language or to another country. Create one on the Channels screen."
+no_channel = "No other channel of this project speaks another language or to another country. Create one on the Channels screen."
 busy = "A version of this video is already being made, or a cancelled job is still stopping."
 not_saved = "Could not load or save the versions. Try again."
 ad_project = "An ad has no versions in other languages yet: its product, brief and claims are not carried to another channel. Approve an angle for that channel on Products instead."
@@ -4871,3 +4883,74 @@ call = "Call to action"
 link = "Link"
 commercial = "Commercial disclosure: {disclosure}. Set the matching label in the ad manager when you create the ad."
 synthetic = "This video shows AI-generated content: mark it so where the ad manager asks."
+
+[project_switcher]
+no_project = "No project yet"
+search = "Search projects"
+favorites = "Favorites"
+recent = "Recent"
+all = "All projects"
+new_project = "New project…"
+star = "Add to favorites"
+unstar = "Remove from favorites"
+move_up = "Move up among the favorites"
+no_match = "No project matches."
+empty = "Create a project to group the channels of one brand."
+open = "Switch project"
+channels_none = "No channel"
+channels_one = "1 channel"
+channels_many = "{n} channels"
+never_opened = "Not opened yet"
+
+[project_form]
+title = "New project"
+hint = "A project holds the channels of one brand, with their ideas and videos. You work in one project at a time."
+name = "Name"
+name_placeholder = "e.g. Space stories"
+color = "Color"
+create = "Create project"
+cancel = "Cancel"
+
+[project_error]
+name_required = "Give the project a name."
+name_too_long = "Use at most 100 characters."
+name_taken = "You already have a project with this name."
+not_found = "This project no longer exists."
+not_saved = "Couldn't save the project. Try again."
+not_loaded = "Couldn't load the projects. Try again."
+
+[move_channel]
+button = "Move to another project…"
+title = "Move {channel} to another project"
+hint = "Its ideas, videos, network accounts and media go with it. Jobs and costs keep the project they were for."
+target = "Project"
+confirm = "Move channel"
+done = "{channel} is now in {project}."
+blocked = "This channel can't change projects now:"
+no_other = "Create another project first, in the project switcher by the logo."
+in_project = "Project: {project}"
+
+[project_filter]
+all = "All projects"
+none = "Not for a project"
+label = "Project"
+costs_by_project = "By project"
+
+[project_color]
+amber = "Amber"
+teal = "Teal"
+violet = "Violet"
+rose = "Rose"
+sky = "Sky"
+lime = "Lime"
+orange = "Orange"
+slate = "Slate"
+
+[move_channel_block]
+scheduled_post = "A post waits for its time in Bardo. Send it now or cancel its schedule first."
+held_on_network = "A post waits on its network to go public at its time. Make it public or remove it on the network first."
+active_job = "A job for this channel or one of its videos is queued or running. Wait for it or cancel it in Jobs."
+version_elsewhere = "One of its videos is a localized version of, or has one in, another channel of this project. Versions stay inside one project."
+
+[project_spend]
+unknown = "Removed project"

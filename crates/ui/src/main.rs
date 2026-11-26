@@ -31,6 +31,7 @@ mod privacy;
 mod product_concept;
 mod product_sheet;
 mod products;
+mod project_switcher;
 mod projects;
 mod research;
 mod settings;

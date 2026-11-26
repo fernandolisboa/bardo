@@ -7,12 +7,13 @@ use bardo_domain::{
 use rusqlite::{Row, params};
 use uuid::Uuid;
 
+use crate::project::{OriginRow, origin_of};
 use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 const SELECT_RECORD: &str = "SELECT id, profile_id, provider, model, purpose, input_tokens, \
      output_tokens, image_tokens, characters, basis, amount_micros, channel_id, project_id, \
      job_id, at, video_seconds, audio_seconds, posts, searches, cache_write_tokens, \
-     cache_read_tokens FROM cost_record";
+     cache_read_tokens, owner_project_id, project_name, channel_name, video_title FROM cost_record";
 
 #[derive(Debug, thiserror::Error)]
 #[error("stored cost is invalid: {0}")]
@@ -32,6 +33,7 @@ struct RecordRow {
     project_id: Option<String>,
     job_id: Option<String>,
     at: i64,
+    origin: OriginRow,
 }
 
 impl RecordRow {
@@ -60,6 +62,7 @@ impl RecordRow {
             project_id: row.get(12)?,
             job_id: row.get(13)?,
             at: row.get(14)?,
+            origin: OriginRow::read(row, 21)?,
         })
     }
 
@@ -117,6 +120,7 @@ impl RecordRow {
                 .map(|text| id(&text).map(JobId::from))
                 .transpose()?,
             at: from_unix_millis(self.at),
+            origin: self.origin.into_origin()?,
         })
     }
 }
@@ -157,12 +161,19 @@ impl CostRepository for Database {
         let usage = &record.usage;
         self.conn()
             .execute(
-                "INSERT INTO cost_record (id, profile_id, provider, model, purpose, \
-                 input_tokens, output_tokens, image_tokens, characters, basis, amount_micros, \
-                 channel_id, project_id, job_id, at, video_seconds, audio_seconds, posts, \
-                 searches, cache_write_tokens, cache_read_tokens) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                 ?17, ?18, ?19, ?20, ?21) ON CONFLICT (id) DO NOTHING",
+                &format!(
+                    "INSERT INTO cost_record (id, profile_id, provider, model, purpose, \
+                     input_tokens, output_tokens, image_tokens, characters, basis, \
+                     amount_micros, channel_id, project_id, job_id, at, video_seconds, \
+                     audio_seconds, posts, searches, cache_write_tokens, cache_read_tokens, \
+                     owner_project_id, project_name, channel_name, video_title) \
+                     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
+                     ?16, ?17, ?18, ?19, ?20, ?21, origin.project_id, origin.project_name, \
+                     origin.channel_name, origin.video_title \
+                     FROM (SELECT 1) LEFT JOIN {} origin ON 1 \
+                     WHERE 1 ON CONFLICT (id) DO NOTHING",
+                    origin_of("?13", "?12"),
+                ),
                 params![
                     record.id.to_string(),
                     record.owner.to_string(),
@@ -204,7 +215,14 @@ impl CostRepository for Database {
     fn move_cost(&self, id: CostRecordId, project: VideoProjectId) -> Result<(), RepositoryError> {
         self.conn()
             .execute(
-                "UPDATE cost_record SET project_id = ?2 WHERE id = ?1",
+                &format!(
+                    "UPDATE cost_record SET project_id = ?2,
+                         (owner_project_id, project_name, channel_name, video_title) =
+                         (SELECT project_id, project_name, channel_name, video_title
+                          FROM {})
+                     WHERE id = ?1",
+                    origin_of("?2", "cost_record.channel_id"),
+                ),
                 params![id.to_string(), project.to_string()],
             )
             .map_err(boxed)?;
@@ -402,6 +420,7 @@ mod tests {
             project: Some(VideoProjectId::new()),
             job: Some(JobId::new()),
             at,
+            origin: Default::default(),
         }
     }
 

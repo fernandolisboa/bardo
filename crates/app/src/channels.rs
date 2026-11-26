@@ -1,6 +1,7 @@
-//! Channel use cases: list, create and edit the profile's channels, each
-//! with an optional default persona from the profile's library and an
-//! optional video model for its clips.
+//! Channel use cases: list, create and edit the open project's channels,
+//! each with an optional default persona from the profile's library and an
+//! optional video model for its clips. Channel names stay unique across
+//! the profile.
 
 use bardo_domain::{
     Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, RepositoryError,
@@ -54,9 +55,19 @@ impl ChannelError {
 }
 
 impl Bardo {
-    /// The profile's channels, ordered by name.
+    /// The open project's channels, ordered by name: what every work
+    /// screen lists. Empty while no project is open. `all_channels` spans
+    /// the profile.
     pub fn channels(&self) -> Result<Vec<Channel>, AppError> {
-        Ok(self.channels.list(self.profile.id)?)
+        let Some(project) = self.open_project_id()? else {
+            return Ok(Vec::new());
+        };
+        Ok(self
+            .channels
+            .list(self.profile.id)?
+            .into_iter()
+            .filter(|channel| channel.project == project)
+            .collect())
     }
 
     /// `draft` with the video model its choice names today: a form or a
@@ -66,13 +77,33 @@ impl Bardo {
         draft
     }
 
+    /// Creates a channel in the open project (in a new one of the
+    /// channel's name when none is open yet).
     pub fn create_channel(&self, draft: ChannelDraft) -> Result<Channel, ChannelError> {
+        self.create_channel_in(None, draft)
+    }
+
+    /// Creates a channel in the project called `project`, or in the open
+    /// one when `project` is `None`.
+    pub(crate) fn create_channel_in(
+        &self,
+        project: Option<&str>,
+        draft: ChannelDraft,
+    ) -> Result<Channel, ChannelError> {
         let draft = self.with_current_clip_model(draft);
         let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
         self.ensure_name_free(&details, None)?;
         self.ensure_own_persona(&details)?;
         self.ensure_offered_clip_model(&details)?;
-        let channel = Channel::new(self.profile.id, details);
+        let project = match project {
+            Some(name) => self.project_named(name),
+            None => self.project_for_new_channel(details.name()),
+        }
+        .map_err(|error| match error {
+            crate::ProjectError::Repository(error) => ChannelError::Repository(error),
+            other => ChannelError::Repository(RepositoryError(other.to_string().into())),
+        })?;
+        let channel = Channel::new(self.profile.id, project, details);
         self.channels.save(&channel)?;
         Ok(channel)
     }
@@ -160,6 +191,7 @@ mod tests {
             tours: Box::new(Arc::clone(db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
             channels: Arc::clone(db) as _,
+            projects: Arc::clone(db) as _,
             jobs: Arc::clone(db) as _,
             themes: Arc::clone(db) as _,
             templates: Arc::clone(db) as _,
@@ -348,8 +380,19 @@ mod tests {
         let app = start(&db);
         let stranger = bardo_domain::UserProfile::new(bardo_domain::UiLanguage::EnUs);
         bardo_domain::ProfileRepository::save(&*db, &stranger).unwrap();
+        let project = bardo_domain::Project::new(
+            stranger.id,
+            bardo_domain::ProjectDetails::validate(bardo_domain::ProjectDraft {
+                name: "Theirs".into(),
+                ..Default::default()
+            })
+            .unwrap(),
+            std::time::SystemTime::now(),
+        );
+        bardo_domain::ProjectRepository::save_project(&*db, &project).unwrap();
         let theirs = Channel::new(
             stranger.id,
+            project.id,
             ChannelDetails::validate(draft("Theirs")).unwrap(),
         );
         ChannelRepository::save(&*db, &theirs).unwrap();
@@ -400,6 +443,7 @@ mod tests {
             tours: Box::new(Arc::clone(&db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
             channels: Arc::new(Broken),
+            projects: Arc::clone(&db) as _,
             jobs: Arc::clone(&db) as _,
             themes: Arc::clone(&db) as _,
             templates: Arc::clone(&db) as _,

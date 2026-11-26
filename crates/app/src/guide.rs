@@ -39,6 +39,7 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("api-keys"),
     page!("get-api-keys"),
     page!("first-video"),
+    page!("your-projects"),
     page!("niche-research"),
     page!("themes-ranking"),
     page!("products"),

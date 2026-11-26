@@ -13,7 +13,7 @@ A channel is one niche for one market: a subject, a language, a country and a na
 <a id="list"></a>
 ## Your channels
 
-The list shows each channel with its niche and country. Pick one to edit it beside the list; **New channel** empties the form for a new one. **Create channel** (or **Save changes**) checks the form and says, under each field, what it still needs.
+The list shows each channel with its niche and country. Pick one to edit it beside the list; **New channel** empties the form for a new one. **Create channel** (or **Save changes**) checks the form and says, under each field, what it still needs. A channel belongs to one [project](your-projects.md); **Move to another project…**, under its form, gives it to another ([Its project](#project)).
 
 <a id="niche"></a>
 ## Niche and themes
@@ -89,6 +89,11 @@ Some video models only make clips of a few fixed lengths, such as 5 or 10 second
 - **Stretch a clip by up to**: how much longer than it was made a clip may play, from 5% to 100% in steps of 5, and 40% unless you change it. At 40%, a 5-second clip covers a scene of up to 7 seconds, and a longer scene takes the next length. A lower limit keeps the motion closer to what the model made and pays for more seconds; a higher one slows more and pays for fewer. It shows only while clips are slowed to fit.
 
 Models that take any length in a range are not affected: their clips are made as long as the scene. Both choices apply to the clips made next; a clip already made keeps playing the way it was made ([Slowed clips](clips.md#stretch)).
+
+<a id="project"></a>
+## Its project
+
+A channel being edited shows, under the form, the [project](your-projects.md) it belongs to. **Move to another project…** picks the project it goes to, and the channel takes its ideas, videos, network accounts and media along; the channel then leaves this project's screens. Bardo says what stops the move while a post waits for its time, a job for the channel is queued or running, or one of its videos has a localized version in another channel of the project: see [Moving a channel](your-projects.md#move).
 
 <a id="accounts"></a>
 ## Next: network accounts

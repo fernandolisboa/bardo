@@ -18,12 +18,12 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     Budget, BudgetLevel, ChannelId, Cost, CostPurpose, CostRecord, CostRecordId, CostRepository,
-    JobId, Meter, Metered, Money, MoneyError, Month, ProfileId, Provider, ProviderFailure,
-    ProviderFailureKind, Rate, RateFieldError, RateTable, RepositoryError, Spend, TextRequest,
-    ThemeRepository, VideoProjectId,
+    JobId, Meter, Metered, Money, MoneyError, Month, ProfileId, ProjectColor, ProjectId, Provider,
+    ProviderFailure, ProviderFailureKind, Rate, RateFieldError, RateTable, RepositoryError, Spend,
+    TextRequest, ThemeRepository, VideoProjectId,
 };
 
-use crate::{Bardo, Text};
+use crate::{Bardo, ProjectFilter, Text};
 
 /// The built-in prices.
 const DEFAULT_RATES: &str = include_str!("../data/rates.toml");
@@ -631,6 +631,7 @@ impl CostBook {
                 project,
                 job: call.job,
                 at: SystemTime::now(),
+                origin: Default::default(),
             })
         });
         if let Err(error) = result {
@@ -888,14 +889,18 @@ impl CostBook {
 
     /// Spend with each provider in `month`.
     fn month_spend(&self, month: Month) -> Result<Spend, RepositoryError> {
+        Ok(Spend::of(&self.month_records(month)?))
+    }
+
+    /// The month's records, each priced with today's rates.
+    fn month_records(&self, month: Month) -> Result<Vec<CostRecord>, RepositoryError> {
         let rates = self.rates()?;
-        let records: Vec<CostRecord> = self
+        Ok(self
             .costs
             .costs_between(self.owner, month.start(), month.end())?
             .into_iter()
             .map(|record| record.priced_with(&rates))
-            .collect();
-        Ok(Spend::of(&records))
+            .collect())
     }
 
     /// What `call` is estimated at: its ceiling when it has one, else
@@ -1016,6 +1021,18 @@ pub struct SpendRow {
     pub amount: Money,
 }
 
+/// Spend on one project. `name` is the project's name now, or the name
+/// it had on its latest record when it is gone; `None` for records that
+/// were for no project.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectSpendRow {
+    pub project: Option<ProjectId>,
+    pub name: Option<String>,
+    /// `None` when the project is gone or there is none.
+    pub color: Option<ProjectColor>,
+    pub amount: Money,
+}
+
 /// One line of the rate table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RateRow {
@@ -1033,6 +1050,11 @@ pub struct CostsView {
     pub total: Money,
     /// Every paid provider, in settings order.
     pub providers: Vec<ProviderSpend>,
+    /// Every project that spent this month, most spent first, whatever
+    /// the filter.
+    pub projects: Vec<ProjectSpendRow>,
+    /// The filter `channels` and `videos` were read with.
+    pub filter: ProjectFilter,
     /// Most spent first.
     pub channels: Vec<SpendRow>,
     /// Most spent first.
@@ -1145,10 +1167,46 @@ impl Bardo {
             .sum())
     }
 
-    /// The costs screen for `month`.
+    /// The costs screen for `month`, every project.
     pub fn costs(&self, month: Month) -> Result<CostsView, CostError> {
+        self.costs_for(month, ProjectFilter::All)
+    }
+
+    /// The filter Costs and Jobs start on: the open project.
+    pub fn starting_filter(&self) -> ProjectFilter {
+        match self.open_project_id() {
+            Ok(Some(project)) => ProjectFilter::Project(project),
+            _ => ProjectFilter::All,
+        }
+    }
+
+    /// The costs screen for `month`: the totals, budgets and projects stay
+    /// the profile's; channels and videos are those `filter` keeps.
+    pub fn costs_for(&self, month: Month, filter: ProjectFilter) -> Result<CostsView, CostError> {
         let book = &self.cost_book;
-        let spend = book.month_spend(month)?;
+        let records = book.month_records(month)?;
+        let spend = Spend::of(&records);
+        let kept = Spend::of(
+            records
+                .iter()
+                .filter(|record| filter.keeps(record.origin.project)),
+        );
+        let known = self.projects().unwrap_or_default();
+        let projects = spend
+            .owners
+            .iter()
+            .map(|(id, name, amount)| {
+                let now = id.and_then(|id| known.iter().find(|project| project.id == id));
+                ProjectSpendRow {
+                    project: *id,
+                    name: now
+                        .map(|project| project.name().to_owned())
+                        .or_else(|| name.clone()),
+                    color: now.map(|project| project.details.color()),
+                    amount: *amount,
+                }
+            })
+            .collect();
         let budgets = book.costs.budgets(self.profile.id)?;
         let providers = Provider::paid()
             .map(|provider| {
@@ -1165,7 +1223,7 @@ impl Bardo {
             .collect();
 
         let mut channels = Vec::new();
-        for (channel, amount) in &spend.channels {
+        for (channel, amount) in &kept.channels {
             let name = match channel {
                 Some(id) => self
                     .channels
@@ -1180,7 +1238,7 @@ impl Bardo {
             });
         }
         let mut videos = Vec::new();
-        for (project, amount) in &spend.projects {
+        for (project, amount) in &kept.projects {
             let project = self.themes.project(*project)?;
             let channel = match &project {
                 Some(project) => self
@@ -1219,6 +1277,8 @@ impl Bardo {
             month,
             total: spend.total,
             providers,
+            projects,
+            filter,
             channels,
             videos,
             unpriced: spend.unpriced,
@@ -1388,6 +1448,8 @@ pub(crate) mod tests {
             month: Month::new(2026, 10).unwrap(),
             total: providers.iter().map(|p| p.spent).sum(),
             providers,
+            projects: Vec::new(),
+            filter: ProjectFilter::All,
             channels: Vec::new(),
             videos: Vec::new(),
             unpriced: Vec::new(),

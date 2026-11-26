@@ -1,7 +1,7 @@
 use bardo_domain::{
     Channel, ChannelDetails, ChannelDraft, ChannelId, ChannelRepository, ClipFit, ClipModelRef,
-    MotionDefault, PersonaId, ProfileId, Provider, RepositoryError, StretchLimit, StyleChoice,
-    Transition, TransitionKind,
+    MotionDefault, PersonaId, ProfileId, ProjectId, Provider, RepositoryError, StretchLimit,
+    StyleChoice, Transition, TransitionKind,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -12,13 +12,14 @@ const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_note
      country, default_persona_id, clip_provider, clip_model, caption_style, transition, \
      transition_frames, video_format, motion, motion_strength, caption_highlight, thumbnail_look, \
      take_provider, take_model, production_mode, visual_style, clip_fit, \
-     clip_stretch_percent \
+     clip_stretch_percent, owner_project_id \
      FROM channel";
 
 /// A channel row before its themes are attached.
 struct ChannelRow {
     id: String,
     profile_id: String,
+    project_id: String,
     default_persona: Option<String>,
     clip_model: (Option<String>, Option<String>),
     take_model: (Option<String>, Option<String>),
@@ -41,6 +42,7 @@ impl ChannelRow {
             Self {
                 id: row.get(0)?,
                 profile_id: row.get(1)?,
+                project_id: row.get(24)?,
                 default_persona: row.get(7)?,
                 clip_model: (row.get(8)?, row.get(9)?),
                 take_model: (row.get(18)?, row.get(19)?),
@@ -110,6 +112,7 @@ impl ChannelRow {
         Ok(Channel {
             id: ChannelId::from(Uuid::parse_str(&self.id).map_err(boxed)?),
             owner: ProfileId::from(Uuid::parse_str(&self.profile_id).map_err(boxed)?),
+            project: ProjectId::from(Uuid::parse_str(&self.project_id).map_err(boxed)?),
             details,
         })
     }
@@ -184,10 +187,11 @@ impl ChannelRepository for Database {
                                   transition, transition_frames, video_format, motion,
                                   motion_strength, caption_highlight, thumbnail_look,
                                   take_provider, take_model, production_mode, visual_style,
-                                  clip_fit, clip_stretch_percent)
+                                  clip_fit, clip_stretch_percent, owner_project_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
              ON CONFLICT (id) DO UPDATE SET
+                 owner_project_id = excluded.owner_project_id,
                  name = excluded.name,
                  niche = excluded.niche,
                  aesthetic_notes = excluded.aesthetic_notes,
@@ -236,6 +240,7 @@ impl ChannelRepository for Database {
                 details.style().code(),
                 details.clip_fit().code(),
                 details.stretch_limit().percent(),
+                channel.project.to_string(),
             ],
         )
         .map_err(boxed)?;
@@ -267,7 +272,7 @@ mod tests {
         (db, profile.id)
     }
 
-    fn channel(owner: ProfileId, name: &str) -> Channel {
+    fn channel(db: &Database, owner: ProfileId, name: &str) -> Channel {
         let details = ChannelDetails::validate(ChannelDraft {
             name: name.into(),
             niche: "space history".into(),
@@ -299,13 +304,13 @@ mod tests {
             stretch_limit: StretchLimit::new(25),
         })
         .unwrap();
-        Channel::new(owner, details)
+        Channel::new(owner, crate::project::test_project(db, owner), details)
     }
 
     #[test]
     fn saved_channel_is_read_back_with_every_field() {
         let (db, owner) = database_with_profile();
-        let saved = channel(owner, "Space Archives");
+        let saved = channel(&db, owner, "Space Archives");
         ChannelRepository::save(&db, &saved).unwrap();
 
         assert_eq!(db.get(saved.id).unwrap(), Some(saved.clone()));
@@ -317,6 +322,7 @@ mod tests {
         let (db, owner) = database_with_profile();
         let short = Channel::new(
             owner,
+            crate::project::test_project(&db, owner),
             ChannelDetails::validate(ChannelDraft {
                 name: "Shorts".into(),
                 ..ChannelDraft::default()
@@ -333,13 +339,15 @@ mod tests {
         let old = ChannelId::new();
         db.conn()
             .execute(
-                "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country)
-                 VALUES (?1, ?2, 'Old', '', '', ?3, ?4)",
+                "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country,
+                                      owner_project_id)
+                 VALUES (?1, ?2, 'Old', '', '', ?3, ?4, ?5)",
                 params![
                     old.to_string(),
                     owner.to_string(),
                     ContentLanguage::English.code(),
                     Country::UnitedStates.code(),
+                    short.project.to_string(),
                 ],
             )
             .unwrap();
@@ -417,7 +425,7 @@ mod tests {
     #[test]
     fn saving_again_updates_fields_and_replaces_themes() {
         let (db, owner) = database_with_profile();
-        let mut saved = channel(owner, "Space Archives");
+        let mut saved = channel(&db, owner, "Space Archives");
         ChannelRepository::save(&db, &saved).unwrap();
 
         saved.details = ChannelDetails::validate(ChannelDraft {
@@ -438,9 +446,9 @@ mod tests {
         ProfileRepository::save(&db, &other).unwrap();
 
         for name in ["beta", "Alpha", "Gamma"] {
-            ChannelRepository::save(&db, &channel(owner, name)).unwrap();
+            ChannelRepository::save(&db, &channel(&db, owner, name)).unwrap();
         }
-        ChannelRepository::save(&db, &channel(other.id, "Not mine")).unwrap();
+        ChannelRepository::save(&db, &channel(&db, other.id, "Not mine")).unwrap();
 
         let names: Vec<_> = db
             .list(owner)
@@ -454,7 +462,7 @@ mod tests {
     #[test]
     fn every_row_carries_its_owner() {
         let (db, owner) = database_with_profile();
-        let saved = channel(owner, "Space Archives");
+        let saved = channel(&db, owner, "Space Archives");
         ChannelRepository::save(&db, &saved).unwrap();
 
         let stored: String = db
@@ -470,23 +478,26 @@ mod tests {
 
     #[test]
     fn a_channel_needs_an_existing_profile() {
+        let (other, owner) = database_with_profile();
+        let mut orphan = channel(&other, owner, "Orphan");
+        orphan.owner = ProfileId::new();
         let db = Database::open_in_memory().unwrap();
-        assert!(ChannelRepository::save(&db, &channel(ProfileId::new(), "Orphan")).is_err());
+        assert!(ChannelRepository::save(&db, &orphan).is_err());
     }
 
     #[test]
     fn duplicate_names_for_one_owner_are_rejected_by_the_schema() {
         let (db, owner) = database_with_profile();
-        ChannelRepository::save(&db, &channel(owner, "Space Archives")).unwrap();
-        assert!(ChannelRepository::save(&db, &channel(owner, "SPACE ARCHIVES")).is_err());
+        ChannelRepository::save(&db, &channel(&db, owner, "Space Archives")).unwrap();
+        assert!(ChannelRepository::save(&db, &channel(&db, owner, "SPACE ARCHIVES")).is_err());
     }
 
     #[test]
     fn a_failed_save_leaves_the_previous_version() {
         let (db, owner) = database_with_profile();
-        let original = channel(owner, "Space Archives");
+        let original = channel(&db, owner, "Space Archives");
         ChannelRepository::save(&db, &original).unwrap();
-        ChannelRepository::save(&db, &channel(owner, "Taken")).unwrap();
+        ChannelRepository::save(&db, &channel(&db, owner, "Taken")).unwrap();
 
         let mut renamed = original.clone();
         renamed.details = ChannelDetails::validate(ChannelDraft {
@@ -505,12 +516,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bardo.db");
         let profile = UserProfile::new(UiLanguage::PtBr);
-        let saved = channel(profile.id, "Arquivos do Espaço");
-        {
+        let saved = {
             let db = Database::open(&path).unwrap();
             ProfileRepository::save(&db, &profile).unwrap();
+            let saved = channel(&db, profile.id, "Arquivos do Espaço");
             ChannelRepository::save(&db, &saved).unwrap();
-        }
+            saved
+        };
 
         let reopened = Database::open(&path).unwrap();
         assert_eq!(reopened.list(profile.id).unwrap(), [saved]);
@@ -519,7 +531,7 @@ mod tests {
     #[test]
     fn a_row_with_an_unknown_country_fails_to_load_instead_of_guessing() {
         let (db, owner) = database_with_profile();
-        let saved = channel(owner, "Space Archives");
+        let saved = channel(&db, owner, "Space Archives");
         ChannelRepository::save(&db, &saved).unwrap();
         db.conn()
             .execute("UPDATE channel SET country = 'ZZ'", [])

@@ -96,6 +96,7 @@ mod product_sheet;
 mod product_shot;
 mod production;
 mod profile;
+mod project;
 mod provider_key;
 mod publication;
 mod redaction;
@@ -351,6 +352,10 @@ pub use production::{
     typical_length, typical_scenes,
 };
 pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage, UserProfile};
+pub use project::{
+    Project, ProjectColor, ProjectDetails, ProjectDraft, ProjectFieldError, ProjectId, ProjectList,
+    ProjectRepository, ProjectState, UnknownProjectState, WorkOrigin, reorder_favorites,
+};
 pub use provider_key::{
     ApiKey, ApiKeyError, BilledUse, KeyCheck, KeyCheckOutcome, KeyChecker, Provider,
     ProviderFailure, ProviderFailureKind, SecretStore, SecretStoreError, UnknownProvider,

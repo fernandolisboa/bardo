@@ -398,6 +398,7 @@ mod tests {
         ProfileRepository::save(&*db, &stranger).unwrap();
         let theirs = bardo_domain::Channel::new(
             stranger.id,
+            crate::projects::saved_project(&*db, stranger.id),
             ChannelDetails::validate(ChannelDraft {
                 name: "Theirs".into(),
                 ..ChannelDraft::default()
