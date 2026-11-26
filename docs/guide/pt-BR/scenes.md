@@ -39,7 +39,7 @@ As cenas de um [anúncio](brief.md) são planejadas a partir do modelo **Plano d
 | Tipo | O que mostra | Quem faz |
 | --- | --- | --- |
 | **Desenhada** | Uma imagem feita a partir do prompt da cena, como as cenas de qualquer vídeo | O modelo de imagem |
-| **Produto em uso** | O produto sendo usado, a partir do prompt da cena | O modelo de imagem |
+| **Produto em uso** | O produto sendo usado, a partir do prompt da cena e da foto do produto, [conferido por você](#product-check) | O modelo de imagem |
 | **Foto do produto** | Uma das imagens do próprio produto, como ela é | O Bardo, de graça |
 | **Cartão final** | A última imagem do anúncio, sobre a chamada para ação | O Bardo, de graça, a partir de uma imagem do produto; o modelo de imagem quando o produto não tem nenhuma |
 
@@ -50,6 +50,19 @@ O próprio Bardo compõe a foto do produto, no seu computador, assim que o plano
 **Tipo de cena**, na cena escolhida, muda o que ela é, entre os tipos que o produto permite; **Cartão final** só aparece na última cena. Uma cena que vira foto do produto é composta na hora, e **Imagem do produto** escolhe qual das imagens do produto ela mostra, numeradas como no produto. Quando essa imagem é pequena para o quadro, a cena avisa: ampliada, ela pode ficar sem nitidez. Uma cena que volta a ser **Desenhada** retoma o desenho que tinha; se nunca teve um, nada é desenhado até você pedir em **Gerar N imagens**, que mostra o custo antes. Quando o vídeo muda de formato, as imagens compostas deixam de servir e aparecem como **A compor**: **Compor fotos do produto** (ou **Compor imagem**, na cena) faz essas imagens de novo, de graça, e **Gerar N imagens** as faz junto com os desenhos. Uma cena cuja imagem foi removida do produto avisa e fica com a imagem que tem; quando essa imagem precisa ser feita de novo, a cena falha até você escolher outra imagem ou outro tipo para ela. Um render no outro formato (um anúncio longo publicado numa rede 9:16, ou o contrário) mostra a imagem composta inteira, com faixas.
 
 A [estimativa](projects.md#mode) do vídeo conta as cenas compostas como gratuitas. Antes de o anúncio ter um plano, ele é estimado com uma cena a cada 3 segundos, das quais duas fotos do produto e o cartão final são gratuitos quando o produto tem imagem.
+
+<a id="product-check"></a>
+## O produto em uso
+
+Uma cena de **Produto em uso** é desenhada com a primeira **Foto** do produto como referência, logo depois dos retratos das pessoas da cena e antes das outras tomadas do vídeo, junto com a aparência do produto (da ficha dele) e uma frase fixa: manter o formato, as cores, o rótulo e as proporções do produto exatamente como na foto. Uma **Tela** nunca vai para um modelo: um produto cujas imagens são todas telas não tem cena assim, e as cenas desenhadas mostram telas ilegíveis. Uma cena que virou **Produto em uso** com um desenho feito sem a foto aparece como **A gerar**, e **Gerar N imagens** a desenha de novo com a foto, depois de mostrar o custo.
+
+Toda imagem do produto em uso espera a sua conferência: a cena mostra **Conferir produto**, e o inspetor a mostra ao lado de **O produto de verdade**. Compare formato, cores, rótulo e proporções:
+
+- **Está igual** confere a imagem. Só então a cena é animada em [Clipes](clips.md#product-check), e só então o vídeo pode ser [renderizado](render.md#gates).
+- **Desenhar de novo** desenha uma imagem nova, paga, com a estimativa; a nova espera a revisão e depois a própria conferência.
+- **Usar a imagem real** torna a cena uma [foto do produto](#ad), composta a partir da imagem do próprio produto, de graça.
+
+O Bardo não julga a semelhança: a conferência é sua, a olho. Uma imagem desenhada de novo e usada perde a conferência. Uma cena esperando conferência bloqueia só o próprio clipe e a renderização, nunca as cenas ao redor.
 
 <a id="shot-look"></a>
 ## A aparência de uma foto do produto

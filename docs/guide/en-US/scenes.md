@@ -39,7 +39,7 @@ The scenes of an [ad](brief.md) are planned from the **Ad scene plan** template 
 | Kind | What it shows | Who makes it |
 | --- | --- | --- |
 | **Drawn** | A picture from the scene's prompt, like the scenes of any video | The image model |
-| **Product in use** | The product being used, from the scene's prompt | The image model |
+| **Product in use** | The product being used, from the scene's prompt and the product's photo, [checked by you](#product-check) | The image model |
 | **Product shot** | One of the product's own images, as it is | Bardo, for free |
 | **End card** | The ad's last picture, over the call to action | Bardo, for free, from a product image; the image model when the product has none |
 
@@ -50,6 +50,19 @@ Bardo composes a product shot itself, on your computer, as soon as the plan is s
 **Scene kind** in the picked scene changes what it is, among the kinds the product allows; **End card** is offered on the last scene only. A scene made a product shot is composed at once, and **Product image** picks which of the product's images it shows, numbered as on the product. When that image is small for the frame, the scene says so: enlarged, it may look soft. A scene made **Drawn** again goes back to the drawing it had; when it never had one, nothing is drawn until you ask with **Generate N images**, which shows the cost first. When the video changes shape, the composed pictures no longer fit and read **To compose**: **Compose product shots** (or **Compose picture** on the scene) makes them again, for free, and **Generate N images** makes them along with the drawings. A scene whose image was removed from the product says so and keeps the picture it has; when that picture has to be made again, the scene fails until you pick another image or kind for it. A render in the other shape (a long ad posted to a 9:16 network, or the other way round) shows a composed picture whole, with bars.
 
 The video's [estimate](projects.md#mode) counts composed scenes as free. Before an ad has a plan, it is estimated with a scene about every 3 seconds, of which two product shots and the end card are free when the product has an image.
+
+<a id="product-check"></a>
+## The product in use
+
+A **Product in use** scene is drawn with the product's first **Photo** as a reference, right after the portraits of the people in it and before the other shots of the video, together with how the product looks (from its sheet) and a fixed sentence: keep the product's shape, colors, label and proportions exactly as in the photo. A **Screen** is never sent to a model: a product whose images are all screens has no such scene, and its drawn scenes show screens unreadable. A scene made **Product in use** whose drawing was made without the photo reads **To draw**, and **Generate N images** draws it again with the photo, after showing the cost.
+
+Every picture of the product in use waits for your check: the scene reads **Check product**, and its inspector shows it beside **The real product**. Compare shape, colors, label and proportions:
+
+- **It matches** checks it. Only then is the scene animated on [Clips](clips.md#product-check), and only then may the video [render](render.md#gates).
+- **Draw again** draws a new picture, paid, with its estimate; the new one waits for review, then for its own check.
+- **Use the real image instead** makes the scene a [product shot](#ad), composed from the product's own image, for free.
+
+Bardo does not judge likeness: the check is yours, by eye. A picture drawn again and used loses the check. A scene waiting for its check holds back only its own clip and the render, never the scenes around it.
 
 <a id="shot-look"></a>
 ## How a product shot looks

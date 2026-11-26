@@ -560,6 +560,9 @@ pub enum SceneState {
     Review,
     /// Its last image or clip failed.
     Failed,
+    /// It shows the product in use, and the product in its picture or
+    /// clip waits for the user's check (#279).
+    CheckProduct,
 }
 
 impl SceneState {
@@ -604,6 +607,16 @@ pub fn scene_states(scenes: &ScenesView, stage: Stage) -> Vec<SceneState> {
                     SceneState::Review
                 } else if scene.clip_failure().is_some() {
                     SceneState::Failed
+                } else if !scene.product_checked()
+                    || (scene.clip().is_some() && !scene.clip_checked())
+                {
+                    // The product in use: its picture is checked before it
+                    // is animated, and its clip before the cut plays it.
+                    if scene.product_drawn() {
+                        SceneState::CheckProduct
+                    } else {
+                        SceneState::ToDraw
+                    }
                 } else if scene.clip().is_none() && !scenes.clips.mode.animates(scene.start) {
                     // The production mode keeps it a still image.
                     SceneState::Done
@@ -618,8 +631,12 @@ pub fn scene_states(scenes: &ScenesView, stage: Stage) -> Vec<SceneState> {
                 SceneState::Review
             } else if scene.failure().is_some() {
                 SceneState::Failed
-            } else if scene.image().is_none() {
+            } else if scene.image().is_none()
+                || (scene.shows_product_in_use() && !scene.product_drawn())
+            {
                 SceneState::ToDraw
+            } else if scene.needs_product_check() {
+                SceneState::CheckProduct
             } else {
                 SceneState::Done
             }

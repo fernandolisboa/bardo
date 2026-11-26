@@ -22,9 +22,9 @@ use std::time::SystemTime;
 use bardo_domain::{
     AspectRatio, BackdropPaint, ComposedShot, JobFailure, JobFailureKind, JobId, KindChange,
     ProductId, ProductImage, ProductImageId, ProductImageKind, ProductLayout, ProductPictures,
-    RenderedPrompt, SceneKind, SceneKindError, ScenePlanId, ShotBackdrop, ShotBackdropDrawing,
-    ShotLayout, ShotLook, ShotPlacement, ShotRecipe, TemplateBody, TemplateVariable, VideoProject,
-    VideoProjectId,
+    ProductRepository, ProjectFiles, RenderedPrompt, SceneKind, SceneKindError, ScenePlanId,
+    ShotBackdrop, ShotBackdropDrawing, ShotLayout, ShotLook, ShotPlacement, ShotRecipe,
+    TemplateBody, TemplateVariable, VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -43,10 +43,46 @@ the end card.
 them: nothing of the product is drawn or redrawn for them.
 - A drawn picture may show the product by its own name and look, and no other brand, logo or \
 real person.
-- No picture holds text, captions or watermarks beyond the product's own name on the product.";
+- No picture holds text, captions or watermarks beyond the product's own name on the product.
+- A scene that shows the product being used is a `product_in_use` scene: it is drawn with the \
+product's photo, and the user checks it. A drawn scene does not show the product.
+- A screen in a drawn picture is unreadable: people and devices may be shown, never what a \
+screen says. The product's own screens are shown only in product shots.";
 
 /// What the product images variable says of a product with none.
 const NO_IMAGES: &str = "none: the product has no image, so no scene is a product shot.";
+
+/// The copy of a product photo that goes as a reference (#279), in the
+/// project folder.
+pub(crate) fn product_reference_file(image: ProductImageId, extension: &str) -> String {
+    format!("product-{image}.{extension}")
+}
+
+/// The product's photo that its in-use scenes are drawn with and checked
+/// against (#279), copied into the project folder once: the file's name.
+/// Only a photo: a screen never goes to a model. The first photo of the
+/// product is the one used.
+pub(crate) fn product_photo(
+    files: &dyn ProjectFiles,
+    products: &dyn ProductRepository,
+    project: VideoProjectId,
+    product: ProductId,
+) -> Result<String, String> {
+    let images = products
+        .images(product)
+        .map_err(|error| format!("the product's images could not be read: {error}"))?;
+    let photo = images
+        .into_iter()
+        .find(|image| image.kind == ProductImageKind::Photo)
+        .ok_or_else(|| "the product has no photo to draw it from".to_owned())?;
+    let file = product_reference_file(photo.id, photo.picture.format().extension());
+    if !files.exists(project, &file) {
+        files
+            .write(project, &file, photo.picture.bytes())
+            .map_err(|error| format!("the product's photo could not be saved: {error}"))?;
+    }
+    Ok(file)
+}
 
 /// The product part of an ad's scene plan job: what the planner was told
 /// of the product's images, so its answer is read against the same list,
@@ -146,7 +182,9 @@ pub(crate) fn kind_lines(pictures: &ProductPictures) -> String {
         .map(|kind| {
             let what = match kind {
                 SceneKind::Drawn => "a picture the image model draws from the scene's prompt.",
-                SceneKind::ProductInUse => "the product being used, drawn from the scene's prompt.",
+                SceneKind::ProductInUse => {
+                    "the product being used, drawn from the scene's prompt with the product's photo."
+                }
                 SceneKind::ProductShot => {
                     "one of the product's own images, shown as it is. Nothing is drawn."
                 }
@@ -279,6 +317,30 @@ fn shot_file() -> String {
 }
 
 impl SceneHandler {
+    /// The product's photo that its in-use scenes are drawn with (#279),
+    /// as a file in the project folder, and how the product looks by its
+    /// sheet.
+    pub(crate) fn product_reference(
+        &self,
+        project: VideoProjectId,
+        product: ProductId,
+    ) -> Result<(String, String), String> {
+        let file = product_photo(
+            self.files.as_ref(),
+            self.products.as_ref(),
+            project,
+            product,
+        )?;
+        let looks = self
+            .products
+            .sheet(product)
+            .ok()
+            .flatten()
+            .map(|sheet| sheet.text().looks.clone())
+            .unwrap_or_default();
+        Ok((file, looks))
+    }
+
     /// Composes the picture of scene `index` when it is a composed scene
     /// that waits for one in `aspect`, from `product`'s image it shows.
     /// Free: pixels of the user's own image, on the computer. A scene that
@@ -495,6 +557,9 @@ pub struct SceneKinds {
     pub backdrop_estimate: crate::SpendEstimate,
     /// A backdrop is being drawn.
     pub drawing_backdrop: bool,
+    /// The product's photo that its in-use scenes are drawn with and
+    /// checked against (#279); `None` for a product without a photo.
+    pub photo: Option<std::path::PathBuf>,
 }
 
 /// One of the product's images as a product shot may show it.
@@ -627,6 +692,16 @@ impl Bardo {
             backdrops: self.scene_plans.shot_backdrops(project.id)?,
             backdrop_estimate: self.backdrop_estimate()?,
             drawing_backdrop: self.drawing_backdrop(project.id),
+            photo: project.product.and_then(|product| {
+                product_photo(
+                    self.files.as_ref(),
+                    self.products.as_ref(),
+                    project.id,
+                    product,
+                )
+                .ok()
+                .map(|file| self.files.path(project.id, &file))
+            }),
         })
     }
 
@@ -1394,9 +1469,12 @@ mod ad_tests {
             let estimate = app.production(project.id).unwrap();
             assert!(estimate.estimate(mode).unwrap().clips <= 2, "{mode:?}");
         }
-        // Every scene animated by the channel's model: the two drawn ones.
+        // Every scene animated by the channel's model: the two drawn ones,
+        // the product in use once its product is checked (#279).
         app.set_project_production(project.id, Some(ProductionMode::ChannelModel))
             .unwrap();
+        assert_eq!(app.scenes(project.id).unwrap().clips.missing, [0]);
+        app.check_product_picture(project.id, 2).unwrap();
         assert_eq!(app.scenes(project.id).unwrap().clips.missing, [0, 2]);
         assert_eq!(
             app.production(project.id)
@@ -1730,7 +1808,10 @@ mod ad_tests {
             plan.scene(3).unwrap().shot().map(|shot| shot.aspect),
             Some(bardo_domain::AspectRatio::Landscape)
         );
-        assert_eq!(plan.missing_images(), Vec::<usize>::new());
+        // The product in use is not drawn without the product's photo,
+        // which was the image removed (#279).
+        assert_eq!(plan.missing_images(), [2]);
+        assert!(job.failure().unwrap().detail.contains("no photo"));
         // Shown another of the product's images, it is composed.
         let KindChanged::Composing(job) = app
             .set_scene_kind(project.id, 1, SceneKind::ProductShot, Some(images[0].id))
@@ -2133,6 +2214,185 @@ mod ad_tests {
             std::time::SystemTime::now(),
         );
         assert_eq!(bare.scene(1).unwrap().look().backdrop, ShotBackdrop::Auto);
+    }
+
+    #[test]
+    fn the_product_in_use_is_drawn_with_the_products_photo_and_never_a_screen() {
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, images) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        plan_with(&h, &app, &project, usual());
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let requests = h.images.requests.lock().unwrap().clone();
+        // Scenes 0 (drawn) and 2 (the product in use) are drawn.
+        assert_eq!(requests.len(), 2);
+        let screen = images[0].picture.bytes();
+        let photo = images[1].picture.bytes();
+        for request in &requests {
+            assert!(
+                request.references.iter().all(|r| r.bytes != screen),
+                "a screen never goes to a model"
+            );
+        }
+        let drawn = &requests[0];
+        assert!(drawn.references.iter().all(|r| r.bytes != photo));
+        assert!(!drawn.prompt.contains(bardo_domain::PRODUCT_REFERENCE_RULE));
+        // The product in use: nobody comes back, so the photo is the first
+        // reference, with the fixed sentence; the drawn scene before it
+        // follows as another shot.
+        let in_use = &requests[1];
+        assert_eq!(in_use.references[0].bytes, photo);
+        assert!(in_use.prompt.contains(&format!(
+            "Reference 1: {}",
+            bardo_domain::PRODUCT_REFERENCE_RULE
+        )));
+        if in_use.references.len() > 1 {
+            assert!(in_use.prompt.contains("Reference 2: "));
+        }
+        let scene = plan_of(&app, &project, 2);
+        assert!(scene.product_drawn() && scene.needs_product_check());
+        assert!(!plan_of(&app, &project, 0).product_drawn());
+        assert_eq!(plan(&app, &project).unchecked_products(), [2]);
+        // The inspector compares it with the real photo.
+        let kinds = app.scene_kinds(project.id).unwrap();
+        let path = kinds.photo.unwrap();
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert_eq!(h.files.read(project.id, name).unwrap(), photo);
+    }
+
+    #[test]
+    fn the_product_in_use_is_animated_and_rendered_only_once_checked() {
+        use bardo_domain::{Network, NetworkAccountDraft, PRODUCT_MOTION_RULE, ProductionMode};
+
+        use crate::render::RenderError;
+        use crate::render::tests::{account, checked};
+
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        plan_with(&h, &app, &project, usual());
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        app.set_project_production(project.id, Some(ProductionMode::ChannelModel))
+            .unwrap();
+        // Not animated before its check, and says why.
+        assert_eq!(app.scenes(project.id).unwrap().clips.missing, [0]);
+        assert!(matches!(
+            app.generate_scene_clip(project.id, 2, BudgetConsent::Confirmed),
+            Err(SceneError::ProductUnchecked)
+        ));
+        // Nor rendered.
+        app.open_editor(project.id).unwrap();
+        let youtube = account(
+            &app,
+            &project,
+            Network::YouTube,
+            NetworkAccountDraft::default(),
+        );
+        let review = checked(&app, project.id);
+        assert_eq!(review.unchecked_products, [2]);
+        assert!(review.renderable().is_empty());
+        assert!(matches!(
+            app.start_render(&review, &[youtube.id]),
+            Err(RenderError::ProductUnchecked)
+        ));
+
+        // Checked, it is animated with the product kept still.
+        app.check_product_picture(project.id, 2).unwrap();
+        assert_eq!(app.scenes(project.id).unwrap().clips.missing, [0, 2]);
+        done(
+            &app,
+            app.generate_scene_clip(project.id, 2, BudgetConsent::Confirmed)
+                .unwrap(),
+        );
+        let sent = h.clips.requests.lock().unwrap().clone();
+        assert!(
+            sent.last()
+                .unwrap()
+                .request
+                .prompt
+                .starts_with(PRODUCT_MOTION_RULE)
+        );
+        let review = checked(&app, project.id);
+        assert!(review.unchecked_products.is_empty());
+        assert_eq!(review.renderable(), [youtube.id]);
+
+        // Its clip waits for a check of its own before the cut plays it.
+        app.accept_scene_clip(project.id, 2).unwrap();
+        let editor = app.open_editor(project.id).unwrap();
+        assert!(!editor.view().clips[2].is_clip, "the checked still plays");
+        app.check_product_clip(project.id, 2).unwrap();
+        let editor = app.open_editor(project.id).unwrap();
+        assert!(editor.view().clips[2].is_clip);
+
+        // Drawn again and accepted, it waits for its check again.
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 2, BudgetConsent::Confirmed)
+                .unwrap(),
+        );
+        app.accept_scene_image(project.id, 2).unwrap();
+        assert!(plan_of(&app, &project, 2).needs_product_check());
+        // Using the real image instead makes it a product shot, for free:
+        // nothing waits for a check any more.
+        let KindChanged::Composing(job) = app
+            .set_scene_kind(project.id, 2, SceneKind::ProductShot, None)
+            .unwrap()
+        else {
+            panic!("expected a job composing it");
+        };
+        done(&app, job);
+        assert!(plan(&app, &project).unchecked_products().is_empty());
+    }
+
+    #[test]
+    fn a_drawn_scene_made_the_product_in_use_waits_for_a_drawing_with_the_product() {
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        plan_with(&h, &app, &project, usual());
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(
+            app.set_scene_kind(project.id, 0, SceneKind::ProductInUse, None)
+                .unwrap(),
+            KindChanged::Drawn { needs_image: true }
+        );
+        assert!(plan(&app, &project).missing_images().contains(&0));
+        assert!(matches!(
+            app.check_product_picture(project.id, 0),
+            Err(SceneError::ProductCheck(
+                bardo_domain::ProductCheckError::NotDrawn
+            ))
+        ));
+        let before = h.images.requests.lock().unwrap().len();
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Confirmed)
+                .unwrap(),
+        );
+        let requests = h.images.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), before + 1);
+        assert!(
+            requests
+                .last()
+                .unwrap()
+                .prompt
+                .contains(bardo_domain::PRODUCT_REFERENCE_RULE)
+        );
+        // The new drawing waits beside the old one, then for its check.
+        app.accept_scene_image(project.id, 0).unwrap();
+        assert!(plan_of(&app, &project, 0).needs_product_check());
     }
 
     #[test]

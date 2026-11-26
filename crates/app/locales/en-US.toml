@@ -2122,6 +2122,8 @@ running = "Rendering {done} of {total}…"
 stopped = "The render stopped."
 cancelled = "Render cancelled. Resume renders the files left; finished ones stay."
 resume = "Resume"
+product_unchecked = "Check the product in every scene of the product in use on Scenes, or use the real image there, before rendering."
+product_unchecked_scenes = "The product is not checked in: scene {scenes}. Check it on Scenes, or use the real image there."
 
 [render.figure]
 length = "Length"
@@ -3108,7 +3110,7 @@ body = "Each scene in order, with its time, its image and where it stands: to dr
 
 [tour.scenes.scene]
 title = "A scene"
-body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images. A product shot's layout, position and backdrop change for free too; only drawing a backdrop is paid, after its estimate, and a new one waits for you to keep or discard it."
+body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images. A product shot's layout, position and backdrop change for free too; only drawing a backdrop is paid, after its estimate, and a new one waits for you to keep or discard it. A scene of the product in use is drawn with the product's photo and waits for you to check it against the real product, draw it again, or use the real image instead."
 
 [tour.scenes.redraw]
 title = "Draw again"
@@ -3143,7 +3145,7 @@ body = "Each scene uses the channel's video model unless you pick another one fo
 
 [tour.clips.review]
 title = "Review a new clip"
-body = "A new clip waits beside the current one; play it before you use it. A scene without a clip keeps its still image, and Use the still image goes back to it."
+body = "A new clip waits beside the current one; play it before you use it. A scene without a clip keeps its still image, and Use the still image goes back to it. In an ad, a scene of the product in use is animated once you checked its picture, and its clip plays in the cut once you checked that the product stays the same."
 
 [tour.clips.cost]
 title = "What a clip costs"
@@ -4664,3 +4666,21 @@ down = "Top to bottom"
 across = "Left to right"
 diagonal = "Diagonal"
 
+[scenes.product]
+check_refused = "Only a scene of the product in use, drawn with the product's photo, can be checked."
+unchecked_clip = "Check the product in this scene's picture on Scenes before animating it."
+check_title = "Does the product match the real one?"
+check_hint = "This scene was drawn with the product's photo as a reference. Compare it with the real image: shape, colors, label and proportions. It is not animated or rendered until you check it. Drawing it again is paid; using the real image makes it a product shot, for free."
+matches = "It matches"
+checked = "Product checked"
+draw_again = "Draw again"
+use_real = "Use the real image instead"
+not_drawn = "This picture was drawn without the product's photo. Draw it with the product to show it in use."
+real = "The real product"
+to_check = "Check product"
+
+[clips.product]
+check_title = "Does the product stay as it is all through the clip?"
+check_hint = "Play the clip and watch the product: its shape, colors and label must not change. Until you check it, the cut shows the checked picture instead."
+matches = "It stays the same"
+checked = "Clip checked"

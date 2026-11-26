@@ -32,6 +32,11 @@ Each scene uses the video's default model unless you pick another one for it und
 
 A new clip waits beside the current one as **New clip to review**. **Play** it first, then **Use new clip** or **Discard**. A scene's clip shows its length and model; **Use the still image** drops the clip and goes back to the image. When the scene's image changes after its clip was made, the clip is marked **Image changed**.
 
+<a id="product-check"></a>
+## The product in use
+
+A scene of the [product in use](scenes.md#product-check) is animated only once you checked the product in its picture; until then it reads **Check product** and **Animate scenes without a clip** leaves it out. Its motion prompt starts with a fixed sentence: the product stays rigid and unchanged, and only the camera or the person moves. Its clip waits for a check of its own: **Play** it and watch the product, then **It stays the same**. Until you check it, the cut plays the checked picture instead of the clip. A new clip used for the scene must be checked again.
+
 <a id="stretch"></a>
 ## Slowed clips
 

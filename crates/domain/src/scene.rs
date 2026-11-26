@@ -400,6 +400,16 @@ pub fn scene_image_prompt(
             ));
         }
     }
+    if let Some(looks) = setting.product {
+        text.push_str(&format!(
+            "\n\nReference {}: {PRODUCT_REFERENCE_RULE}",
+            with.len() + 1
+        ));
+        if !looks.trim().is_empty() {
+            text.push_str("\nHow the product looks: ");
+            text.push_str(looks.trim());
+        }
+    }
     if let Some(place) = setting.place {
         text.push_str("\n\n");
         text.push_str(&place.setting());
@@ -409,7 +419,7 @@ pub fn scene_image_prompt(
         text.push_str(&style);
     }
     if !setting.shots.is_empty() {
-        text.push_str(if with.is_empty() {
+        text.push_str(if with.is_empty() && setting.product.is_none() {
             "\n\nThe reference images are other shots of the same video, so that this image \
              belongs with them."
         } else {
@@ -417,8 +427,9 @@ pub fn scene_image_prompt(
              this image belongs with them."
         });
     }
+    let product = usize::from(setting.product.is_some());
     for (offset, shot) in setting.shots.iter().enumerate() {
-        let number = with.len() + offset + 1;
+        let number = with.len() + product + offset + 1;
         text.push_str(&format!("\nReference {number}: "));
         text.push_str(match shot {
             OtherShot::SamePlace => {
@@ -600,7 +611,17 @@ pub struct SceneSetting<'a> {
     /// The video's visual style (#259), added after the people and the
     /// place.
     pub style: StyleChoice,
+    /// For a scene of the product in use (#279): the product's photo is
+    /// the reference right after the people's, and this is how the
+    /// product looks.
+    pub product: Option<&'a str>,
 }
+
+/// What a product in use scene's image request says of the product's
+/// reference (#279), before how it looks.
+pub const PRODUCT_REFERENCE_RULE: &str = "the product itself. Keep the product's shape, colors, \
+label and proportions exactly as in this reference; show it being used as this prompt says, \
+not the reference's framing or background.";
 
 /// A clip made from a scene's image: the file in the project folder, its
 /// length, the image it animated and the generation that made it.
@@ -697,6 +718,44 @@ pub struct Scene {
     shot: Option<ComposedShot>,
     /// How its product shot looks (#285): layout, place and backdrop.
     look: ShotLook,
+    /// Which of its images were drawn with the product as a reference,
+    /// and which picture and clip the user checked against the product's
+    /// own image (#279).
+    checks: ProductChecks,
+}
+
+/// What a scene of the product in use (#279) holds about its product:
+/// whether its image and the image waiting for review were drawn with
+/// the product's photo as a reference, and the image and the clip the
+/// user checked against the real product. A check names what it was
+/// made on, so a new image or clip is not checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ProductChecks {
+    pub image_drawn: bool,
+    pub pending_drawn: bool,
+    /// The image the user checked, by its generation.
+    pub picture: Option<GenerationId>,
+    /// The clip the user checked, by its generation.
+    pub clip: Option<GenerationId>,
+}
+
+/// The sentence a product in use scene's clip prompt starts with (#279).
+pub const PRODUCT_MOTION_RULE: &str = "The product stays rigid and unchanged: its shape, \
+colors, label and proportions never change. Only the camera or the person moves.";
+
+/// A product check that does not apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ProductCheckError {
+    #[error("the scene does not show the product in use")]
+    NotInUse,
+    /// Its image was not drawn with the product as a reference.
+    #[error("the scene's image was not drawn with the product")]
+    NotDrawn,
+    #[error("the scene has no clip to check")]
+    NoClip,
+    /// Its picture is not checked, or its clip was made of another one.
+    #[error("the scene's picture is not checked, or its clip is of another picture")]
+    PictureUnchecked,
 }
 
 /// Every stored field of a scene, for adapters that rebuild one.
@@ -742,6 +801,7 @@ impl Scene {
             product_image: None,
             shot: None,
             look: ShotLook::default(),
+            checks: ProductChecks::default(),
         }
     }
 
@@ -803,6 +863,7 @@ impl Scene {
             product_image: None,
             shot: None,
             look: ShotLook::default(),
+            checks: ProductChecks::default(),
         }
     }
 
@@ -832,6 +893,132 @@ impl Scene {
     /// when it is composed again.
     pub fn look(&self) -> ShotLook {
         self.look
+    }
+
+    /// The scene with what it holds about its product, as an adapter
+    /// rebuilds it. A flag or check about an image or clip it does not
+    /// have is dropped.
+    pub fn with_product_checks(mut self, checks: ProductChecks) -> Self {
+        self.checks = ProductChecks {
+            image_drawn: checks.image_drawn && self.image.is_some(),
+            pending_drawn: checks.pending_drawn && self.pending.is_some(),
+            picture: checks
+                .picture
+                .filter(|id| self.image.as_ref().is_some_and(|i| i.generation.id == *id)),
+            clip: checks
+                .clip
+                .filter(|id| self.clip.as_ref().is_some_and(|c| c.generation.id == *id)),
+        };
+        self
+    }
+
+    /// What it holds about its product, for adapters.
+    pub fn product_checks(&self) -> ProductChecks {
+        self.checks
+    }
+
+    /// Whether it shows the product in use (#279).
+    pub fn shows_product_in_use(&self) -> bool {
+        self.kind == SceneKind::ProductInUse
+    }
+
+    /// Whether its image was drawn with the product as a reference.
+    pub fn product_drawn(&self) -> bool {
+        self.image.is_some() && self.checks.image_drawn
+    }
+
+    /// Whether the image waiting for review was drawn with the product.
+    pub fn pending_product_drawn(&self) -> bool {
+        self.pending.is_some() && self.checks.pending_drawn
+    }
+
+    /// Whether its picture may be shown and animated: always, but for a
+    /// scene of the product in use, whose image drawn with the product
+    /// the user checked against the real product.
+    pub fn product_checked(&self) -> bool {
+        !self.shows_product_in_use()
+            || (self.product_drawn()
+                && self.checks.picture.is_some()
+                && self.checks.picture == self.image.as_ref().map(|i| i.generation.id))
+    }
+
+    /// Whether its picture waits for the user's check: drawn with the
+    /// product and not checked yet.
+    pub fn needs_product_check(&self) -> bool {
+        self.shows_product_in_use() && self.product_drawn() && !self.product_checked()
+    }
+
+    /// Whether the cut may use its clip: always, but for a scene of the
+    /// product in use, whose clip the user checked.
+    pub fn clip_checked(&self) -> bool {
+        !self.shows_product_in_use()
+            || (self.product_checked()
+                && !self.is_clip_stale()
+                && self
+                    .clip
+                    .as_ref()
+                    .is_some_and(|clip| self.checks.clip == Some(clip.generation.id)))
+    }
+
+    /// Whether its clip may be checked: the product in use whose picture
+    /// is checked, with a clip made of that picture.
+    pub fn may_check_clip(&self) -> bool {
+        self.shows_product_in_use()
+            && self.product_checked()
+            && self.clip.is_some()
+            && !self.is_clip_stale()
+    }
+
+    /// Checks its picture: the product in it matches the real one.
+    /// Returns whether that changed anything.
+    pub fn check_product(&mut self) -> Result<bool, ProductCheckError> {
+        if !self.shows_product_in_use() {
+            return Err(ProductCheckError::NotInUse);
+        }
+        if !self.product_drawn() {
+            return Err(ProductCheckError::NotDrawn);
+        }
+        let image = self.image.as_ref().map(|image| image.generation.id);
+        Ok(self.checks.picture.replace(image.expect("drawn")) != image)
+    }
+
+    /// Checks its clip: the product stays as it is all through it.
+    pub fn check_product_clip(&mut self) -> Result<bool, ProductCheckError> {
+        if !self.shows_product_in_use() {
+            return Err(ProductCheckError::NotInUse);
+        }
+        if !self.product_checked() || self.is_clip_stale() {
+            return Err(ProductCheckError::PictureUnchecked);
+        }
+        let clip = self
+            .clip
+            .as_ref()
+            .map(|clip| clip.generation.id)
+            .ok_or(ProductCheckError::NoClip)?;
+        Ok(self.checks.clip.replace(clip) != Some(clip))
+    }
+
+    /// What its clip is asked to do: the motion prompt, and for the
+    /// product in use, first that the product stays as it is (first, so a
+    /// provider that keeps only the start of a long prompt keeps it).
+    pub fn clip_prompt(&self) -> String {
+        let motion = self.motion_prompt().as_str();
+        match self.shows_product_in_use() {
+            true => format!("{PRODUCT_MOTION_RULE} {}", motion.trim_start()),
+            false => motion.to_owned(),
+        }
+    }
+
+    /// Whether the scene has yet to be drawn: it has no image, or it shows
+    /// the product in use (#279) and neither its image nor the one waiting
+    /// for review was drawn with the product. A composed scene is never
+    /// drawn.
+    pub fn needs_drawing(&self) -> bool {
+        !self.is_composed()
+            && (self.image.is_none()
+                || (self.shows_product_in_use()
+                    && !self.product_drawn()
+                    && !self.pending_product_drawn()))
     }
 
     /// What the scene is: a drawn scene, unless an ad's plan says
@@ -973,13 +1160,26 @@ impl Scene {
         image: SceneImage,
         portraits: Option<PortraitsUsed>,
     ) -> Option<SceneImage> {
+        self.add_drawing(image, portraits, false)
+    }
+
+    /// `add_image_drawn_with`, recording whether the image was drawn with
+    /// the product's photo as a reference (#279).
+    pub fn add_drawing(
+        &mut self,
+        image: SceneImage,
+        portraits: Option<PortraitsUsed>,
+        with_product: bool,
+    ) -> Option<SceneImage> {
         self.failure = None;
         if self.image.is_none() {
             self.image = Some(image);
             self.image_portraits = portraits;
+            self.checks.image_drawn = with_product;
             None
         } else {
             self.pending_portraits = portraits;
+            self.checks.pending_drawn = with_product;
             self.pending.replace(image)
         }
     }
@@ -994,6 +1194,9 @@ impl Scene {
     pub fn accept_image(&mut self) -> Result<Option<SceneImage>, NoPendingImage> {
         let pending = self.pending.take().ok_or(NoPendingImage)?;
         self.image_portraits = self.pending_portraits.take();
+        // The new image is not the one checked (#279).
+        self.checks.image_drawn = std::mem::take(&mut self.checks.pending_drawn);
+        self.checks.picture = None;
         Ok(self.image.replace(pending))
     }
 
@@ -1002,6 +1205,7 @@ impl Scene {
     pub fn reject_image(&mut self) -> Result<SceneImage, NoPendingImage> {
         let pending = self.pending.take().ok_or(NoPendingImage)?;
         self.pending_portraits = None;
+        self.checks.pending_drawn = false;
         Ok(pending)
     }
 
@@ -1093,6 +1297,7 @@ impl Scene {
     /// replaced one, whose file can go.
     pub fn accept_clip(&mut self) -> Result<Option<SceneClip>, NoPendingClip> {
         let pending = self.pending_clip.take().ok_or(NoPendingClip)?;
+        self.checks.clip = None;
         Ok(self.clip.replace(pending))
     }
 
@@ -1105,6 +1310,7 @@ impl Scene {
     /// Goes back to the still image. Returns the clip it dropped, whose
     /// file can go.
     pub fn remove_clip(&mut self) -> Option<SceneClip> {
+        self.checks.clip = None;
         self.clip.take()
     }
 
@@ -1886,10 +2092,7 @@ impl ScenePlan {
     /// scene is never drawn.
     pub fn missing_images(&self) -> Vec<usize> {
         (0..self.scenes.len())
-            .filter(|&index| {
-                let scene = &self.scenes[index];
-                scene.image.is_none() && !scene.is_composed()
-            })
+            .filter(|&index| self.scenes[index].needs_drawing())
             .collect()
     }
 
@@ -1948,7 +2151,9 @@ impl ScenePlan {
         Ok(match scene.is_composed() {
             true => KindChange::Compose,
             false => KindChange::Drawn {
-                needs_image: scene.image.is_none(),
+                // The product in use needs an image drawn with the
+                // product (#279).
+                needs_image: scene.needs_drawing(),
                 dropped: scene.shot.take(),
             },
         })
@@ -1979,13 +2184,25 @@ impl ScenePlan {
         Ok(true)
     }
 
+    /// Scenes of the product in use whose picture waits for the user's
+    /// check, or for a drawing with the product (#279): the render waits
+    /// for them.
+    pub fn unchecked_products(&self) -> Vec<usize> {
+        (0..self.scenes.len())
+            .filter(|&index| !self.scenes[index].product_checked())
+            .collect()
+    }
+
     /// Scenes a clip can be made for that have none, accepted or waiting:
     /// what a new clip run animates.
     pub fn missing_clips(&self) -> Vec<usize> {
         (0..self.scenes.len())
             .filter(|&index| {
                 let scene = &self.scenes[index];
-                scene.can_animate() && scene.clip.is_none() && scene.pending_clip.is_none()
+                scene.can_animate()
+                    && scene.product_checked()
+                    && scene.clip.is_none()
+                    && scene.pending_clip.is_none()
             })
             .collect()
     }
@@ -2955,6 +3172,7 @@ mod tests {
                     .and_then(|place| plan.place(place).ok()),
                 shots: &[],
                 style,
+                product: None,
             },
         );
         plan.scene_mut(index, SystemTime::UNIX_EPOCH)
@@ -3658,6 +3876,7 @@ mod tests {
             place: plan.place(0).ok(),
             shots: &[OtherShot::Before],
             style: manga,
+            product: None,
         };
         let prompt = scene_image_prompt("The chef plates a dish.", &shown, &[true], setting);
         let line = manga.line().unwrap();
@@ -4131,6 +4350,91 @@ mod tests {
     }
 
     #[test]
+    fn the_product_in_use_is_drawn_with_the_product_and_checked_before_it_moves() {
+        use crate::ProductImageKind::Photo;
+        let n = narration(STORY, 0);
+        let now = SystemTime::UNIX_EPOCH;
+        let photo = pictures(&[Photo]);
+        let mut plan = ad_plan(
+            &n,
+            &photo,
+            vec![kinded(0, "drawn", None), kinded(1, "drawn", None)],
+        );
+        // A drawing made without the product does not count for it.
+        plan.scene_mut(0, now)
+            .unwrap()
+            .add_image(image(&n, "old.png"));
+        assert_eq!(
+            plan.set_scene_kind(0, SceneKind::ProductInUse, None, &photo, now),
+            Ok(KindChange::Drawn {
+                needs_image: true,
+                dropped: None,
+            })
+        );
+        assert!(plan.missing_images().contains(&0));
+        assert_eq!(plan.unchecked_products(), [0]);
+        let scene = plan.scene_mut(0, now).unwrap();
+        assert_eq!(scene.check_product(), Err(ProductCheckError::NotDrawn));
+        assert!(!scene.needs_product_check());
+
+        // Drawn with it, it waits for review, then for the check.
+        scene.add_drawing(image(&n, "with.png"), None, true);
+        assert!(scene.pending_product_drawn());
+        assert!(!plan.missing_images().contains(&0));
+        let scene = plan.scene_mut(0, now).unwrap();
+        scene.accept_image().unwrap();
+        assert!(scene.needs_product_check());
+        assert!(!scene.product_checked());
+        assert!(!plan.missing_clips().contains(&0), "not animated unchecked");
+        let scene = plan.scene_mut(0, now).unwrap();
+        assert_eq!(scene.check_product(), Ok(true));
+        assert_eq!(scene.check_product(), Ok(false));
+        assert!(scene.product_checked() && !scene.needs_product_check());
+        assert!(plan.unchecked_products().is_empty());
+        assert!(plan.missing_clips().contains(&0));
+
+        // Its clip keeps the product still, and plays once checked.
+        let scene = plan.scene_mut(0, now).unwrap();
+        assert!(scene.clip_prompt().starts_with(PRODUCT_MOTION_RULE));
+        let source = scene.image().unwrap().clone();
+        scene.add_clip(clip(&n, "moves.mp4", &source));
+        scene.accept_clip().unwrap();
+        assert!(!scene.clip_checked());
+        assert!(matches!(
+            crate::VideoSource::of(scene),
+            crate::VideoSource::Still(file) if file == "with.png"
+        ));
+        assert_eq!(scene.check_product_clip(), Ok(true));
+        assert!(matches!(
+            crate::VideoSource::of(scene),
+            crate::VideoSource::Clip { .. }
+        ));
+
+        // Drawn again and accepted, it is not checked any more.
+        scene.add_drawing(image(&n, "again.png"), None, true);
+        scene.accept_image().unwrap();
+        assert!(scene.needs_product_check());
+        // Its clip, of the earlier picture, plays no more and cannot be
+        // checked until the new picture is.
+        assert!(!scene.clip_checked() && !scene.may_check_clip());
+        assert_eq!(
+            scene.check_product_clip(),
+            Err(ProductCheckError::PictureUnchecked)
+        );
+        assert!(matches!(
+            crate::VideoSource::of(scene),
+            crate::VideoSource::Still(_)
+        ));
+        assert_eq!(plan.unchecked_products(), [0]);
+
+        // Other scenes need no check, and their clip prompt is the motion.
+        let other = plan.scene_mut(1, now).unwrap();
+        assert!(other.product_checked() && other.clip_checked());
+        assert_eq!(other.clip_prompt(), other.motion_prompt().as_str());
+        assert_eq!(other.check_product(), Err(ProductCheckError::NotInUse));
+    }
+
+    #[test]
     fn a_scenes_kind_changes_within_what_the_product_allows() {
         use crate::ProductImageKind::{Photo, Screen};
         let n = narration(STORY, 0);
@@ -4183,7 +4487,7 @@ mod tests {
         // Away from it: the drawing it kept is there, so nothing is paid,
         // and the composed picture goes.
         assert_eq!(
-            plan.set_scene_kind(0, SceneKind::ProductInUse, None, &both, later),
+            plan.set_scene_kind(0, SceneKind::Drawn, None, &both, later),
             Ok(KindChange::Drawn {
                 needs_image: false,
                 dropped: Some(shot(both.at(1).unwrap(), "shot.png")),

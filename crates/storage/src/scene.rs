@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use bardo_domain::{
     AspectRatio, BackdropId, CastMember, CastRecord, ComposedShot, GenerationId, JobFailureKind,
-    JobId, NarrationId, Place, PlaceRecord, PortraitsUsed, ProductImageId, ProfileId, Provider,
-    RepositoryError, Scene, SceneClip, SceneImage, SceneKind, ScenePlan, ScenePlanId,
-    ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, ShotBackdropDrawing, ShotColor,
-    ShotLook, StretchLimit, VideoProjectId,
+    JobId, NarrationId, Place, PlaceRecord, PortraitsUsed, ProductChecks, ProductImageId,
+    ProfileId, Provider, RepositoryError, Scene, SceneClip, SceneImage, SceneKind, ScenePlan,
+    ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord,
+    ShotBackdropDrawing, ShotColor, ShotLook, StretchLimit, VideoProjectId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
@@ -67,6 +67,47 @@ struct SceneRow {
     look: Option<String>,
     shot_look: Option<String>,
     shot_tones: Option<String>,
+    /// What it holds about the product in use (#279).
+    product_checks: Option<String>,
+}
+
+/// What a scene holds about the product in use (#279) as stored; none
+/// when it holds nothing.
+fn product_checks_code(scene: &Scene) -> Option<String> {
+    let checks = scene.product_checks();
+    (checks != ProductChecks::default()).then(|| {
+        let id = |id: Option<GenerationId>| id.map_or_else(|| "-".to_owned(), |id| id.to_string());
+        format!(
+            "{},{},{},{}",
+            u8::from(checks.image_drawn),
+            u8::from(checks.pending_drawn),
+            id(checks.picture),
+            id(checks.clip)
+        )
+    })
+}
+
+/// [`product_checks_code`] read back. A line that will not read holds
+/// nothing: the scene is drawn and checked again.
+fn parse_product_checks(code: Option<&str>) -> ProductChecks {
+    let Some(code) = code else {
+        return ProductChecks::default();
+    };
+    let parts: Vec<&str> = code.split(',').collect();
+    let id = |part: &str| {
+        (part != "-")
+            .then(|| Uuid::parse_str(part).ok().map(GenerationId::from))
+            .flatten()
+    };
+    match parts.as_slice() {
+        [image, pending, picture, clip] => ProductChecks {
+            image_drawn: *image == "1",
+            pending_drawn: *pending == "1",
+            picture: id(picture),
+            clip: id(clip),
+        },
+        _ => ProductChecks::default(),
+    }
 }
 
 /// The picture composed for a scene, as stored: its three columns are set
@@ -274,7 +315,8 @@ impl SceneRow {
                 .as_deref()
                 .and_then(ShotLook::from_code)
                 .unwrap_or_default(),
-        ))
+        )
+        .with_product_checks(parse_product_checks(self.product_checks.as_deref())))
     }
 }
 
@@ -286,7 +328,7 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                  motion_prompt, clip_provider, clip_model, clip_failure, position,
                  cast_members, planned_motion_prompt, place, image_portraits,
                  pending_portraits, kind, product_image_id, shot_file, shot_image_id,
-                 shot_aspect, look, shot_look, shot_tones
+                 shot_aspect, look, shot_look, shot_tones, product_checks
              FROM scene WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -316,6 +358,7 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                     look: row.get(25)?,
                     shot_look: row.get(26)?,
                     shot_tones: row.get(27)?,
+                    product_checks: row.get(28)?,
                 },
                 row.get::<_, i64>(14)?,
             ))
@@ -529,9 +572,9 @@ fn insert_scene(
              failure, motion_prompt, clip_provider, clip_model, clip_failure, cast_members,
              planned_motion_prompt, place, image_portraits, pending_portraits, kind,
              product_image_id, shot_file, shot_image_id, shot_aspect, look, shot_look,
-             shot_tones)
+             shot_tones, product_checks)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-             ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+             ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
         params![
             plan,
             position(index)?,
@@ -562,6 +605,7 @@ fn insert_scene(
             look_code(scene),
             shot_look_code(scene),
             shot_tones_code(scene),
+            product_checks_code(scene),
         ],
     )
     .map_err(boxed)?;
@@ -723,7 +767,7 @@ impl ScenePlanRepository for Database {
                      clip_failure = ?12, image_portraits = ?13, pending_portraits = ?14,
                      kind = ?15, product_image_id = ?16, shot_file = ?17,
                      shot_image_id = ?18, shot_aspect = ?19, look = ?20, shot_look = ?21,
-                     shot_tones = ?22
+                     shot_tones = ?22, product_checks = ?23
                  WHERE plan_id = ?1 AND position = ?2",
                 params![
                     id,
@@ -748,6 +792,7 @@ impl ScenePlanRepository for Database {
                     look_code(scene),
                     shot_look_code(scene),
                     shot_tones_code(scene),
+                    product_checks_code(scene),
                 ],
             )
             .map_err(boxed)?;
@@ -1111,7 +1156,8 @@ mod tests {
             // then migrated.
             let mut conn = s.db.conn();
             conn.execute_batch(
-                "DROP TABLE shot_backdrop;
+                "ALTER TABLE scene DROP COLUMN product_checks;
+                 DROP TABLE shot_backdrop;
                  ALTER TABLE scene DROP COLUMN shot_tones;
                  ALTER TABLE scene DROP COLUMN shot_look;
                  ALTER TABLE scene DROP COLUMN look;
@@ -1418,6 +1464,43 @@ mod tests {
         let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
         assert_eq!(stored.scenes()[1].kind(), SceneKind::EndCard);
         assert_eq!(stored.scenes()[1].shot(), None);
+
+        // The product in use (#279): its drawing with the product, the
+        // checked picture and the checked clip come back.
+        plan.set_scene_kind(
+            0,
+            SceneKind::ProductInUse,
+            None,
+            &pictures,
+            time(1_800_000_040),
+        )
+        .unwrap();
+        let drawn = image(&s, "with-product.png");
+        let scene = plan.scene_mut(0, time(1_800_000_041)).unwrap();
+        scene.add_drawing(drawn.clone(), None, true);
+        if scene.pending().is_some() {
+            scene.accept_image().unwrap();
+        }
+        scene.check_product().unwrap();
+        scene.add_clip(clip(&s, "moves.mp4", &drawn));
+        scene.accept_clip().unwrap();
+        scene.check_product_clip().unwrap();
+        scene.add_drawing(image(&s, "waiting.png"), None, true);
+        s.db.save_scene(&plan, 0).unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored, plan);
+        let scene = &stored.scenes()[0];
+        assert!(scene.product_checked() && scene.clip_checked());
+        assert!(scene.pending_product_drawn());
+        // A line that will not read holds nothing.
+        s.db.conn()
+            .execute(
+                "UPDATE scene SET product_checks = 'x' WHERE position = 0",
+                [],
+            )
+            .unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert!(!stored.scenes()[0].product_drawn());
     }
 
     #[test]

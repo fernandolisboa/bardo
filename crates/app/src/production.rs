@@ -286,7 +286,7 @@ impl Bardo {
                         // A scene Bardo composes from a product image
                         // (#278) is free: nothing is drawn or animated
                         // for it.
-                        needs_image: scene.image().is_none() && !scene.is_composed(),
+                        needs_image: scene.needs_drawing(),
                         // A clip waiting for review is already paid for,
                         // and so is one a provider is making.
                         needs_clip: scene.clip().is_none()

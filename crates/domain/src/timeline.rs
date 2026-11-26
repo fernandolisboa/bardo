@@ -107,7 +107,9 @@ impl VideoSource {
             };
         }
         match (scene.clip(), scene.image()) {
-            (Some(clip), _) if !scene.is_clip_stale() => {
+            // A clip of the product in use plays once the user checked it
+            // (#279); until then the checked still does.
+            (Some(clip), _) if !scene.is_clip_stale() && scene.clip_checked() => {
                 let length = clip.played_over(scene.duration());
                 VideoSource::Clip {
                     file: clip.file.clone(),

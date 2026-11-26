@@ -60,6 +60,9 @@ pub enum RenderError {
     /// The cut changed after the review: review it again.
     #[error("the cut changed since the review")]
     CutChanged,
+    /// Scenes of the product in use wait for the user's check (#279).
+    #[error("the product in some scenes is not checked")]
+    ProductUnchecked,
     /// A render of this project is running or waiting.
     #[error("the project is already rendering")]
     AlreadyRendering,
@@ -87,6 +90,7 @@ impl RenderError {
             RenderError::NothingChosen => Text::RenderNothingChosen,
             RenderError::Blocked => Text::RenderBlocked,
             RenderError::CutChanged => Text::RenderCutChanged,
+            RenderError::ProductUnchecked => Text::RenderProductUnchecked,
             RenderError::AlreadyRendering => Text::RenderAlreadyRunning,
             RenderError::Exporting => Text::RenderWhileExporting,
             RenderError::Uploading => Text::RenderWhileUploading,
@@ -148,6 +152,10 @@ pub struct RenderReview {
     pub gates: Vec<Gate>,
     /// Every network account of the channel, in `Network::ALL` order.
     pub targets: Vec<RenderTarget>,
+    /// The scenes (from 0) of the product in use whose picture the user
+    /// has not checked (#279): no render starts until each is checked or
+    /// shows the product's own image.
+    pub unchecked_products: Vec<usize>,
     encoders: Option<Encoders>,
     /// The cut framed for each shape a target needs, from the originals.
     plans: Vec<CutPlan>,
@@ -174,7 +182,8 @@ impl RenderReview {
 
     /// The targets the user may pick: checked, with nothing blocking.
     pub fn renderable(&self) -> Vec<NetworkAccountId> {
-        if !self.is_checked() {
+        // Nothing while the product in use waits for its check (#279).
+        if !self.is_checked() || !self.unchecked_products.is_empty() {
             return Vec::new();
         }
         self.targets
@@ -489,11 +498,17 @@ impl Bardo {
                 }
             })
             .collect();
+        let unchecked_products = self
+            .scene_plans
+            .scene_plan(project)?
+            .map(|plan| plan.unchecked_products())
+            .unwrap_or_default();
         let mut review = RenderReview {
             project,
             cut,
             gates: Vec::new(),
             targets,
+            unchecked_products,
             encoders: None,
             plans,
         };
@@ -519,6 +534,14 @@ impl Bardo {
     ) -> Result<JobId, RenderError> {
         if !review.is_checked() {
             return Err(RenderError::NotChecked);
+        }
+        // Read again: the review may be older than the user's checks.
+        let unchecked = self
+            .scene_plans
+            .scene_plan(review.project)?
+            .is_some_and(|plan| !plan.unchecked_products().is_empty());
+        if unchecked {
+            return Err(RenderError::ProductUnchecked);
         }
         let targets: Vec<&RenderTarget> = review
             .targets
@@ -887,7 +910,7 @@ pub(crate) mod tests {
     use crate::editor::testing::loudness;
     use crate::scenes::tests::{Harness, done, wait_done};
 
-    fn account(
+    pub(crate) fn account(
         app: &Bardo,
         project: &VideoProject,
         network: Network,

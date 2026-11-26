@@ -780,6 +780,15 @@ impl ClipJob<'_> {
         if (left || scene.is_composed()) && !unanswered {
             return Ok(Step::Left);
         }
+        // The product in use is animated only once the user checked the
+        // product in its picture (#279).
+        if !scene.product_checked() && !unanswered {
+            let failure = ProviderFailure::new(
+                ProviderFailureKind::NotAllowed,
+                "the product in its picture is not checked yet: check it on Scenes first",
+            );
+            return self.scene_failed(order, failure, cx);
+        }
         // A scene handed over and not sent (the provider was busy, the
         // job was stopped) may have changed since: fitted to a new
         // narration, its motion edited, its image replaced. It is handed
@@ -794,7 +803,7 @@ impl ClipJob<'_> {
         if let Some(run) = self.run_of(order.scene)
             && run.sent_at.is_none()
             && run.staged.is_some()
-            && (run.prompt != scene.motion_prompt().as_str()
+            && (run.prompt != scene.clip_prompt()
                 || length.as_ref().is_none_or(|length| {
                     run.seconds != length.seconds
                         || run.stretch_percent != length.stretch.map_or(0, StretchLimit::percent)
@@ -1132,7 +1141,7 @@ impl ClipJob<'_> {
             Ok(staged) => staged.0,
             Err(failure) => return self.submit_failed(order, failure, cx).map(Err),
         };
-        let prompt = scene.motion_prompt().as_str().to_owned();
+        let prompt = scene.clip_prompt();
         let ClipLength { seconds, stretch } = model.durations.fit(scene.duration(), self.stretch);
         let stretch_percent = stretch.map_or(0, StretchLimit::percent);
         let (source_image, image_file) = (image.generation.id.to_string(), image.file.clone());
@@ -1698,6 +1707,9 @@ impl Bardo {
         let scene = plan.scene(index)?;
         if !scene.can_animate() {
             return Err(SceneError::NoImageToAnimate);
+        }
+        if !scene.product_checked() {
+            return Err(SceneError::ProductUnchecked);
         }
         if view.scenes[index].is_busy() {
             return Err(SceneError::Busy);

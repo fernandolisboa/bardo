@@ -2122,6 +2122,8 @@ running = "Renderizando {done} de {total}…"
 stopped = "O render parou."
 cancelled = "Render cancelado. Retomar renderiza os arquivos que faltam; os prontos ficam."
 resume = "Retomar"
+product_unchecked = "Confira o produto em cada cena do produto em uso, em Cenas, ou use ali a imagem real antes de renderizar."
+product_unchecked_scenes = "O produto não foi conferido em: cena {scenes}. Confira em Cenas, ou use ali a imagem real."
 
 [render.figure]
 length = "Duração"
@@ -3108,7 +3110,7 @@ body = "Cada cena em ordem, com o tempo, a imagem e como está: para desenhar, p
 
 [tour.scenes.scene]
 title = "Uma cena"
-body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato de cada pessoa dela, a não ser de quem você escolheu desenhar sem retrato, e uma desenhada com um retrato mais antigo fica marcada. Edite o prompt para mudar o que o próximo desenho mostra. Num anúncio, Tipo de cena diz o que a cena é: desenhada, ou uma foto do produto que o Bardo compõe de graça a partir de uma das imagens do próprio produto. O layout, a posição e o fundo de uma foto do produto também mudam de graça; só desenhar um fundo é pago, depois da estimativa, e um fundo novo espera você manter ou descartar."
+body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato de cada pessoa dela, a não ser de quem você escolheu desenhar sem retrato, e uma desenhada com um retrato mais antigo fica marcada. Edite o prompt para mudar o que o próximo desenho mostra. Num anúncio, Tipo de cena diz o que a cena é: desenhada, ou uma foto do produto que o Bardo compõe de graça a partir de uma das imagens do próprio produto. O layout, a posição e o fundo de uma foto do produto também mudam de graça; só desenhar um fundo é pago, depois da estimativa, e um fundo novo espera você manter ou descartar. Uma cena do produto em uso é desenhada com a foto do produto e espera você conferir com o produto de verdade, desenhar de novo ou usar a imagem real."
 
 [tour.scenes.redraw]
 title = "Desenhe de novo"
@@ -3143,7 +3145,7 @@ body = "Cada cena usa o modelo de vídeo do canal, a menos que você escolha out
 
 [tour.clips.review]
 title = "Revise um novo clipe"
-body = "Um novo clipe espera ao lado do atual; reproduza-o antes de usar. Uma cena sem clipe fica com a imagem parada, e Usar a imagem parada volta para ela."
+body = "Um novo clipe espera ao lado do atual; reproduza-o antes de usar. Uma cena sem clipe fica com a imagem parada, e Usar a imagem parada volta para ela. Num anúncio, uma cena do produto em uso é animada depois que você confere a imagem dela, e o clipe entra no corte depois que você confere que o produto continua igual."
 
 [tour.clips.cost]
 title = "Quanto custa um clipe"
@@ -4664,3 +4666,21 @@ down = "De cima para baixo"
 across = "Da esquerda para a direita"
 diagonal = "Diagonal"
 
+[scenes.product]
+check_refused = "Só uma cena do produto em uso, desenhada com a foto do produto, pode ser conferida."
+unchecked_clip = "Confira o produto na imagem desta cena, em Cenas, antes de animá-la."
+check_title = "O produto bate com o de verdade?"
+check_hint = "Esta cena foi desenhada com a foto do produto como referência. Compare com a imagem real: formato, cores, rótulo e proporções. Ela não é animada nem renderizada até você conferir. Desenhar de novo é pago; usar a imagem real a torna uma foto do produto, de graça."
+matches = "Está igual"
+checked = "Produto conferido"
+draw_again = "Desenhar de novo"
+use_real = "Usar a imagem real"
+not_drawn = "Esta imagem foi desenhada sem a foto do produto. Desenhe com o produto para mostrá-lo em uso."
+real = "O produto de verdade"
+to_check = "Conferir produto"
+
+[clips.product]
+check_title = "O produto continua igual o clipe todo?"
+check_hint = "Assista ao clipe e observe o produto: formato, cores e rótulo não podem mudar. Até você conferir, o corte mostra a imagem conferida no lugar."
+matches = "Continua igual"
+checked = "Clipe conferido"
