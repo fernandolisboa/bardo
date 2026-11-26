@@ -44,13 +44,12 @@ fn networks(list: &str) -> anyhow::Result<Vec<Network>> {
 
 /// The files in the project folder, by name.
 fn folder_files(bardo: &Bardo, project: VideoProjectId) -> anyhow::Result<Vec<String>> {
-    let folder = bardo_storage::default_projects_dir()?.join(project.to_string());
+    let folder = bardo.video_folder(project);
     let mut names: Vec<String> = std::fs::read_dir(&folder)?
         .filter_map(Result::ok)
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    let _ = bardo;
     Ok(names)
 }
 

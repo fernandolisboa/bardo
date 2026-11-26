@@ -1320,7 +1320,7 @@ impl Bardo {
             if bardo.role == RunnerRole::App {
                 // The app opens on a project, after the upgrade too.
                 let _ = bardo.open_some_project();
-                bardo.prepare_folders();
+                let _ = bardo.prepare_folders();
             }
             bardo.mark_restored_connections();
             bardo.prune_installers();

@@ -25,9 +25,9 @@ use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     ChannelId, ChannelRepository, FolderMoveError, FolderPlaces, FolderRepository, Job, JobFailure,
-    JobFailureKind, JobKind, JobRepository, PROJECT_MANIFEST, Progress, Project, ProjectFolders,
-    ProjectId, ProjectManifest, ProjectRepository, RUNNER_ALIVE, RepositoryError, RunnerRole,
-    VIDEOS_DIR, VideoProjectId, leaves_room, project_folder_name,
+    JobFailureKind, JobId, JobKind, JobRepository, PROJECT_MANIFEST, Progress, Project,
+    ProjectFolders, ProjectId, ProjectManifest, ProjectRepository, RUNNER_ALIVE, RepositoryError,
+    RunnerRole, VIDEOS_DIR, VideoProjectId, leaves_room, project_folder_name,
 };
 
 use crate::jobs::{JobContext, JobGate, JobHandler};
@@ -305,14 +305,15 @@ impl Bardo {
     }
 
     /// Gives each project without a folder one under the base folder, and
-    /// queues the move of media that is not in its project's folder. Runs
-    /// as the app opens; what fails is tried again at the next start.
-    pub(crate) fn prepare_folders(&self) {
+    /// queues the move of media that is not in its project's folder: the
+    /// move queued or under way, if any. Runs as the app opens; what fails
+    /// is tried again at the next start.
+    pub fn prepare_folders(&self) -> Option<JobId> {
         let projects = match self.projects.projects(self.profile.id) {
             Ok(projects) => projects,
             Err(error) => {
                 tracing::warn!("could not read the projects: {error}");
-                return;
+                return None;
             }
         };
         for mut project in projects.into_iter().filter(|p| p.folder.is_none()) {
@@ -329,29 +330,39 @@ impl Bardo {
             }
         }
         self.check_folders();
-        self.queue_media_move();
+        self.queue_media_move()
     }
 
     /// Queues the media move when a video's media is not in its project's
-    /// folder and no move is queued or running.
-    pub(crate) fn queue_media_move(&self) {
+    /// folder and no move is queued or running: the move queued or under
+    /// way, if any.
+    pub(crate) fn queue_media_move(&self) -> Option<JobId> {
         if self.role != RunnerRole::App {
-            return;
+            return None;
         }
         let waiting = match self.folder_book.folders.videos_to_move(self.profile.id) {
             Ok(videos) => !videos.is_empty(),
             Err(error) => {
                 tracing::warn!("could not read where the media is: {error}");
-                return;
+                return None;
             }
         };
-        if !waiting || self.media_move().is_some_and(|job| job.state().is_active()) {
-            return;
+        if let Some(job) = self.media_move().filter(|job| job.state().is_active()) {
+            return Some(job.id());
+        }
+        if !waiting {
+            return None;
         }
         let job = Job::new(self.profile.id, JobKind::MoveMedia, "{}");
         match self.jobs.enqueue(job) {
-            Ok(_) => tracing::info!("moving media into the project folders"),
-            Err(error) => tracing::warn!("could not queue the media move: {error}"),
+            Ok(id) => {
+                tracing::info!("moving media into the project folders");
+                Some(id)
+            }
+            Err(error) => {
+                tracing::warn!("could not queue the media move: {error}");
+                None
+            }
         }
     }
 

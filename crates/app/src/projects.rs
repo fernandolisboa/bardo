@@ -394,7 +394,7 @@ impl Bardo {
         }
         self.projects.move_channel(channel, to)?;
         // Its videos' media follows it into the project's folder.
-        self.queue_media_move();
+        let _ = self.queue_media_move();
         Ok(())
     }
 
