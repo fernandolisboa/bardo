@@ -2887,6 +2887,24 @@ pub enum Text {
     ProductLayoutName(ProductLayout),
     ShotPlacementName(ShotPlacement),
     BackdropDirectionName(BackdropDirection),
+    /// A render refused while scenes of the product in use wait for their check (#279).
+    RenderProductUnchecked,
+    RenderProductUncheckedScenes,
+    ProductCheckRefused,
+    ProductUncheckedClip,
+    ProductCheckTitle,
+    ProductCheckHint,
+    ProductMatches,
+    ProductCheckedNote,
+    ProductDrawAgain,
+    ProductUseRealImage,
+    ProductNotDrawn,
+    ProductRealImage,
+    ProductToCheckTag,
+    ClipProductCheckTitle,
+    ClipProductCheckHint,
+    ClipProductMatches,
+    ClipProductCheckedNote,
 }
 
 impl Text {
@@ -5987,6 +6005,23 @@ impl Text {
                 BackdropDirection::Across => "scenes.look.direction.across",
                 BackdropDirection::Diagonal => "scenes.look.direction.diagonal",
             },
+            Text::RenderProductUnchecked => "render.product_unchecked",
+            Text::RenderProductUncheckedScenes => "render.product_unchecked_scenes",
+            Text::ProductCheckRefused => "scenes.product.check_refused",
+            Text::ProductUncheckedClip => "scenes.product.unchecked_clip",
+            Text::ProductCheckTitle => "scenes.product.check_title",
+            Text::ProductCheckHint => "scenes.product.check_hint",
+            Text::ProductMatches => "scenes.product.matches",
+            Text::ProductCheckedNote => "scenes.product.checked",
+            Text::ProductDrawAgain => "scenes.product.draw_again",
+            Text::ProductUseRealImage => "scenes.product.use_real",
+            Text::ProductNotDrawn => "scenes.product.not_drawn",
+            Text::ProductRealImage => "scenes.product.real",
+            Text::ProductToCheckTag => "scenes.product.to_check",
+            Text::ClipProductCheckTitle => "clips.product.check_title",
+            Text::ClipProductCheckHint => "clips.product.check_hint",
+            Text::ClipProductMatches => "clips.product.matches",
+            Text::ClipProductCheckedNote => "clips.product.checked",
         };
         Cow::Borrowed(key)
     }
@@ -8186,6 +8221,23 @@ mod tests {
         texts.extend(ProductLayout::ALL.map(Text::ProductLayoutName));
         texts.extend(ShotPlacement::ALL.map(Text::ShotPlacementName));
         texts.extend(BackdropDirection::ALL.map(Text::BackdropDirectionName));
+        texts.push(Text::RenderProductUnchecked);
+        texts.push(Text::RenderProductUncheckedScenes);
+        texts.push(Text::ProductCheckRefused);
+        texts.push(Text::ProductUncheckedClip);
+        texts.push(Text::ProductCheckTitle);
+        texts.push(Text::ProductCheckHint);
+        texts.push(Text::ProductMatches);
+        texts.push(Text::ProductCheckedNote);
+        texts.push(Text::ProductDrawAgain);
+        texts.push(Text::ProductUseRealImage);
+        texts.push(Text::ProductNotDrawn);
+        texts.push(Text::ProductRealImage);
+        texts.push(Text::ProductToCheckTag);
+        texts.push(Text::ClipProductCheckTitle);
+        texts.push(Text::ClipProductCheckHint);
+        texts.push(Text::ClipProductMatches);
+        texts.push(Text::ClipProductCheckedNote);
         texts.extend(Stage::ALL.map(Text::StageName));
         texts.extend(Stage::ALL.map(Text::StageAfter));
         texts.push(Text::RenderNoCut);

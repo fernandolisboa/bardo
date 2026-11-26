@@ -154,6 +154,11 @@ pub enum Control {
     /// Scenes: how an ad's picked product shot looks: its layout,
     /// position and backdrop (#285).
     ShotLook,
+    /// Scenes: checking the product in a scene of the product in use
+    /// against the real one (#279).
+    ProductCheck,
+    /// Clips: checking the product in such a scene's clip (#279).
+    ClipProductCheck,
     /// Clips: animating every scene without a clip.
     ClipsAnimate,
     /// Clips: the picked scene's motion prompt.
@@ -792,7 +797,7 @@ pub const SCENES: Tour = {
     const TOOLBAR: WhenMissing = WhenMissing::LightPart(TourAnchor::Toolbar);
     Tour {
         id: TourId::Scenes,
-        version: 8,
+        version: 9,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "plan", control(Control::ScenesPlan))
@@ -828,7 +833,7 @@ pub const CLIPS: Tour = {
     const SCENE: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Clips,
-        version: 3,
+        version: 4,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "animate", control(Control::ClipsAnimate))

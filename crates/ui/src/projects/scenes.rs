@@ -1367,7 +1367,7 @@ impl ProjectsScreen {
         busy: bool,
         cx: &mut Context<Self>,
     ) -> (Vec<AnyElement>, usize) {
-        let kind = self.render_scene_kind(index, scene, busy, cx);
+        let kind = self.render_scene_kind(index, scene, busy, open.is_some(), cx);
         if scene.is_composed() {
             return self.composed_scene_body(index, scene, kind, busy, cx);
         }
@@ -1574,6 +1574,7 @@ impl ProjectsScreen {
         index: usize,
         scene: &Scene,
         busy: bool,
+        editing: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let view = self.scenes.as_ref()?;
@@ -1647,6 +1648,7 @@ impl ProjectsScreen {
         let removed = shown
             .filter(|shown| !kinds.images.iter().any(|image| image.id == *shown))
             .map(|_| kit::notice(Tone::Warning, tr(bardo, Text::SceneImageRemoved), cx).text_xs());
+        let product = self.render_product_check(index, scene, locked, editing, cx);
         Some(
             v_flex()
                 .gap_1()
@@ -1655,7 +1657,171 @@ impl ProjectsScreen {
                 .children(images)
                 .children(too_small)
                 .children(removed)
+                .children(product)
                 .into_any_element(),
+        )
+    }
+
+    /// The product in use (#279): its picture beside the real product,
+    /// to check by eye. It matches (the check), draw it again (paid), or
+    /// show the real image instead (a product shot, free). A picture drawn
+    /// without the product says to draw it with the product.
+    fn render_product_check(
+        &self,
+        index: usize,
+        scene: &Scene,
+        locked: bool,
+        editing: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !scene.shows_product_in_use() {
+            return None;
+        }
+        let view = self.scenes.as_ref()?;
+        let bardo = self.bardo.read(cx);
+        if scene.image().is_some() && !scene.product_drawn() && !scene.pending_product_drawn() {
+            return Some(
+                kit::notice(Tone::Warning, tr(bardo, Text::ProductNotDrawn), cx)
+                    .text_xs()
+                    .into_any_element(),
+            );
+        }
+        if !scene.product_drawn() {
+            return None;
+        }
+        if scene.product_checked() {
+            return Some(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        Icon::new(Lucide::ShieldCheck)
+                            .xsmall()
+                            .text_color(cx.theme().success),
+                    )
+                    .child(muted(cx, tr(bardo, Text::ProductCheckedNote)))
+                    .into_any_element(),
+            );
+        }
+        let thumb = |path: PathBuf, id: &'static str| {
+            div()
+                .id((id, index))
+                .w_full()
+                .max_w(px(120.))
+                .aspect_ratio(1.)
+                .rounded_sm()
+                .overflow_hidden()
+                .border_1()
+                .border_color(cx.theme().border)
+                .child(img(path).size_full().object_fit(ObjectFit::Contain))
+        };
+        let drawn = scene.image().map(|image| {
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .child(thumb(bardo.scene_image_path(image), "product-check-drawn"))
+        });
+        let real = view.kinds.photo.clone().map(|path| {
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_1()
+                .child(thumb(path, "product-check-real"))
+                .child(muted(cx, tr(bardo, Text::ProductRealImage)))
+        });
+        let estimate = view
+            .image_estimates
+            .get(index)
+            .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateRedraw, cx));
+        Some(
+            kit::anchor(
+                TourAnchor::Control(Control::ProductCheck),
+                v_flex()
+                    .gap_1()
+                    .p_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().warning)
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(field_label(tr(bardo, Text::ProductCheckTitle)))
+                            .child(guide::info(
+                                bardo,
+                                ("product-check-info", index),
+                                tr(bardo, Text::ProductCheckHint),
+                                guide::refs::SCENES_PRODUCT_CHECK,
+                            )),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_start()
+                            .children(drawn)
+                            .children(real),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_wrap()
+                            .gap_1()
+                            .child(
+                                Button::new(("product-matches", index))
+                                    .xsmall()
+                                    .primary()
+                                    .label(tr(bardo, Text::ProductMatches))
+                                    .disabled(locked)
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.scene_action(window, cx, |bardo, project| {
+                                                bardo.check_product_picture(project, index)
+                                            });
+                                        },
+                                    )),
+                            )
+                            .child(
+                                self.paid(
+                                    Button::new(("product-draw-again", index))
+                                        .disabled(locked || editing || scene.pending().is_some()),
+                                    cx,
+                                )
+                                .xsmall()
+                                .outline()
+                                .label(tr(bardo, Text::ProductDrawAgain))
+                                .on_click(cx.listener(
+                                    move |this, _: &ClickEvent, window, cx| {
+                                        this.run_scene(
+                                            SceneAction::Redraw(index),
+                                            BudgetConsent::Ask,
+                                            window,
+                                            cx,
+                                        );
+                                    },
+                                )),
+                            )
+                            .child(
+                                Button::new(("product-use-real", index))
+                                    .xsmall()
+                                    .ghost()
+                                    .label(tr(bardo, Text::ProductUseRealImage))
+                                    .disabled(locked)
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.scene_action(window, cx, |bardo, project| {
+                                                bardo.set_scene_kind(
+                                                    project,
+                                                    index,
+                                                    SceneKind::ProductShot,
+                                                    None,
+                                                )
+                                            });
+                                        },
+                                    )),
+                            ),
+                    )
+                    .children(estimate),
+            )
+            .into_any_element(),
         )
     }
 
@@ -2886,6 +3052,69 @@ impl ProjectsScreen {
         });
 
         let scroll = Some(&self.inspector_scroll);
+        // Checking a clip waits for every job of the stage (#279).
+        let stage_busy = self
+            .scenes
+            .as_ref()
+            .is_none_or(|scenes| scenes.is_busy() || scenes.is_animating());
+        // The product in use (#279): its clip plays in the cut once the
+        // user checked the product stays as it is.
+        let product = (scene.shows_product_in_use() && scene.clip().is_some())
+            .then_some(())
+            .filter(|()| scene.clip_checked() || scene.may_check_clip())
+            .map(|()| {
+                if scene.clip_checked() {
+                    return h_flex()
+                        .gap_1()
+                        .items_center()
+                        .child(
+                            Icon::new(Lucide::ShieldCheck)
+                                .xsmall()
+                                .text_color(cx.theme().success),
+                        )
+                        .child(muted(cx, tr(bardo, Text::ClipProductCheckedNote)))
+                        .into_any_element();
+                }
+                kit::anchor_in(
+                    TourAnchor::Control(Control::ClipProductCheck),
+                    v_flex()
+                        .gap_1()
+                        .p_2()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().warning)
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .items_center()
+                                .child(field_label(tr(bardo, Text::ClipProductCheckTitle)))
+                                .child(guide::info(
+                                    bardo,
+                                    ("clip-product-check-info", index),
+                                    tr(bardo, Text::ClipProductCheckHint),
+                                    guide::refs::CLIPS_PRODUCT_CHECK,
+                                )),
+                        )
+                        .child(
+                            h_flex().child(
+                                Button::new(("clip-product-matches", index))
+                                    .primary()
+                                    .xsmall()
+                                    .label(tr(bardo, Text::ClipProductMatches))
+                                    .disabled(stage_busy)
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.scene_action(window, cx, |bardo, id| {
+                                                bardo.check_product_clip(id, index)
+                                            });
+                                        },
+                                    )),
+                            ),
+                        ),
+                    scroll,
+                )
+                .into_any_element()
+            });
         let review = (current.is_some() || pending.is_some()).then(|| {
             kit::anchor_in(
                 TourAnchor::Control(Control::ClipReview),
@@ -2929,6 +3158,7 @@ impl ProjectsScreen {
             .children(state)
             .children(actions)
             .children(review)
+            .children(product)
             .into_any_element()
     }
 }
@@ -3036,6 +3266,11 @@ fn scene_chip(bardo: &Bardo, state: SceneState, composed: bool, cx: &App) -> Opt
             Tone::Danger,
             Icon::new(Tone::Danger.icon()),
             Text::SceneCardFailed,
+        ),
+        SceneState::CheckProduct => (
+            Tone::Warning,
+            Icon::new(Lucide::ShieldCheck),
+            Text::ProductToCheckTag,
         ),
     };
     Some(kit::status_with(tone, icon, tr(bardo, text), cx).into_any_element())

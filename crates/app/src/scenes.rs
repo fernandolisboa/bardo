@@ -139,6 +139,13 @@ pub enum SceneError {
     /// end card.
     #[error(transparent)]
     Kind(#[from] SceneKindError),
+    /// A product check that does not apply (#279).
+    #[error(transparent)]
+    ProductCheck(#[from] bardo_domain::ProductCheckError),
+    /// The scene shows the product in use and its picture is not checked
+    /// yet: it is not animated (#279).
+    #[error("the product in the scene's picture is not checked")]
+    ProductUnchecked,
     /// The drawn backdrop named is not one of the project's, or was not
     /// kept (#285).
     #[error("no such backdrop")]
@@ -184,6 +191,8 @@ impl SceneError {
             SceneError::ClipModelNotOffered => Text::SceneClipModelNotOffered,
             SceneError::Kind(SceneKindError::NoSuchScene(_)) => Text::SceneNotFound,
             SceneError::Kind(_) => Text::SceneKindNotAllowed,
+            SceneError::ProductCheck(_) => Text::ProductCheckRefused,
+            SceneError::ProductUnchecked => Text::ProductUncheckedClip,
             SceneError::NoSuchBackdrop => Text::ShotBackdropGone,
             SceneError::BackdropInUse => Text::ShotBackdropInUse,
             SceneError::Template(error) => error.message(),
@@ -1162,8 +1171,12 @@ impl SceneHandler {
             // style. Once one of them is left without (it failed now, or
             // earlier in this run), the scene will not be drawn, so the
             // portraits of the others are not bought for it.
+            // Nor for a product in use whose product photo is missing
+            // (#279): the scene fails below without being drawn.
+            let no_photo = scene.shows_product_in_use()
+                && product.is_none_or(|product| self.product_reference(project, product).is_err());
             let missing = plan.missing_portraits(&[index], style);
-            if !missing.iter().any(|member| tried.contains(member)) {
+            if !no_photo && !missing.iter().any(|member| tried.contains(member)) {
                 for member in missing {
                     tried.push(member);
                     total += 1;
@@ -1260,6 +1273,47 @@ impl SceneHandler {
                 continue;
             }
             let referenced: Vec<bool> = used.iter().map(|(_, used)| used.is_some()).collect();
+            // The product in use is drawn with the product's photo, right
+            // after the people (#279). Without it the scene is not drawn:
+            // it would be paid for and show another product.
+            let looks = match scene.shows_product_in_use() {
+                false => None,
+                true => {
+                    let added = product
+                        .ok_or_else(|| "the ad has no product".to_owned())
+                        .and_then(|product| self.product_reference(project, product))
+                        .and_then(|(file, looks)| {
+                            references
+                                .try_add(self.files.as_ref(), self.media.as_ref(), project, &file)
+                                .map(|()| looks)
+                                .map_err(|why| match why {
+                                    NotAdded::Unreadable => {
+                                        "the product's photo could not be read".to_owned()
+                                    }
+                                    NotAdded::NoRoom => {
+                                        "the product's photo did not fit in the request".to_owned()
+                                    }
+                                })
+                        });
+                    match added {
+                        Ok(looks) => Some(looks),
+                        Err(why) => {
+                            if let Some(mut plan) = self.saved_plan(project, plan_id)? {
+                                plan.scene_mut(index, SystemTime::now())
+                                    .map_err(unexpected)?
+                                    .fail(JobFailureKind::Files);
+                                self.plans.save_scene(&plan, index).map_err(unexpected)?;
+                            }
+                            failed.push(JobFailure::new(
+                                JobFailureKind::Files,
+                                format!("scene {}: {why}", index + 1),
+                            ));
+                            step(&mut cx, &mut done, total)?;
+                            continue;
+                        }
+                    }
+                }
+            };
             // Then the other scenes it belongs with; one whose image will
             // not read is left out.
             let shots: Vec<OtherShot> = plan
@@ -1283,7 +1337,9 @@ impl SceneHandler {
                     .and_then(|place| plan.place(place).ok()),
                 shots: &shots,
                 style,
+                product: looks.as_deref(),
             };
+            let with_product = looks.is_some();
             let references = references.images;
             let prompt = scene_image_prompt(scene.prompt().as_str(), &shown, &referenced, setting);
             let request = ImageRequest {
@@ -1341,7 +1397,7 @@ impl SceneHandler {
                     let pushed = plan
                         .scene_mut(index, SystemTime::now())
                         .map_err(unexpected)?
-                        .add_image_drawn_with(image, Some(used));
+                        .add_drawing(image, Some(used), with_product);
                     self.plans.save_scene(&plan, index).map_err(unexpected)?;
                     if let Some(pushed) = pushed {
                         crate::proxies::remove_media(self.files.as_ref(), project, &pushed.file);
@@ -2173,10 +2229,9 @@ impl Bardo {
             aspect: self.video_format(&project)?.aspect().code().to_owned(),
             portraits,
             style: style.code().to_owned(),
-            product: project
-                .product
-                .filter(|_| !shots.is_empty())
-                .map(|product| product.to_string()),
+            // The product's photo goes with its in-use scenes (#279), and
+            // its images make its product shots.
+            product: project.product.map(|product| product.to_string()),
             shots,
         };
         let job = Job::new(self.profile.id, JobKind::SceneImages, to_json(&payload));

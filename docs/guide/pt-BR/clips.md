@@ -32,6 +32,11 @@ Cada cena usa o modelo padrão do vídeo, a menos que você escolha outro para e
 
 Um novo clipe espera ao lado do atual como **Novo clipe para revisar**. **Reproduza-o** primeiro (**Reproduzir**), depois **Usar o novo clipe** ou **Descartar**. O clipe de uma cena mostra a duração e o modelo; **Usar a imagem parada** tira o clipe e volta à imagem. Quando a imagem da cena muda depois que o clipe foi feito, o clipe fica marcado como **Imagem mudou**.
 
+<a id="product-check"></a>
+## O produto em uso
+
+Uma cena do [produto em uso](scenes.md#product-check) só é animada depois que você conferiu o produto na imagem dela; até lá ela mostra **Conferir produto** e **Animar cenas sem clipe** a deixa de fora. O prompt de movimento dela começa com uma frase fixa: o produto fica rígido e sem mudanças, e só a câmera ou a pessoa se mexe. O clipe dela espera uma conferência própria: **Reproduza** e observe o produto, depois **Continua igual**. Até você conferir, o corte mostra a imagem conferida no lugar do clipe. Um clipe novo usado na cena precisa ser conferido de novo.
+
 <a id="stretch"></a>
 ## Clipes em câmera lenta
 

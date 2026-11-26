@@ -18,9 +18,9 @@ use bardo_domain::{
     ComposedShot, ContentLanguage, CostPurpose, CostRecordId, Country, Gap, GeneratedScript,
     Generation, GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, Localization,
     LocalizationRepository, MediaAsset, MediaAssetId, MediaAssetRepository, MusicTrack,
-    MusicTrackRepository, Narration, NarrationRepository, NewVersion, PlacedScene, ProfileId,
-    ProjectFiles, Provider, RenderedPrompt, RepositoryError, Scene, SceneClip, SceneImage,
-    ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository, SceneRecord, Script,
+    MusicTrackRepository, Narration, NarrationRepository, NewVersion, PlacedScene, ProductChecks,
+    ProfileId, ProjectFiles, Provider, RenderedPrompt, RepositoryError, Scene, SceneClip,
+    SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository, SceneRecord, Script,
     ScriptRepository, SecretStore, ShotBackdrop, ShotBackdropDrawing, ShotLook, SourceSentence,
     Stop, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
     TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, Theme, ThemeIdea,
@@ -416,6 +416,20 @@ pub(crate) fn copy_plan(
                     source_image: image.generation.id,
                     generation: copied(&clip.generation),
                 });
+            // A check names what it was made on: the copies (#279).
+            let checks = scene.product_checks();
+            let checks = ProductChecks {
+                image_drawn: checks.image_drawn,
+                pending_drawn: false,
+                picture: checks
+                    .picture
+                    .filter(|id| scene.image().is_some_and(|i| i.generation.id == *id))
+                    .and(image.as_ref().map(|i| i.generation.id)),
+                clip: checks
+                    .clip
+                    .filter(|id| scene.clip().is_some_and(|c| c.generation.id == *id))
+                    .and(clip.as_ref().map(|c| c.generation.id)),
+            };
             Scene::restore(SceneRecord {
                 start: scene.start,
                 end: scene.end,
@@ -454,6 +468,7 @@ pub(crate) fn copy_plan(
                 }),
             )
             .with_look(copied_look(scene.look()))
+            .with_product_checks(checks)
         })
         .collect();
     ScenePlan::restore(ScenePlanRecord {

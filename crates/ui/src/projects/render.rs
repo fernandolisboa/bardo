@@ -471,6 +471,23 @@ impl ProjectsScreen {
             ),
             _ => {}
         }
+        // The product in use waits for its check (#279): nothing renders.
+        if !review.unchecked_products.is_empty() {
+            let scenes = review
+                .unchecked_products
+                .iter()
+                .map(|index| (index + 1).to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            notices.push(
+                kit::notice(
+                    Tone::Danger,
+                    bardo.text_with(Text::RenderProductUncheckedScenes, &[("scenes", &scenes)]),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
         notices.extend(review.gates.iter().map(|gate| gate_line(bardo, gate, cx)));
         if review.targets.is_empty() {
             notices.push(muted(cx, tr(bardo, Text::RenderNoAccounts)));

@@ -42,6 +42,7 @@ mod persona_looks;
 mod persona_package;
 mod personas;
 mod plans;
+mod product_checks;
 mod product_sheets;
 mod production;
 mod products;
