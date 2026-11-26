@@ -1506,7 +1506,7 @@ impl Render for ChannelsScreen {
         let form = self.render_form(cx).into_any_element();
         let project = self.render_project(cx);
         let bardo = self.bardo.read(cx);
-        let mut header = Header::place(bardo, Destination::Channels);
+        let mut header = Header::place(bardo, Destination::Channels, cx);
         header.info =
             guide::header_info(bardo, Destination::Channels, self.has_content(), None, cx);
         header.actions.push(

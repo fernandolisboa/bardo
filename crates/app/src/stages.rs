@@ -58,7 +58,7 @@ impl Stage {
         )
     }
 
-    /// The stage's name in links (`bardo:go/projects/script`).
+    /// The stage's name in links (`bardo:go/videos/script`).
     pub fn code(self) -> &'static str {
         match self {
             Stage::Brief => "brief",

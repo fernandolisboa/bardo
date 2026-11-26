@@ -544,7 +544,7 @@ impl Render for PerformanceScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.refresh_over(cx);
         let bardo = self.bardo.read(cx);
-        let mut header = Header::place(bardo, Destination::Performance);
+        let mut header = Header::place(bardo, Destination::Performance, cx);
         let info = guide::info(
             bardo,
             "performance-info",

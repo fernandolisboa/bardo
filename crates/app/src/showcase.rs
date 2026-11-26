@@ -31,7 +31,7 @@ impl ShowcasePlace {
             .filter(|place| {
                 !matches!(
                     place,
-                    GuidePlace::Screen(Destination::Projects | Destination::Settings)
+                    GuidePlace::Screen(Destination::Videos | Destination::Settings)
                 )
             })
             .map(ShowcasePlace::Place)

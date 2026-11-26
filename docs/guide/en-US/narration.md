@@ -2,13 +2,13 @@
 id: narration
 title: Narration
 group: production
-place: projects/narration
+place: videos/narration
 tour: narration
 ---
 
 # Narration
 
-The narration is the script read aloud by the project's narrator, with the time of every word, so scenes, captions and cuts line up with it. It lives at the [Narration](bardo:go/projects/narration) stage of a project. [Show me the stage](bardo:tour/narration).
+The narration is the script read aloud by the project's narrator, with the time of every word, so scenes, captions and cuts line up with it. It lives at the [Narration](bardo:go/videos/narration) stage of a project. [Show me the stage](bardo:tour/narration).
 
 <a id="generate"></a>
 ## Generating it
@@ -42,4 +42,4 @@ Recorded the script yourself? **Import recording** takes an MP3 or uncompressed 
 <a id="capture"></a>
 ## Importing a capture
 
-Recorded yourself reading the script on camera? **Import capture** takes the video: its speech becomes the narration, in the persona's voice or your own, and the recording is split into takes at the [Capture](bardo:go/projects/capture) stage. See [Performance capture](capture.md).
+Recorded yourself reading the script on camera? **Import capture** takes the video: its speech becomes the narration, in the persona's voice or your own, and the recording is split into takes at the [Capture](bardo:go/videos/capture) stage. See [Performance capture](capture.md).

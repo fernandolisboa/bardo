@@ -2,13 +2,13 @@
 id: script
 title: Roteiro
 group: production
-place: projects/script
+place: videos/script
 tour: script
 ---
 
 # Roteiro
 
-O roteiro é o que o narrador vai dizer. O Claude escreve, você edita, e todas as etapas seguintes partem dele. Ele fica na etapa [Roteiro](bardo:go/projects/script) de um projeto, com a música do vídeo logo abaixo: o prompt dela e as faixas feitas a partir dele. [Mostre a etapa para mim](bardo:tour/script).
+O roteiro é o que o narrador vai dizer. O Claude escreve, você edita, e todas as etapas seguintes partem dele. Ele fica na etapa [Roteiro](bardo:go/videos/script) de um projeto, com a música do vídeo logo abaixo: o prompt dela e as faixas feitas a partir dele. [Mostre a etapa para mim](bardo:tour/script).
 
 <a id="write"></a>
 ## Gere e depois edite

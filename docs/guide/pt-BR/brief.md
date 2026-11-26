@@ -2,13 +2,13 @@
 id: brief
 title: Briefing
 group: production
-place: projects/brief
+place: videos/brief
 tour: brief
 ---
 
 # Briefing
 
-O briefing é o que um anúncio diz sobre o produto: as afirmações que ele pode fazer, a oferta, a chamada para ação e o link. É a primeira etapa de um projeto de anúncio, o tipo de projeto que começa quando você aprova um [ângulo de anúncio](products.md#angle-review) em Produtos, e o [roteiro](script.md) é escrito a partir dele. Um projeto que não é anúncio não tem a etapa Briefing. A etapa fica em [Briefing](bardo:go/projects/brief) e não custa nada; enquanto um projeto que não é anúncio está aberto, esse link abre o seu projeto de anúncio mais novo. [Mostre a etapa para mim](bardo:tour/brief).
+O briefing é o que um anúncio diz sobre o produto: as afirmações que ele pode fazer, a oferta, a chamada para ação e o link. É a primeira etapa de um projeto de anúncio, o tipo de projeto que começa quando você aprova um [ângulo de anúncio](products.md#angle-review) em Produtos, e o [roteiro](script.md) é escrito a partir dele. Um projeto que não é anúncio não tem a etapa Briefing. A etapa fica em [Briefing](bardo:go/videos/brief) e não custa nada; enquanto um projeto que não é anúncio está aberto, esse link abre o seu projeto de anúncio mais novo. [Mostre a etapa para mim](bardo:tour/brief).
 
 <a id="angle"></a>
 ## Produto e ângulo

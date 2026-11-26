@@ -5,6 +5,7 @@ use bardo_app::{
     Bardo, Destination, GuidePlace, GuideRef, ScreenTour, SettingsTab, SetupTarget, SpendSummary,
     Stage, Text, TourMove, TourPlace,
 };
+use bardo_app::{LibraryTab, NavEntry};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -26,7 +27,8 @@ use crate::kit::Tone;
 use crate::layout;
 use crate::missed::{MissedChanged, MissedPosts};
 use crate::network_accounts::OpenNetworkSettings;
-use crate::parts::{BudgetMeter, Navigation};
+use crate::overview::{OpenIdeas, OpenVideo, OverviewScreen};
+use crate::parts::{BudgetMeter, Navigation, ShownPlace};
 use crate::performance::{OpenRetention, PerformanceScreen};
 use crate::personas::PersonasScreen;
 use crate::products::ProductsScreen;
@@ -50,6 +52,13 @@ pub(crate) fn tr(bardo: &Bardo, text: Text) -> SharedString {
 pub struct Shell {
     bardo: Entity<Bardo>,
     screen: Destination,
+    /// The tab the global library shows.
+    library_tab: LibraryTab,
+    /// The place last shown under Ideas and under Channels and accounts:
+    /// their entries open it again.
+    ideas_tab: Destination,
+    channels_tab: Destination,
+    overview: Entity<OverviewScreen>,
     channels: Entity<ChannelsScreen>,
     accounts: Entity<AccountsScreen>,
     personas: Entity<PersonasScreen>,
@@ -101,6 +110,7 @@ pub struct Shell {
 impl Shell {
     pub fn new(bardo: Bardo, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let bardo = cx.new(|_| bardo);
+        let overview = cx.new(|cx| OverviewScreen::new(bardo.clone(), cx));
         let channels = cx.new(|cx| ChannelsScreen::new(bardo.clone(), window, cx));
         let accounts = cx.new(|cx| AccountsScreen::new(bardo.clone(), window, cx));
         let personas = cx.new(|cx| PersonasScreen::new(bardo.clone(), window, cx));
@@ -125,6 +135,17 @@ impl Shell {
             cx,
         );
         let subscriptions = vec![
+            // Overview's Continue and Open: the video at its next step.
+            cx.subscribe_in(
+                &overview,
+                window,
+                |this, _, event: &OpenVideo, window, cx| {
+                    this.open_video(event.video, event.stage, window, cx);
+                },
+            ),
+            cx.subscribe_in(&overview, window, |this, _, _: &OpenIdeas, window, cx| {
+                this.pick(Destination::Themes, window, cx);
+            }),
             // Another project opened: every screen shows it now.
             cx.subscribe_in(
                 &switcher,
@@ -216,7 +237,7 @@ impl Shell {
                 window,
                 |this, _, event: &OpenProject, window, cx| {
                     let project = event.0;
-                    this.pick(Destination::Projects, window, cx);
+                    this.pick(Destination::Videos, window, cx);
                     this.projects.update(cx, |projects, cx| {
                         projects.show_project(project, window, cx)
                     });
@@ -250,6 +271,10 @@ impl Shell {
         let mut shell = Self {
             bardo,
             screen: Destination::START,
+            library_tab: LibraryTab::Narrators,
+            ideas_tab: Destination::Research,
+            channels_tab: Destination::Channels,
+            overview,
             channels,
             accounts,
             personas,
@@ -290,6 +315,7 @@ impl Shell {
     /// and Costs on it.
     fn project_switched(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_project = open_project_of(&self.bardo, cx);
+        self.overview.update(cx, |overview, cx| overview.reload(cx));
         self.channels
             .update(cx, |channels, cx| channels.reload(window, cx));
         self.accounts
@@ -350,13 +376,17 @@ impl Shell {
         // personas, niches, projects started from themes.
         if place != self.screen {
             match place {
+                Destination::Overview => {
+                    self.overview.update(cx, |overview, cx| overview.reload(cx))
+                }
+                Destination::Library => self.reload_library(window, cx),
                 Destination::Channels => self
                     .channels
                     .update(cx, |channels, cx| channels.reload(window, cx)),
                 Destination::Accounts => self
                     .accounts
                     .update(cx, |accounts, cx| accounts.reload(window, cx)),
-                Destination::Personas => self
+                Destination::Narrators => self
                     .personas
                     .update(cx, |personas, cx| personas.reload(window, cx)),
                 Destination::Products => self
@@ -371,7 +401,7 @@ impl Shell {
                 Destination::Performance => self
                     .performance
                     .update(cx, |performance, cx| performance.reload(window, cx)),
-                Destination::Projects => self
+                Destination::Videos => self
                     .projects
                     .update(cx, |projects, cx| projects.reload(window, cx)),
                 Destination::Templates => self
@@ -381,9 +411,50 @@ impl Shell {
                 Destination::Settings | Destination::Jobs | Destination::Guide => {}
             }
         }
+        match place.entry() {
+            Some(NavEntry::Ideas) => self.ideas_tab = place,
+            Some(NavEntry::ChannelsAndAccounts) => self.channels_tab = place,
+            _ => {}
+        }
         self.screen = place;
         self.refresh_spend(cx);
         cx.notify();
+    }
+
+    /// Re-reads the screen the global library's tab shows.
+    fn reload_library(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.library_tab {
+            LibraryTab::Narrators => self
+                .personas
+                .update(cx, |personas, cx| personas.reload(window, cx)),
+            LibraryTab::Products => self
+                .products
+                .update(cx, |products, cx| products.reload(window, cx)),
+            LibraryTab::Templates => self
+                .templates
+                .update(cx, |templates, cx| templates.reload(window, cx)),
+        }
+    }
+
+    /// Overview's Continue or Open: the video on Videos, at the stage of
+    /// its next step; building the cut opens the editor.
+    fn open_video(
+        &mut self,
+        video: VideoProjectId,
+        stage: Option<Stage>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pick(Destination::Videos, window, cx);
+        self.projects
+            .update(cx, |projects, cx| projects.show_project(video, window, cx));
+        match stage {
+            Some(Stage::Edit) => self.open_editor(video, window, cx),
+            Some(stage) => self
+                .projects
+                .update(cx, |projects, cx| projects.show_stage(stage, window, cx)),
+            None => {}
+        }
     }
 
     /// Runs what the user asked of the Guide, and opens the place the
@@ -469,7 +540,7 @@ impl Shell {
                     editor.focus(window, cx);
                 }),
                 None => {
-                    self.pick(Destination::Projects, window, cx);
+                    self.pick(Destination::Videos, window, cx);
                     self.projects.update(cx, |projects, cx| {
                         projects.show_stage(Stage::Edit, window, cx)
                     });
@@ -481,7 +552,7 @@ impl Shell {
         match place {
             TourPlace::Screen(place) => self.reveal(place, window, cx),
             TourPlace::Stage(stage) => {
-                self.pick(Destination::Projects, window, cx);
+                self.pick(Destination::Videos, window, cx);
                 self.projects
                     .update(cx, |projects, cx| projects.show_stage(stage, window, cx));
             }
@@ -524,11 +595,11 @@ impl Shell {
     fn place(&self, cx: &App) -> Option<GuidePlace> {
         match self.screen {
             Destination::Guide => None,
-            Destination::Projects => Some(
+            Destination::Videos => Some(
                 self.projects
                     .read(cx)
                     .current_stage()
-                    .map_or(GuidePlace::Screen(Destination::Projects), GuidePlace::Stage),
+                    .map_or(GuidePlace::Screen(Destination::Videos), GuidePlace::Stage),
             ),
             Destination::Settings => Some(GuidePlace::Settings(self.settings.read(cx).tab())),
             place => Some(GuidePlace::Screen(place)),
@@ -604,10 +675,16 @@ impl Shell {
             Destination::Research => self.research.read(cx).has_content(),
             Destination::Themes => self.themes.read(cx).has_content(),
             Destination::Performance => self.performance.read(cx).has_content(),
-            Destination::Projects => self.projects.read(cx).has_content(),
-            Destination::Personas => self.personas.read(cx).has_content(),
+            Destination::Videos => self.projects.read(cx).has_content(),
+            Destination::Narrators => self.personas.read(cx).has_content(),
             Destination::Products => self.products.read(cx).has_content(),
             Destination::Templates => self.templates.read(cx).has_content(),
+            Destination::Overview => self.overview.read(cx).has_content(),
+            Destination::Library => match self.library_tab {
+                LibraryTab::Narrators => self.personas.read(cx).has_content(),
+                LibraryTab::Products => self.products.read(cx).has_content(),
+                LibraryTab::Templates => self.templates.read(cx).has_content(),
+            },
             // Its providers and rates always show.
             Destination::Costs => true,
             _ => false,
@@ -618,7 +695,7 @@ impl Shell {
     /// The tour the open project's stage on display offers: one with a
     /// tour of its own that has made something.
     fn stage_tour(&self, cx: &App) -> Option<ScreenTour> {
-        if self.screen != Destination::Projects {
+        if self.screen != Destination::Videos {
             return None;
         }
         let (stage, has_content) = self.projects.read(cx).stage_content()?;
@@ -726,7 +803,7 @@ impl Shell {
             GuidePlace::Screen(Destination::Jobs) => self.reveal(Destination::Jobs, window, cx),
             GuidePlace::Screen(place) => self.show(place, window, cx),
             GuidePlace::Stage(stage) => {
-                self.pick(Destination::Projects, window, cx);
+                self.pick(Destination::Videos, window, cx);
                 self.projects
                     .update(cx, |projects, cx| projects.show_stage(stage, window, cx));
             }
@@ -734,6 +811,14 @@ impl Shell {
                 self.settings
                     .update(cx, |settings, cx| settings.show_tab(tab, cx));
                 self.pick(Destination::Settings, window, cx);
+            }
+            GuidePlace::Library(tab) => {
+                let changed = self.library_tab != tab;
+                self.library_tab = tab;
+                if changed && self.screen == Destination::Library {
+                    self.reload_library(window, cx);
+                }
+                self.pick(Destination::Library, window, cx);
             }
         }
     }
@@ -756,7 +841,7 @@ impl Shell {
                     // Performance): its project's Render stage is on Projects.
                     EditorEvent::Render => {
                         this.close_editor(window, cx);
-                        this.pick(Destination::Projects, window, cx);
+                        this.pick(Destination::Videos, window, cx);
                         this.projects.update(cx, |projects, cx| {
                             projects.show_project(project, window, cx);
                             projects.show_stage(Stage::Render, window, cx)
@@ -821,7 +906,13 @@ impl Shell {
     fn navigation(&self, cx: &mut Context<Self>) -> Navigation {
         let shell = cx.entity().downgrade();
         let bardo = self.bardo.read(cx);
-        let mut navigation = Navigation::new(bardo, self.screen, move |place, window, cx| {
+        let (ideas_tab, channels_tab) = (self.ideas_tab, self.channels_tab);
+        let last = move |entry: NavEntry| match entry {
+            NavEntry::Ideas => ideas_tab,
+            NavEntry::ChannelsAndAccounts => channels_tab,
+            entry => entry.places()[0],
+        };
+        let mut navigation = Navigation::new(bardo, self.screen, last, move |place, window, cx| {
             let _ = shell.update(cx, |shell, cx| shell.pick(place, window, cx));
         });
         navigation.jobs_open = self.jobs_open;
@@ -900,7 +991,10 @@ impl Render for Shell {
         // A copy built from source says so, as its data is its own.
         let dev = (bardo_storage::data_home() == bardo_storage::DataHome::Development)
             .then(|| tr(self.bardo.read(cx), Text::DevCopyChip));
+        // The guide's layer covers the title bar too, so a tour can light
+        // the project switcher there.
         v_flex()
+            .relative()
             .size_full()
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::on_open_guide))
@@ -916,15 +1010,8 @@ impl Render for Shell {
                             .then(|| self.switcher.clone().into_any_element()),
                     ),
             )
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .child(content)
-                    .child(guide),
-            )
+            .child(div().relative().flex_1().min_h_0().w_full().child(content))
+            .child(guide)
     }
 }
 
@@ -982,16 +1069,26 @@ impl Shell {
     /// The current screen in the layout, under the missed posts when any.
     fn render_screens(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let navigation = self.navigation(cx);
+        // A screen's header reads whether the global library shows it.
+        if cx.try_global::<ShownPlace>() != Some(&ShownPlace(self.screen)) {
+            cx.set_global(ShownPlace(self.screen));
+        }
         let screen = match self.screen {
+            Destination::Overview => self.overview.clone().into_any_element(),
+            Destination::Library => match self.library_tab {
+                LibraryTab::Narrators => self.personas.clone().into_any_element(),
+                LibraryTab::Products => self.products.clone().into_any_element(),
+                LibraryTab::Templates => self.templates.clone().into_any_element(),
+            },
             Destination::Channels => self.channels.clone().into_any_element(),
             Destination::Accounts => self.accounts.clone().into_any_element(),
-            Destination::Personas => self.personas.clone().into_any_element(),
+            Destination::Narrators => self.personas.clone().into_any_element(),
             Destination::Products => self.products.clone().into_any_element(),
             Destination::Research => self.research.clone().into_any_element(),
             Destination::Themes => self.themes.clone().into_any_element(),
             Destination::Performance => self.performance.clone().into_any_element(),
             Destination::Guide => self.guide_screen.clone().into_any_element(),
-            Destination::Projects | Destination::Jobs => self.projects.clone().into_any_element(),
+            Destination::Videos | Destination::Jobs => self.projects.clone().into_any_element(),
             Destination::Templates => self.templates.clone().into_any_element(),
             Destination::Costs => self.costs.clone().into_any_element(),
             Destination::Settings => self.settings.clone().into_any_element(),

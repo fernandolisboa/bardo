@@ -23,6 +23,7 @@ mod metrics;
 mod missed;
 mod model_picker;
 mod network_accounts;
+mod overview;
 mod parts;
 mod performance;
 mod persona_look;

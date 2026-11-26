@@ -70,7 +70,7 @@ save = "Save changes"
 saved = "Channel saved."
 persona = "Default persona"
 persona_none = "No default persona"
-persona_hint = "The narrator of this channel's scripts and narration. Manage personas on the Personas screen."
+persona_hint = "The narrator of this channel's scripts and narration. Manage narrators on the Narrators screen."
 clip_model = "Video model"
 clip_model_default = "{model} (default)"
 clip_model_hint = "The model that animates this channel's scene images into clips, through Higgsfield, Kling or Google, in the production mode All animated, channel's model (the other modes pick their own). The default is that of the first provider with a key saved. Any scene can pick another."
@@ -637,12 +637,12 @@ angle_too_long = "Keep the angle to at most 500 characters."
 [projects]
 settings_video = "Video"
 settings_production = "Production and spend"
-switch = "Switch project"
-nav = "Projects"
-title = "Video projects"
-empty = "Approve an idea on Themes, or an ad angle on Products, to start a video project."
-started = "Video project started: {title}"
-no_channels = "This project has no channel yet. Create one on Channels and approve one of its themes to start a video project."
+switch = "Switch video"
+nav = "Videos"
+title = "Videos"
+empty = "Approve an idea on Ideas › Themes, or an ad angle on Products, to start a video."
+started = "Video started: {title}"
+no_channels = "This project has no channel yet. Create one on Channels and approve one of its themes to start a video."
 narrator = "Narrator"
 narrator_channel = "Channel default: {name}"
 narrator_channel_none = "Channel default (none set)"
@@ -756,8 +756,8 @@ imported = "Imported"
 [narration.error]
 no_script = "Generate the script first; the narration reads it."
 no_persona = "Choose a narrator for this video, or a default persona for its channel on the Channels screen."
-voice_unchecked = "The narrator's voice has not been checked in your ElevenLabs account yet. Check it on the Personas screen."
-voice_unavailable = "The narrator's voice is not in your ElevenLabs account. Fix it on the Personas screen or choose another narrator."
+voice_unchecked = "The narrator's voice has not been checked in your ElevenLabs account yet. Check it on the Narrators screen."
+voice_unavailable = "The narrator's voice is not in your ElevenLabs account. Fix it on the Narrators screen or choose another narrator."
 missing_key = "Save an ElevenLabs key under Settings to generate or import narration."
 busy = "A narration is already being made for this project."
 scenes_busy = "Scenes, images or clips are being made for this project on the current narration, or a cancelled job is still stopping. Wait for them, or cancel them on the Jobs panel, before replacing the narration."
@@ -955,8 +955,8 @@ skip_draft_cost = "A final without a draft: about {amount}"
 no_model = "No take model is offered."
 mode_not_taken = "This take's model does not take its mode. Pick one of the modes it takes before anything is paid."
 length = "This take is shorter or longer than its model makes. Move a cut first."
-no_look = "The persona has no look yet. Draw or import one on the Personas screen."
-no_verified_likeness = "This model takes a photo of you only as your verified likeness from the BytePlus asset library. Add its asset id under the persona's look on the Personas screen, or use a drawn look."
+no_look = "The persona has no look yet. Draw or import one on the Narrators screen."
+no_verified_likeness = "This model takes a photo of you only as your verified likeness from the BytePlus asset library. Add its asset id under the persona's look on the Narrators screen, or use a drawn look."
 control_not_approved = "Approve the take's control video first."
 no_video_host = "Kling reads the control video from a link, so Bardo stages it in storage you already set up. Save a BytePlus ModelArk or Higgsfield key under Settings."
 
@@ -1258,39 +1258,39 @@ billions = "{n}B"
 decimal_separator = "."
 
 [personas]
-title = "Personas"
+title = "Narrators"
 hint = "Narrators you reuse across channels: voice, tone, script style and presets."
-empty = "No personas yet. Create one to give your channels a narrator."
-not_loaded = "Could not load your personas. Restart Bardo to try again."
-new = "New persona"
+empty = "No narrators yet. Create one to give your channels a voice."
+not_loaded = "Could not load your narrators. Restart Bardo to try again."
+new = "New narrator"
 import = "Import from file…"
-import_dialog = "Import persona"
+import_dialog = "Import narrator"
 
 [persona]
-new_title = "New persona"
-edit_title = "Edit persona"
+new_title = "New narrator"
+edit_title = "Edit narrator"
 name = "Name"
 name_placeholder = "e.g. Calm Documentary Narrator"
 voice = "Voice"
 voice_none = "No voice chosen yet."
-voice_hint = "The voice stays in your ElevenLabs account. The persona keeps only a reference to it, never audio or keys; samples you play are kept on this computer only, so they replay for free."
+voice_hint = "The voice stays in your ElevenLabs account. The narrator keeps only a reference to it, never audio or keys; samples you play are kept on this computer only, so they replay for free."
 tone = "Tone"
 tone_placeholder = "How the narrator sounds: e.g. sober, measured, no hype."
 script_style = "Script style"
 script_style_placeholder = "How scripts are written for this narrator: structure, sentence length, hooks."
 presets = "Generation presets"
 presets_hint = "How ElevenLabs reads the narration with this voice."
-create = "Create persona"
+create = "Create narrator"
 save = "Save changes"
 duplicate = "Duplicate"
-saved = "Persona saved."
+saved = "Narrator saved."
 duplicated = "Created {name}. Edit it freely; the original stays as it was."
-used_by = "Default persona of: {channels}"
+used_by = "Default narrator of: {channels}"
 unused = "No channel uses it as default yet."
 copy_suffix = "copy"
 imported_suffix = "imported"
 export = "Export to file…"
-export_hint = "Exports a package with the persona, a reference to its voice and its look when it is a drawing; never audio, keys or a photo of you. Whoever imports it needs the same voice in their own ElevenLabs account."
+export_hint = "Exports a package with the narrator, a reference to its voice and its look when it is a drawing; never audio, keys or a photo of you. Whoever imports it needs the same voice in their own ElevenLabs account."
 exported = "Exported to {path}."
 exported_no_look = "Exported to {path}. The look stayed here: it is a photo of you, and a photo never leaves in a package."
 imported = "Imported {name}."
@@ -1604,7 +1604,7 @@ cancel = "Cancel"
 
 [editor]
 open = "Open editor"
-back = "Projects"
+back = "Videos"
 duration = "{duration} · {fps} fps"
 seconds = "{n} s"
 undo = "Undo"
@@ -2016,10 +2016,13 @@ spent = "Spent"
 budget = "Budget"
 state = "State"
 
-[nav.pillar]
-strategy = "Strategy"
-production = "Production"
-publishing = "Publishing"
+[nav.section]
+project = "Project"
+library = "Global library"
+
+[nav.entry]
+ideas = "Ideas"
+channels_and_accounts = "Channels and accounts"
 
 [nav.place]
 guide = "Guide"
@@ -2027,8 +2030,10 @@ performance = "Performance"
 research = "Research"
 themes = "Themes"
 products = "Products"
-projects = "Projects"
-personas = "Personas"
+videos = "Videos"
+narrators = "Narrators"
+overview = "Overview"
+library = "Global library"
 templates = "Templates"
 channels = "Channels"
 accounts = "Accounts"
@@ -2068,7 +2073,7 @@ studio = "Studio"
 not_saved = "Couldn't save the layout. Try again."
 
 [ui_layout.description]
-workspace = "Sidebar by pillar, cards with the details beside them."
+workspace = "Sidebar by project and library, cards with the details beside them."
 studio = "Denser: top tabs, tables with the details below, a status bar."
 
 [status]
@@ -2882,7 +2887,7 @@ this_stage = "Tour this stage"
 
 [tour.offer]
 title = "Take a 2-minute tour?"
-body = "A quick look at where things are: the three pillars, your API keys, jobs, costs and where help lives. It only explains; nothing changes."
+body = "A quick look at where things are: your project and the global library, your API keys, jobs, costs and where help lives. It only explains; nothing changes."
 start = "Start the tour"
 not_now = "Not now"
 never = "Don't show again"
@@ -2898,17 +2903,13 @@ body = "In two minutes this tour shows where everything is. Use Next or the arro
 title = "Your projects"
 body = "A project holds the channels of one brand, with their ideas and videos. The switcher by the logo opens another project, keeps your favorites and recent ones at hand, and creates new projects. The screens show the open project."
 
-[tour.welcome.strategy]
-title = "Strategy"
-body = "Research niches, rank video ideas and see how your published videos did. This is where you decide what to make next."
+[tour.welcome.project]
+title = "Your project"
+body = "The open project's places. Overview shows each video in progress with its next step, Ideas holds research and themes, Videos the videos and their stages; narrators, products, templates, channels and performance follow."
 
-[tour.welcome.production]
-title = "Production"
-body = "Your video projects, from the script to the render. Personas are the narrators, and templates hold the instructions Claude writes from."
-
-[tour.welcome.publishing]
-title = "Publishing"
-body = "Your channels and their accounts on each network. Uploads, schedules and your posts' numbers start from here."
+[tour.welcome.library]
+title = "Global library"
+body = "Narrators, products and templates every project can use. For now they are the same ones the project shows; later each project can keep its own."
 
 [tour.welcome.settings]
 title = "Start with your keys"
@@ -2974,7 +2975,7 @@ body = "Approving an idea starts a video project from it. Editing its title or a
 
 [tour.themes.projects]
 title = "Your projects"
-body = "The projects started from this channel's ideas. Open them on Projects to write the script and carry on."
+body = "The projects started from this channel's ideas. Open them on Videos to write the script and carry on."
 
 [tour.performance]
 name = "Performance tour"
@@ -3004,11 +3005,11 @@ title = "Linking a post"
 body = "Posts are linked at a project's Publish stage: Bardo's uploads link themselves, and for an export you paste the post's link. Unlink a post there too; it stays on the network."
 
 [tour.projects]
-name = "Projects tour"
+name = "Videos tour"
 
 [tour.projects.switcher]
-title = "Your video project"
-body = "The project you are working on, with the menu that switches to another project of the channel. The channel picker beside Projects lists another channel's projects."
+title = "Your video"
+body = "The video you are working on, with the menu that switches to another video of the channel. The channel picker beside Videos lists another channel's videos."
 
 [tour.projects.narrator]
 title = "Who narrates it"
@@ -3170,11 +3171,11 @@ title = "What a clip costs"
 body = "How long the scene's next clip will run and what it costs at the provider's rate, before you animate it. The provider bills each second. With a model of fixed lengths, a scene a little longer than one of them pays for that shorter clip, which plays slowed to fit; the channel sets how far, or turns it off."
 
 [tour.personas]
-name = "Personas tour"
+name = "Narrators tour"
 
 [tour.personas.library]
 title = "Your narrators"
-body = "Personas are narrators you reuse across channels: four come with Bardo, and you can add your own. Pick one to edit it."
+body = "Narrators you reuse across channels: four come with Bardo, and you can add your own. Pick one to edit it."
 
 [tour.personas.voice]
 title = "The voice"
@@ -3371,7 +3372,7 @@ body = "The language scripts and narration are written in, and the country whose
 
 [tour.channels.persona]
 title = "Default persona"
-body = "Who narrates the channel's videos unless a project picks someone else. Personas live on their own screen, and one can narrate several channels."
+body = "Who narrates the channel's videos unless a project picks someone else. Narrators live on their own screen, and one can narrate several channels."
 
 [tour.channels.format]
 title = "Short or long videos, and how they are produced"
@@ -3595,7 +3596,7 @@ body = "How Bardo looks and speaks, saved for your profile as soon as you change
 
 [tour.appearance.layout]
 title = "Layout"
-body = "Workspace has a sidebar by pillar and cards; Studio is denser, with top tabs and tables. Every screen does the same things in both, and switching keeps your place."
+body = "Workspace has a sidebar with the project's places and cards; Studio is denser, with top tabs and tables. Every screen does the same things in both, and switching keeps your place."
 
 [tour.appearance.theme]
 title = "Themes"
@@ -3961,7 +3962,7 @@ export_title = "What goes in the file"
 group_keys = "API keys"
 group_apps = "App credentials"
 group_preferences = "Preferences and costs"
-group_personas = "Personas"
+group_personas = "Narrators"
 group_products = "Products"
 group_channels = "Channels, with their network accounts"
 group_sign_ins = "Sign-ins"
@@ -4954,3 +4955,92 @@ version_elsewhere = "One of its videos is a localized version of, or has one in,
 
 [project_spend]
 unknown = "Removed project"
+
+[overview]
+hint = "The open project at a glance: each video in progress and the step that moves it on, the ideas waiting for you and the project's channels."
+not_loaded = "The overview could not be loaded."
+no_project = "No project yet. Create a channel on Channels and accounts, or a project in the switcher by the logo."
+pick_up = "Pick up where you left off"
+no_videos = "No video in progress. Approve an idea on Ideas › Themes to start one."
+continue = "Continue"
+open = "Open"
+next = "Next step: {step}"
+next_cost = "Next step: {step}, about {amount}"
+working = "Bardo is working on {stage}. Nothing to do until it ends."
+waiting_at = "Nothing to do until the post goes out on {when}."
+waiting = "Nothing to do until the post goes out."
+ideas = "Ideas waiting for you"
+ideas_none = "No idea waits for you. Suggest themes on Ideas › Themes."
+ideas_unranked = "Themes without a ranking: {n}"
+ideas_ranked = "Ranked themes to approve or discard: {n}"
+ideas_orphans = "Approved themes without a video: {n}"
+open_ideas = "Open Ideas"
+channels = "Channels"
+spent = "Spent this month"
+narrators = "Default narrators"
+no_narrator = "No channel has a default narrator."
+ad = "Ad"
+
+[overview.step]
+confirm_brief = "confirm the brief"
+decide_claims = "keep or drop the changed claims ({n})"
+complete_brief = "complete the brief"
+write_script = "write the script"
+review_script = "review the new script"
+rewrite_script = "write the script again from the new brief"
+record_narration = "record the narration"
+record_again = "record the narration again"
+fix_takes = "fix the flagged takes ({n})"
+plan_scenes = "plan the scenes"
+place_scenes = "place the scenes on the narration"
+plan_again = "plan the scenes again"
+review_images = "review the new images ({n})"
+draw_images = "draw the missing images ({n})"
+review_clips = "review the new clips ({n})"
+animate_clips = "animate the scenes without a clip ({n})"
+build_cut = "open the editor and build the cut"
+render = "render the video"
+render_again = "render again from the cut as it is now"
+resume_render = "resume the render"
+export = "export for the networks"
+export_again = "export again"
+export_rest = "export the files left"
+resume_export = "resume the export"
+post = "upload it or link the post"
+
+[library]
+hint = "Narrators, products and templates every project can use. For now they are the same ones each project shows."
+
+[tour.overview]
+name = "Overview tour"
+
+[tour.overview.videos]
+title = "Videos in progress"
+body = "Every video of the project that is not posted yet, newest first, with its channel, format and the stage it is at."
+
+[tour.overview.next]
+title = "The next step"
+body = "What moves the video on, with what it would cost when it calls a paid provider. Continue opens the video at that stage; a video waiting for nothing says so."
+
+[tour.overview.ideas]
+title = "Ideas waiting for you"
+body = "Themes still to rank, ranked themes to approve or discard, and approved themes whose video is gone. Open Ideas takes you to them."
+
+[tour.overview.project]
+title = "The project"
+body = "The project's channels, what its work spent this month and the narrators its channels speak with by default."
+
+[tour.library]
+name = "Global library tour"
+
+[tour.library.tabs]
+title = "Three libraries"
+body = "Narrators, products and templates, each under its tab. Switch tabs here; the project's own entries in the navigation open the same screens."
+
+[tour.library.items]
+title = "What each holds"
+body = "The narrators that speak your videos, the products your ads show and the instructions Claude writes from. Create and edit them as before."
+
+[tour.library.projects]
+title = "Global for now"
+body = "Every project uses these same items today. A later version lets a project keep its own, with the global library shared by all."

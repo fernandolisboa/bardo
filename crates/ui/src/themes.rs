@@ -1042,7 +1042,7 @@ fn research_tags(bardo: &Bardo, scores: NicheScores) -> impl IntoElement {
 impl Render for ThemesScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let bardo = self.bardo.read(cx);
-        let mut header = Header::place(bardo, Destination::Themes);
+        let mut header = Header::place(bardo, Destination::Themes, cx);
         header.info = guide::header_info(bardo, Destination::Themes, self.has_content(), None, cx);
         let mut parts = ScreenParts::new(header);
         if self.channels.is_empty() {

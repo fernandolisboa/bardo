@@ -2,13 +2,13 @@
 id: capture
 title: Performance capture
 group: production
-place: projects/capture
+place: videos/capture
 tour: capture
 ---
 
 # Performance capture
 
-A capture is a recording of you reading the project's script on camera. Its speech becomes the narration, in the persona's voice or your own, and the recording is split into takes that later become performed clips. It lives at the [Capture](bardo:go/projects/capture) stage, which shows while the narration is the capture's. [Show me the stage](bardo:tour/capture).
+A capture is a recording of you reading the project's script on camera. Its speech becomes the narration, in the persona's voice or your own, and the recording is split into takes that later become performed clips. It lives at the [Capture](bardo:go/videos/capture) stage, which shows while the narration is the capture's. [Show me the stage](bardo:tour/capture).
 
 <a id="record"></a>
 ## Recording it
@@ -20,7 +20,7 @@ Only record yourself. Bardo imports a capture only after you confirm the recordi
 <a id="import"></a>
 ## Importing it
 
-On the [Narration](bardo:go/projects/narration) stage, **Import capture** opens a file picker. Bardo reads the file first and shows its size, frame rate and length, or why it cannot be a capture. Then pick the voice, tick **This recording shows only me.** and check the estimate: the script check, the voice and the timing of the words are each billed per hour of sound by ElevenLabs. **Import this capture** runs as a job; you need an ElevenLabs key ([Your API keys](api-keys.md#providers)).
+On the [Narration](bardo:go/videos/narration) stage, **Import capture** opens a file picker. Bardo reads the file first and shows its size, frame rate and length, or why it cannot be a capture. Then pick the voice, tick **This recording shows only me.** and check the estimate: the script check, the voice and the timing of the words are each billed per hour of sound by ElevenLabs. **Import this capture** runs as a job; you need an ElevenLabs key ([Your API keys](api-keys.md#providers)).
 
 The capture replaces the current narration once it is done. Generating or importing another narration later removes the capture.
 

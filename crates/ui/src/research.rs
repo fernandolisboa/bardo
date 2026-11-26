@@ -652,7 +652,7 @@ fn score_tags(bardo: &Bardo, scores: NicheScores) -> impl IntoElement {
 impl Render for ResearchScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let bardo = self.bardo.read(cx);
-        let mut header = Header::place(bardo, Destination::Research);
+        let mut header = Header::place(bardo, Destination::Research, cx);
         header.info =
             guide::header_info(bardo, Destination::Research, self.has_content(), None, cx);
         if self.channels.is_empty() {

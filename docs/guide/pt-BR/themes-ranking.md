@@ -53,7 +53,7 @@ O Bardo não aprova nada no seu lugar: uma ideia só vira vídeo quando você a 
 <a id="projects"></a>
 ## Projetos começados aqui
 
-A lista **Projetos**, abaixo dos controles, mostra os projetos começados a partir das ideias do canal. Abra-os em [Projetos](bardo:go/projects) para escrever o roteiro e depois a narração, as cenas e o resto ([Seu primeiro vídeo](first-video.md#project)).
+A lista **Projetos**, abaixo dos controles, mostra os projetos começados a partir das ideias do canal. Abra-os em [Vídeos](bardo:go/videos) para escrever o roteiro e depois a narração, as cenas e o resto ([Seu primeiro vídeo](first-video.md#project)).
 
 <a id="next"></a>
 ## Próximo passo

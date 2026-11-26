@@ -401,7 +401,7 @@ impl Render for TemplatesScreen {
         let collection = self.collection(cx);
         let editor = self.render_editor(cx).into_any_element();
         let bardo = self.bardo.read(cx);
-        let mut header = Header::place(bardo, Destination::Templates);
+        let mut header = Header::place(bardo, Destination::Templates, cx);
         let info = guide::info(
             bardo,
             "templates-info",

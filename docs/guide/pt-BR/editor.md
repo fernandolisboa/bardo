@@ -2,13 +2,13 @@
 id: editor
 title: O editor
 group: editing
-place: projects/edit
+place: videos/edit
 tour: editor
 ---
 
 # O editor
 
-É no editor que as cenas e a narração viram um corte: você apara, mixa o som, legenda e enquadra, e depois manda para o render. Ele abre sobre a janela inteira a partir da etapa [Edição](bardo:go/projects/edit) de um projeto, quando as cenas estão planejadas e narradas, e **Projetos**, no canto superior esquerdo, leva você de volta. O corte se salva sozinho a cada edição. [Mostre o editor para mim](bardo:tour/editor), ou [a parte 2 do tour](bardo:tour/editor-more) para a mixagem, as legendas, o enquadramento, o movimento nas imagens, os clipes interpretados e as sugestões de corte.
+É no editor que as cenas e a narração viram um corte: você apara, mixa o som, legenda e enquadra, e depois manda para o render. Ele abre sobre a janela inteira a partir da etapa [Edição](bardo:go/videos/edit) de um projeto, quando as cenas estão planejadas e narradas, e **Vídeos**, no canto superior esquerdo, leva você de volta. O corte se salva sozinho a cada edição. [Mostre o editor para mim](bardo:tour/editor), ou [a parte 2 do tour](bardo:tour/editor-more) para a mixagem, as legendas, o enquadramento, o movimento nas imagens, os clipes interpretados e as sugestões de corte.
 
 F1 abre este guia sobre o editor, e **Voltar ao editor** devolve você a ele como estava. Esc fecha um tour; o botão **Tour do editor** na barra de cima (Shift+F1) volta ao passo em que ele fechou.
 

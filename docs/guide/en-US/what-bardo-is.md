@@ -15,7 +15,7 @@ Bardo helps you run faceless channels on YouTube, TikTok, Instagram Reels, X and
 Everything in Bardo belongs to one of four pillars, in this order:
 
 - **Strategy**: choose a niche and a video idea. [Research](bardo:go/research) scores niches by competition and trend, [Themes](bardo:go/themes) suggests and ranks video ideas, [Products](bardo:go/products) holds what you advertise, and [Performance](bardo:go/performance) shows how your published videos did.
-- **Production**: make the video's material. A [project](bardo:go/projects) goes from the script to the narration, the scene images and the clips. [Personas](bardo:go/personas) are your narrators, and [Templates](bardo:go/templates) hold the instructions the AI writes from.
+- **Production**: make the video's material. A [project](bardo:go/videos) goes from the script to the narration, the scene images and the clips. [Narrators](bardo:go/narrators) are your narrators, and [Templates](bardo:go/templates) hold the instructions the AI writes from.
 - **Editing**: the editor, where you cut the picture, mix the audio, place the captions and frame the video for each network, then render it.
 - **Publishing**: your [channels](bardo:go/channels) and their [accounts](bardo:go/accounts) on each network, the text of each post, uploads, schedules and exports.
 

@@ -70,7 +70,7 @@ save = "Salvar alterações"
 saved = "Canal salvo."
 persona = "Persona padrão"
 persona_none = "Sem persona padrão"
-persona_hint = "O narrador dos roteiros e narrações deste canal. Gerencie as personas na tela Personas."
+persona_hint = "O narrador dos roteiros e narrações deste canal. Gerencie os narradores na tela Narradores."
 clip_model = "Modelo de vídeo"
 clip_model_default = "{model} (padrão)"
 clip_model_hint = "O modelo que anima as imagens das cenas deste canal em clipes, pelo Higgsfield, pelo Kling ou pelo Google, no modo de produção Tudo animado, modelo do canal (os outros modos escolhem o seu). O padrão é o do primeiro provedor com chave salva. Qualquer cena pode escolher outro."
@@ -637,12 +637,12 @@ angle_too_long = "Use no máximo 500 caracteres no ângulo."
 [projects]
 settings_video = "Vídeo"
 settings_production = "Produção e gasto"
-switch = "Trocar de projeto"
-nav = "Projetos"
-title = "Projetos de vídeo"
-empty = "Aprove uma ideia em Temas, ou um ângulo de anúncio em Produtos, para começar um projeto de vídeo."
-started = "Projeto de vídeo iniciado: {title}"
-no_channels = "Este projeto ainda não tem canal. Crie um em Canais e aprove um dos temas dele para começar um projeto de vídeo."
+switch = "Trocar de vídeo"
+nav = "Vídeos"
+title = "Vídeos"
+empty = "Aprove uma ideia em Ideias › Temas, ou um ângulo de anúncio em Produtos, para começar um vídeo."
+started = "Vídeo iniciado: {title}"
+no_channels = "Este projeto ainda não tem canal. Crie um em Canais e aprove um dos temas dele para começar um vídeo."
 narrator = "Narrador"
 narrator_channel = "Padrão do canal: {name}"
 narrator_channel_none = "Padrão do canal (nenhuma definida)"
@@ -756,8 +756,8 @@ imported = "Importada"
 [narration.error]
 no_script = "Gere o roteiro primeiro; a narração lê o roteiro."
 no_persona = "Escolha um narrador para este vídeo, ou uma persona padrão para o canal dele na tela Canais."
-voice_unchecked = "A voz do narrador ainda não foi verificada na sua conta ElevenLabs. Verifique na tela Personas."
-voice_unavailable = "A voz do narrador não está na sua conta ElevenLabs. Resolva na tela Personas ou escolha outro narrador."
+voice_unchecked = "A voz do narrador ainda não foi verificada na sua conta ElevenLabs. Verifique na tela Narradores."
+voice_unavailable = "A voz do narrador não está na sua conta ElevenLabs. Resolva na tela Narradores ou escolha outro narrador."
 missing_key = "Salve uma chave da ElevenLabs em Configurações para gerar ou importar narração."
 busy = "Já há uma narração sendo feita para este projeto."
 scenes_busy = "Há cenas, imagens ou clipes sendo feitos para este projeto na narração atual, ou uma tarefa cancelada ainda está parando. Espere terminarem, ou cancele no painel Tarefas, antes de trocar a narração."
@@ -955,8 +955,8 @@ skip_draft_cost = "Versão final sem rascunho: cerca de {amount}"
 no_model = "Nenhum modelo de tomada é oferecido."
 mode_not_taken = "O modelo desta tomada não aceita o modo dela. Escolha um dos modos que ele aceita antes de pagar qualquer coisa."
 length = "Esta tomada é mais curta ou mais longa do que o modelo dela faz. Mova um corte antes."
-no_look = "A persona ainda não tem aparência. Desenhe ou importe uma na tela Personas."
-no_verified_likeness = "Este modelo só aceita uma foto sua como a sua semelhança verificada na biblioteca de assets da BytePlus. Adicione o id do asset na aparência da persona, na tela Personas, ou use uma aparência desenhada."
+no_look = "A persona ainda não tem aparência. Desenhe ou importe uma na tela Narradores."
+no_verified_likeness = "Este modelo só aceita uma foto sua como a sua semelhança verificada na biblioteca de assets da BytePlus. Adicione o id do asset na aparência da persona, na tela Narradores, ou use uma aparência desenhada."
 control_not_approved = "Aprove o vídeo de controle da tomada antes."
 no_video_host = "O Kling lê o vídeo de controle por um link, então o Bardo o envia para um armazenamento que você já configurou. Salve uma chave da BytePlus ModelArk ou da Higgsfield em Configurações."
 
@@ -1258,39 +1258,39 @@ billions = "{n} bi"
 decimal_separator = ","
 
 [personas]
-title = "Personas"
+title = "Narradores"
 hint = "Narradores que você reutiliza entre canais: voz, tom, estilo de roteiro e presets."
-empty = "Nenhuma persona ainda. Crie uma para dar um narrador aos seus canais."
-not_loaded = "Não foi possível carregar suas personas. Reinicie o Bardo para tentar de novo."
-new = "Nova persona"
+empty = "Nenhum narrador ainda. Crie um para dar voz aos seus canais."
+not_loaded = "Não foi possível carregar seus narradores. Reinicie o Bardo para tentar de novo."
+new = "Novo narrador"
 import = "Importar de arquivo…"
-import_dialog = "Importar persona"
+import_dialog = "Importar narrador"
 
 [persona]
-new_title = "Nova persona"
-edit_title = "Editar persona"
+new_title = "Novo narrador"
+edit_title = "Editar narrador"
 name = "Nome"
 name_placeholder = "ex.: Narrador Documental Calmo"
 voice = "Voz"
 voice_none = "Nenhuma voz escolhida ainda."
-voice_hint = "A voz fica na sua conta ElevenLabs. A persona guarda só uma referência a ela, nunca áudio nem chaves; as amostras que você ouve ficam só neste computador, para tocar de novo de graça."
+voice_hint = "A voz fica na sua conta ElevenLabs. O narrador guarda só uma referência a ela, nunca áudio nem chaves; as amostras que você ouve ficam só neste computador, para tocar de novo de graça."
 tone = "Tom"
 tone_placeholder = "Como o narrador soa: ex.: sóbrio, ponderado, sem exageros."
 script_style = "Estilo de roteiro"
 script_style_placeholder = "Como os roteiros são escritos para este narrador: estrutura, tamanho das frases, ganchos."
 presets = "Presets de geração"
 presets_hint = "Como a ElevenLabs lê a narração com esta voz."
-create = "Criar persona"
+create = "Criar narrador"
 save = "Salvar alterações"
 duplicate = "Duplicar"
-saved = "Persona salva."
-duplicated = "{name} criada. Edite à vontade; a original continua como estava."
-used_by = "Persona padrão de: {channels}"
-unused = "Nenhum canal a usa como padrão ainda."
+saved = "Narrador salvo."
+duplicated = "{name} criado. Edite à vontade; o original continua como estava."
+used_by = "Narrador padrão de: {channels}"
+unused = "Nenhum canal usa este narrador como padrão ainda."
 copy_suffix = "cópia"
 imported_suffix = "importada"
 export = "Exportar para arquivo…"
-export_hint = "Exporta um pacote com a persona, uma referência à voz dela e a aparência quando ela é desenhada; nunca áudio, chaves nem uma foto sua. Quem importar precisa ter a mesma voz na própria conta ElevenLabs."
+export_hint = "Exporta um pacote com o narrador, uma referência à voz dele e a aparência quando ela é desenhada; nunca áudio, chaves nem uma foto sua. Quem importar precisa ter a mesma voz na própria conta ElevenLabs."
 exported = "Exportada para {path}."
 exported_no_look = "Exportada para {path}. A aparência ficou aqui: é uma foto sua, e uma foto nunca vai num pacote."
 imported = "{name} importada."
@@ -1604,7 +1604,7 @@ cancel = "Cancelar"
 
 [editor]
 open = "Abrir editor"
-back = "Projetos"
+back = "Vídeos"
 duration = "{duration} · {fps} fps"
 seconds = "{n} s"
 undo = "Desfazer"
@@ -2016,10 +2016,13 @@ spent = "Gasto"
 budget = "Orçamento"
 state = "Estado"
 
-[nav.pillar]
-strategy = "Estratégia"
-production = "Produção"
-publishing = "Publicação"
+[nav.section]
+project = "Projeto"
+library = "Biblioteca global"
+
+[nav.entry]
+ideas = "Ideias"
+channels_and_accounts = "Canais e contas"
 
 [nav.place]
 guide = "Guia"
@@ -2027,8 +2030,10 @@ performance = "Desempenho"
 research = "Pesquisa"
 themes = "Temas"
 products = "Produtos"
-projects = "Projetos"
-personas = "Personas"
+videos = "Vídeos"
+narrators = "Narradores"
+overview = "Visão geral"
+library = "Biblioteca global"
 templates = "Modelos"
 channels = "Canais"
 accounts = "Contas"
@@ -2068,7 +2073,7 @@ studio = "Studio"
 not_saved = "Não foi possível salvar o layout. Tente de novo."
 
 [ui_layout.description]
-workspace = "Barra lateral por pilar, cartões com os detalhes ao lado."
+workspace = "Barra lateral por projeto e biblioteca, cartões com os detalhes ao lado."
 studio = "Mais denso: abas no topo, tabelas com os detalhes embaixo, barra de status."
 
 [status]
@@ -2882,7 +2887,7 @@ this_stage = "Tour desta etapa"
 
 [tour.offer]
 title = "Quer um tour de 2 minutos?"
-body = "Uma olhada rápida em onde fica cada coisa: os três pilares, suas chaves de API, as tarefas, os custos e onde encontrar ajuda. O tour só explica; nada é alterado."
+body = "Uma olhada rápida em onde fica cada coisa: seu projeto e a biblioteca global, suas chaves de API, as tarefas, os custos e onde encontrar ajuda. O tour só explica; nada é alterado."
 start = "Começar o tour"
 not_now = "Agora não"
 never = "Não mostrar mais"
@@ -2898,17 +2903,13 @@ body = "Em dois minutos, este tour mostra onde fica cada coisa. Avance com Próx
 title = "Seus projetos"
 body = "Um projeto reúne os canais de uma marca, com as ideias e os vídeos deles. O seletor ao lado do logo abre outro projeto, deixa à mão seus favoritos e os recentes e cria projetos novos. As telas mostram o projeto aberto."
 
-[tour.welcome.strategy]
-title = "Estratégia"
-body = "Pesquise nichos, ranqueie ideias de vídeo e veja como foram os vídeos que você publicou. É aqui que você decide o que fazer em seguida."
+[tour.welcome.project]
+title = "Seu projeto"
+body = "Os lugares do projeto aberto. A Visão geral mostra cada vídeo em andamento com o próximo passo, Ideias reúne pesquisa e temas, Vídeos traz os vídeos e suas etapas; depois vêm narradores, produtos, modelos, canais e desempenho."
 
-[tour.welcome.production]
-title = "Produção"
-body = "Seus projetos de vídeo, do roteiro ao render. As personas são os narradores, e os modelos guardam as instruções que o Claude segue para escrever."
-
-[tour.welcome.publishing]
-title = "Publicação"
-body = "Seus canais e as contas de cada um nas redes. Os envios, os agendamentos e os números dos seus posts partem daqui."
+[tour.welcome.library]
+title = "Biblioteca global"
+body = "Narradores, produtos e modelos que todo projeto pode usar. Por enquanto são os mesmos que o projeto mostra; depois cada projeto poderá ter os seus."
 
 [tour.welcome.settings]
 title = "Comece pelas chaves"
@@ -2974,7 +2975,7 @@ body = "Aprovar uma ideia começa um projeto de vídeo a partir dela. Editar o t
 
 [tour.themes.projects]
 title = "Seus projetos"
-body = "Os projetos começados a partir das ideias deste canal. Abra-os em Projetos para escrever o roteiro e seguir em frente."
+body = "Os projetos começados a partir das ideias deste canal. Abra-os em Vídeos para escrever o roteiro e seguir em frente."
 
 [tour.performance]
 name = "Tour do Desempenho"
@@ -3004,11 +3005,11 @@ title = "Vincular uma publicação"
 body = "As publicações são vinculadas na etapa Publicação de um projeto: os envios feitos pelo Bardo se vinculam sozinhos, e para uma exportação você cola o link da publicação. Desvincule ali também; a publicação continua na rede."
 
 [tour.projects]
-name = "Tour dos Projetos"
+name = "Tour dos Vídeos"
 
 [tour.projects.switcher]
-title = "Seu projeto de vídeo"
-body = "O projeto em que você está trabalhando, com o menu que troca para outro projeto do canal. O seletor de canal ao lado de Projetos lista os projetos de outro canal."
+title = "Seu vídeo"
+body = "O vídeo em que você está trabalhando, com o menu que troca para outro vídeo do canal. O seletor de canal ao lado de Vídeos lista os vídeos de outro canal."
 
 [tour.projects.narrator]
 title = "Quem narra"
@@ -3170,11 +3171,11 @@ title = "Quanto custa um clipe"
 body = "Quanto vai durar o próximo clipe da cena e quanto ele custa pela tarifa do provedor, antes de você animar. O provedor cobra cada segundo. Num modelo de durações fixas, uma cena um pouco mais longa que uma delas paga esse clipe mais curto, que toca em câmera lenta para caber; o canal define até quanto, ou desliga."
 
 [tour.personas]
-name = "Tour das Personas"
+name = "Tour dos Narradores"
 
 [tour.personas.library]
 title = "Seus narradores"
-body = "Personas são narradores que você reutiliza entre canais: quatro vêm com o Bardo, e você pode criar as suas. Escolha uma para editá-la."
+body = "Narradores que você reutiliza entre canais: quatro vêm com o Bardo, e você pode criar os seus. Escolha um para editá-lo."
 
 [tour.personas.voice]
 title = "A voz"
@@ -3371,7 +3372,7 @@ body = "O idioma em que roteiros e narração são escritos, e o país cujo púb
 
 [tour.channels.persona]
 title = "Persona padrão"
-body = "Quem narra os vídeos do canal, a menos que um projeto escolha outra persona. As personas ficam numa tela própria, e uma pode narrar vários canais."
+body = "Quem narra os vídeos do canal, a menos que um projeto escolha outra persona. Os narradores ficam numa tela própria, e um pode narrar vários canais."
 
 [tour.channels.format]
 title = "Shorts ou vídeos longos, e como são produzidos"
@@ -3595,7 +3596,7 @@ body = "Como o Bardo aparece e fala, salvo no seu perfil assim que você muda."
 
 [tour.appearance.layout]
 title = "Layout"
-body = "O Workspace tem barra lateral por pilar e cartões; o Studio é mais denso, com abas no topo e tabelas. Toda tela faz as mesmas coisas nos dois, e trocar mantém você onde está."
+body = "O Workspace tem barra lateral com os lugares do projeto e cartões; o Studio é mais denso, com abas no topo e tabelas. Toda tela faz as mesmas coisas nos dois, e trocar mantém você onde está."
 
 [tour.appearance.theme]
 title = "Temas"
@@ -3961,7 +3962,7 @@ export_title = "O que vai no arquivo"
 group_keys = "Chaves de API"
 group_apps = "Credenciais de app"
 group_preferences = "Preferências e custos"
-group_personas = "Personas"
+group_personas = "Narradores"
 group_products = "Produtos"
 group_channels = "Canais, com as contas nas redes"
 group_sign_ins = "Logins"
@@ -4954,3 +4955,92 @@ version_elsewhere = "Um dos vídeos dele é versão localizada de outro canal de
 
 [project_spend]
 unknown = "Projeto removido"
+
+[overview]
+hint = "O projeto aberto num relance: cada vídeo em andamento e o passo que o faz avançar, as ideias esperando você e os canais do projeto."
+not_loaded = "Não foi possível carregar a visão geral."
+no_project = "Ainda não há projeto. Crie um canal em Canais e contas, ou um projeto no seletor ao lado do logo."
+pick_up = "Continuar de onde parou"
+no_videos = "Nenhum vídeo em andamento. Aprove uma ideia em Ideias › Temas para começar um."
+continue = "Continuar"
+open = "Abrir"
+next = "Próximo passo: {step}"
+next_cost = "Próximo passo: {step}, cerca de {amount}"
+working = "O Bardo está trabalhando em {stage}. Nada a fazer até terminar."
+waiting_at = "Nada a fazer até a publicação sair em {when}."
+waiting = "Nada a fazer até a publicação sair."
+ideas = "Ideias esperando você"
+ideas_none = "Nenhuma ideia espera você. Sugira temas em Ideias › Temas."
+ideas_unranked = "Temas sem ranking: {n}"
+ideas_ranked = "Temas ranqueados para aprovar ou descartar: {n}"
+ideas_orphans = "Temas aprovados sem vídeo: {n}"
+open_ideas = "Abrir Ideias"
+channels = "Canais"
+spent = "Gasto neste mês"
+narrators = "Narradores padrão"
+no_narrator = "Nenhum canal tem narrador padrão."
+ad = "Anúncio"
+
+[overview.step]
+confirm_brief = "confirmar o briefing"
+decide_claims = "manter ou descartar as alegações alteradas ({n})"
+complete_brief = "completar o briefing"
+write_script = "escrever o roteiro"
+review_script = "revisar o roteiro novo"
+rewrite_script = "escrever o roteiro de novo a partir do briefing novo"
+record_narration = "gravar a narração"
+record_again = "gravar a narração de novo"
+fix_takes = "corrigir as tomadas marcadas ({n})"
+plan_scenes = "planejar as cenas"
+place_scenes = "encaixar as cenas na narração"
+plan_again = "planejar as cenas de novo"
+review_images = "revisar as imagens novas ({n})"
+draw_images = "desenhar as imagens que faltam ({n})"
+review_clips = "revisar os clipes novos ({n})"
+animate_clips = "animar as cenas sem clipe ({n})"
+build_cut = "abrir o editor e montar o corte"
+render = "renderizar o vídeo"
+render_again = "renderizar de novo a partir do corte atual"
+resume_render = "retomar a renderização"
+export = "exportar para as redes"
+export_again = "exportar de novo"
+export_rest = "exportar os arquivos que faltam"
+resume_export = "retomar a exportação"
+post = "enviar o vídeo ou vincular a publicação"
+
+[library]
+hint = "Narradores, produtos e modelos que todo projeto pode usar. Por enquanto são os mesmos que cada projeto mostra."
+
+[tour.overview]
+name = "Tour da visão geral"
+
+[tour.overview.videos]
+title = "Vídeos em andamento"
+body = "Cada vídeo do projeto que ainda não foi publicado, do mais novo ao mais antigo, com o canal, o formato e a etapa em que está."
+
+[tour.overview.next]
+title = "O próximo passo"
+body = "O que faz o vídeo avançar, com quanto custaria quando chama um provedor pago. Continuar abre o vídeo nessa etapa; um vídeo que não espera nada diz isso."
+
+[tour.overview.ideas]
+title = "Ideias esperando você"
+body = "Temas ainda sem ranking, temas ranqueados para aprovar ou descartar e temas aprovados cujo vídeo não existe mais. Abrir Ideias leva até eles."
+
+[tour.overview.project]
+title = "O projeto"
+body = "Os canais do projeto, o que o trabalho dele gastou neste mês e os narradores padrão dos canais."
+
+[tour.library]
+name = "Tour da biblioteca global"
+
+[tour.library.tabs]
+title = "Três bibliotecas"
+body = "Narradores, produtos e modelos, cada um na sua aba. Troque de aba aqui; as entradas do projeto na navegação abrem as mesmas telas."
+
+[tour.library.items]
+title = "O que cada uma guarda"
+body = "Os narradores que falam nos seus vídeos, os produtos que seus anúncios mostram e as instruções a partir das quais o Claude escreve. Crie e edite como antes."
+
+[tour.library.projects]
+title = "Global por enquanto"
+body = "Hoje todo projeto usa estes mesmos itens. Uma versão futura deixa cada projeto ter os seus, com a biblioteca global compartilhada por todos."

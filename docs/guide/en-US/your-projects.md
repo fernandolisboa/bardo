@@ -6,7 +6,7 @@ group: getting-started
 
 # Your projects
 
-A **project** holds the channels of one brand, with their research, ideas and videos. You work in one project at a time: the **open project**. Research, Themes, Performance, Projects, Channels and Accounts show only its channels and their work. [Show me the switcher](bardo:tour/welcome).
+A **project** holds the channels of one brand, with their research, ideas and videos. You work in one project at a time: the **open project**. Overview, Ideas, Videos, Channels and accounts and Performance show only its channels and their work; narrators, products and templates are shared by every project for now ([Global library](global-library.md)). [Show me the switcher](bardo:tour/welcome).
 
 When you updated to this version, Bardo made a project for each channel, named after it. Channels linked by a localized version went into one project together, named after the oldest of them.
 

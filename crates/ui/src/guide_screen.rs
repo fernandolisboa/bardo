@@ -553,7 +553,11 @@ impl GuideScreen {
 fn place_name(bardo: &Bardo, place: GuidePlace) -> String {
     let (screen, part) = match place {
         GuidePlace::Screen(place) => (place, None),
-        GuidePlace::Stage(stage) => (Destination::Projects, Some(Text::StageName(stage))),
+        GuidePlace::Stage(stage) => (Destination::Videos, Some(Text::StageName(stage))),
+        GuidePlace::Library(tab) => (
+            Destination::Library,
+            Some(Text::DestinationName(tab.place())),
+        ),
         GuidePlace::Settings(tab) => (
             Destination::Settings,
             Some(match tab {

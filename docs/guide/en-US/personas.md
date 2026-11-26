@@ -1,14 +1,14 @@
 ---
 id: personas
-title: Personas
+title: Narrators
 group: production
-place: personas
+place: narrators
 tour: personas
 ---
 
-# Personas
+# Narrators
 
-A persona is a narrator: a voice from your ElevenLabs account, a tone, a script style and the settings ElevenLabs reads with. Personas belong to you, not to a channel: one can narrate for several channels, and each channel has a default ([Projects and stages](projects.md#narrator)). They live on [Personas](bardo:go/personas). [Show me the screen](bardo:tour/personas).
+A persona is a narrator: a voice from your ElevenLabs account, a tone, a script style and the settings ElevenLabs reads with. Personas belong to you, not to a channel: one can narrate for several channels, and each channel has a default ([Projects and stages](projects.md#narrator)). They live on [Narrators](bardo:go/narrators). [Show me the screen](bardo:tour/personas).
 
 <a id="library"></a>
 ## Your narrators

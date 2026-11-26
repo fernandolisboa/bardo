@@ -1792,7 +1792,7 @@ impl Render for ProductsScreen {
         let form = self.render_form(cx);
         let archived = self.archived_count();
         let bardo = self.bardo.read(cx);
-        let mut header = Header::place(bardo, Destination::Products);
+        let mut header = Header::place(bardo, Destination::Products, cx);
         let info = guide::info(
             bardo,
             "products-info",

@@ -499,7 +499,7 @@ mod tests {
             ),
             sample(
                 "projects",
-                Some(GuidePlace::Screen(Destination::Projects)),
+                Some(GuidePlace::Screen(Destination::Videos)),
                 "",
             ),
         ];

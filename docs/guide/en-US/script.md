@@ -2,13 +2,13 @@
 id: script
 title: Script
 group: production
-place: projects/script
+place: videos/script
 tour: script
 ---
 
 # Script
 
-The script is what the narrator will say. Claude writes it, you edit it, and every later stage builds on it. It lives at the [Script](bardo:go/projects/script) stage of a project, with the video's music below it: its prompt and the tracks made from it. [Show me the stage](bardo:tour/script).
+The script is what the narrator will say. Claude writes it, you edit it, and every later stage builds on it. It lives at the [Script](bardo:go/videos/script) stage of a project, with the video's music below it: its prompt and the tracks made from it. [Show me the stage](bardo:tour/script).
 
 <a id="write"></a>
 ## Generate, then edit

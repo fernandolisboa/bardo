@@ -2790,7 +2790,7 @@ impl Render for SettingsScreen {
                 }
             }));
 
-        let mut header = Header::place(bardo, Destination::Settings);
+        let mut header = Header::place(bardo, Destination::Settings, cx);
         header.info = guide::place_info(bardo, TourPlace::Settings(self.tab), None, cx);
         let mut parts = ScreenParts::new(header);
         parts.toolbar = Some(tabs.into_any_element());

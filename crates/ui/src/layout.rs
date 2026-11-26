@@ -11,7 +11,7 @@ use bardo_app::bardo_domain::LayoutId;
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Div, Global, KeyDownEvent, Stateful, div, px};
 
-use crate::parts::{CollectionKeys, Navigation, ScreenParts};
+use crate::parts::{CollectionKeys, Navigation, PlaceTabs, ScreenParts};
 
 /// The layout on screen.
 struct Current(LayoutId);
@@ -145,6 +145,29 @@ pub fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
 
 /// `items` taking ↑/↓ and Enter while focused; a click on them focuses
 /// them.
+/// Places under one entry, as tabs under a header (Research and Themes,
+/// the global library's): the same in every layout.
+fn place_tabs(tabs: PlaceTabs) -> AnyElement {
+    use gpui_kit::component::tab::{Tab, TabBar};
+    let PlaceTabs {
+        items,
+        selected,
+        on_pick,
+        anchor,
+    } = tabs;
+    let mut bar = TabBar::new("place-tabs")
+        .underline()
+        .selected_index(selected);
+    for item in items {
+        bar = bar.child(Tab::new().label(item));
+    }
+    let bar = bar.on_click(move |ix: &usize, window, cx| on_pick(*ix, window, cx));
+    match anchor {
+        Some(anchor) => crate::kit::anchor(anchor, bar).into_any_element(),
+        None => bar.into_any_element(),
+    }
+}
+
 fn take_keys(items: Stateful<Div>, keys: Option<CollectionKeys>) -> Stateful<Div> {
     let Some(keys) = keys else {
         return items;

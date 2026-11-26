@@ -2,13 +2,13 @@
 id: capture
 title: Captura de atuação
 group: production
-place: projects/capture
+place: videos/capture
 tour: capture
 ---
 
 # Captura de atuação
 
-Uma captura é uma gravação sua lendo o roteiro do projeto diante da câmera. A fala vira a narração, na voz da persona ou na sua, e a gravação é dividida em tomadas que depois viram clipes interpretados. Ela fica na etapa [Captura](bardo:go/projects/capture), que aparece enquanto a narração é a da captura. [Mostre a etapa para mim](bardo:tour/capture).
+Uma captura é uma gravação sua lendo o roteiro do projeto diante da câmera. A fala vira a narração, na voz da persona ou na sua, e a gravação é dividida em tomadas que depois viram clipes interpretados. Ela fica na etapa [Captura](bardo:go/videos/capture), que aparece enquanto a narração é a da captura. [Mostre a etapa para mim](bardo:tour/capture).
 
 <a id="record"></a>
 ## Gravar
@@ -20,7 +20,7 @@ Grave só você. O Bardo importa uma captura só depois que você confirma que a
 <a id="import"></a>
 ## Importar
 
-Na etapa [Narração](bardo:go/projects/narration), **Importar captura** abre a escolha de arquivo. O Bardo lê o arquivo primeiro e mostra tamanho, quadros por segundo e duração, ou por que ele não pode ser uma captura. Depois escolha a voz, marque **Só eu apareço nesta gravação.** e confira a estimativa: a conferência do roteiro, a voz e o tempo das palavras são cobrados por hora de som pela ElevenLabs. **Importar esta captura** roda como uma tarefa; é preciso uma chave da ElevenLabs ([Suas chaves de API](api-keys.md#providers)).
+Na etapa [Narração](bardo:go/videos/narration), **Importar captura** abre a escolha de arquivo. O Bardo lê o arquivo primeiro e mostra tamanho, quadros por segundo e duração, ou por que ele não pode ser uma captura. Depois escolha a voz, marque **Só eu apareço nesta gravação.** e confira a estimativa: a conferência do roteiro, a voz e o tempo das palavras são cobrados por hora de som pela ElevenLabs. **Importar esta captura** roda como uma tarefa; é preciso uma chave da ElevenLabs ([Suas chaves de API](api-keys.md#providers)).
 
 A captura substitui a narração atual quando termina. Gerar ou importar outra narração depois remove a captura.
 

@@ -16,7 +16,7 @@ O canal é a sua marca: nome, nicho, os temas que ele cobre, o visual, o idioma 
 <a id="persona"></a>
 ## 2. Escolha um narrador
 
-Uma persona é um narrador: uma voz da sua conta na ElevenLabs, um tom, um estilo de escrita e os ajustes da voz. O Bardo já vem com quatro, duas em inglês e duas em português. Em [Personas](bardo:go/personas) você ouve uma voz antes de usar, ajusta, ou cria a sua com qualquer voz da sua conta na ElevenLabs, clones incluídos. As personas são suas, não de um canal, então uma pode narrar para vários canais.
+Uma persona é um narrador: uma voz da sua conta na ElevenLabs, um tom, um estilo de escrita e os ajustes da voz. O Bardo já vem com quatro, duas em inglês e duas em português. Em [Narradores](bardo:go/narrators) você ouve uma voz antes de usar, ajusta, ou cria a sua com qualquer voz da sua conta na ElevenLabs, clones incluídos. As personas são suas, não de um canal, então uma pode narrar para vários canais.
 
 <a id="research"></a>
 ## 3. Pesquise um nicho
@@ -31,12 +31,12 @@ Em [Temas](bardo:go/themes), peça ideias para um nicho. O Claude sugere título
 <a id="project"></a>
 ## 5. Produza, etapa por etapa
 
-Um [projeto](bardo:go/projects) passa por etapas, mostradas no alto. Cada uma pode ser revisada e alterada antes da próxima:
+Um [projeto](bardo:go/videos) passa por etapas, mostradas no alto. Cada uma pode ser revisada e alterada antes da próxima:
 
-- **[Roteiro](bardo:go/projects/script)**: o Claude escreve a partir da ideia, da persona e do canal. Edite à vontade; uma versão nova espera ao lado da atual até você aceitar.
-- **[Narração](bardo:go/projects/narration)**: a persona lê o roteiro, com o tempo de cada palavra. Você também pode importar a sua própria gravação.
-- **[Cenas](bardo:go/projects/scenes)**: o Claude divide a narração em cenas, cada uma com um prompt de imagem que você pode editar, e cada cena ganha a sua imagem.
-- **[Clipes](bardo:go/projects/clips)**: vídeos curtos opcionais feitos a partir da imagem de uma cena, com o custo mostrado antes de gerar.
+- **[Roteiro](bardo:go/videos/script)**: o Claude escreve a partir da ideia, da persona e do canal. Edite à vontade; uma versão nova espera ao lado da atual até você aceitar.
+- **[Narração](bardo:go/videos/narration)**: a persona lê o roteiro, com o tempo de cada palavra. Você também pode importar a sua própria gravação.
+- **[Cenas](bardo:go/videos/scenes)**: o Claude divide a narração em cenas, cada uma com um prompt de imagem que você pode editar, e cada cena ganha a sua imagem.
+- **[Clipes](bardo:go/videos/clips)**: vídeos curtos opcionais feitos a partir da imagem de uma cena, com o custo mostrado antes de gerar.
 
 Quando um roteiro ou uma narração muda, o que foi feito a partir deles aparece como desatualizado, então você sempre sabe o que gerar de novo.
 
@@ -55,7 +55,7 @@ Para a música, a etapa Roteiro escreve um prompt de música e, com um plano pag
 <a id="publish"></a>
 ## 8. Publique
 
-Na etapa [Publicação](bardo:go/projects/publish), o Claude escreve o título, a descrição e as tags de cada rede, e você edita dentro dos limites de cada uma. Depois, uma de duas:
+Na etapa [Publicação](bardo:go/videos/publish), o Claude escreve o título, a descrição e as tags de cada rede, e você edita dentro dos limites de cada uma. Depois, uma de duas:
 
 - **Exportar** uma pasta por rede com o arquivo e um texto para copiar, e postar à mão; cole de volta o link do post para o Bardo acompanhar os números. Veja [Exportação](exporting.md).
 - **Enviar** para o YouTube, o Instagram Reels ou o TikTok (como rascunho que você termina no app do TikTok), depois de conectar a conta do canal em [Contas](bardo:go/accounts), com o seu próprio app salvo em [Configurações › Redes](app-credentials.md). Todo envio passa antes por uma revisão, e os do YouTube e do Instagram podem ser agendados. Veja [Envio e agendamento](uploading.md).

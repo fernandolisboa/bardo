@@ -29,7 +29,7 @@ YouTube videos are never missed: YouTube publishes them by itself. TikTok drafts
 <a id="cancel"></a>
 ## Cancel post
 
-**Cancel post** asks first, then drops the post: nothing goes to the network. To post it later, review the upload again at the project's [Publish](bardo:go/projects/publish) stage.
+**Cancel post** asks first, then drops the post: nothing goes to the network. To post it later, review the upload again at the project's [Publish](bardo:go/videos/publish) stage.
 
 <a id="later"></a>
 ## Decide later

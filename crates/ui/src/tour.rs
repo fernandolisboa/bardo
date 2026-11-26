@@ -650,7 +650,7 @@ mod tests {
     }
 
     /// The screens that tag their own controls, in every layout alike.
-    const SCREENS: [&str; 34] = [
+    const SCREENS: [&str; 36] = [
         include_str!("research.rs"),
         include_str!("themes.rs"),
         include_str!("performance.rs"),
@@ -685,19 +685,21 @@ mod tests {
         include_str!("costs.rs"),
         include_str!("jobs.rs"),
         include_str!("project_switcher.rs"),
+        include_str!("overview.rs"),
+        include_str!("parts.rs"),
     ];
 
-    /// How a layout tags `anchor`: a pillar's group and each place come
+    /// How a layout tags `anchor`: a section's group and each place come
     /// from the navigation it is handed, which holds every one.
     fn tag(anchor: TourAnchor) -> String {
         match anchor {
-            TourAnchor::NavGroup(_) => "TourAnchor::NavGroup(group.pillar)".to_owned(),
+            TourAnchor::NavGroup(_) => "TourAnchor::NavGroup(group.section)".to_owned(),
             TourAnchor::NavPlace(place) => {
                 let pinned = Destination::PINNED.contains(&place);
                 if pinned {
                     "TourAnchor::NavPlace(".to_owned()
                 } else {
-                    "TourAnchor::NavPlace(item.place)".to_owned()
+                    "TourAnchor::NavPlace(item.home)".to_owned()
                 }
             }
             part => format!("TourAnchor::{part:?}"),

@@ -2,13 +2,13 @@
 id: render
 title: Revisão e render
 group: editing
-place: projects/render
+place: videos/render
 tour: render
 ---
 
 # Revisão e render
 
-O render transforma o corte nos arquivos que você publica: um por conta de rede do canal, no preset da rede. Ele leva um tempo e substitui o último arquivo de cada rede, então a etapa [Render](bardo:go/projects/render) primeiro mostra o que vai sair e o que está no caminho, e só renderiza depois que você confirma. [Mostre a etapa para mim](bardo:tour/render).
+O render transforma o corte nos arquivos que você publica: um por conta de rede do canal, no preset da rede. Ele leva um tempo e substitui o último arquivo de cada rede, então a etapa [Render](bardo:go/videos/render) primeiro mostra o que vai sair e o que está no caminho, e só renderiza depois que você confirma. [Mostre a etapa para mim](bardo:tour/render).
 
 <a id="review"></a>
 ## A revisão

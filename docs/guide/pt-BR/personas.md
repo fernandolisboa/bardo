@@ -1,14 +1,14 @@
 ---
 id: personas
-title: Personas
+title: Narradores
 group: production
-place: personas
+place: narrators
 tour: personas
 ---
 
-# Personas
+# Narradores
 
-Uma persona é um narrador: uma voz da sua conta na ElevenLabs, um tom, um estilo de roteiro e os ajustes com que a ElevenLabs lê. As personas são suas, não de um canal: uma pode narrar para vários canais, e cada canal tem uma padrão ([Projetos e etapas](projects.md#narrator)). Elas ficam em [Personas](bardo:go/personas). [Mostre a tela para mim](bardo:tour/personas).
+Uma persona é um narrador: uma voz da sua conta na ElevenLabs, um tom, um estilo de roteiro e os ajustes com que a ElevenLabs lê. As personas são suas, não de um canal: uma pode narrar para vários canais, e cada canal tem uma padrão ([Projetos e etapas](projects.md#narrator)). Elas ficam em [Narradores](bardo:go/narrators). [Mostre a tela para mim](bardo:tour/personas).
 
 <a id="library"></a>
 ## Seus narradores

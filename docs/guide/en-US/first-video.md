@@ -16,7 +16,7 @@ A channel is your brand: its name, niche, the themes it covers, its look, the la
 <a id="persona"></a>
 ## 2. Choose a narrator
 
-A persona is a narrator: a voice from your ElevenLabs account, a tone, a writing style and voice settings. Bardo comes with four, two in English and two in Portuguese. On [Personas](bardo:go/personas) you can listen to a voice before using it, tune it, or create your own from any voice in your ElevenLabs account, clones included. Personas belong to you, not to a channel, so one can narrate for several channels.
+A persona is a narrator: a voice from your ElevenLabs account, a tone, a writing style and voice settings. Bardo comes with four, two in English and two in Portuguese. On [Narrators](bardo:go/narrators) you can listen to a voice before using it, tune it, or create your own from any voice in your ElevenLabs account, clones included. Personas belong to you, not to a channel, so one can narrate for several channels.
 
 <a id="research"></a>
 ## 3. Research a niche
@@ -31,12 +31,12 @@ On [Themes](bardo:go/themes), ask for ideas for a niche. Claude suggests titles 
 <a id="project"></a>
 ## 5. Produce it, stage by stage
 
-A [project](bardo:go/projects) moves through stages, shown across its top. Each one can be reviewed and changed before the next:
+A [project](bardo:go/videos) moves through stages, shown across its top. Each one can be reviewed and changed before the next:
 
-- **[Script](bardo:go/projects/script)**: Claude writes it from the idea, the persona and the channel. Edit it freely; a new version waits beside the current one until you accept it.
-- **[Narration](bardo:go/projects/narration)**: the persona reads the script, with the timing of every word. You can also import your own recording.
-- **[Scenes](bardo:go/projects/scenes)**: Claude splits the narration into scenes, each with an image prompt you can edit, and each scene gets its image.
-- **[Clips](bardo:go/projects/clips)**: optional short videos made from a scene's image, with the cost shown before you generate.
+- **[Script](bardo:go/videos/script)**: Claude writes it from the idea, the persona and the channel. Edit it freely; a new version waits beside the current one until you accept it.
+- **[Narration](bardo:go/videos/narration)**: the persona reads the script, with the timing of every word. You can also import your own recording.
+- **[Scenes](bardo:go/videos/scenes)**: Claude splits the narration into scenes, each with an image prompt you can edit, and each scene gets its image.
+- **[Clips](bardo:go/videos/clips)**: optional short videos made from a scene's image, with the cost shown before you generate.
 
 When a script or a narration changes, what was made from it shows as out of date, so you always know what to generate again.
 
@@ -55,7 +55,7 @@ For the music, the Script stage writes a music prompt and, with a paid ElevenLab
 <a id="publish"></a>
 ## 8. Publish
 
-At the [Publish](bardo:go/projects/publish) stage Claude writes each network's title, description and tags, which you edit within each network's limits. Then either:
+At the [Publish](bardo:go/videos/publish) stage Claude writes each network's title, description and tags, which you edit within each network's limits. Then either:
 
 - **Export** a folder per network with the file and a text file to copy from, and post by hand; paste the post's link back so Bardo can follow its numbers. See [Exporting](exporting.md).
 - **Upload** to YouTube, Instagram Reels or TikTok (as a draft you finish in the TikTok app), once the channel's account is connected on [Accounts](bardo:go/accounts) with your own app saved in [Settings › Networks](app-credentials.md). Every upload shows a review first, and YouTube and Instagram uploads can be scheduled. See [Uploading and scheduling](uploading.md).

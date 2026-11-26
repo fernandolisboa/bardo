@@ -1,19 +1,19 @@
 ---
 id: projects
-title: Projetos e etapas
+title: Vídeos e etapas
 group: production
-place: projects
+place: videos
 tour: projects
 ---
 
-# Projetos e etapas
+# Vídeos e etapas
 
-Um projeto de vídeo é um vídeo no caminho entre uma ideia aprovada e uma publicação. [Projetos](bardo:go/projects) mostra um projeto por vez: quem narra, as etapas do roteiro à publicação e quanto ele já custou. Aprovar uma ideia em [Temas](themes-ranking.md#review) começa um projeto, e aprovar um [ângulo de anúncio](products.md#angle-review) em Produtos começa um projeto de anúncio. [Mostre a tela para mim](bardo:tour/projects).
+Um projeto de vídeo é um vídeo no caminho entre uma ideia aprovada e uma publicação. [Vídeos](bardo:go/videos) mostra um projeto por vez: quem narra, as etapas do roteiro à publicação e quanto ele já custou. Aprovar uma ideia em [Temas](themes-ranking.md#review) começa um projeto, e aprovar um [ângulo de anúncio](products.md#angle-review) em Produtos começa um projeto de anúncio. [Mostre a tela para mim](bardo:tour/projects).
 
 <a id="switch"></a>
 ## Escolher um projeto
 
-O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos do canal; escolha um para trocar. Um projeto de anúncio aparece marcado como **Anúncio** nesse menu, e a linha sob o nome dele começa com **Anúncio de** e o produto que ele anuncia. Um anúncio cujo produto era uma *ideia* quando o projeto começou é um conceito: ele aparece marcado como **Conceito** nesse menu e ao lado do nome, e continua com essa marca mesmo que o produto mude de tipo depois ([Uma imagem de conceito para uma ideia](products.md#concept)). O seletor de canal ao lado de **Projetos** lista os projetos de outro canal.
+O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos do canal; escolha um para trocar. Um projeto de anúncio aparece marcado como **Anúncio** nesse menu, e a linha sob o nome dele começa com **Anúncio de** e o produto que ele anuncia. Um anúncio cujo produto era uma *ideia* quando o projeto começou é um conceito: ele aparece marcado como **Conceito** nesse menu e ao lado do nome, e continua com essa marca mesmo que o produto mude de tipo depois ([Uma imagem de conceito para uma ideia](products.md#concept)). O seletor de canal ao lado de **Vídeos** lista os projetos de outro canal.
 
 <a id="settings"></a>
 ## As configurações do vídeo

@@ -18,6 +18,7 @@ icon_assets!(
         Film,
         Image,
         LayoutTemplate,
+        Library,
         Lightbulb,
         Link,
         List,
@@ -60,15 +61,17 @@ impl AssetSource for BardoAssets {
 
 pub fn destination(place: Destination) -> Lucide {
     match place {
+        Destination::Overview => Lucide::LayoutDashboard,
         Destination::Research => Lucide::Compass,
         Destination::Themes => Lucide::Lightbulb,
         Destination::Products => Lucide::Package,
         Destination::Performance => Lucide::TrendingUp,
-        Destination::Projects => Lucide::Clapperboard,
-        Destination::Personas => Lucide::User,
+        Destination::Videos => Lucide::Clapperboard,
+        Destination::Narrators => Lucide::User,
         Destination::Templates => Lucide::LayoutTemplate,
         Destination::Channels => Lucide::Tv,
         Destination::Accounts => Lucide::Link,
+        Destination::Library => Lucide::Library,
         Destination::Jobs => Lucide::List,
         Destination::Costs => Lucide::CircleDollarSign,
         Destination::Guide => Lucide::BookOpen,

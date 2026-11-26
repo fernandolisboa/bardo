@@ -29,7 +29,7 @@ Vídeos do YouTube nunca são perdidos: o YouTube publica sozinho. Rascunhos do 
 <a id="cancel"></a>
 ## Cancelar post
 
-**Cancelar post** pergunta antes e então descarta o post: nada vai para a rede. Para postar depois, revise o envio de novo na etapa [Publicação](bardo:go/projects/publish) do projeto.
+**Cancelar post** pergunta antes e então descarta o post: nada vai para a rede. Para postar depois, revise o envio de novo na etapa [Publicação](bardo:go/videos/publish) do projeto.
 
 <a id="later"></a>
 ## Decidir depois
