@@ -64,12 +64,10 @@ impl CommercialDisclosure {
 pub enum DisclosureStep {
     /// Nothing to set: the network has no label for it.
     Nothing,
-    /// Bardo sends the label with the post (Instagram's
+    /// Bardo sends the label with the post (YouTube's
+    /// `paidProductPlacementDetails.hasPaidProductPlacement`, Instagram's
     /// `is_paid_partnership`, X's `paid_partnership`).
     Sent,
-    /// The user ticks *Includes paid promotion* in YouTube Studio: the
-    /// API reads the box but no upload can set it.
-    InStudio,
     /// The user turns on *Disclose post content* in TikTok before posting
     /// the draft: the inbox upload has no disclosure field.
     InApp,
@@ -82,10 +80,10 @@ pub fn disclosure_step(network: Network, disclosure: CommercialDisclosure) -> Di
         (CommercialDisclosure::None, _) => DisclosureStep::Nothing,
         (_, Network::TikTok) => DisclosureStep::InApp,
         (CommercialDisclosure::YourBrand, _) => DisclosureStep::Nothing,
-        (CommercialDisclosure::PaidPartnership, Network::YouTube) => DisclosureStep::InStudio,
-        (CommercialDisclosure::PaidPartnership, Network::InstagramReels | Network::X) => {
-            DisclosureStep::Sent
-        }
+        (
+            CommercialDisclosure::PaidPartnership,
+            Network::YouTube | Network::InstagramReels | Network::X,
+        ) => DisclosureStep::Sent,
         (CommercialDisclosure::PaidPartnership, Network::Kick) => DisclosureStep::Nothing,
     }
 }
@@ -233,7 +231,7 @@ mod tests {
             assert_eq!(step(network, None), Nothing, "{network:?}");
         }
         assert_eq!(step(Network::YouTube, YourBrand), Nothing);
-        assert_eq!(step(Network::YouTube, PaidPartnership), InStudio);
+        assert_eq!(step(Network::YouTube, PaidPartnership), Sent);
         assert_eq!(step(Network::TikTok, YourBrand), InApp);
         assert_eq!(step(Network::TikTok, PaidPartnership), InApp);
         assert_eq!(step(Network::InstagramReels, YourBrand), Nothing);

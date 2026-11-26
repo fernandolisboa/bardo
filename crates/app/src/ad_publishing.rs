@@ -9,8 +9,8 @@
 
 use bardo_domain::{
     AdReviewItem, CheckedScript, ClaimDrift, ClaimsCheck, CommercialDisclosure, DisclosureStep,
-    Job, JobId, JobKind, Network, Provider, RepositoryError, SceneKind, ScriptText, VideoProject,
-    VideoProjectId, ad_synthetic_default, disclosure_step,
+    Job, JobId, JobKind, JobState, Network, Provider, RepositoryError, SceneKind, ScriptText,
+    VideoProject, VideoProjectId, ad_synthetic_default, disclosure_step,
 };
 
 use crate::ad_briefs::ScriptBrief;
@@ -45,6 +45,9 @@ pub struct AdPublishing {
     pub check_estimate: Option<SpendEstimate>,
     /// A check of the post texts asked for on its own is at work.
     pub checking: bool,
+    /// The last check of the post texts asked for on its own stopped
+    /// (failed or cancelled) and none was saved after it.
+    pub check_stopped: bool,
 }
 
 impl AdPublishing {
@@ -184,6 +187,24 @@ impl Bardo {
                 unique.push(item);
             }
         }
+        // The last check asked for on its own, and whether it stopped with
+        // no check saved after it (by itself or by a later metadata job).
+        let id = project.id.to_string();
+        let jobs = self.jobs();
+        let last = jobs
+            .iter()
+            .rposition(|job| Bardo::checks_posts_of(job, &id));
+        let last_check = last.map(|at| jobs[at].clone());
+        let saved_by = posts_check
+            .as_ref()
+            .and_then(|check| check.job)
+            .and_then(|saver| jobs.iter().position(|job| job.id() == saver));
+        let check_stopped = last.is_some_and(|at| {
+            let job = &jobs[at];
+            matches!(job.state(), JobState::Failed | JobState::Cancelled)
+                && !self.at_work(job)
+                && saved_by.is_none_or(|saved| saved < at)
+        });
         let check_estimate = match &posts_text {
             Some(text) => Some(self.estimate(&[reads.call(text, CheckedScript::Posts)])?),
             None => None,
@@ -194,11 +215,8 @@ impl Bardo {
             posts,
             has_posts: posts_text.is_some(),
             check_estimate,
-            checking: self.jobs().iter().any(|job| {
-                job.kind() == JobKind::ClaimsCheck
-                    && self.at_work(job)
-                    && Work::of(job) == Some(Work::Metadata(project.id.to_string()))
-            }),
+            checking: last_check.as_ref().is_some_and(|job| self.at_work(job)),
+            check_stopped,
         }))
     }
 
@@ -288,31 +306,40 @@ impl Bardo {
         let text = match disclosure_step(network, disclosure) {
             DisclosureStep::Nothing => return None,
             DisclosureStep::Sent => Text::CommercialSent(network),
-            DisclosureStep::InStudio => Text::CommercialInStudio,
             DisclosureStep::InApp if paid => Text::CommercialTikTokBranded,
             DisclosureStep::InApp => Text::CommercialTikTokYourBrand,
         };
         Some(self.text(text).into_owned())
     }
 
-    /// The reminder line of an export's metadata file: what to set by
-    /// hand on `network` for `disclosure`.
+    /// The reminder line of an export's metadata file: the disclosure, and
+    /// what to set by hand on `network` when posting it, since an export
+    /// is posted by hand and carries no label.
     pub fn commercial_reminder(
         &self,
         network: Network,
         disclosure: CommercialDisclosure,
     ) -> String {
-        self.text_with(
-            Text::CommercialReminder,
-            &[
-                ("disclosure", &self.text(Text::CommercialName(disclosure))),
-                ("network", &self.text(Text::NetworkName(network))),
-            ],
+        let step = match (disclosure_step(network, disclosure), disclosure.is_paid()) {
+            (DisclosureStep::Sent, _) => Text::CommercialReminderLabel,
+            (DisclosureStep::InApp, true) => Text::CommercialReminderTikTokBranded,
+            (DisclosureStep::InApp, false) => Text::CommercialReminderTikTokYourBrand,
+            (DisclosureStep::Nothing, true) => Text::CommercialReminderNoLabel,
+            (DisclosureStep::Nothing, false) => Text::CommercialReminderNothing,
+        };
+        let network = self.text(Text::NetworkName(network));
+        format!(
+            "{} {}",
+            self.text_with(
+                Text::CommercialReminder,
+                &[("disclosure", &self.text(Text::CommercialName(disclosure)))],
+            ),
+            self.text_with(step, &[("network", &network)])
         )
     }
 
     /// The YouTube Studio page of an uploaded video, where a paid
-    /// partnership's *Includes paid promotion* box is ticked by hand.
+    /// partnership's *Includes paid promotion* shows.
     pub fn studio_link(video_id: &str) -> String {
         format!("https://studio.youtube.com/video/{video_id}/edit")
     }
@@ -679,7 +706,9 @@ mod tests {
         )
         .unwrap();
         assert!(
-            text.contains("Commercial disclosure: Your brand. Set it on TikTok"),
+            text.contains(
+                "Commercial disclosure: Your brand. Before posting, turn on \"Disclose post content\" in TikTok and pick \"Your brand\"."
+            ),
             "{text}"
         );
         assert!(text.contains("Before posting this ad, keep in mind:"));
@@ -734,8 +763,8 @@ mod tests {
             sponsors: "@not-an-id".into(),
             acknowledged: ad.keys(),
         };
-        // YouTube takes no label with the upload: the brands typed are
-        // Instagram's and are not read.
+        // YouTube takes the paid promotion with the upload; the brands
+        // typed are Instagram's and are not read.
         let job = app
             .start_ad_upload(&review, review.choices(), &choices)
             .unwrap();
@@ -746,7 +775,8 @@ mod tests {
             .unwrap()
             .payload()
             .to_owned();
-        assert!(!payload.contains("paid_partnership"), "{payload}");
+        assert!(payload.contains("\"paid_partnership\":true"), "{payload}");
+        assert!(!payload.contains("sponsors"), "{payload}");
         let publication = app
             .publications
             .publications(project.id)
@@ -781,6 +811,30 @@ mod tests {
         let view = s.app.export_view(s.project.id).unwrap();
         assert_eq!(view.ad, None);
         assert_eq!(view.template.body.kind(), TemplateKind::Metadata);
+    }
+
+    #[test]
+    fn an_exports_reminder_says_what_to_turn_on_by_hand() {
+        let h = Harness::new();
+        let app = h.start();
+        let paid = CommercialDisclosure::PaidPartnership;
+        let brand = CommercialDisclosure::YourBrand;
+        assert_eq!(
+            app.commercial_reminder(Network::YouTube, paid),
+            "Commercial disclosure: Paid partnership. Turn on YouTube's paid partnership or paid promotion label when you post."
+        );
+        assert_eq!(
+            app.commercial_reminder(Network::InstagramReels, brand),
+            "Commercial disclosure: Your brand. Instagram Reels asks nothing more for it."
+        );
+        assert!(
+            app.commercial_reminder(Network::TikTok, paid)
+                .contains("pick \"Branded content\"")
+        );
+        assert_eq!(
+            app.commercial_reminder(Network::Kick, paid),
+            "Commercial disclosure: Paid partnership. Kick has no label for it: say so in the post."
+        );
     }
 
     #[test]

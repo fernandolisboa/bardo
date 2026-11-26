@@ -89,13 +89,13 @@ A post that promotes something says so, apart from the [synthetic-content](#disc
 
 | Network | Your brand | Paid partnership |
 | --- | --- | --- |
-| YouTube | nothing to set | tick **Includes paid promotion** in YouTube Studio: the upload can't set it, so the post links **Open in YouTube Studio** once the video is up |
+| YouTube | nothing to set | Bardo declares the paid promotion with the upload, which YouTube shows as **Includes paid promotion**; once the video is up, **Open in YouTube Studio** lets you check it |
 | Instagram | nothing to set | Bardo sends the **Paid partnership** label with the Reel, with up to two brand accounts (their Instagram account ids); if Instagram refuses the label, Bardo shows why and never posts without it |
 | TikTok | turn on **Disclose post content** and pick **Your brand** in the app, before posting the draft | the same, picking **Branded content**; TikTok does not allow branded content on a private post |
 | X | nothing to set | Bardo sends X's paid partnership label with the post |
-| Kick | no label | no label |
+| Kick | no label: a reminder in `metadata.txt` | no label: a reminder in `metadata.txt` to say so in the post |
 
-An export of an ad writes the disclosure into each network's `metadata.txt`, with where to set it ([Exporting](exporting.md#folder)).
+An export is posted by hand, so it carries no label: each network's `metadata.txt` names the disclosure and what to turn on when you post ([Exporting](exporting.md#folder)).
 
 <a id="ad-review"></a>
 ## Before an ad goes out
@@ -105,7 +105,7 @@ An ad's Publish stage has a **Before this ad goes out** card under the networks:
 - **Claims in the post texts.** Writing the metadata of an ad uses the Ad metadata [template](templates.md), and Claude then reads every network's title and text and ties each statement about the product to a claim of the [Brief](brief.md) stage, as the [claims check](script.md#claims) does for the script. The card lists what no claim backs. After you edit the texts, or the brief changes, it says so: **Check the post texts** checks them again, showing its cost first.
 - **The items to acknowledge**: each sensitive claim the script or the texts use, each statement no claim backs, a script or texts not checked as they read now, a claim the product no longer confirms, a product in a category the networks have their own ad rules for, and a product that is only an idea. Tick each one, or **Acknowledge all**.
 
-**Export** and every network's **Upload** stay off until each item is acknowledged; the upload review lists the same items, ticked together. A changed item (a claim edited, a new statement) needs a new tick. What you acknowledged is kept with the upload or the export. Bardo reminds and sets defaults; each decision is yours.
+**Export** and the upload review's confirm button stay off until each item is acknowledged; the upload review lists the same items, ticked together. A changed item (a claim edited, a new statement) needs a new tick. What you acknowledged is kept with the upload or the export. Bardo reminds and sets defaults; each decision is yours.
 
 <a id="states"></a>
 ## Upload states

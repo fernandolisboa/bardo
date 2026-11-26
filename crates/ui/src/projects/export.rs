@@ -679,6 +679,14 @@ impl ProjectsScreen {
         if chosen > 0 && !rendering && !self.metadata_dirty(cx) {
             // An ad's items are acknowledged first, in its card below.
             let ad_left = view.ad.as_ref().map_or(0, |ad| self.ad_left(ad));
+            if ad_left > 0 {
+                row = row.child(
+                    div()
+                        .text_sm()
+                        .text_color(look(cx).tokens.text2)
+                        .child(tr(bardo, Text::AdNotAcknowledged)),
+                );
+            }
             row = row.child(
                 Button::new("export-start")
                     .small()

@@ -629,6 +629,10 @@ pub enum UploadErrorKind {
     NotReady,
     /// The network dropped the upload (Instagram's expired container).
     Expired,
+    /// The network refused a post's paid-partnership label (Instagram's
+    /// branded content): the post never goes without it, and the user
+    /// sees the network's reason.
+    LabelRefused,
 }
 
 impl UploadErrorKind {

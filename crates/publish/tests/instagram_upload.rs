@@ -226,6 +226,8 @@ fn a_refused_paid_partnership_says_metas_reason_and_sends_nothing_else() {
     let error = uploader.upload(&video, &mut run).unwrap_err();
 
     assert!(error.detail.contains("branded content"), "{}", error.detail);
+    // The user sees Meta's reason, not a generic permission problem.
+    assert_eq!(error.kind, UploadErrorKind::LabelRefused);
     let sent = uploader.transport().sent();
     assert_eq!(sent.len(), 1, "no container without the label");
 }

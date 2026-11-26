@@ -594,10 +594,20 @@ fn check_view(
 }
 
 impl Bardo {
-    /// Whether `job` is a claims check of `project`.
+    /// Whether `job` is a claims check of `project`'s script; a check of
+    /// an ad's post texts is the Publish stage's.
     pub(crate) fn checks_claims_of(job: &Job, project: &str) -> bool {
         job.kind() == JobKind::ClaimsCheck
-            && CheckPayload::parse(job.payload()).is_ok_and(|payload| payload.project == project)
+            && CheckPayload::parse(job.payload())
+                .is_ok_and(|payload| payload.project == project && !payload.posts)
+    }
+
+    /// Whether `job` is a check of `project`'s post texts asked for on its
+    /// own (#282).
+    pub(crate) fn checks_posts_of(job: &Job, project: &str) -> bool {
+        job.kind() == JobKind::ClaimsCheck
+            && CheckPayload::parse(job.payload())
+                .is_ok_and(|payload| payload.project == project && payload.posts)
     }
 
     /// Whether a check of `text` by `job` is still to be made: the text

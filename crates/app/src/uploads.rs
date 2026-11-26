@@ -209,9 +209,9 @@ pub struct UploadReview {
     /// An ad's commercial disclosure and what the user acknowledges before
     /// it goes out (#282); `None` for any other project.
     pub ad: Option<AdPublishing>,
-    /// The YouTube Studio page of the uploaded video, where the user ticks
-    /// *Includes paid promotion*: for a YouTube post uploaded as a paid
-    /// partnership; `None` otherwise.
+    /// The YouTube Studio page of the uploaded video, where the user can
+    /// check its *Includes paid promotion*: for a YouTube post uploaded as
+    /// a paid partnership; `None` otherwise.
     pub studio_link: Option<String>,
 }
 
@@ -767,6 +767,11 @@ fn failure_of(error: &UploadError, network: Network) -> (JobFailure, Option<Uplo
         UploadErrorKind::NotAllowed => (
             JobFailureKind::NotAllowed,
             Some(UploadFailure::Job(JobFailureKind::NotAllowed)),
+        ),
+        // The network's own reason for refusing the label, as it said it.
+        UploadErrorKind::LabelRefused => (
+            JobFailureKind::NotAllowed,
+            Some(UploadFailure::Rejected(error.detail.clone())),
         ),
         UploadErrorKind::RateLimited
         | UploadErrorKind::NetworkDown

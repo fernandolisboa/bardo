@@ -1021,7 +1021,6 @@ pub enum Text {
     AdNotAcknowledged,
     AdReviewTitle,
     AdReviewHint,
-    AdAcknowledge,
     AdAcknowledgeAll,
     AdAcknowledgeLeft,
     CommercialTitle,
@@ -1032,6 +1031,11 @@ pub enum Text {
     CommercialTikTokYourBrand,
     CommercialTikTokBranded,
     CommercialReminder,
+    CommercialReminderLabel,
+    CommercialReminderTikTokYourBrand,
+    CommercialReminderTikTokBranded,
+    CommercialReminderNoLabel,
+    CommercialReminderNothing,
     CommercialChangeNote,
     SponsorsLabel,
     SponsorsHint,
@@ -1045,6 +1049,8 @@ pub enum Text {
     PostsCheckOutdated,
     PostsCheckAllBacked,
     PostsCheckUnbacked,
+    PostsCheckSaveFirst,
+    PostsCheckStopped,
     CardTextPlaceName(CardTextPlace),
     CardLogoPlaceName(CardLogoPlace),
     CardFieldError(CardFieldError),
@@ -4238,7 +4244,6 @@ impl Text {
             Text::AdNotAcknowledged => "ad_publishing.not_acknowledged",
             Text::AdReviewTitle => "ad_publishing.review_title",
             Text::AdReviewHint => "ad_publishing.review_hint",
-            Text::AdAcknowledge => "ad_publishing.acknowledge",
             Text::AdAcknowledgeAll => "ad_publishing.acknowledge_all",
             Text::AdAcknowledgeLeft => "ad_publishing.acknowledge_left",
             Text::CommercialTitle => "ad_publishing.commercial.title",
@@ -4253,6 +4258,15 @@ impl Text {
             Text::CommercialTikTokYourBrand => "ad_publishing.commercial.tiktok_your_brand",
             Text::CommercialTikTokBranded => "ad_publishing.commercial.tiktok_branded",
             Text::CommercialReminder => "ad_publishing.commercial.reminder",
+            Text::CommercialReminderLabel => "ad_publishing.commercial.reminder_label",
+            Text::CommercialReminderTikTokYourBrand => {
+                "ad_publishing.commercial.reminder_tiktok_your_brand"
+            }
+            Text::CommercialReminderTikTokBranded => {
+                "ad_publishing.commercial.reminder_tiktok_branded"
+            }
+            Text::CommercialReminderNoLabel => "ad_publishing.commercial.reminder_no_label",
+            Text::CommercialReminderNothing => "ad_publishing.commercial.reminder_nothing",
             Text::CommercialChangeNote => "ad_publishing.commercial.change_note",
             Text::SponsorsLabel => "ad_publishing.sponsors.label",
             Text::SponsorsHint => "ad_publishing.sponsors.hint",
@@ -4269,6 +4283,8 @@ impl Text {
             Text::PostsCheckOutdated => "ad_publishing.posts_check.outdated",
             Text::PostsCheckAllBacked => "ad_publishing.posts_check.all_backed",
             Text::PostsCheckUnbacked => "ad_publishing.posts_check.unbacked",
+            Text::PostsCheckSaveFirst => "ad_publishing.posts_check.save_first",
+            Text::PostsCheckStopped => "ad_publishing.posts_check.stopped",
             Text::CardTextPlaceName(place) => {
                 return format!("scenes.end_card.text_place_name.{}", place.code()).into();
             }
@@ -7774,7 +7790,6 @@ mod tests {
             Text::AdNotAcknowledged,
             Text::AdReviewTitle,
             Text::AdReviewHint,
-            Text::AdAcknowledge,
             Text::AdAcknowledgeAll,
             Text::AdAcknowledgeLeft,
             Text::CommercialTitle,
@@ -7783,6 +7798,11 @@ mod tests {
             Text::CommercialTikTokYourBrand,
             Text::CommercialTikTokBranded,
             Text::CommercialReminder,
+            Text::CommercialReminderLabel,
+            Text::CommercialReminderTikTokYourBrand,
+            Text::CommercialReminderTikTokBranded,
+            Text::CommercialReminderNoLabel,
+            Text::CommercialReminderNothing,
             Text::CommercialChangeNote,
             Text::SponsorsLabel,
             Text::SponsorsHint,
@@ -7795,9 +7815,13 @@ mod tests {
             Text::PostsCheckOutdated,
             Text::PostsCheckAllBacked,
             Text::PostsCheckUnbacked,
+            Text::PostsCheckSaveFirst,
+            Text::PostsCheckStopped,
         ]);
         texts.extend(CommercialDisclosure::ALL.map(Text::CommercialName));
-        texts.extend([Network::InstagramReels, Network::X].map(Text::CommercialSent));
+        texts.extend(
+            [Network::YouTube, Network::InstagramReels, Network::X].map(Text::CommercialSent),
+        );
         texts.extend([SponsorError::NotAnId, SponsorError::TooMany].map(Text::SponsorError));
         texts.extend(TemplateKind::ALL.map(Text::TemplateKindName));
         texts.extend(TemplateVariable::ALL.map(Text::TemplateVariableHint));

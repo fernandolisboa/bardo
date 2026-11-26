@@ -157,7 +157,20 @@ impl<T: Transport> InstagramUploader<T> {
             }
         }
         let url = format!("{}/{account}/media", self.endpoints.graph);
-        let body = self.graph(HttpRequest::post_form(url, &fields), token)?;
+        let body = self
+            .graph(HttpRequest::post_form(url, &fields), token)
+            .map_err(|error| match error.kind {
+                // A refusal of the label is the user's to see: the Reel never
+                // goes without it.
+                UploadErrorKind::NotAllowed
+                | UploadErrorKind::Invalid
+                | UploadErrorKind::Unexpected
+                    if video.paid_partnership =>
+                {
+                    UploadError::new(UploadErrorKind::LabelRefused, error.detail)
+                }
+                _ => error,
+            })?;
         body["id"]
             .as_str()
             .filter(|id| is_id(id))

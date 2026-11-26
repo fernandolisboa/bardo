@@ -95,7 +95,7 @@ Enquanto o envio roda, o Bardo recusa renderizar o projeto, porque o render rees
 
 O Bardo acompanha o processamento do YouTube por cerca de uma hora. Se o YouTube ainda estiver processando o vídeo depois disso, o post mostra **Ainda processando**; escolha **Verificar de novo** mais tarde.
 
-Um anúncio enviado como **Parceria paga** precisa de **Inclui promoção paga** marcado nos Detalhes do vídeo no YouTube Studio, porque nenhum envio consegue marcar: quando o vídeo estiver no ar, o post mostra **Abrir no YouTube Studio**. Veja [Divulgação comercial](uploading.md#commercial).
+Um anúncio enviado como **Parceria paga** vai com a promoção paga declarada, que o YouTube mostra como **Inclui promoção paga** nos Detalhes do vídeo; quando o vídeo estiver no ar, **Abrir no YouTube Studio** deixa você conferir. Veja [Divulgação comercial](uploading.md#commercial).
 
 Colar o link de um post sobre um vídeo enviado pergunta antes e substitui o envio só no Bardo; o vídeo continua no YouTube.
 

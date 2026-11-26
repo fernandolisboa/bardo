@@ -89,23 +89,23 @@ Um post que promove algo diz isso, à parte do selo de [conteúdo sintético](#d
 
 | Rede | Sua marca | Parceria paga |
 | --- | --- | --- |
-| YouTube | nada a marcar | marque **Inclui promoção paga** no YouTube Studio: o envio não consegue marcar, então o post traz **Abrir no YouTube Studio** quando o vídeo estiver no ar |
+| YouTube | nada a marcar | o Bardo declara a promoção paga com o envio, que o YouTube mostra como **Inclui promoção paga**; quando o vídeo estiver no ar, **Abrir no YouTube Studio** deixa você conferir |
 | Instagram | nada a marcar | o Bardo envia o selo **Parceria paga** com o Reel, com até duas contas de marca (o id da conta no Instagram); se o Instagram recusar o selo, o Bardo mostra o motivo e nunca publica sem ele |
 | TikTok | ative **Divulgar conteúdo da publicação** e escolha **Sua marca** no app, antes de publicar o rascunho | o mesmo, escolhendo **Conteúdo de marca**; o TikTok não permite conteúdo de marca num post privado |
 | X | nada a marcar | o Bardo envia o selo de parceria paga do X com o post |
-| Kick | sem selo | sem selo |
+| Kick | sem selo: um lembrete no `metadata.txt` | sem selo: um lembrete no `metadata.txt` para dizer isso no post |
 
-A exportação de um anúncio escreve a divulgação no `metadata.txt` de cada rede, com onde marcá-la ([Exportar](exporting.md#folder)).
+Uma exportação é publicada à mão, então não leva selo: o `metadata.txt` de cada rede diz a divulgação e o que ativar ao publicar ([Exportar](exporting.md#folder)).
 
 <a id="ad-review"></a>
 ## Antes de um anúncio ir ao ar
 
-A etapa Publicar de um anúncio tem um cartão **Antes de este anúncio sair**, abaixo das redes:
+A etapa Publicação de um anúncio tem um cartão **Antes de este anúncio sair**, abaixo das redes:
 
 - **Afirmações nos textos do post.** Escrever os metadados de um anúncio usa o [modelo](templates.md) Metadados de anúncio, e depois o Claude lê o título e o texto de cada rede e liga cada afirmação sobre o produto a uma afirmação da etapa [Briefing](brief.md), como a [checagem de afirmações](script.md#claims) faz com o roteiro. O cartão lista o que nenhuma afirmação sustenta. Depois que você edita os textos, ou o briefing muda, ele avisa: **Conferir os textos do post** confere de novo, mostrando o custo antes.
 - **Os itens a confirmar**: cada afirmação sensível que o roteiro ou os textos usam, cada afirmação que nenhuma afirmação do briefing sustenta, um roteiro ou textos não conferidos como estão agora, uma afirmação que o produto não confirma mais, um produto numa categoria em que as redes têm regras próprias de anúncio, e um produto que é só uma ideia. Marque cada um, ou **Confirmar todos**.
 
-**Exportar** e o **Enviar** de cada rede ficam desligados até cada item ser confirmado; a revisão do envio lista os mesmos itens, marcados juntos. Um item que mudou (uma afirmação editada, uma frase nova) pede uma nova marcação. O que você confirmou fica guardado com o envio ou a exportação. O Bardo lembra e sugere padrões; cada decisão é sua.
+**Exportar** e o botão de confirmar da revisão do envio ficam desligados até cada item ser confirmado; a revisão do envio lista os mesmos itens, marcados juntos. Um item que mudou (uma afirmação editada, uma frase nova) pede uma nova marcação. O que você confirmou fica guardado com o envio ou a exportação. O Bardo lembra e sugere padrões; cada decisão é sua.
 
 <a id="states"></a>
 ## Estados do envio

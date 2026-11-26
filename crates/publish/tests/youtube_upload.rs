@@ -200,6 +200,46 @@ fn a_new_upload_starts_a_session_and_sends_the_file_in_chunks() {
 }
 
 #[test]
+fn a_paid_partnership_declares_its_paid_promotion_and_others_do_not() {
+    let paid = uploader(&[
+        "session-started",
+        "chunk-incomplete-1",
+        "chunk-incomplete-2",
+        "upload-complete",
+    ]);
+    let paid_video = VideoUpload {
+        paid_partnership: true,
+        ..video()
+    };
+    paid.upload(&paid_video, &mut FakeRun::new()).unwrap();
+    let start = &paid.transport().sent()[0];
+    assert!(
+        start
+            .url
+            .ends_with("&part=snippet,status,paidProductPlacementDetails"),
+        "{}",
+        start.url
+    );
+    let body: serde_json::Value = serde_json::from_str(&start.body).unwrap();
+    assert_eq!(
+        body["paidProductPlacementDetails"],
+        serde_json::json!({ "hasPaidProductPlacement": true })
+    );
+
+    let plain = uploader(&[
+        "session-started",
+        "chunk-incomplete-1",
+        "chunk-incomplete-2",
+        "upload-complete",
+    ]);
+    plain.upload(&video(), &mut FakeRun::new()).unwrap();
+    let start = &plain.transport().sent()[0];
+    assert!(start.url.ends_with("&part=snippet,status"), "{}", start.url);
+    let body: serde_json::Value = serde_json::from_str(&start.body).unwrap();
+    assert!(body.get("paidProductPlacementDetails").is_none());
+}
+
+#[test]
 fn an_interrupted_upload_resumes_from_the_confirmed_bytes() {
     let uploader = uploader(&[
         "status-first-chunk",

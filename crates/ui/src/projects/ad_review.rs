@@ -197,6 +197,11 @@ impl ProjectsScreen {
                 ));
             }
         }
+        if ad.check_stopped && !ad.checking {
+            column = column.child(
+                kit::notice(Tone::Warning, tr(bardo, Text::PostsCheckStopped), cx).text_xs(),
+            );
+        }
         if ad.checking {
             column = column.child(
                 h_flex()
@@ -220,11 +225,18 @@ impl ProjectsScreen {
                         })),
                 ),
             );
-            column = column.children(
+            column = column.children(if unsaved {
+                Some(
+                    kit::notice(Tone::Info, tr(bardo, Text::PostsCheckSaveFirst), cx)
+                        .text_xs()
+                        .into_any_element(),
+                )
+            } else {
                 ad.check_estimate
                     .as_ref()
-                    .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx)),
-            );
+                    .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx))
+                    .map(IntoElement::into_any_element)
+            });
         }
         if let Some(estimate) = &self.posts_check_ask {
             column = column.child(budget_question(
@@ -361,8 +373,8 @@ impl ProjectsScreen {
         column.into_any_element()
     }
 
-    /// A YouTube post uploaded as a paid partnership: the box the user
-    /// ticks in YouTube Studio, and the way there.
+    /// A YouTube post uploaded as a paid partnership: where its paid
+    /// promotion shows in YouTube Studio, and the way there.
     pub(super) fn studio_note(&self, review: &UploadReview, cx: &App) -> Option<AnyElement> {
         let link = review.studio_link.clone()?;
         let bardo = self.bardo.read(cx);

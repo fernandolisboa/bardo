@@ -24,7 +24,7 @@ Each network's row has a box: tick the networks to export. Networks not exported
 Each project's export has a folder, with one folder per network inside, named after the network. Each holds:
 
 - the rendered video, in the network's preset;
-- `metadata.txt`, in the interface language: the title, description or caption and tags to paste in each field, the visibility to pick, and, when the voice is synthetic, where to set the network's label; for an ad, its commercial disclosure and where to set it, and the items you acknowledged before exporting ([Before an ad goes out](uploading.md#ad-review));
+- `metadata.txt`, in the interface language: the title, description or caption and tags to paste in each field, the visibility to pick, and, when the voice is synthetic, where to set the network's label; for an ad, its commercial disclosure and what to turn on when you post, and the items you acknowledged before exporting ([Before an ad goes out](uploading.md#ad-review));
 - in the YouTube folder, `thumbnail.jpg` when the project has a saved [thumbnail](uploading.md#thumbnail), to set in YouTube Studio.
 
 **Show in folder** opens it, and **Details** shows its path. The inspector also has **Copy** beside each field, to paste straight from Bardo.
