@@ -18,7 +18,7 @@ The project's name heads the screen, with a menu beside it that lists the channe
 <a id="settings"></a>
 ## The video's settings
 
-Under the project's name, one bar holds what the video is and how it is made. **Video** has the [narrator](#narrator), the [format](#format), the [length](#length) and the [visual style](#style); **Production and spend** has the [mode](#mode), the [cap](#mode) and what the whole video will cost. Each setting has its label above it and an ⓘ that explains it. In a narrow window the settings wrap to the next line. What the cap has to say (the default cap offered, a video over its cap, a cap saved) shows under the bar, across its width.
+Under the project's name, one bar holds what the video is and how it is made. **Video** has the [narrator](#narrator), the [format](#format), the [length](#length) and the [visual style](#style); **Production and spend** has the [mode](#mode), the [cap](#mode) and what the whole video will cost. Each setting has its label above it and an ⓘ that explains it. In a window narrower than 1000 pixels the bar goes compact, labels beside the fields and no group names, so the stage below still shows. What the cap has to say (the default cap offered, a video over its cap, a cap saved) shows under the bar, across its width.
 
 <a id="narrator"></a>
 ## The narrator

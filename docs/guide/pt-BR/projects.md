@@ -18,7 +18,7 @@ O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos 
 <a id="settings"></a>
 ## As configurações do vídeo
 
-Sob o nome do projeto, uma barra reúne o que o vídeo é e como ele é feito. **Vídeo** tem o [narrador](#narrator), o [formato](#format), a [duração](#length) e o [estilo visual](#style); **Produção e gasto** tem o [modo](#mode), o [teto](#mode) e quanto o vídeo inteiro vai custar. Cada configuração tem o rótulo em cima e um ⓘ que a explica. Numa janela estreita, as configurações quebram para a linha de baixo. O que o teto tem a dizer (o teto padrão oferecido, um vídeo acima do teto, um teto salvo) aparece sob a barra, na largura dela.
+Sob o nome do projeto, uma barra reúne o que o vídeo é e como ele é feito. **Vídeo** tem o [narrador](#narrator), o [formato](#format), a [duração](#length) e o [estilo visual](#style); **Produção e gasto** tem o [modo](#mode), o [teto](#mode) e quanto o vídeo inteiro vai custar. Cada configuração tem o rótulo em cima e um ⓘ que a explica. Numa janela com menos de 1000 pixels de largura, a barra fica compacta, com os rótulos ao lado dos campos e sem os nomes dos grupos, para a etapa embaixo continuar aparecendo. O que o teto tem a dizer (o teto padrão oferecido, um vídeo acima do teto, um teto salvo) aparece sob a barra, na largura dela.
 
 <a id="narrator"></a>
 ## O narrador

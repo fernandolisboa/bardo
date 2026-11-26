@@ -1857,7 +1857,10 @@ impl ProjectsScreen {
     /// line, and who narrates it.
     fn header(&self, cx: &mut Context<Self>) -> Header {
         let screen = cx.entity().downgrade();
-        let mode = self.render_mode(cx);
+        // A narrow window gets the compact bar: labels beside the fields and
+        // no group captions, so the stage below still shows (#330).
+        let compact = crate::layout::room(cx).window < COMPACT_BAR_BELOW;
+        let mode = self.render_mode(compact, cx);
         let bardo = self.bardo.read(cx);
         let Some(project) = self.view.as_ref().map(|view| &view.project) else {
             let mut header = Header::new(tr(bardo, Text::DestinationName(Destination::Projects)));
@@ -1986,24 +1989,35 @@ impl ProjectsScreen {
                        width: f32,
                        control: AnyElement| {
             let (id, hint, at) = info;
-            v_flex()
+            let label = h_flex()
+                .flex_none()
                 .gap_1()
-                .w(px(width))
-                .max_w_full()
-                .child(
-                    h_flex()
-                        .gap_1()
-                        .items_center()
-                        .text_xs()
-                        .text_color(muted)
-                        .child(tr(bardo, label))
-                        .child(guide::info(bardo, id, tr(bardo, hint), at)),
-                )
-                .child(control)
+                .items_center()
+                .text_xs()
+                .text_color(muted)
+                .child(tr(bardo, label))
+                .child(guide::info(bardo, id, tr(bardo, hint), at));
+            if compact {
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .max_w_full()
+                    .child(label)
+                    .child(div().w(px(width - 20.)).min_w_0().child(control))
+            } else {
+                v_flex()
+                    .gap_1()
+                    .w(px(width))
+                    .max_w_full()
+                    .child(label)
+                    .child(control)
+            }
         };
         let video = v_flex()
             .gap_2()
-            .child(group_caption(bardo, Text::ProjectSettingsVideo, cx))
+            .when(!compact, |group| {
+                group.child(group_caption(bardo, Text::ProjectSettingsVideo, cx))
+            })
             .child(
                 h_flex()
                     .flex_wrap()
@@ -2080,8 +2094,8 @@ impl ProjectsScreen {
                         h_flex()
                             .w_full()
                             .flex_wrap()
-                            .gap_x_8()
-                            .gap_y_3()
+                            .when(compact, |row| row.gap_x_3().gap_y_2())
+                            .when(!compact, |row| row.gap_x_8().gap_y_3())
                             .items_start()
                             .child(video)
                             .children(production),
@@ -2096,7 +2110,11 @@ impl ProjectsScreen {
     /// The production mode, what the whole video costs in it, and the
     /// video's spend cap (#248), as a group of the settings bar; then what
     /// the cap has to say, each a notice the bar's full width (#330).
-    fn render_mode(&self, cx: &mut Context<Self>) -> Option<(Option<AnyElement>, Vec<AnyElement>)> {
+    fn render_mode(
+        &self,
+        compact: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<(Option<AnyElement>, Vec<AnyElement>)> {
         let production = self.production.as_ref()?;
         let save = cx.listener(|this, _: &ClickEvent, window, cx| this.save_spend_cap(window, cx));
         let answer = |accept: bool| {
@@ -2191,38 +2209,50 @@ impl ProjectsScreen {
             .spend_cap_note
             .map(|(tone, text)| kit::notice(tone, tr(bardo, text), cx).text_xs());
         let field = |label: Text, control: AnyElement| {
-            v_flex()
-                .gap_1()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(tr(bardo, label)),
-                )
-                .child(control)
+            let label = div()
+                .flex_none()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(tr(bardo, label));
+            if compact {
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .child(label)
+                    .child(div().flex_1().min_w_0().child(control))
+            } else {
+                v_flex().gap_1().child(label).child(control)
+            }
+        };
+        let info = guide::info(
+            bardo,
+            "project-mode-info",
+            SharedString::from(format!(
+                "{} {} {}",
+                bardo.text(Text::ProductionModeAbout(production.mode)),
+                bardo.text(Text::ProjectModeHint),
+                bardo.text(Text::SpendCapHint)
+            )),
+            guide::refs::PROJECTS_MODE,
+        );
+        // The compact bar has no caption: the ⓘ follows the cap.
+        let (caption_info, row_info) = if compact {
+            (None, Some(info))
+        } else {
+            (Some(info), None)
         };
         let group = kit::anchor(
             TourAnchor::Control(Control::ProjectMode),
             v_flex()
                 .gap_2()
                 .max_w_full()
-                .child(
+                .children(caption_info.map(|info| {
                     h_flex()
                         .gap_1()
                         .items_center()
                         .child(group_caption(bardo, Text::ProjectSettingsProduction, cx))
-                        .child(guide::info(
-                            bardo,
-                            "project-mode-info",
-                            SharedString::from(format!(
-                                "{} {} {}",
-                                bardo.text(Text::ProductionModeAbout(production.mode)),
-                                bardo.text(Text::ProjectModeHint),
-                                bardo.text(Text::SpendCapHint)
-                            )),
-                            guide::refs::PROJECTS_MODE,
-                        )),
-                )
+                        .child(info)
+                }))
                 .child(
                     h_flex()
                         .flex_wrap()
@@ -2237,7 +2267,7 @@ impl ProjectsScreen {
                                     .menu_width(px(560.))
                                     .into_any_element(),
                             )
-                            .w(px(280.))
+                            .w(px(if compact { 260. } else { 280. }))
                             .max_w_full(),
                         )
                         .child(field(
@@ -2258,6 +2288,7 @@ impl ProjectsScreen {
                                         .on_click(save),
                                 )
                                 .children(default)
+                                .children(row_info)
                                 .into_any_element(),
                         )),
                 )
@@ -3260,6 +3291,9 @@ impl ProjectsScreen {
             .into_any_element()
     }
 }
+
+/// Below this window width the settings bar is compact (#330).
+const COMPACT_BAR_BELOW: f32 = 1000.;
 
 /// The caption over a group of the settings bar: "Video", "Production
 /// and spend".
