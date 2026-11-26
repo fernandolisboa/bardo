@@ -20,7 +20,7 @@ A lista mostra seus canais; escolha um para ver as contas dele ao lado. O canal 
 
 Um canal tem no máximo uma conta em cada uma das cinco redes: YouTube, TikTok, Instagram Reels, X e Kick. Cada cartão mostra a rede, o @ (sem a @), se o preset de render é o padrão da rede ou ajustado, e o preset numa linha.
 
-Os renders fazem um arquivo por conta, e a etapa [Publicação](bardo:go/projects/publish) escreve um post por conta.
+Os renders fazem um arquivo por conta, e a etapa [Publicação](bardo:go/videos/publish) escreve um post por conta.
 
 <a id="metadata"></a>
 ## Padrões de metadados

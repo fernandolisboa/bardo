@@ -2,13 +2,13 @@
 id: uploading
 title: Envio e agendamento
 group: publishing
-place: projects/publish
+place: videos/publish
 tour: publish
 ---
 
 # Envio e agendamento
 
-A etapa [Publicação](bardo:go/projects/publish) transforma cada arquivo renderizado num post: escreve o texto do post para cada rede e então o envia a uma conta conectada do YouTube, do Instagram Reels, do TikTok ou do X, ou o [exporta](exporting.md) para você postar à mão. Nada sai do seu computador antes de você confirmar uma revisão. [Mostre a etapa para mim](bardo:tour/publish).
+A etapa [Publicação](bardo:go/videos/publish) transforma cada arquivo renderizado num post: escreve o texto do post para cada rede e então o envia a uma conta conectada do YouTube, do Instagram Reels, do TikTok ou do X, ou o [exporta](exporting.md) para você postar à mão. Nada sai do seu computador antes de você confirmar uma revisão. [Mostre a etapa para mim](bardo:tour/publish).
 
 <a id="networks"></a>
 ## Um post por rede

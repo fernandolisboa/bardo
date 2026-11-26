@@ -2,13 +2,13 @@
 id: uploading
 title: Uploading and scheduling
 group: publishing
-place: projects/publish
+place: videos/publish
 tour: publish
 ---
 
 # Uploading and scheduling
 
-The [Publish](bardo:go/projects/publish) stage turns each rendered file into a post: it writes the post's text for each network, then uploads it to a connected YouTube, Instagram Reels, TikTok or X account, or [exports](exporting.md) it for you to post by hand. Nothing leaves your computer until you confirm a review. [Show me the stage](bardo:tour/publish).
+The [Publish](bardo:go/videos/publish) stage turns each rendered file into a post: it writes the post's text for each network, then uploads it to a connected YouTube, Instagram Reels, TikTok or X account, or [exports](exporting.md) it for you to post by hand. Nothing leaves your computer until you confirm a review. [Show me the stage](bardo:tour/publish).
 
 <a id="networks"></a>
 ## One post per network

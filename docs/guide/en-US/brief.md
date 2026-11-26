@@ -2,13 +2,13 @@
 id: brief
 title: Brief
 group: production
-place: projects/brief
+place: videos/brief
 tour: brief
 ---
 
 # Brief
 
-The brief is what one ad says about its product: the claims it may state, the offer, the call to action and the link. It is the first stage of an ad project, the kind of project that starts when you approve an [ad angle](products.md#angle-review) on Products, and the [script](script.md) is written from it. A project that is not an ad has no Brief stage. The stage lives at [Brief](bardo:go/projects/brief) and costs nothing; while a project that is not an ad is open, that link opens your newest ad project. [Show me the stage](bardo:tour/brief).
+The brief is what one ad says about its product: the claims it may state, the offer, the call to action and the link. It is the first stage of an ad project, the kind of project that starts when you approve an [ad angle](products.md#angle-review) on Products, and the [script](script.md) is written from it. A project that is not an ad has no Brief stage. The stage lives at [Brief](bardo:go/videos/brief) and costs nothing; while a project that is not an ad is open, that link opens your newest ad project. [Show me the stage](bardo:tour/brief).
 
 <a id="angle"></a>
 ## Product and angle

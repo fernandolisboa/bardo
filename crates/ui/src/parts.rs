@@ -9,7 +9,10 @@
 
 use std::rc::Rc;
 
-use bardo_app::{Bardo, Destination, GuideRef, Pillar, Stage, StageStatus, Step, Text};
+use bardo_app::{
+    Bardo, Control, Destination, GuidePlace, GuideRef, LibraryTab, NavEntry, NavSection, Stage,
+    StageStatus, Step, Text, TourAnchor,
+};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, ClickEvent, ElementId, FocusHandle, ScrollHandle, SharedString, Window,
@@ -76,7 +79,7 @@ impl ScreenParts {
 
 /// Where the screen sits and what it shows.
 pub struct Header {
-    /// The way here, before the title: a pillar, "Projects › channel".
+    /// The way here, before the title: "Ideas", "Videos › channel".
     pub trail: Vec<AnyElement>,
     /// The title; may be a switcher.
     pub title: AnyElement,
@@ -89,7 +92,26 @@ pub struct Header {
     /// A row of settings under the title, the full width of the header:
     /// an open project's narrator, format, mode and cap (#330).
     pub bar: Option<AnyElement>,
+    /// The places shown under the same entry, as tabs under the title:
+    /// Research and Themes, Channels and Accounts, the global library's.
+    pub tabs: Option<PlaceTabs>,
 }
+
+/// Places under one entry of the navigation, as tabs.
+pub struct PlaceTabs {
+    pub items: Vec<SharedString>,
+    pub selected: usize,
+    pub on_pick: OnPick<usize>,
+    /// What a tour lights them as.
+    pub anchor: Option<TourAnchor>,
+}
+
+/// The place the shell shows, which may be the global library showing
+/// one of its tabs' screens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShownPlace(pub Destination);
+
+impl gpui_kit::Global for ShownPlace {}
 
 impl Header {
     pub fn new(title: impl IntoElement) -> Self {
@@ -100,17 +122,53 @@ impl Header {
             info: None,
             actions: Vec::new(),
             bar: None,
+            tabs: None,
         }
     }
 
-    /// A place's own header: its pillar, then its name.
-    pub fn place(bardo: &Bardo, place: Destination) -> Self {
+    /// A place's own header: its name, with the entry it sits under and
+    /// that entry's places as tabs when it has several. Shown in the global
+    /// library, a library screen's header is the library's, with its tabs.
+    pub fn place(bardo: &Bardo, place: Destination, cx: &App) -> Self {
+        let shown = cx.try_global::<ShownPlace>().map(|shown| shown.0);
+        if shown == Some(Destination::Library)
+            && let Some(tab) = LibraryTab::of(place)
+        {
+            let mut header = Self::new(tr(bardo, Text::DestinationName(Destination::Library)));
+            header.meta = Some(tr(bardo, Text::LibraryHint));
+            header.tabs = Some(PlaceTabs {
+                items: LibraryTab::ALL
+                    .iter()
+                    .map(|tab| tr(bardo, Text::DestinationName(tab.place())))
+                    .collect(),
+                selected: LibraryTab::ALL.iter().position(|t| *t == tab).unwrap_or(0),
+                on_pick: Rc::new(|ix, window, cx| {
+                    if let Some(tab) = LibraryTab::ALL.get(ix) {
+                        crate::guide::go(GuidePlace::Library(*tab), window, cx);
+                    }
+                }),
+                anchor: Some(TourAnchor::Control(Control::LibraryTabs)),
+            });
+            return header;
+        }
         let mut header = Self::new(tr(bardo, Text::DestinationName(place)));
-        header.trail = place
-            .pillar()
-            .map(|pillar| tr(bardo, Text::PillarName(pillar)).into_any_element())
-            .into_iter()
-            .collect();
+        if let Some(entry) = place.entry().filter(|entry| entry.has_tabs()) {
+            let places = entry.places();
+            header.trail = vec![tr(bardo, Text::NavEntryName(entry)).into_any_element()];
+            header.tabs = Some(PlaceTabs {
+                items: places
+                    .iter()
+                    .map(|place| tr(bardo, Text::DestinationName(*place)))
+                    .collect(),
+                selected: places.iter().position(|p| *p == place).unwrap_or(0),
+                on_pick: Rc::new(move |ix, window, cx| {
+                    if let Some(place) = places.get(ix) {
+                        crate::guide::go(GuidePlace::Screen(*place), window, cx);
+                    }
+                }),
+                anchor: None,
+            });
+        }
         header
     }
 }
@@ -369,7 +427,8 @@ impl Inspector {
     }
 }
 
-/// The app-wide navigation: the places by pillar and the pinned ones,
+/// The app-wide navigation: the project's places, the global library and
+/// the pinned ones,
 /// where the user is, the month's spend and the job count, and what
 /// picking a place does.
 pub struct Navigation {
@@ -395,15 +454,22 @@ pub struct Navigation {
     pub on_pick: OnPick<Destination>,
 }
 
-/// A pillar and its places.
+/// A section and its entries.
 pub struct NavGroup {
-    pub pillar: Pillar,
+    pub section: NavSection,
     pub label: SharedString,
     pub places: Vec<NavItem>,
 }
 
+/// An entry of the navigation.
 pub struct NavItem {
+    /// Where a click goes: the entry's place, or the tab last shown under
+    /// it.
     pub place: Destination,
+    /// The entry's first place: its icon, its id and what tours light.
+    pub home: Destination,
+    /// Every place the entry shows; it reads as current on any of them.
+    pub places: &'static [Destination],
     pub label: SharedString,
 }
 
@@ -411,27 +477,55 @@ impl NavItem {
     fn of(bardo: &Bardo, place: Destination) -> Self {
         Self {
             place,
+            home: place,
+            places: std::slice::from_ref(
+                Destination::ALL
+                    .iter()
+                    .find(|p| **p == place)
+                    .expect("every place is listed"),
+            ),
             label: tr(bardo, Text::DestinationName(place)),
         }
+    }
+
+    fn entry(bardo: &Bardo, entry: NavEntry, last: Destination) -> Self {
+        let places = entry.places();
+        Self {
+            place: if places.contains(&last) {
+                last
+            } else {
+                places[0]
+            },
+            home: places[0],
+            places,
+            label: tr(bardo, Text::NavEntryName(entry)),
+        }
+    }
+
+    /// Whether `current` is one of its places.
+    pub fn holds(&self, current: Destination) -> bool {
+        self.places.contains(&current)
     }
 }
 
 impl Navigation {
-    /// The places as `bardo_app` groups them, with nothing counted yet.
+    /// The places as `bardo_app` groups them, with nothing counted yet;
+    /// `last` is the place last shown under an entry with tabs.
     pub fn new(
         bardo: &Bardo,
         current: Destination,
+        last: impl Fn(NavEntry) -> Destination,
         on_pick: impl Fn(Destination, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self {
-            groups: Destination::GROUPS
+            groups: Destination::SECTIONS
                 .iter()
-                .map(|(pillar, places)| NavGroup {
-                    pillar: *pillar,
-                    label: tr(bardo, Text::PillarName(*pillar)),
-                    places: places
+                .map(|(section, entries)| NavGroup {
+                    section: *section,
+                    label: tr(bardo, Text::NavSectionName(*section)),
+                    places: entries
                         .iter()
-                        .map(|place| NavItem::of(bardo, *place))
+                        .map(|entry| NavItem::entry(bardo, *entry, last(*entry)))
                         .collect(),
                 })
                 .collect(),

@@ -1,12 +1,12 @@
-//! The Workspace layout (direction B of spike #52): a sidebar grouped by
-//! pillar, with jobs, costs, the guide and settings pinned at its foot;
+//! The Workspace layout (direction B of spike #52): a sidebar with the
+//! project's places and the global library, with jobs, costs, the guide and settings pinned at its foot;
 //! each screen's header on top, the project stages as a stepper under it;
 //! a grid of cards (or a feed) with the inspector in a right column, or a
 //! list beside the record it opens.
 
 use std::rc::Rc;
 
-use bardo_app::{Destination, Side, Stage, StageState, TourAnchor};
+use bardo_app::{Destination, NavSection, Side, Stage, StageState, TourAnchor};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
@@ -43,7 +43,7 @@ const COMPACT_INSPECTOR_WIDTH: f32 = 300.;
 /// The longest a page's text runs.
 const PAGE_WIDTH: f32 = 920.;
 /// The narrowest a screen's title column gets, with the way here above
-/// it (a pillar, "Projects › channel").
+/// it ("Ideas", "Videos › channel").
 const TITLE_MIN_WIDTH: f32 = 320.;
 /// The narrowest a project stage gets before the stepper scrolls.
 const STEP_MIN_WIDTH: f32 = 132.;
@@ -126,9 +126,9 @@ pub(super) fn shell(
         .into_any_element()
 }
 
-/// The places grouped by pillar, with the pinned ones at the foot; as a
-/// rail of icons when `rail`, each name in its icon's tooltip and the
-/// pillars apart by a rule.
+/// The places by section (the project's, then the global library), with
+/// the pinned ones at the foot; as a rail of icons when `rail`, each name
+/// in its icon's tooltip and the sections apart by a rule.
 fn sidebar(nav: Navigation, rail: bool, cx: &App) -> AnyElement {
     let look = look(cx);
     let t = look.tokens;
@@ -141,8 +141,8 @@ fn sidebar(nav: Navigation, rail: bool, cx: &App) -> AnyElement {
                badge: Option<AnyElement>| {
         let place = item.place;
         let pick = Rc::clone(&pick);
-        let icon = Icon::new(icons::destination(place)).size(px(16.));
-        let row = nav_row(("nav", place as usize), selected, cx);
+        let icon = Icon::new(icons::destination(item.home)).size(px(16.));
+        let row = nav_row(("nav", item.home as usize), selected, cx);
         let row = if rail {
             let tip = tip.unwrap_or_else(|| item.label.clone());
             row.relative()
@@ -152,11 +152,13 @@ fn sidebar(nav: Navigation, rail: bool, cx: &App) -> AnyElement {
                 .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
         } else {
             row.child(icon)
+                // A long name ("Channels and accounts" in a terminal
+                // font) wraps to a second line rather than losing its end.
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
-                        .truncate()
+                        .line_height(relative(1.2))
                         .child(item.label.clone()),
                 )
                 .children(trailing)
@@ -168,7 +170,9 @@ fn sidebar(nav: Navigation, rail: bool, cx: &App) -> AnyElement {
         v_flex()
             .gap_0p5()
             .map(|column| {
-                if !rail {
+                // The global library sits under a rule: its one entry
+                // names it.
+                if !rail && group.section != NavSection::Library {
                     column.child(
                         div()
                             .px_2()
@@ -190,14 +194,14 @@ fn sidebar(nav: Navigation, rail: bool, cx: &App) -> AnyElement {
                 }
             })
             .children(group.places.iter().map(|item| {
-                row(item, item.place == nav.current, None, None, None).tour_anchor(
-                    TourAnchor::NavPlace(item.place),
+                row(item, item.holds(nav.current), None, None, None).tour_anchor(
+                    TourAnchor::NavPlace(item.home),
                     Side::Right,
                     Some(&nav.scroll),
                 )
             }))
             .tour_anchor(
-                TourAnchor::NavGroup(group.pillar),
+                TourAnchor::NavGroup(group.section),
                 Side::Right,
                 Some(&nav.scroll),
             )
@@ -340,7 +344,8 @@ fn nav_row(
     let t = look(cx).tokens;
     h_flex()
         .id(id)
-        .h(px(32.))
+        .min_h(px(32.))
+        .py_1()
         .px_2()
         .gap_2()
         .rounded(t.radius)
@@ -509,6 +514,7 @@ fn screen_header(header: Header, cx: &App) -> AnyElement {
         trail.push(crumb);
     }
     let bar = header.bar;
+    let tabs = header.tabs;
     // The title's column never gets narrower than TITLE_MIN_WIDTH: in a
     // narrow window the actions drop below it instead (issue #142).
     let row = h_flex()
@@ -575,6 +581,7 @@ fn screen_header(header: Header, cx: &App) -> AnyElement {
         .flex_none()
         .child(row)
         .children(bar.map(|bar| div().px_6().pb_3().child(bar)))
+        .children(tabs.map(|tabs| div().px_6().child(super::place_tabs(tabs))))
         .tour_anchor(TourAnchor::Header, Side::Below, None)
         .into_any_element()
 }

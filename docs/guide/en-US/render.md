@@ -2,13 +2,13 @@
 id: render
 title: Review and render
 group: editing
-place: projects/render
+place: videos/render
 tour: render
 ---
 
 # Review and render
 
-Rendering turns the cut into the files you publish: one per network account of the channel, in that network's preset. It takes a while and replaces each network's last file, so the [Render](bardo:go/projects/render) stage first shows what will come out and what stands in the way, and renders only after you confirm. [Show me the stage](bardo:tour/render).
+Rendering turns the cut into the files you publish: one per network account of the channel, in that network's preset. It takes a while and replaces each network's last file, so the [Render](bardo:go/videos/render) stage first shows what will come out and what stands in the way, and renders only after you confirm. [Show me the stage](bardo:tour/render).
 
 <a id="review"></a>
 ## The review

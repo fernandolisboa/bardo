@@ -27,15 +27,15 @@ use bardo_domain::{
     ProfileId, TourId, TourProgress, TourProgressRepository, TourState, UserProfile,
 };
 
-use crate::{AppError, Bardo, Destination, Pillar, SettingsTab, Stage, Text};
+use crate::{AppError, Bardo, Destination, NavSection, SettingsTab, Stage, Text};
 
 /// A component a tour step can point at. The layouts tag the places and
 /// parts they draw, wherever they draw them; screens tag their own
 /// controls as later tours need them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TourAnchor {
-    /// A pillar's places in the navigation.
-    NavGroup(Pillar),
+    /// A section's places in the navigation.
+    NavGroup(NavSection),
     /// One place in the navigation, pinned ones included.
     NavPlace(Destination),
     /// A screen's header: where it is, its title, its actions.
@@ -326,6 +326,16 @@ pub enum Control {
     JobsFilter,
     /// The title bar's project switcher, on every screen.
     OpenProject,
+    /// Overview: the videos in progress.
+    OverviewVideos,
+    /// Overview: the first video's next step and its Continue.
+    OverviewNextStep,
+    /// Overview: the ideas waiting for the user.
+    OverviewIdeas,
+    /// Overview: the project's channels, spending and narrators.
+    OverviewProject,
+    /// The global library's tabs.
+    LibraryTabs,
     /// Jobs: the first job's progress bar.
     JobProgress,
     /// Jobs: the first Cancel.
@@ -511,18 +521,16 @@ pub struct Tour {
 /// lives. Every step lights the navigation, which every screen shows.
 pub const WELCOME: Tour = Tour {
     id: TourId::Welcome,
-    version: 2,
+    version: 3,
     place: None,
     steps: &[
         TourStep::centered("intro").learn("what-bardo-is", "flow"),
         TourStep::at("projects", TourAnchor::Control(Control::OpenProject))
             .learn("your-projects", "switcher"),
-        TourStep::at("strategy", TourAnchor::NavGroup(Pillar::Strategy))
-            .learn("first-video", "research"),
-        TourStep::at("production", TourAnchor::NavGroup(Pillar::Production))
-            .learn("first-video", "project"),
-        TourStep::at("publishing", TourAnchor::NavGroup(Pillar::Publishing))
-            .learn("first-video", "publish"),
+        TourStep::at("project", TourAnchor::NavGroup(NavSection::Project))
+            .learn("overview", "next-steps"),
+        TourStep::at("library", TourAnchor::NavGroup(NavSection::Library))
+            .learn("global-library", "tabs"),
         TourStep::at("settings", TourAnchor::NavPlace(Destination::Settings))
             .learn("api-keys", "providers"),
         TourStep::at("jobs", TourAnchor::NavPlace(Destination::Jobs)).learn("jobs", "panel"),
@@ -545,6 +553,54 @@ const fn at_stage(stage: Stage, key: &'static str, anchor: TourAnchor) -> TourSt
 const fn control(control: Control) -> TourAnchor {
     TourAnchor::Control(control)
 }
+
+/// Overview: the videos in progress, the next step, the ideas waiting
+/// and the project beside them.
+pub const OVERVIEW: Tour = {
+    const AT: Destination = Destination::Overview;
+    const PAGE: &str = "overview";
+    const CONTENT: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::Overview,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "videos", control(Control::OverviewVideos))
+                .missing(CONTENT)
+                .learn(PAGE, "videos"),
+            on(AT, "next", control(Control::OverviewNextStep))
+                .missing(CONTENT)
+                .learn(PAGE, "next-steps"),
+            on(AT, "ideas", control(Control::OverviewIdeas))
+                .missing(CONTENT)
+                .learn(PAGE, "ideas"),
+            on(AT, "project", control(Control::OverviewProject))
+                .missing(CONTENT)
+                .learn(PAGE, "project"),
+        ],
+    }
+};
+
+/// The global library: its tabs, what each holds, and how it relates to
+/// the project's own entries.
+pub const LIBRARY: Tour = {
+    const AT: Destination = Destination::Library;
+    const PAGE: &str = "global-library";
+    Tour {
+        id: TourId::Library,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "tabs", control(Control::LibraryTabs))
+                .missing(WhenMissing::LightPart(TourAnchor::Header))
+                .learn(PAGE, "tabs"),
+            on(AT, "items", TourAnchor::Collection)
+                .missing(WhenMissing::LightPart(TourAnchor::Header))
+                .learn(PAGE, "libraries"),
+            on(AT, "projects", TourAnchor::Header).learn(PAGE, "projects"),
+        ],
+    }
+};
 
 /// Research: the market, the niches, a run and its quota, the results.
 pub const RESEARCH: Tour = {
@@ -626,7 +682,7 @@ pub const PERFORMANCE: Tour = {
             on(AT, "sync", TourAnchor::Toolbar)
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "sync"),
-            on(AT, "link", TourAnchor::NavPlace(Destination::Projects)).learn(PAGE, "link"),
+            on(AT, "link", TourAnchor::NavPlace(Destination::Videos)).learn(PAGE, "link"),
         ],
     }
 };
@@ -635,7 +691,7 @@ pub const PERFORMANCE: Tour = {
 /// style and production mode, the stages and how they open, and what the project has
 /// cost.
 pub const PROJECTS: Tour = {
-    const AT: Destination = Destination::Projects;
+    const AT: Destination = Destination::Videos;
     const PAGE: &str = "projects";
     const HEADER: WhenMissing = WhenMissing::LightPart(TourAnchor::Header);
     Tour {
@@ -869,7 +925,7 @@ pub const CLIPS: Tour = {
 /// Personas: the library, a persona's voice, tone and script style,
 /// presets, sharing it, the realistic voice flag and its look.
 pub const PERSONAS: Tour = {
-    const AT: Destination = Destination::Personas;
+    const AT: Destination = Destination::Narrators;
     const PAGE: &str = "personas";
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
@@ -1545,8 +1601,10 @@ pub const BACKUP: Tour = {
 
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 32] = [
+    pub const ALL: [&'static Tour; 34] = [
         &WELCOME,
+        &OVERVIEW,
+        &LIBRARY,
         &RESEARCH,
         &THEMES,
         &PERFORMANCE,
@@ -1583,6 +1641,8 @@ impl Tour {
     pub fn get(id: TourId) -> &'static Tour {
         match id {
             TourId::Welcome => &WELCOME,
+            TourId::Overview => &OVERVIEW,
+            TourId::Library => &LIBRARY,
             TourId::Research => &RESEARCH,
             TourId::Themes => &THEMES,
             TourId::Performance => &PERFORMANCE,
@@ -2230,7 +2290,7 @@ mod tests {
 
     #[test]
     fn next_walks_the_steps_and_finishes_after_the_last() {
-        let mut run = TourRun::new(&SAMPLE, 0, Destination::Projects);
+        let mut run = TourRun::new(&SAMPLE, 0, Destination::Videos);
         assert_eq!(run.next(), Some(TourMove::Show(None)));
         assert_eq!(
             run.next(),
@@ -2245,7 +2305,7 @@ mod tests {
 
     #[test]
     fn back_stays_on_the_first_step() {
-        let mut run = TourRun::new(&SAMPLE, 1, Destination::Projects);
+        let mut run = TourRun::new(&SAMPLE, 1, Destination::Videos);
         run.back();
         assert_eq!(run.step, 0);
         run.back();
@@ -2254,7 +2314,7 @@ mod tests {
 
     #[test]
     fn a_missing_step_is_passed_over_the_way_the_user_was_going() {
-        let mut run = TourRun::new(&SAMPLE, 0, Destination::Projects);
+        let mut run = TourRun::new(&SAMPLE, 0, Destination::Videos);
         run.next();
         assert_eq!(run.spot(|_| false), Spot::Skip);
         run.step_over();
@@ -2274,7 +2334,7 @@ mod tests {
             place: None,
             steps: &[SKIPPED, LIT],
         };
-        let mut run = TourRun::new(&FIRST_MISSING, 1, Destination::Projects);
+        let mut run = TourRun::new(&FIRST_MISSING, 1, Destination::Videos);
         run.back();
         assert_eq!(run.step_over(), Some(TourMove::Show(None)));
         assert_eq!(run.step, 1);
@@ -2288,13 +2348,13 @@ mod tests {
             place: None,
             steps: &[LIT, SKIPPED],
         };
-        let mut run = TourRun::new(&LAST_MISSING, 1, Destination::Projects);
+        let mut run = TourRun::new(&LAST_MISSING, 1, Destination::Videos);
         assert_eq!(run.step_over(), None);
     }
 
     #[test]
     fn a_missing_component_lights_its_part_or_centers_the_card() {
-        let mut run = TourRun::new(&SAMPLE, 3, Destination::Projects);
+        let mut run = TourRun::new(&SAMPLE, 3, Destination::Videos);
         assert_eq!(
             run.spot(|anchor| anchor == TourAnchor::NavPlace(Destination::Costs)),
             Spot::Lit(TourAnchor::NavPlace(Destination::Costs))
@@ -2312,11 +2372,11 @@ mod tests {
     }
 
     #[test]
-    fn the_welcome_tour_has_nine_steps_over_the_title_bar_and_navigation() {
-        assert_eq!(WELCOME.len(), 9);
+    fn the_welcome_tour_has_eight_steps_over_the_title_bar_and_navigation() {
+        assert_eq!(WELCOME.len(), 8);
         assert_eq!(WELCOME.steps[0].anchor, None, "a welcome in the middle");
         assert_eq!(
-            WELCOME.steps[8].anchor,
+            WELCOME.steps[7].anchor,
             Some(TourAnchor::NavPlace(Destination::Guide))
         );
         for step in WELCOME.steps {
@@ -2401,11 +2461,11 @@ mod tests {
         let progress = FakeProgress::default();
         let mut app = start(&progress);
         let moved = app
-            .start_tour(TourId::Welcome, Destination::Projects, false)
+            .start_tour(TourId::Welcome, Destination::Videos, false)
             .unwrap();
         assert_eq!(moved, TourMove::Show(None));
         let step = app.tour_step(false).unwrap();
-        assert_eq!((step.number, step.count), (1, 9));
+        assert_eq!((step.number, step.count), (1, 8));
         assert!(step.is_first() && !step.is_last());
         assert_eq!(step.title, Text::TourStepTitle(TourId::Welcome, "intro"));
         assert!(!app.tour_offer());
@@ -2420,7 +2480,7 @@ mod tests {
     fn next_and_back_move_and_save_the_step() {
         let progress = FakeProgress::default();
         let mut app = start(&progress);
-        app.start_tour(TourId::Welcome, Destination::Projects, false)
+        app.start_tour(TourId::Welcome, Destination::Videos, false)
             .unwrap();
         app.tour_next();
         app.tour_next();
@@ -2447,7 +2507,7 @@ mod tests {
         assert_eq!(app.tour_step(false), None);
         assert_eq!(
             progress.state(TourId::Welcome),
-            Some((TourState::Completed, 8))
+            Some((TourState::Completed, 7))
         );
         assert_eq!(app.resumable_tour(), None);
         assert!(!app.tour_is_new(TourId::Welcome));
@@ -2473,7 +2533,7 @@ mod tests {
     fn esc_keeps_the_step_for_resume_tour() {
         let progress = FakeProgress::default();
         let mut app = start(&progress);
-        app.start_tour(TourId::Welcome, Destination::Projects, false)
+        app.start_tour(TourId::Welcome, Destination::Videos, false)
             .unwrap();
         app.tour_next();
         app.tour_next();
@@ -2485,17 +2545,17 @@ mod tests {
         let mut app = start(&progress);
         assert!(!app.tour_offer());
         assert_eq!(app.resumable_tour(), Some(TourId::Welcome));
-        app.resume_tour(Destination::Personas, false).unwrap();
+        app.resume_tour(Destination::Narrators, false).unwrap();
         assert_eq!(at(&app), 3);
         assert_eq!(app.resumable_tour(), None, "it is on screen");
-        assert_eq!(app.tour_skip(), TourMove::Left(Destination::Personas));
+        assert_eq!(app.tour_skip(), TourMove::Left(Destination::Narrators));
     }
 
     #[test]
     fn resume_tour_goes_back_to_the_tour_closed_last() {
         let progress = FakeProgress::default();
         let mut app = start(&progress);
-        app.start_tour(TourId::Welcome, Destination::Projects, false)
+        app.start_tour(TourId::Welcome, Destination::Videos, false)
             .unwrap();
         app.tour_next();
         assert_eq!(app.tour_close(), TourMove::Closed);
@@ -2513,7 +2573,7 @@ mod tests {
     fn nothing_to_resume_without_a_closed_tour() {
         let mut app = start(&FakeProgress::default());
         assert_eq!(
-            app.resume_tour(Destination::Projects, false),
+            app.resume_tour(Destination::Videos, false),
             Err(TourError::NothingToResume)
         );
     }
@@ -2532,7 +2592,7 @@ mod tests {
         let mut app = start(&progress);
         assert!(app.tour_is_new(TourId::Welcome), "new content");
         assert!(!app.tour_offer(), "it never restarts on its own");
-        app.resume_tour(Destination::Projects, false).unwrap();
+        app.resume_tour(Destination::Videos, false).unwrap();
         assert_eq!(at(&app), 1);
     }
 
@@ -2557,12 +2617,12 @@ mod tests {
     fn tours_wait_for_the_missed_posts_list() {
         let mut app = start(&FakeProgress::default());
         assert_eq!(
-            app.start_tour(TourId::Welcome, Destination::Projects, true),
+            app.start_tour(TourId::Welcome, Destination::Videos, true),
             Err(TourError::MissedPostsOpen)
         );
         assert_eq!(app.tour_step(false), None);
 
-        app.start_tour(TourId::Welcome, Destination::Projects, false)
+        app.start_tour(TourId::Welcome, Destination::Videos, false)
             .unwrap();
         app.tour_next();
         assert_eq!(app.tour_step(true), None, "paused behind the list");
@@ -2573,10 +2633,10 @@ mod tests {
     fn starting_another_tour_keeps_the_running_ones_step() {
         let progress = FakeProgress::default();
         let mut app = start(&progress);
-        app.start_tour(TourId::Welcome, Destination::Projects, false)
+        app.start_tour(TourId::Welcome, Destination::Videos, false)
             .unwrap();
         app.tour_next();
-        app.start_tour(TourId::Welcome, Destination::Projects, false)
+        app.start_tour(TourId::Welcome, Destination::Videos, false)
             .unwrap();
         assert_eq!(at(&app), 1);
     }
@@ -2586,7 +2646,7 @@ mod tests {
         let progress = FakeProgress::default();
         let mut app = start(&progress);
         *progress.fail.borrow_mut() = true;
-        app.start_tour(TourId::Welcome, Destination::Projects, false)
+        app.start_tour(TourId::Welcome, Destination::Videos, false)
             .unwrap();
         app.tour_next();
         assert_eq!(at(&app), 2);
@@ -2607,7 +2667,7 @@ mod tests {
     fn reset_forgets_every_tour_and_offers_again() {
         let progress = FakeProgress::default();
         let mut app = start(&progress);
-        app.start_tour(TourId::Welcome, Destination::Projects, false)
+        app.start_tour(TourId::Welcome, Destination::Videos, false)
             .unwrap();
         app.tour_close();
         app.reset_tours().unwrap();
@@ -2638,8 +2698,8 @@ mod tests {
             (Destination::Research, TourId::Research),
             (Destination::Themes, TourId::Themes),
             (Destination::Performance, TourId::Performance),
-            (Destination::Projects, TourId::Projects),
-            (Destination::Personas, TourId::Personas),
+            (Destination::Videos, TourId::Projects),
+            (Destination::Narrators, TourId::Personas),
             (Destination::Products, TourId::Products),
             (Destination::Templates, TourId::Templates),
             (Destination::Channels, TourId::Channels),
@@ -2731,9 +2791,9 @@ mod tests {
                 new: true
             })
         );
-        app.start_tour(TourId::Scenes, Destination::Projects, false)
+        app.start_tour(TourId::Scenes, Destination::Videos, false)
             .unwrap();
-        assert_eq!(app.tour_skip(), TourMove::Left(Destination::Projects));
+        assert_eq!(app.tour_skip(), TourMove::Left(Destination::Videos));
         assert_eq!(
             app.stage_tour(Stage::Scenes, true).map(|tour| tour.new),
             Some(false),
@@ -2760,11 +2820,11 @@ mod tests {
             })
         );
         // Closed midway: part one is still the one offered.
-        app.start_tour(TourId::Editor, Destination::Projects, false)
+        app.start_tour(TourId::Editor, Destination::Videos, false)
             .unwrap();
         app.tour_close();
         assert_eq!(offered(&app).map(|tour| tour.tour), Some(TourId::Editor));
-        app.start_tour(TourId::Editor, Destination::Projects, false)
+        app.start_tour(TourId::Editor, Destination::Videos, false)
             .unwrap();
         while app.tour_next() != TourMove::Finished {}
         assert_eq!(
@@ -2775,7 +2835,7 @@ mod tests {
             }),
             "part two, still new"
         );
-        app.start_tour(TourId::EditorMore, Destination::Projects, false)
+        app.start_tour(TourId::EditorMore, Destination::Videos, false)
             .unwrap();
         app.tour_skip();
         assert_eq!(
@@ -2792,7 +2852,7 @@ mod tests {
     fn the_editor_button_takes_a_closed_tour_back_to_its_step() {
         let progress = FakeProgress::default();
         let mut app = start(&progress);
-        let from = Destination::Projects;
+        let from = Destination::Videos;
         let step = |app: &Bardo| app.tour_step(false).map(|step| step.number);
         app.continue_tour(TourId::Editor, from, false).unwrap();
         assert_eq!(step(&app), Some(1), "never run: from the start");
@@ -2810,7 +2870,7 @@ mod tests {
     fn a_stage_tour_opens_its_stage_first() {
         let mut app = start(&FakeProgress::default());
         assert_eq!(
-            app.start_tour(TourId::Narration, Destination::Personas, false),
+            app.start_tour(TourId::Narration, Destination::Narrators, false),
             Ok(TourMove::Show(Some(TourPlace::Stage(Stage::Narration))))
         );
         assert_eq!(
@@ -2824,7 +2884,7 @@ mod tests {
         // No scene picked, so no inspector: the scene step goes. A picked
         // scene with nothing to draw again lights the inspector instead,
         // and with no inspector either the card centres.
-        let mut run = TourRun::new(&SCENES, 2, Destination::Projects);
+        let mut run = TourRun::new(&SCENES, 2, Destination::Videos);
         assert_eq!(
             run.spot(|anchor| anchor != TourAnchor::Inspector),
             Spot::Skip
@@ -2944,12 +3004,12 @@ mod tests {
     fn the_missed_posts_list_runs_its_own_tour_and_holds_the_others() {
         let mut app = start(&FakeProgress::default());
         assert_eq!(
-            app.start_tour(TourId::Publish, Destination::Projects, true),
+            app.start_tour(TourId::Publish, Destination::Videos, true),
             Err(TourError::MissedPostsOpen),
             "the others wait behind the list"
         );
         assert_eq!(
-            app.start_tour(TourId::Missed, Destination::Projects, true),
+            app.start_tour(TourId::Missed, Destination::Videos, true),
             Ok(TourMove::Show(Some(TourPlace::Missed)))
         );
         assert_eq!(
@@ -2976,7 +3036,7 @@ mod tests {
                 new: true
             })
         );
-        app.start_tour(TourId::Missed, Destination::Projects, true)
+        app.start_tour(TourId::Missed, Destination::Videos, true)
             .unwrap();
         while app.tour_next() != TourMove::Finished {}
         assert_eq!(
@@ -2988,7 +3048,7 @@ mod tests {
     #[test]
     fn a_missed_post_step_without_its_buttons_lights_the_list() {
         // The first post is being given a new time: its buttons are gone.
-        let run = TourRun::new(&MISSED, 1, Destination::Projects);
+        let run = TourRun::new(&MISSED, 1, Destination::Videos);
         assert_eq!(
             run.spot(|anchor| anchor == control(Control::MissedList)),
             Spot::Lit(control(Control::MissedList))
@@ -3005,14 +3065,14 @@ mod tests {
             Some(TourId::Networks)
         );
         assert_eq!(
-            app.start_tour(TourId::Networks, Destination::Projects, false),
+            app.start_tour(TourId::Networks, Destination::Videos, false),
             Ok(TourMove::Show(Some(networks)))
         );
     }
 
     #[test]
     fn the_publish_tour_falls_back_where_a_network_does_not_upload() {
-        let mut run = TourRun::new(&PUBLISH, 2, Destination::Projects);
+        let mut run = TourRun::new(&PUBLISH, 2, Destination::Videos);
         let inspector = TourAnchor::Inspector;
         // Another network or a Short: no thumbnail card, so the inspector.
         assert_eq!(run.spot(|anchor| anchor == inspector), Spot::Lit(inspector));
@@ -3043,7 +3103,7 @@ mod tests {
     #[test]
     fn the_costs_tour_lights_the_figure_of_a_tab_not_shown() {
         // Workspace shows the budgets or the rates, one at a time.
-        let mut run = TourRun::new(&COSTS, 2, Destination::Projects);
+        let mut run = TourRun::new(&COSTS, 2, Destination::Videos);
         let shown = |anchor| anchor == TourAnchor::Summary;
         assert_eq!(run.spot(shown), Spot::Lit(TourAnchor::Summary));
         run.next();
@@ -3077,7 +3137,7 @@ mod tests {
 
     #[test]
     fn the_keys_tour_lights_the_first_card_before_any_key_is_saved() {
-        let mut run = TourRun::new(&KEYS, 2, Destination::Projects);
+        let mut run = TourRun::new(&KEYS, 2, Destination::Videos);
         let card = control(Control::KeyCard);
         // No key saved: no Test key to light.
         assert_eq!(run.spot(|anchor| anchor == card), Spot::Lit(card));
@@ -3106,7 +3166,7 @@ mod tests {
             None,
         )
         .unwrap();
-        app.start_tour(TourId::Welcome, Destination::Projects, false)
+        app.start_tour(TourId::Welcome, Destination::Videos, false)
             .unwrap();
         app.tour_next();
         app.tour_close();
@@ -3117,7 +3177,7 @@ mod tests {
         )
         .unwrap();
         assert!(!app.tour_offer());
-        app.resume_tour(Destination::Projects, false).unwrap();
+        app.resume_tour(Destination::Videos, false).unwrap();
         assert_eq!(at(&app), 2);
     }
 }

@@ -2,13 +2,13 @@
 id: clips
 title: Clipes
 group: production
-place: projects/clips
+place: videos/clips
 tour: clips
 ---
 
 # Clipes
 
-Um clipe anima a imagem de uma cena num vídeo curto. Os clipes são opcionais: uma cena sem clipe mostra a imagem parada no vídeo. Eles ficam na etapa [Clipes](bardo:go/projects/clips), que se abre quando uma cena tem imagem ([Cenas e imagens](scenes.md)). [Mostre a etapa para mim](bardo:tour/clips).
+Um clipe anima a imagem de uma cena num vídeo curto. Os clipes são opcionais: uma cena sem clipe mostra a imagem parada no vídeo. Eles ficam na etapa [Clipes](bardo:go/videos/clips), que se abre quando uma cena tem imagem ([Cenas e imagens](scenes.md)). [Mostre a etapa para mim](bardo:tour/clips).
 
 <a id="animate"></a>
 ## Animar as cenas

@@ -2,13 +2,13 @@
 id: narration
 title: Narração
 group: production
-place: projects/narration
+place: videos/narration
 tour: narration
 ---
 
 # Narração
 
-A narração é o roteiro lido em voz alta pelo narrador do projeto, com o tempo de cada palavra, para que cenas, legendas e cortes se alinhem a ela. Ela fica na etapa [Narração](bardo:go/projects/narration) de um projeto. [Mostre a etapa para mim](bardo:tour/narration).
+A narração é o roteiro lido em voz alta pelo narrador do projeto, com o tempo de cada palavra, para que cenas, legendas e cortes se alinhem a ela. Ela fica na etapa [Narração](bardo:go/videos/narration) de um projeto. [Mostre a etapa para mim](bardo:tour/narration).
 
 <a id="generate"></a>
 ## Gerar a narração
@@ -42,4 +42,4 @@ Gravou o roteiro você mesmo? **Importar gravação** aceita um arquivo MP3 ou W
 <a id="capture"></a>
 ## Importar uma captura
 
-Você se gravou lendo o roteiro diante da câmera? **Importar captura** recebe o vídeo: a fala vira a narração, na voz da persona ou na sua, e a gravação é dividida em tomadas na etapa [Captura](bardo:go/projects/capture). Veja [Captura de atuação](capture.md).
+Você se gravou lendo o roteiro diante da câmera? **Importar captura** recebe o vídeo: a fala vira a narração, na voz da persona ou na sua, e a gravação é dividida em tomadas na etapa [Captura](bardo:go/videos/capture). Veja [Captura de atuação](capture.md).

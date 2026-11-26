@@ -2,13 +2,13 @@
 id: scenes
 title: Cenas e imagens
 group: production
-place: projects/scenes
+place: videos/scenes
 tour: scenes
 ---
 
 # Cenas e imagens
 
-As cenas dividem a narração nos planos que o vídeo mostra, cada um com uma imagem. Elas ficam na etapa [Cenas](bardo:go/projects/scenes) de um projeto, e a etapa [Clipes](clips.md) as anima. [Mostre a etapa para mim](bardo:tour/scenes).
+As cenas dividem a narração nos planos que o vídeo mostra, cada um com uma imagem. Elas ficam na etapa [Cenas](bardo:go/videos/scenes) de um projeto, e a etapa [Clipes](clips.md) as anima. [Mostre a etapa para mim](bardo:tour/scenes).
 
 <a id="plan"></a>
 ## Planejar e desenhar

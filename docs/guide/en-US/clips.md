@@ -2,13 +2,13 @@
 id: clips
 title: Clips
 group: production
-place: projects/clips
+place: videos/clips
 tour: clips
 ---
 
 # Clips
 
-A clip animates a scene's image into a short video. Clips are optional: a scene without one shows its still image in the video. They live at the [Clips](bardo:go/projects/clips) stage, which opens once a scene has an image ([Scenes and images](scenes.md)). [Show me the stage](bardo:tour/clips).
+A clip animates a scene's image into a short video. Clips are optional: a scene without one shows its still image in the video. They live at the [Clips](bardo:go/videos/clips) stage, which opens once a scene has an image ([Scenes and images](scenes.md)). [Show me the stage](bardo:tour/clips).
 
 <a id="animate"></a>
 ## Animating scenes

@@ -53,7 +53,7 @@ Nothing is approved for you: an idea becomes a video only when you approve it.
 <a id="projects"></a>
 ## Projects started here
 
-The **Projects** list under the controls shows the projects started from the channel's ideas. Open them on [Projects](bardo:go/projects) to write the script, then narration, scenes and the rest ([Your first video](first-video.md#project)).
+The **Projects** list under the controls shows the projects started from the channel's ideas. Open them on [Videos](bardo:go/videos) to write the script, then narration, scenes and the rest ([Your first video](first-video.md#project)).
 
 <a id="next"></a>
 ## Next step

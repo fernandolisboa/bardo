@@ -129,7 +129,7 @@ impl Render for AccountsScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let collection = self.collection(cx);
         let bardo = self.bardo.read(cx);
-        let mut header = Header::place(bardo, Destination::Accounts);
+        let mut header = Header::place(bardo, Destination::Accounts, cx);
         let info = guide::info(
             bardo,
             "accounts-info",

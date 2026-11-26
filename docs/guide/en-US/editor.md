@@ -2,13 +2,13 @@
 id: editor
 title: The editor
 group: editing
-place: projects/edit
+place: videos/edit
 tour: editor
 ---
 
 # The editor
 
-The editor is where the scenes and the narration become a cut: you trim it, mix its sound, caption it and frame it, then send it to the render. It opens over the whole window from the [Edit](bardo:go/projects/edit) stage of a project, once the scenes are planned and narrated, and **Projects** at its top left takes you back. The cut saves itself after every edit. [Show me the editor](bardo:tour/editor), or [part 2 of the tour](bardo:tour/editor-more) for the mix, captions, framing, motion on stills, performed clips and cut suggestions.
+The editor is where the scenes and the narration become a cut: you trim it, mix its sound, caption it and frame it, then send it to the render. It opens over the whole window from the [Edit](bardo:go/videos/edit) stage of a project, once the scenes are planned and narrated, and **Videos** at its top left takes you back. The cut saves itself after every edit. [Show me the editor](bardo:tour/editor), or [part 2 of the tour](bardo:tour/editor-more) for the mix, captions, framing, motion on stills, performed clips and cut suggestions.
 
 F1 opens this guide over the editor, and **Back to the editor** returns to it as you left it. Esc closes a tour; the **Editor tour** button in the top bar (Shift+F1) takes it back to the step it closed on.
 

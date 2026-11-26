@@ -1,19 +1,19 @@
 ---
 id: projects
-title: Projects and stages
+title: Videos and stages
 group: production
-place: projects
+place: videos
 tour: projects
 ---
 
-# Projects and stages
+# Videos and stages
 
-A video project is one video on its way from an approved idea to a published post. [Projects](bardo:go/projects) shows one project at a time: who narrates it, its stages from the script to publishing, and what it has cost. Approving an idea on [Themes](themes-ranking.md#review) starts a project, and approving an [ad angle](products.md#angle-review) on Products starts an ad project. [Show me the screen](bardo:tour/projects).
+A video project is one video on its way from an approved idea to a published post. [Videos](bardo:go/videos) shows one project at a time: who narrates it, its stages from the script to publishing, and what it has cost. Approving an idea on [Themes](themes-ranking.md#review) starts a project, and approving an [ad angle](products.md#angle-review) on Products starts an ad project. [Show me the screen](bardo:tour/projects).
 
 <a id="switch"></a>
 ## Picking a project
 
-The project's name heads the screen, with a menu beside it that lists the channel's other projects; pick one to switch. An ad project is marked **Ad** in that menu, and the line under its name starts with **Ad for** and the product it advertises. An ad whose product was an *idea* when the project started is a concept: it is marked **Concept** in that menu and beside its name, and keeps that mark even if the product changes kind later ([A concept image for an idea](products.md#concept)). The channel picker next to **Projects** lists another channel's projects.
+The project's name heads the screen, with a menu beside it that lists the channel's other projects; pick one to switch. An ad project is marked **Ad** in that menu, and the line under its name starts with **Ad for** and the product it advertises. An ad whose product was an *idea* when the project started is a concept: it is marked **Concept** in that menu and beside its name, and keeps that mark even if the product changes kind later ([A concept image for an idea](products.md#concept)). The channel picker next to **Videos** lists another channel's projects.
 
 <a id="settings"></a>
 ## The video's settings

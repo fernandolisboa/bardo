@@ -42,7 +42,7 @@ A YouTube post with a retention curve also lists **Where viewers leave**: the cu
 <a id="link"></a>
 ## Linking and unlinking a post
 
-Posts are linked at a project's [Publish](bardo:go/projects/publish) stage. A video Bardo uploads is linked by itself. For an exported file, post it by hand, then paste the post's link with **Mark as posted**; Bardo checks that the link is a post on that network. **Unlink** removes the post and its numbers from Bardo; the post stays on the network.
+Posts are linked at a project's [Publish](bardo:go/videos/publish) stage. A video Bardo uploads is linked by itself. For an exported file, post it by hand, then paste the post's link with **Mark as posted**; Bardo checks that the link is a post on that network. **Unlink** removes the post and its numbers from Bardo; the post stays on the network.
 
 <a id="ranking"></a>
 ## How your numbers rank ideas

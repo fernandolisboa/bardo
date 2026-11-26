@@ -22,16 +22,18 @@ pub enum ShowcasePlace {
 
 impl ShowcasePlace {
     /// Every place: the screens, the stages and the Settings tabs in the
-    /// guide's order, then the Guide screen. The Projects and Settings
-    /// screens always show one of their stages or tabs, which stand for
-    /// them.
+    /// guide's order, then the Guide screen. The Videos, Settings and
+    /// Global library screens always show one of their stages or tabs,
+    /// which stand for them.
     pub fn all() -> Vec<ShowcasePlace> {
         GuidePlace::all()
             .into_iter()
             .filter(|place| {
                 !matches!(
                     place,
-                    GuidePlace::Screen(Destination::Projects | Destination::Settings)
+                    GuidePlace::Screen(
+                        Destination::Videos | Destination::Settings | Destination::Library
+                    )
                 )
             })
             .map(ShowcasePlace::Place)

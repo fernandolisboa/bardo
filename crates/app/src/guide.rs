@@ -13,7 +13,7 @@
 
 use bardo_domain::{Network, Provider, TourId, UiLanguage};
 
-use crate::{Destination, SettingsTab, Stage, TourPlace};
+use crate::{Destination, LibraryTab, SettingsTab, Stage, TourPlace};
 
 /// One page in both languages, embedded from `docs/guide/<language>/`.
 pub(crate) struct PageSource {
@@ -40,6 +40,8 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("get-api-keys"),
     page!("first-video"),
     page!("your-projects"),
+    page!("overview"),
+    page!("global-library"),
     page!("niche-research"),
     page!("themes-ranking"),
     page!("products"),
@@ -128,6 +130,8 @@ pub enum GuidePlace {
     Screen(Destination),
     Stage(Stage),
     Settings(SettingsTab),
+    /// A tab of the global library.
+    Library(LibraryTab),
 }
 
 impl GuidePlace {
@@ -140,15 +144,18 @@ impl GuidePlace {
             .map(GuidePlace::Screen);
         let stages = Stage::ALL.into_iter().map(GuidePlace::Stage);
         let tabs = SettingsTab::ALL.into_iter().map(GuidePlace::Settings);
-        screens.chain(stages).chain(tabs).collect()
+        let library = LibraryTab::ALL.into_iter().map(GuidePlace::Library);
+        screens.chain(stages).chain(tabs).chain(library).collect()
     }
 
-    /// `research`, `projects/script`, `settings/keys`.
+    /// `research`, `videos/script`, `settings/keys`, `library/products`;
+    /// `projects/script` from before Videos was named so.
     pub fn parse(code: &str) -> Option<Self> {
         match code.split_once('/') {
             None => Destination::from_code(code).map(GuidePlace::Screen),
-            Some(("projects", stage)) => Stage::from_code(stage).map(GuidePlace::Stage),
+            Some(("videos" | "projects", stage)) => Stage::from_code(stage).map(GuidePlace::Stage),
             Some(("settings", tab)) => SettingsTab::from_code(tab).map(GuidePlace::Settings),
+            Some(("library", tab)) => LibraryTab::from_code(tab).map(GuidePlace::Library),
             Some(_) => None,
         }
     }
@@ -156,8 +163,9 @@ impl GuidePlace {
     pub fn code(self) -> String {
         match self {
             GuidePlace::Screen(place) => place.code().to_owned(),
-            GuidePlace::Stage(stage) => format!("projects/{}", stage.code()),
+            GuidePlace::Stage(stage) => format!("videos/{}", stage.code()),
             GuidePlace::Settings(tab) => format!("settings/{}", tab.code()),
+            GuidePlace::Library(tab) => format!("library/{}", tab.code()),
         }
     }
 
@@ -165,19 +173,24 @@ impl GuidePlace {
     pub fn screen(self) -> Destination {
         match self {
             GuidePlace::Screen(place) => place,
-            GuidePlace::Stage(_) => Destination::Projects,
+            GuidePlace::Stage(_) => Destination::Videos,
             GuidePlace::Settings(_) => Destination::Settings,
+            GuidePlace::Library(_) => Destination::Library,
         }
     }
 
     /// The places the guide must explain, each with a page and a tour of
     /// its own: every place [`GuidePlace::all`] lists but the Settings
     /// screen, which always shows one of its tabs (they carry its pages and
-    /// tours).
+    /// tours), and the global library's tabs, which show screens the
+    /// project's entries explain.
     pub fn covered() -> Vec<GuidePlace> {
         Self::all()
             .into_iter()
-            .filter(|place| *place != GuidePlace::Screen(Destination::Settings))
+            .filter(|place| {
+                *place != GuidePlace::Screen(Destination::Settings)
+                    && !matches!(place, GuidePlace::Library(_))
+            })
             .collect()
     }
 
@@ -187,6 +200,7 @@ impl GuidePlace {
             GuidePlace::Screen(screen) => TourPlace::Screen(screen),
             GuidePlace::Stage(stage) => TourPlace::Stage(stage),
             GuidePlace::Settings(tab) => TourPlace::Settings(tab),
+            GuidePlace::Library(_) => TourPlace::Screen(Destination::Library),
         }
     }
 
@@ -1157,6 +1171,32 @@ Text of the **first** part.
         assert_eq!(GuidePlace::parse("settings/kitchen"), None);
         assert_eq!(GuidePlace::parse("themes/script"), None);
         assert!(!GuidePlace::all().contains(&GuidePlace::Screen(Destination::Guide)));
+    }
+
+    #[test]
+    fn links_from_before_the_project_navigation_still_land() {
+        let go = |link: &str| match GuideLink::parse(link, "here") {
+            Some(GuideLink::Go(place)) => Some(place),
+            _ => None,
+        };
+        let screen = |place| Some(GuidePlace::Screen(place));
+        assert_eq!(go("bardo:go/projects"), screen(Destination::Videos));
+        assert_eq!(go("bardo:go/personas"), screen(Destination::Narrators));
+        assert_eq!(go("bardo:go/research"), screen(Destination::Research));
+        assert_eq!(go("bardo:go/themes"), screen(Destination::Themes));
+        assert_eq!(
+            go("bardo:go/projects/clips"),
+            Some(GuidePlace::Stage(Stage::Clips))
+        );
+        assert_eq!(
+            go("bardo:go/videos/clips"),
+            Some(GuidePlace::Stage(Stage::Clips))
+        );
+        assert_eq!(
+            go("bardo:go/library/products"),
+            Some(GuidePlace::Library(LibraryTab::Products))
+        );
+        assert_eq!(GuidePlace::Stage(Stage::Clips).code(), "videos/clips");
     }
 
     #[test]

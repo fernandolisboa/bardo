@@ -1635,7 +1635,7 @@ impl Render for PersonasScreen {
         let collection = self.collection(cx);
         let form = self.render_form(cx).into_any_element();
         let bardo = self.bardo.read(cx);
-        let mut header = Header::place(bardo, Destination::Personas);
+        let mut header = Header::place(bardo, Destination::Narrators, cx);
         let info = guide::info(
             bardo,
             "personas-info",
@@ -1645,7 +1645,7 @@ impl Render for PersonasScreen {
         .into_any_element();
         header.info = guide::header_info(
             bardo,
-            Destination::Personas,
+            Destination::Narrators,
             self.has_content(),
             Some(info),
             cx,

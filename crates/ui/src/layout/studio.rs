@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use bardo_app::{Destination, Side, Stage, StageState, TourAnchor};
+use bardo_app::{Destination, NavSection, Side, Stage, StageState, TourAnchor};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Div, ElementId, Hsla, Stateful, div, px, relative};
@@ -126,7 +126,7 @@ pub(super) fn shell(
         .into_any_element()
 }
 
-/// The places as tabs, pillar after pillar, then the pinned places that
+/// The places as tabs, section after section, then the pinned places that
 /// are screens; jobs, the guide and settings as buttons on the right.
 fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
     let t = look(cx).tokens;
@@ -134,8 +134,8 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
     let tab = |item: &NavItem, selected: bool| {
         let place = item.place;
         let pick = Rc::clone(&pick);
-        nav_tab(("nav", place as usize), selected, cx)
-            .child(Icon::new(icons::destination(place)).size(px(14.)))
+        nav_tab(("nav", item.home as usize), selected, cx)
+            .child(Icon::new(icons::destination(item.home)).size(px(14.)))
             .child(div().whitespace_nowrap().child(item.label.clone()))
             .on_click(move |_, window, cx| pick(place, window, cx))
     };
@@ -150,9 +150,9 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
 
     // A separator opens every group but the first and stays with it, so a
     // group that wraps to the next line never leaves one at a line's end.
+    // Not `flex_none`: the project's group shrinks to wrap its own tabs.
     let lead = |first: bool, group: AnyElement| {
         h_flex()
-            .flex_none()
             .items_center()
             .when(!first, |row| row.child(separator()))
             .child(group)
@@ -160,25 +160,30 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
     };
 
     let mut tabs: Vec<AnyElement> = Vec::new();
-    for (ix, group) in nav.groups.iter().enumerate() {
-        // A pillar's tabs together, so the tour can light them as one and
-        // a narrow window wraps them as one. No gap between them: their
-        // own padding spaces them, and the strip stays on one line.
-        tabs.push(lead(
-            ix == 0,
-            h_flex()
-                .flex_none()
-                .items_center()
-                .children(group.places.iter().map(|item| {
-                    tab(item, item.place == nav.current).tour_anchor(
-                        TourAnchor::NavPlace(item.place),
-                        Side::Below,
-                        None,
-                    )
-                }))
-                .tour_anchor(TourAnchor::NavGroup(group.pillar), Side::Below, None)
-                .into_any_element(),
-        ));
+    // The global places (the library, then Costs) wrap as one unit, so a
+    // window too narrow for one line puts them together on the next one.
+    let mut global: Vec<AnyElement> = Vec::new();
+    for group in &nav.groups {
+        // A section's tabs together, so the tour can light them as one.
+        // No gap between them: their own padding spaces them. The
+        // project's tabs wrap inside their group in a narrow window.
+        let element = h_flex()
+            .flex_wrap()
+            .min_w_0()
+            .items_center()
+            .children(group.places.iter().map(|item| {
+                tab(item, item.holds(nav.current)).tour_anchor(
+                    TourAnchor::NavPlace(item.home),
+                    Side::Below,
+                    None,
+                )
+            }))
+            .tour_anchor(TourAnchor::NavGroup(group.section), Side::Below, None)
+            .into_any_element();
+        match group.section {
+            NavSection::Project => tabs.push(lead(tabs.is_empty(), element)),
+            NavSection::Library => global.push(element),
+        }
     }
     // Costs is a screen; jobs open a panel, the guide a menu, and settings
     // sit apart.
@@ -223,16 +228,30 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
                     .tour_anchor(TourAnchor::NavPlace(item.place), Side::Below, None)
                     .into_any_element(),
             ),
-            _ => tabs.push(lead(
-                tabs.is_empty(),
-                tab(item, nav.current == item.place)
-                    .tour_anchor(TourAnchor::NavPlace(item.place), Side::Below, None)
-                    .into_any_element(),
-            )),
+            _ => {
+                if !global.is_empty() {
+                    global.push(separator().into_any_element());
+                }
+                global.push(
+                    tab(item, nav.current == item.place)
+                        .tour_anchor(TourAnchor::NavPlace(item.place), Side::Below, None)
+                        .into_any_element(),
+                );
+            }
         }
     }
+    if !global.is_empty() {
+        tabs.push(lead(
+            tabs.is_empty(),
+            h_flex()
+                .flex_none()
+                .items_center()
+                .children(global)
+                .into_any_element(),
+        ));
+    }
 
-    // The tabs wrap, a pillar at a time, when the window is too narrow
+    // The tabs wrap, a section at a time, when the window is too narrow
     // for one line (issue #151); jobs, the guide and settings keep the
     // first line's right end.
     h_flex()
@@ -272,8 +291,8 @@ fn nav_tab(id: impl Into<ElementId>, selected: bool, cx: &App) -> Stateful<Div> 
         .id(id)
         .flex_none()
         .h(px(TAB_HEIGHT))
-        // Snug, so every place fits the default window in both languages,
-        // terminal fonts included; the strip wraps only below that.
+        // Snug, so the project's places fit the default window in both
+        // languages, terminal fonts included; the global ones may wrap.
         .px_1()
         .gap_1()
         .items_center()
@@ -533,6 +552,7 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
     let summed = !summary.is_empty();
     let briefs = summary.into_iter().map(|figure| brief(figure, cx));
     let bar = header.bar;
+    let tabs = header.tabs;
     let row = h_flex()
         .flex_none()
         .w_full()
@@ -616,6 +636,7 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
         .border_color(t.border)
         .child(row)
         .children(bar.map(|bar| div().px_4().pb_2().child(bar)))
+        .children(tabs.map(|tabs| div().px_4().child(super::place_tabs(tabs))))
         .tour_anchor(TourAnchor::Header, Side::Below, None)
         .into_any_element()
 }

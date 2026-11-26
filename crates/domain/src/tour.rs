@@ -12,6 +12,11 @@ use crate::{ProfileId, RepositoryError};
 pub enum TourId {
     /// The first-run tour of the navigation and the first steps.
     Welcome,
+    /// The Overview screen's tour: the videos in progress and their next
+    /// steps, the ideas waiting and the project's channels.
+    Overview,
+    /// The global library's tour: its tabs.
+    Library,
     /// The Research screen's tour.
     Research,
     /// The Themes screen's tour.
@@ -81,8 +86,10 @@ pub enum TourId {
 }
 
 impl TourId {
-    pub const ALL: [TourId; 32] = [
+    pub const ALL: [TourId; 34] = [
         TourId::Welcome,
+        TourId::Overview,
+        TourId::Library,
         TourId::Research,
         TourId::Themes,
         TourId::Performance,
@@ -119,6 +126,8 @@ impl TourId {
     pub fn code(self) -> &'static str {
         match self {
             TourId::Welcome => "welcome",
+            TourId::Overview => "overview",
+            TourId::Library => "library",
             TourId::Research => "research",
             TourId::Themes => "themes",
             TourId::Performance => "performance",

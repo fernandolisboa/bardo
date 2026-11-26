@@ -19,7 +19,7 @@ use gpui_kit::{
     AlignItems, AnyElement, App, BorderStyle, Bounds, DispatchPhase, Display, Element, ElementId,
     Global, GlobalElementId, HitboxBehavior, Hsla, InspectorElementId, LayoutId, MouseDownEvent,
     Pixels, Point, ScrollHandle, Size, Style, Window, WindowId, canvas, fill, outline, point, px,
-    relative,
+    relative, size,
 };
 
 /// Space between the lit component and the ring.
@@ -248,6 +248,10 @@ pub struct Spotlight {
     on_skip: Option<Callback>,
     /// A click outside the card.
     on_outside: Option<Callback>,
+    /// A strip at the layer's top (the title bar) left undimmed and
+    /// working: its window controls and drag stay usable, and an anchor
+    /// there is still ringed.
+    spare_top: Pixels,
 }
 
 impl Spotlight {
@@ -262,6 +266,21 @@ impl Spotlight {
             motion,
             on_skip: None,
             on_outside: None,
+            spare_top: px(0.),
+        }
+    }
+
+    pub fn spare_top(mut self, height: Pixels) -> Self {
+        self.spare_top = height;
+        self
+    }
+
+    /// The part of the layer the scrim dims and the blocking takes.
+    fn cover(&self, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+        let spare = self.spare_top.min(bounds.size.height);
+        Bounds {
+            origin: point(bounds.origin.x, bounds.origin.y + spare),
+            size: size(bounds.size.width, bounds.size.height - spare),
         }
     }
 
@@ -393,9 +412,9 @@ impl Element for Spotlight {
         };
         let ring = self.ring.map_or(px(0.), |ring| ring.width);
         let around = hole.map(|hole| hole.dilate(ring));
-        let origin = place(bounds, around, natural.size, side);
+        let origin = place(self.cover(bounds), around, natural.size, side);
         if self.block {
-            window.insert_hitbox(bounds, HitboxBehavior::BlockMouse);
+            window.insert_hitbox(self.cover(bounds), HitboxBehavior::BlockMouse);
         }
         let offset = origin - natural.origin;
         window.with_element_offset(point(offset.x.round(), offset.y.round()), |window| {
@@ -420,8 +439,13 @@ impl Element for Spotlight {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let cover = self.cover(bounds);
         if let Some(scrim) = self.scrim {
-            for part in around_hole(bounds, placed.hole) {
+            let hole = placed
+                .hole
+                .map(|hole| hole.intersect(&cover))
+                .filter(|hole| hole.size.width > px(0.) && hole.size.height > px(0.));
+            for part in around_hole(cover, hole) {
                 window.paint_quad(fill(part, scrim));
             }
         }
@@ -437,7 +461,7 @@ impl Element for Spotlight {
             let card = placed.card;
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if phase == DispatchPhase::Bubble
-                    && bounds.contains(&event.position)
+                    && cover.contains(&event.position)
                     && !card.contains(&event.position)
                 {
                     on_outside(window, cx);
@@ -650,7 +674,7 @@ mod tests {
     }
 
     /// The screens that tag their own controls, in every layout alike.
-    const SCREENS: [&str; 34] = [
+    const SCREENS: [&str; 36] = [
         include_str!("research.rs"),
         include_str!("themes.rs"),
         include_str!("performance.rs"),
@@ -685,19 +709,21 @@ mod tests {
         include_str!("costs.rs"),
         include_str!("jobs.rs"),
         include_str!("project_switcher.rs"),
+        include_str!("overview.rs"),
+        include_str!("parts.rs"),
     ];
 
-    /// How a layout tags `anchor`: a pillar's group and each place come
+    /// How a layout tags `anchor`: a section's group and each place come
     /// from the navigation it is handed, which holds every one.
     fn tag(anchor: TourAnchor) -> String {
         match anchor {
-            TourAnchor::NavGroup(_) => "TourAnchor::NavGroup(group.pillar)".to_owned(),
+            TourAnchor::NavGroup(_) => "TourAnchor::NavGroup(group.section)".to_owned(),
             TourAnchor::NavPlace(place) => {
                 let pinned = Destination::PINNED.contains(&place);
                 if pinned {
                     "TourAnchor::NavPlace(".to_owned()
                 } else {
-                    "TourAnchor::NavPlace(item.place)".to_owned()
+                    "TourAnchor::NavPlace(item.home)".to_owned()
                 }
             }
             part => format!("TourAnchor::{part:?}"),

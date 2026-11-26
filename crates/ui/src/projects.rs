@@ -1863,7 +1863,7 @@ impl ProjectsScreen {
         let mode = self.render_mode(compact, cx);
         let bardo = self.bardo.read(cx);
         let Some(project) = self.view.as_ref().map(|view| &view.project) else {
-            let mut header = Header::new(tr(bardo, Text::DestinationName(Destination::Projects)));
+            let mut header = Header::new(tr(bardo, Text::DestinationName(Destination::Videos)));
             header.trail = vec![
                 div()
                     .w(px(200.))
@@ -1949,7 +1949,7 @@ impl ProjectsScreen {
             .min_w_0(),
         );
         header.trail = vec![
-            tr(bardo, Text::DestinationName(Destination::Projects)).into_any_element(),
+            tr(bardo, Text::DestinationName(Destination::Videos)).into_any_element(),
             div()
                 .w(px(200.))
                 .child(kit::channel_pick(
@@ -1983,7 +1983,7 @@ impl ProjectsScreen {
         header.meta = Some(SharedString::from(meta));
         header.info = guide::header_tours(
             bardo,
-            (Destination::Projects, self.has_content()),
+            (Destination::Videos, self.has_content()),
             self.stage_content(),
             None,
             cx,
@@ -3327,7 +3327,7 @@ impl Render for ProjectsScreen {
         self.advance_control(window, cx);
         if self.channels.is_empty() {
             let bardo = self.bardo.read(cx);
-            let mut parts = ScreenParts::new(Header::place(bardo, Destination::Projects));
+            let mut parts = ScreenParts::new(Header::place(bardo, Destination::Videos, cx));
             parts
                 .content
                 .push(muted(cx, tr(bardo, Text::ProjectsNoChannels)));

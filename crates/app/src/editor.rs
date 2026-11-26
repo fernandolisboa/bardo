@@ -3919,13 +3919,13 @@ mod tests {
             assert!(!editor.is_playing(), "starting the tour paused playback");
         };
         for tour in [TourId::Editor, TourId::EditorMore] {
-            let first = app.start_tour(tour, Destination::Projects, false).unwrap();
+            let first = app.start_tour(tour, Destination::Videos, false).unwrap();
             show(first, &mut editor);
             show(app.tour_next(), &mut editor);
             show(app.tour_back(), &mut editor);
             assert_eq!(app.tour_close(), TourMove::Closed);
             show(
-                app.resume_tour(Destination::Projects, false).unwrap(),
+                app.resume_tour(Destination::Videos, false).unwrap(),
                 &mut editor,
             );
             loop {
@@ -3935,9 +3935,9 @@ mod tests {
                 }
             }
         }
-        app.start_tour(TourId::Editor, Destination::Projects, false)
+        app.start_tour(TourId::Editor, Destination::Videos, false)
             .unwrap();
-        assert_eq!(app.tour_skip(), TourMove::Left(Destination::Projects));
+        assert_eq!(app.tour_skip(), TourMove::Left(Destination::Videos));
 
         assert_eq!(editor.view().timeline, timeline);
         assert_eq!(editor.history, history);

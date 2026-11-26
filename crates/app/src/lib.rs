@@ -39,6 +39,7 @@ mod narration_import;
 mod narrations;
 mod navigation;
 mod network_accounts;
+mod overview;
 mod performed_takes;
 mod persona_looks;
 mod persona_package;
@@ -177,8 +178,12 @@ pub use narration_import::{MAX_RECORDING_BYTES, Recording};
 pub use narrations::{
     NarrationError, NarrationPlayer, NarrationView, PicturesAtStake, PicturesConsent,
 };
-pub use navigation::{Destination, Pillar, SettingsTab};
+pub use navigation::{Destination, LibraryTab, NavEntry, NavSection, SettingsTab};
 pub use network_accounts::NetworkAccountError;
+pub use overview::{
+    IdeasWaiting, NextAction, NextStep, OverviewView, Posts, StepEstimates, StepKind,
+    VideoInProgress, next_step,
+};
 pub use performed_takes::{
     PerformedBlock, PerformedStep, PerformedTakeView, PerformedView, REFUSED as TAKE_REFUSED,
 };

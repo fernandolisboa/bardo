@@ -20,7 +20,7 @@ The list shows your channels; pick one to see its accounts beside it. A channel 
 
 A channel has at most one account on each of the five networks: YouTube, TikTok, Instagram Reels, X and Kick. Each card shows the network, the handle (without the @), whether the render preset is the network's default or custom, and the preset in one line.
 
-Renders make one file per account, and the [Publish](bardo:go/projects/publish) stage writes one post per account.
+Renders make one file per account, and the [Publish](bardo:go/videos/publish) stage writes one post per account.
 
 <a id="metadata"></a>
 ## Metadata defaults

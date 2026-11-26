@@ -6,7 +6,7 @@ group: getting-started
 
 # Seus projetos
 
-Um **projeto** reúne os canais de uma marca, com a pesquisa, as ideias e os vídeos deles. Você trabalha em um projeto por vez: o **projeto aberto**. Pesquisa, Temas, Desempenho, Projetos, Canais e Contas mostram só os canais dele e o trabalho deles. [Mostre o seletor](bardo:tour/welcome).
+Um **projeto** reúne os canais de uma marca, com a pesquisa, as ideias e os vídeos deles. Você trabalha em um projeto por vez: o **projeto aberto**. Visão geral, Ideias, Vídeos, Canais e contas e Desempenho mostram só os canais dele e o trabalho deles; narradores, produtos e templates são compartilhados por todos os projetos por enquanto ([Biblioteca global](global-library.md)). [Mostre o seletor](bardo:tour/welcome).
 
 Ao atualizar para esta versão, o Bardo criou um projeto para cada canal, com o nome dele. Canais ligados por uma versão localizada foram juntos para um projeto, com o nome do mais antigo.
 

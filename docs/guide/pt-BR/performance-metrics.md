@@ -42,7 +42,7 @@ Uma publicação do YouTube com curva de retenção também lista **Onde o públ
 <a id="link"></a>
 ## Vincular e desvincular uma publicação
 
-As publicações são vinculadas na etapa [Publicação](bardo:go/projects/publish) de um projeto. Um vídeo que o Bardo envia se vincula sozinho. Para um arquivo exportado, poste à mão e depois cole o link da publicação em **Marcar como publicado**; o Bardo confere se o link é de uma publicação naquela rede. **Desvincular** tira a publicação e os números dela do Bardo; a publicação continua na rede.
+As publicações são vinculadas na etapa [Publicação](bardo:go/videos/publish) de um projeto. Um vídeo que o Bardo envia se vincula sozinho. Para um arquivo exportado, poste à mão e depois cole o link da publicação em **Marcar como publicado**; o Bardo confere se o link é de uma publicação naquela rede. **Desvincular** tira a publicação e os números dela do Bardo; a publicação continua na rede.
 
 <a id="ranking"></a>
 ## Como os seus números ranqueiam ideias

@@ -2,13 +2,13 @@
 id: scenes
 title: Scenes and images
 group: production
-place: projects/scenes
+place: videos/scenes
 tour: scenes
 ---
 
 # Scenes and images
 
-Scenes cut the narration into the shots the video shows, each with an image. They live at the [Scenes](bardo:go/projects/scenes) stage of a project, and the [Clips](clips.md) stage animates them. [Show me the stage](bardo:tour/scenes).
+Scenes cut the narration into the shots the video shows, each with an image. They live at the [Scenes](bardo:go/videos/scenes) stage of a project, and the [Clips](clips.md) stage animates them. [Show me the stage](bardo:tour/scenes).
 
 <a id="plan"></a>
 ## Planning and drawing

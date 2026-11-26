@@ -1314,7 +1314,7 @@ impl Render for CostsScreen {
             cx.notify();
         });
         let bardo = self.bardo.read(cx);
-        let mut header = Header::place(bardo, Destination::Costs);
+        let mut header = Header::place(bardo, Destination::Costs, cx);
         header.trail = vec![tr(bardo, Text::CostsOverview).into_any_element()];
         let info = guide::info(
             bardo,
