@@ -158,6 +158,11 @@ impl Shell {
             cx.observe(&jobs, |this, _, cx| {
                 if this.bardo.read(cx).jobs_revision() != this.spend_revision {
                     this.refresh_spend(cx);
+                    // Overview on screen follows a job that started or
+                    // ended: its video's next step and the month's spend.
+                    if this.screen == Destination::Overview {
+                        this.overview.update(cx, |overview, cx| overview.reload(cx));
+                    }
                 }
                 // A job that moved may have missed its post's time.
                 this.missed.update(cx, |missed, cx| missed.jobs_moved(cx));

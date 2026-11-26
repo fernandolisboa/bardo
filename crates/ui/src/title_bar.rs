@@ -21,7 +21,7 @@ use crate::appearance::{EditorColor, editor_color, look};
 use crate::brand::{Ink, Lockup};
 
 /// Height of the bar.
-const HEIGHT: Pixels = px(32.);
+pub(crate) const HEIGHT: Pixels = px(32.);
 /// Side of the mark: the small mark's size, as the window icon's 20 px.
 const MARK: Pixels = px(20.);
 /// Width of each window button, as Windows draws its own.

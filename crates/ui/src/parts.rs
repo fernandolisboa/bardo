@@ -135,6 +135,7 @@ impl Header {
             && let Some(tab) = LibraryTab::of(place)
         {
             let mut header = Self::new(tr(bardo, Text::DestinationName(Destination::Library)));
+            header.meta = Some(tr(bardo, Text::LibraryHint));
             header.tabs = Some(PlaceTabs {
                 items: LibraryTab::ALL
                     .iter()

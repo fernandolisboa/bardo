@@ -150,7 +150,8 @@ fn earliest(a: Option<SystemTime>, b: Option<SystemTime>) -> Option<SystemTime> 
 /// The step that moves a video on: its posts first (sending, waiting to go
 /// out, or posted and done), then the first stage, in order, that waits on
 /// the user; a stage at work holds the video until it ends. The editor is a
-/// step only while the render waits for a cut. With every stage done and
+/// step only while the render waits for a cut, and images or clips left to
+/// make stop being one once the render has run. With every stage done and
 /// nothing posted, the step is to post it.
 pub fn next_step(stages: &[StageStatus], posts: Posts, estimates: &StepEstimates) -> NextStep {
     if posts.sending {
@@ -165,6 +166,10 @@ pub fn next_step(stages: &[StageStatus], posts: Posts, estimates: &StepEstimates
     let edit_open = stages
         .iter()
         .any(|status| status.stage == Stage::Edit && status.state != StageState::Locked);
+    let moved_past_gaps = stages.iter().any(|status| {
+        status.stage == Stage::Render
+            && !matches!(status.state, StageState::Locked | StageState::Open)
+    });
     for status in stages {
         let action = |step: StepKind| {
             let estimate = match step {
@@ -200,6 +205,16 @@ pub fn next_step(stages: &[StageStatus], posts: Posts, estimates: &StepEstimates
             StageState::Attention | StageState::Open | StageState::Partial => {}
         }
         if status.stage == Stage::Edit {
+            continue;
+        }
+        // Images or clips left to make once a cut went to the render (built
+        // with stills in their place) are optional: the video moved on.
+        if moved_past_gaps
+            && matches!(
+                status.note,
+                StageNote::Images { .. } | StageNote::Clips { .. }
+            )
+        {
             continue;
         }
         let step = match status.note {
@@ -509,6 +524,20 @@ mod tests {
         .collect()
     }
 
+    /// `stages` with the cut built but not rendered yet.
+    fn unrendered(mut stages: Vec<StageStatus>) -> Vec<StageStatus> {
+        for status in &mut stages {
+            if status.stage == Stage::Render {
+                *status = StageStatus {
+                    stage: Stage::Render,
+                    state: StageState::Open,
+                    note: StageNote::RenderReady,
+                };
+            }
+        }
+        stages
+    }
+
     fn step(stages: &[StageStatus]) -> NextStep {
         next_step(stages, Posts::default(), &StepEstimates::default())
     }
@@ -641,7 +670,7 @@ mod tests {
         };
         let at = |state, note| {
             next_step(
-                &all_done_but(status(Stage::Scenes, state, note)),
+                &unrendered(all_done_but(status(Stage::Scenes, state, note))),
                 Posts::default(),
                 &estimates,
             )
@@ -673,16 +702,46 @@ mod tests {
     }
 
     #[test]
+    fn gaps_left_in_images_or_clips_wait_no_longer_once_the_video_is_rendered() {
+        // Built with stills where clips are missing, then rendered: the
+        // video is ready to post, not waiting on paid gap filling.
+        let mut stages = all_done_but(status(
+            Stage::Clips,
+            StageState::Partial,
+            StageNote::Clips { done: 5, total: 8 },
+        ));
+        stages[2] = status(
+            Stage::Scenes,
+            StageState::Partial,
+            StageNote::Images { done: 6, total: 8 },
+        );
+        assert_eq!(step(&stages), doing(Stage::Publish, StepKind::Post));
+
+        // Before any render, the gaps are still the next thing to do.
+        let stages = unrendered(stages);
+        assert_eq!(step(&stages), doing(Stage::Scenes, StepKind::DrawImages(2)));
+
+        // Clips to review still ask for a decision after a render.
+        let mut stages = all_done_but(status(
+            Stage::Clips,
+            StageState::Attention,
+            StageNote::ClipsToReview(2),
+        ));
+        stages[2] = done(Stage::Scenes);
+        assert_eq!(step(&stages), doing(Stage::Clips, StepKind::ReviewClips(2)));
+    }
+
+    #[test]
     fn clips_left_to_animate_carry_their_estimate() {
         let estimates = StepEstimates {
             clips: Some(priced(140)),
             ..StepEstimates::default()
         };
-        let stages = all_done_but(status(
+        let stages = unrendered(all_done_but(status(
             Stage::Clips,
             StageState::Partial,
             StageNote::Clips { done: 7, total: 14 },
-        ));
+        )));
         assert_eq!(
             next_step(&stages, Posts::default(), &estimates),
             NextStep::Do(NextAction {

@@ -30,7 +30,7 @@ Um vídeo já publicado numa rede fica de fora. Um vídeo cuja publicação espe
 <a id="next-steps"></a>
 ## O próximo passo
 
-Cada cartão diz o que faz o vídeo avançar, na cor de destaque: confirmar um briefing, escrever ou revisar o roteiro, gravar a narração, planejar as cenas, desenhar ou revisar imagens, animar clipes, abrir o editor para montar o corte, renderizar, exportar e, por fim, enviar o vídeo ou vincular a publicação. O Bardo escolhe a primeira etapa, em ordem, que espera por você.
+Cada cartão diz o que faz o vídeo avançar, na cor de destaque: confirmar um briefing, escrever ou revisar o roteiro, gravar a narração, planejar as cenas, desenhar ou revisar imagens, animar clipes, abrir o editor para montar o corte, renderizar, exportar e, por fim, enviar o vídeo ou vincular a publicação. O Bardo escolhe a primeira etapa, em ordem, que espera por você. Imagens ou clipes que ainda faltam deixam de contar depois que o vídeo é renderizado: um corte montado com imagens paradas no lugar deles já seguiu em frente.
 
 Quando o passo chama um provedor pago, o cartão mostra quanto custaria ("cerca de US$ 1,40"), pela mesma estimativa que a etapa mostra antes de começar. **Continuar** abre o vídeo nessa etapa; montar o corte abre o [editor](editor.md).
 

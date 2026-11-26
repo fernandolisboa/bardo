@@ -11,8 +11,8 @@ use std::rc::Rc;
 
 use bardo_app::bardo_domain::{ThemeFamily, TourId};
 use bardo_app::{
-    Bardo, Destination, GuidePlace, GuideRef, SHORTCUTS, ScreenTour, SetupTarget, Spot, Stage,
-    Text, TourAnchor, TourPlace, TourStepView,
+    Bardo, Destination, GuidePlace, GuideRef, LibraryTab, SHORTCUTS, ScreenTour, SetupTarget, Spot,
+    Stage, Text, TourAnchor, TourPlace, TourStepView,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
@@ -405,6 +405,14 @@ pub fn header_tours(
     info: Option<AnyElement>,
     cx: &App,
 ) -> Option<AnyElement> {
+    // A library tab's screen offers the Global library's tour, as Shift+F1
+    // does there.
+    let screen = match cx.try_global::<crate::parts::ShownPlace>() {
+        Some(shown) if shown.0 == Destination::Library && LibraryTab::of(screen).is_some() => {
+            Destination::Library
+        }
+        _ => screen,
+    };
     let screen_tour = bardo.screen_tour(screen, has_content);
     let stage_tour = stage.and_then(|(stage, has_content)| bardo.stage_tour(stage, has_content));
     if screen_tour.is_none() && stage_tour.is_none() {
@@ -1190,6 +1198,7 @@ impl Guide {
                     .dim(scrim)
                     .ring(Self::ring(cx))
                     .block()
+                    .spare_top(crate::title_bar::HEIGHT)
                     .on_skip(move |_, cx| {
                         let _ = this.update(cx, |_, cx| cx.emit(GuideEvent::StepOver(number)));
                     })
@@ -1200,6 +1209,7 @@ impl Guide {
                 Spotlight::new(center, self.shortcuts_card(cx), Rc::default())
                     .dim(scrim)
                     .block()
+                    .spare_top(crate::title_bar::HEIGHT)
                     .on_outside(move |_, cx| {
                         let _ = this.update(cx, |this, cx| {
                             this.shortcuts = false;
@@ -1219,6 +1229,7 @@ impl Guide {
                 });
                 Spotlight::new(resolve, self.menu_card(row, cx), Rc::default())
                     .block()
+                    .spare_top(crate::title_bar::HEIGHT)
                     .on_outside(move |_, cx| {
                         let _ = this.update(cx, |this, cx| {
                             this.menu = None;
@@ -1229,7 +1240,9 @@ impl Guide {
             }
             Layer::Offer => {
                 let center: crate::tour::Resolve = Rc::new(|_, _| Spot::Center);
-                Spotlight::new(center, self.offer_card(cx), Rc::default()).into_any_element()
+                Spotlight::new(center, self.offer_card(cx), Rc::default())
+                    .spare_top(crate::title_bar::HEIGHT)
+                    .into_any_element()
             }
         }
     }

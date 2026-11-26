@@ -30,7 +30,7 @@ A video already posted on a network is left out. A video whose post waits to go 
 <a id="next-steps"></a>
 ## The next step
 
-Each card says what moves the video on, in the accent color: confirm a brief, write or review the script, record the narration, plan the scenes, draw or review images, animate clips, open the editor to build the cut, render, export, and finally upload it or link its post. Bardo picks the first stage, in order, that waits on you.
+Each card says what moves the video on, in the accent color: confirm a brief, write or review the script, record the narration, plan the scenes, draw or review images, animate clips, open the editor to build the cut, render, export, and finally upload it or link its post. Bardo picks the first stage, in order, that waits on you. Images or clips still missing stop counting once the video is rendered: a cut built with stills in their place has moved on.
 
 When the step calls a paid provider, the card shows what it would cost ("about $1.40"), from the same estimate the stage shows before it starts. **Continue** opens the video at that stage; building the cut opens the [editor](editor.md).
 
