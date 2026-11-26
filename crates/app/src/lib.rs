@@ -43,6 +43,7 @@ mod performed_takes;
 mod persona_looks;
 mod persona_package;
 mod personas;
+mod placements;
 mod plans;
 mod product_checks;
 mod product_concepts;
@@ -185,6 +186,9 @@ pub use persona_package::PackageError;
 pub use personas::{
     PersonaError, PersonaExport, VoiceList, VoiceListing, VoiceStatus, persona_package_folder,
 };
+pub use placements::{
+    AD_FILE, PlacementClip, PlacementError, PlacementReview, PlacementShape, placement_job_shapes,
+};
 pub use plans::{
     PlanCheck, PlanCheckResult, PlanConnect, PlanConnectResult, PlanConsent, PlanError, PlanState,
     PlanStatus,
@@ -299,6 +303,8 @@ pub struct Repositories {
     pub ads: Arc<dyn AdRepository>,
     /// Each ad's end card design (#281). Shared with the job queue.
     pub end_cards: Arc<dyn bardo_domain::EndCardRepository>,
+    /// Each ad's export for ads (#283). Shared with the job queue.
+    pub ad_exports: Arc<dyn bardo_domain::AdExportRepository>,
     /// Narrations and their word timings. Shared with the job queue.
     pub narrations: Arc<dyn NarrationRepository>,
     /// Each project's capture and its takes. Shared with the job queue.
@@ -420,6 +426,7 @@ impl Repositories {
             products: Arc::clone(&db) as _,
             ads: Arc::clone(&db) as _,
             end_cards: Arc::clone(&db) as _,
+            ad_exports: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
             captures: Arc::clone(&db) as _,
             staging: Arc::clone(&db) as _,
@@ -615,6 +622,7 @@ pub struct Bardo {
     products: Arc<dyn ProductRepository>,
     ads: Arc<dyn AdRepository>,
     end_cards: Arc<dyn bardo_domain::EndCardRepository>,
+    ad_exports: Arc<dyn bardo_domain::AdExportRepository>,
     narrations: Arc<dyn NarrationRepository>,
     captures: Arc<dyn CaptureRepository>,
     staging: Arc<dyn StagingRepository>,
@@ -738,6 +746,7 @@ impl Bardo {
             products,
             ads,
             end_cards,
+            ad_exports,
             narrations,
             captures,
             staging,
@@ -1036,6 +1045,11 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let placement_handler = crate::placements::PlacementHandler {
+            scenes: scene_handler.clone(),
+            ad_exports: Arc::clone(&ad_exports),
+            export_files: Arc::clone(&export_files),
+        };
         let export_handler = ExportHandler {
             owner: profile.id,
             exports: Arc::clone(&exports),
@@ -1139,6 +1153,7 @@ impl Bardo {
                     renders: render_handler,
                     metadata: metadata_handler,
                     exports: export_handler,
+                    placements: placement_handler,
                     metrics: metrics_handler,
                     cuts: cut_handler,
                     uploads: upload_handler,
@@ -1165,6 +1180,7 @@ impl Bardo {
             products,
             ads,
             end_cards,
+            ad_exports,
             narrations,
             captures,
             staging,
@@ -3554,6 +3570,7 @@ mod tests {
             products: Arc::clone(&db) as _,
             ads: Arc::clone(&db) as _,
             end_cards: Arc::clone(&db) as _,
+            ad_exports: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
             captures: Arc::clone(&db) as _,
             staging: Arc::clone(&db) as _,

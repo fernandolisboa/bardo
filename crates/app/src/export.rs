@@ -22,8 +22,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    AdPostReview, AdRepository, ApiKey, CaptureVoice, CommercialDisclosure, Cost, CostPurpose,
-    Export, ExportFiles, ExportRepository, Generation, GenerationId, Job, JobFailure,
+    AdPostReview, AdRepository, AdTexts, ApiKey, CaptureVoice, CommercialDisclosure, Cost,
+    CostPurpose, Export, ExportFiles, ExportRepository, Generation, GenerationId, Job, JobFailure,
     JobFailureKind, JobId, JobKind, METADATA_FILE, MetadataProblem, NarrationSource, Network,
     NetworkAccount, NetworkAccountId, Post, ProfileId, Progress, ProjectFiles, Provider, Render,
     RenderId, RenderRepository, RenderedPrompt, RepositoryError, SecretStore, Stop, TagPlacement,
@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ad_briefs::ScriptBrief;
 use crate::ad_publishing::AdPublishing;
-use crate::ads::{as_data, with_ad_rules, with_concept_rules};
+use crate::ads::{as_data, with_ad_rules, with_ad_texts_rules, with_concept_rules};
 use crate::claims_check::{CheckBrief, CheckRun, check_call_ahead, check_posts};
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler, Work};
@@ -71,6 +71,24 @@ const METADATA_SCHEMA: &str = r#"{
   "required": ["posts"],
   "additionalProperties": false
 }"#;
+
+/// What Claude answers for an ad (#283): its posts, and the texts an ad
+/// manager asks for.
+fn ad_metadata_schema() -> String {
+    let mut schema: serde_json::Value =
+        serde_json::from_str(METADATA_SCHEMA).expect("the metadata schema is JSON");
+    schema["properties"]["ad"] = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "primary_text": { "type": "string" },
+            "headline": { "type": "string" }
+        },
+        "required": ["primary_text", "headline"],
+        "additionalProperties": false
+    });
+    schema["required"] = serde_json::json!(["posts", "ad"]);
+    schema.to_string()
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
@@ -321,6 +339,9 @@ struct MetadataPayload {
     /// When the ad's brief last changed, in Unix milliseconds.
     #[serde(default, skip_serializing_if = "is_zero")]
     brief_at: u64,
+    /// The answer also holds the ad's texts for an ad manager (#283).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    ad_texts: bool,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -340,6 +361,14 @@ impl MetadataPayload {
 #[derive(Deserialize)]
 struct Answer {
     posts: Vec<AnsweredPost>,
+    #[serde(default)]
+    ad: Option<AnsweredAd>,
+}
+
+#[derive(Deserialize)]
+struct AnsweredAd {
+    primary_text: String,
+    headline: String,
 }
 
 #[derive(Deserialize)]
@@ -462,7 +491,7 @@ fn export_stamp(
 
 /// Whether two file names name the same file on Windows, whose names
 /// ignore case: a title changed only in case keeps the same file.
-fn same_file_name(a: &str, b: &str) -> bool {
+pub(crate) fn same_file_name(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
 
@@ -612,7 +641,11 @@ impl MetadataHandler {
             prompt: payload.prompt.clone(),
             images: Vec::new(),
             format: TextFormat::Json {
-                schema: METADATA_SCHEMA.to_owned(),
+                schema: if payload.ad_texts {
+                    ad_metadata_schema()
+                } else {
+                    METADATA_SCHEMA.to_owned()
+                },
             },
         };
         let paid_call = PlannedCall::text(CostPurpose::Metadata, &request);
@@ -682,6 +715,14 @@ impl MetadataHandler {
             .collect();
         if metadata.is_empty() {
             return Err(not_usable("no post for any network asked".to_owned()));
+        }
+        // Before the posts, whose saving marks the job's text as written.
+        if payload.ad_texts
+            && let Some(ad) = &answer.ad
+        {
+            self.ads
+                .save_ad_texts(project, &AdTexts::new(&ad.primary_text, &ad.headline))
+                .map_err(unexpected)?;
         }
         self.exports
             .save_video_metadata(&metadata)
@@ -829,7 +870,7 @@ impl ExportHandler {
 }
 
 impl Bardo {
-    fn export_project(&self, id: VideoProjectId) -> Result<VideoProject, ExportError> {
+    pub(crate) fn export_project(&self, id: VideoProjectId) -> Result<VideoProject, ExportError> {
         self.themes
             .project(id)?
             .filter(|project| project.owner == self.profile.id)
@@ -922,6 +963,7 @@ impl Bardo {
             if brief.as_ref().is_some_and(ScriptBrief::is_concept) {
                 rendered.instructions = with_concept_rules(&rendered.instructions);
             }
+            rendered.instructions = with_ad_texts_rules(&rendered.instructions);
             let fixed = brief
                 .as_ref()
                 .map(|brief| brief.fixed_for(&template.body))
@@ -1227,6 +1269,7 @@ impl Bardo {
             brief_at: brief.as_ref().map_or(0, |brief| {
                 crate::claims_check::millis(brief.brief.changed_at())
             }),
+            ad_texts: project.is_ad(),
         };
         let job = Job::new(self.profile.id, JobKind::Metadata, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
@@ -1551,6 +1594,39 @@ pub(crate) mod tests {
 
         fn folder(&self, package: &str, network: Network) -> PathBuf {
             self.inner.folder(package, network)
+        }
+
+        fn copy_ad_from(
+            &self,
+            package: &str,
+            shape: bardo_domain::FrameShape,
+            name: &str,
+            source: &mut dyn std::io::Read,
+        ) -> Result<(), ProjectFileError> {
+            self.inner.copy_ad_from(package, shape, name, source)
+        }
+
+        fn write_ad(
+            &self,
+            package: &str,
+            shape: bardo_domain::FrameShape,
+            name: &str,
+            bytes: &[u8],
+        ) -> Result<(), ProjectFileError> {
+            self.inner.write_ad(package, shape, name, bytes)
+        }
+
+        fn remove_ad(
+            &self,
+            package: &str,
+            shape: bardo_domain::FrameShape,
+            name: &str,
+        ) -> Result<(), ProjectFileError> {
+            self.inner.remove_ad(package, shape, name)
+        }
+
+        fn ad_folder(&self, package: &str, shape: bardo_domain::FrameShape) -> PathBuf {
+            self.inner.ad_folder(package, shape)
         }
     }
 

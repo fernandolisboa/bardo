@@ -156,6 +156,7 @@ impl ProjectsScreen {
         });
         self.fill_metadata(window, cx);
         self.load_upload(cx);
+        self.load_placements(id, window, cx);
     }
 
     /// The network in the inspector: the picked one, else the first.
@@ -327,7 +328,7 @@ impl ProjectsScreen {
                 .iter()
                 .any(|t| t.metadata.as_ref().is_some_and(|m| m.is_edited()))
         });
-        if edited {
+        if edited || self.ad_texts_edited() {
             self.confirm_metadata = true;
             cx.notify();
         } else {
@@ -496,6 +497,13 @@ impl ProjectsScreen {
         if let Some(ad) = &view.ad {
             let writing = is_running(view.metadata_job.as_ref());
             parts.content.push(self.ad_review_card(ad, writing, cx));
+            parts.content.extend(self.placement_card(cx));
+            let bardo = self.bardo.read(cx);
+            parts.notices.extend(
+                self.placements_load_error().map(|error| {
+                    kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element()
+                }),
+            );
         }
         parts.inspector = self
             .shown_network(view)
@@ -807,6 +815,12 @@ impl ProjectsScreen {
                         &[("n", &edited.to_string())],
                     ))),
             )
+            .children(self.ad_texts_edited().then(|| {
+                div()
+                    .text_sm()
+                    .text_color(t.text2)
+                    .child(tr(bardo, Text::PlacementTextsReplaced))
+            }))
             .children(estimate_note(bardo, &view.estimate, Text::EstimateCost, cx))
             .child(
                 h_flex()

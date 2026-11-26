@@ -144,59 +144,15 @@ impl SceneHandler {
         }
         let wanted = scene.product_image();
         let look = scene.look();
-        let failure = |why: String| {
-            JobFailure::new(JobFailureKind::Files, format!("scene {}: {why}", index + 1))
-        };
-        let composed: Result<(Vec<u8>, Vec<bardo_domain::ShotColor>), JobFailure> = (|| {
-            let image = match wanted {
-                None => None,
-                Some(wanted) => Some(
-                    ad_product_images(self.products.as_ref(), product)
-                        .map_err(|error| {
-                            failure(format!("the product's images could not be read: {error}"))
-                        })?
-                        .into_iter()
-                        .find(|image| image.id == wanted)
-                        .ok_or_else(|| {
-                            failure("the product no longer has the image it shows".to_owned())
-                        })?,
-                ),
-            };
-            let backdrop = self
-                .backdrop_bytes(project, look.backdrop)
-                .map_err(failure)?;
-            let layout = CardLayout::of(
-                aspect,
-                inputs.design.text_place,
-                inputs.design.logo_place,
-                image.is_some(),
-                inputs.logo.is_some(),
-            );
-            let recipe = CardRecipe {
-                aspect,
-                layout,
-                backdrop: backdrop_paint(look.backdrop, backdrop.as_deref()),
-                product: image.as_ref().map(|image| {
-                    (
-                        image.picture.bytes(),
-                        look.layout_for(image.kind, image.cut_out()),
-                    )
-                }),
-                logo: inputs.logo.as_ref().map(|logo| logo.picture.bytes()),
-            };
-            let picture = self
-                .composer
-                .compose_card(&recipe)
-                .map_err(|error| failure(error.to_string()))?;
-            let png = self
-                .card_text(
-                    &picture.png,
-                    &layout,
-                    &inputs.design.text(inputs.brief.text()),
-                )
-                .map_err(failure)?;
-            Ok((png, picture.tones))
-        })();
+        let composed = self.compose_card_picture(
+            project,
+            index,
+            &inputs,
+            wanted,
+            look,
+            product,
+            aspect.into(),
+        );
         let (png, tones) = match composed {
             Ok(composed) => composed,
             Err(failure) => {
@@ -244,6 +200,75 @@ impl SceneHandler {
             crate::proxies::remove_media(self.files.as_ref(), project, &unused.file);
         }
         Ok(())
+    }
+
+    /// The picture of the end card, scene `index`, from `inputs`, with
+    /// `product`'s image `wanted` when it shows one, in `look`, composed
+    /// in `shape` with its text drawn: a cut's own shape, or one of an
+    /// export for ads (#283). Free, on the computer.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn compose_card_picture(
+        &self,
+        project: VideoProjectId,
+        index: usize,
+        inputs: &CardInputs,
+        wanted: Option<bardo_domain::ProductImageId>,
+        look: bardo_domain::ShotLook,
+        product: ProductId,
+        shape: bardo_domain::FrameShape,
+    ) -> Result<(Vec<u8>, Vec<bardo_domain::ShotColor>), JobFailure> {
+        let failure = |why: String| {
+            JobFailure::new(JobFailureKind::Files, format!("scene {}: {why}", index + 1))
+        };
+
+        let image = match wanted {
+            None => None,
+            Some(wanted) => Some(
+                ad_product_images(self.products.as_ref(), product)
+                    .map_err(|error| {
+                        failure(format!("the product's images could not be read: {error}"))
+                    })?
+                    .into_iter()
+                    .find(|image| image.id == wanted)
+                    .ok_or_else(|| {
+                        failure("the product no longer has the image it shows".to_owned())
+                    })?,
+            ),
+        };
+        let backdrop = self
+            .backdrop_bytes(project, look.backdrop)
+            .map_err(failure)?;
+        let layout = CardLayout::of(
+            shape,
+            inputs.design.text_place,
+            inputs.design.logo_place,
+            image.is_some(),
+            inputs.logo.is_some(),
+        );
+        let recipe = CardRecipe {
+            shape,
+            layout,
+            backdrop: backdrop_paint(look.backdrop, backdrop.as_deref()),
+            product: image.as_ref().map(|image| {
+                (
+                    image.picture.bytes(),
+                    look.layout_for(image.kind, image.cut_out()),
+                )
+            }),
+            logo: inputs.logo.as_ref().map(|logo| logo.picture.bytes()),
+        };
+        let picture = self
+            .composer
+            .compose_card(&recipe)
+            .map_err(|error| failure(error.to_string()))?;
+        let png = self
+            .card_text(
+                &picture.png,
+                &layout,
+                &inputs.design.text(inputs.brief.text()),
+            )
+            .map_err(failure)?;
+        Ok((png, picture.tones))
     }
 
     /// The card picture `picture` with `text` drawn in `layout`'s text

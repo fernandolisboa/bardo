@@ -421,49 +421,8 @@ impl SceneHandler {
         let look = scene.look();
         // An image that cannot be read is this scene's failure, not the
         // job's: the other scenes are still made.
-        let composed = ad_product_images(self.products.as_ref(), product)
-            .map_err(|error| {
-                JobFailure::new(
-                    JobFailureKind::Files,
-                    format!(
-                        "scene {}: the product's images could not be read: {error}",
-                        index + 1
-                    ),
-                )
-            })
-            .and_then(|images| {
-                images
-                    .into_iter()
-                    .find(|image| image.id == wanted)
-                    .ok_or_else(|| {
-                        JobFailure::new(
-                            JobFailureKind::Files,
-                            format!(
-                                "scene {}: the product no longer has the image it shows",
-                                index + 1
-                            ),
-                        )
-                    })
-            })
-            .and_then(|image| {
-                let backdrop = self.backdrop_bytes(project, look.backdrop).map_err(|why| {
-                    JobFailure::new(JobFailureKind::Files, format!("scene {}: {why}", index + 1))
-                })?;
-                let recipe = ShotRecipe {
-                    aspect,
-                    layout: look.layout_for(image.kind, image.cut_out()),
-                    placement: look.placement,
-                    backdrop: backdrop_paint(look.backdrop, backdrop.as_deref()),
-                };
-                self.composer
-                    .compose(image.picture.bytes(), &recipe)
-                    .map_err(|error| {
-                        JobFailure::new(
-                            JobFailureKind::Files,
-                            format!("scene {}: {error}", index + 1),
-                        )
-                    })
-            });
+        let composed =
+            self.compose_product_shot(project, index, wanted, look, product, aspect.into());
         let picture = match composed {
             Ok(picture) => picture,
             Err(failure) => {
@@ -511,6 +470,63 @@ impl SceneHandler {
             crate::proxies::remove_media(self.files.as_ref(), project, &unused.file);
         }
         Ok(())
+    }
+
+    /// The picture of a product shot, scene `index`, of `product`'s image
+    /// `wanted` in `look`, composed in `shape`: a cut's own shape, or one
+    /// of an export for ads (#283). Free, on the computer.
+    pub(crate) fn compose_product_shot(
+        &self,
+        project: VideoProjectId,
+        index: usize,
+        wanted: bardo_domain::ProductImageId,
+        look: bardo_domain::ShotLook,
+        product: ProductId,
+        shape: bardo_domain::FrameShape,
+    ) -> Result<bardo_domain::ComposedPicture, JobFailure> {
+        ad_product_images(self.products.as_ref(), product)
+            .map_err(|error| {
+                JobFailure::new(
+                    JobFailureKind::Files,
+                    format!(
+                        "scene {}: the product's images could not be read: {error}",
+                        index + 1
+                    ),
+                )
+            })
+            .and_then(|images| {
+                images
+                    .into_iter()
+                    .find(|image| image.id == wanted)
+                    .ok_or_else(|| {
+                        JobFailure::new(
+                            JobFailureKind::Files,
+                            format!(
+                                "scene {}: the product no longer has the image it shows",
+                                index + 1
+                            ),
+                        )
+                    })
+            })
+            .and_then(|image| {
+                let backdrop = self.backdrop_bytes(project, look.backdrop).map_err(|why| {
+                    JobFailure::new(JobFailureKind::Files, format!("scene {}: {why}", index + 1))
+                })?;
+                let recipe = ShotRecipe {
+                    shape,
+                    layout: look.layout_for(image.kind, image.cut_out()),
+                    placement: look.placement,
+                    backdrop: backdrop_paint(look.backdrop, backdrop.as_deref()),
+                };
+                self.composer
+                    .compose(image.picture.bytes(), &recipe)
+                    .map_err(|error| {
+                        JobFailure::new(
+                            JobFailureKind::Files,
+                            format!("scene {}: {error}", index + 1),
+                        )
+                    })
+            })
     }
 
     /// The bytes of the drawn backdrop `backdrop` shows; none for one that

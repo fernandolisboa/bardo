@@ -68,6 +68,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) renders: RenderHandler,
     pub(crate) metadata: MetadataHandler,
     pub(crate) exports: ExportHandler,
+    pub(crate) placements: crate::placements::PlacementHandler,
     pub(crate) metrics: MetricsSyncHandler,
     pub(crate) cuts: CutSuggestionHandler,
     pub(crate) uploads: UploadHandler,
@@ -108,6 +109,7 @@ pub(crate) fn built_in_handlers(
         renders,
         metadata,
         exports,
+        placements,
         metrics,
         cuts,
         uploads,
@@ -155,6 +157,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Render, Arc::new(renders));
     handlers.insert(JobKind::Metadata, Arc::new(metadata));
     handlers.insert(JobKind::Export, Arc::new(exports));
+    handlers.insert(JobKind::PlacementExport, Arc::new(placements));
     handlers.insert(JobKind::MetricsSync, Arc::new(metrics));
     handlers.insert(JobKind::CutSuggestions, Arc::new(cuts));
     handlers.insert(JobKind::Upload, Arc::new(uploads));
@@ -2200,6 +2203,7 @@ mod tests {
             products: Arc::clone(db) as _,
             ads: Arc::clone(db) as _,
             end_cards: Arc::clone(db) as _,
+            ad_exports: Arc::clone(db) as _,
             narrations: Arc::clone(db) as _,
             captures: Arc::clone(db) as _,
             staging: Arc::clone(db) as _,

@@ -160,6 +160,17 @@ pub const MAX_CAPTION_CHARS: usize = 200;
 /// keeps what matters above it.
 pub const CAPTION_BAND: f64 = 0.38;
 
+/// The caption band ([`CAPTION_BAND`]) of a frame of `shape`: in 4:5 and
+/// 1:1 (#283) the two lines of a 1080-wide frame take a larger share of a
+/// shorter height.
+pub fn caption_band(shape: crate::FrameShape) -> f64 {
+    match shape {
+        crate::FrameShape::Vertical | crate::FrameShape::Landscape => CAPTION_BAND,
+        crate::FrameShape::Portrait => 0.42,
+        crate::FrameShape::Square => 0.46,
+    }
+}
+
 /// One caption: its text and when it shows, in narration-file time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caption {

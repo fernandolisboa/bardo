@@ -352,7 +352,7 @@ mod tests {
             offer: Some("Free shipping on every order this week, no code".into()),
             look: ThumbnailLook::Bold,
         };
-        for aspect in AspectRatio::ALL {
+        for aspect in bardo_domain::FrameShape::ALL {
             for text_place in CardTextPlace::ALL {
                 for logo_place in CardLogoPlace::ALL {
                     for (image, logo) in

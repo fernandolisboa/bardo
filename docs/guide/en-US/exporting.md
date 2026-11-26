@@ -34,6 +34,21 @@ Each project's export has a folder, with one folder per network inside, named af
 
 A network's last export reads **Exported** while it matches the render, the metadata and the YouTube thumbnail, **Out of date** once one of them changed after it, and **Not exported** before the first one. Export again to bring the folder up to date. A file whose render is out of date exports as it is; render again at the [Render](render.md) stage to include the changes.
 
+<a id="ads"></a>
+## Export for ads
+
+An ad has a second export at the Publish stage, **Export for ads**, for the ad managers where you run it as a paid ad. Bardo never sends anything to an ad manager: you upload the files yourself.
+
+- **Shapes.** It renders the cut in 4:5 (1080 × 1350) and 1:1 (1080 × 1080), the shapes ad managers ask for, and in the editor's other shape (16:9 for a vertical cut, 9:16 for a landscape one). A shape not exported yet, or out of date, comes ticked.
+- **Composed pictures.** Product shots and the end card are composed again for each shape, so the product, its text and the button stay whole.
+- **Windows.** Every other picture and clip fills the frame through a window, centered unless you move it. **Window per clip** shows each clip's window in the picked shape; the arrows move it and **Center** puts it back. A window is kept per clip and per shape. In 16:9 every picture shows whole, with bars where it does not reach the frame.
+- **Captions** are laid out again for the shape, and none show over the end card.
+- **Texts for the ad manager.** The job that writes the post texts also writes a primary text (at most 125 characters, shown above the video) and a headline (at most 40, beside the button), once for every shape, and the [check of the post texts](uploading.md#ad-review) reads them too. Edit them on the card and select **Save texts**; the export waits while one is empty or too long.
+
+The export waits for the product-in-use scenes you have yet to check and for a composed picture that has to be made again, and goes with the items you acknowledged in the ad's review. **Export for ads** runs one job, with its progress on the stage and in Jobs; **Cancel** stops it, and exporting again finishes the shapes left.
+
+Each shape gets a folder in the project's export folder, `Ads/4x5`, `Ads/1x1` and `Ads/16x9` or `Ads/9x16`, with the video and `ad.txt`: the file, its size and shape, the primary text, the headline, the call to action and link from the brief, the commercial disclosure to set, the synthetic-content label when the video needs it ([Synthetic content](uploading.md#disclosure)), and the items you acknowledged. **Show in folder** opens it. A shape reads **Exported**, **Out of date** once the cut, a composed picture or the texts changed after it, or **Not exported**.
+
 <a id="post"></a>
 ## After posting by hand
 

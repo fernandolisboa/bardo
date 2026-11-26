@@ -194,10 +194,14 @@ pub enum JobKind {
     /// Downloads the installer of a newer Bardo and checks it against its
     /// release's SHA-256 (ADR-0011). Starts over on resume.
     UpdateDownload,
+    /// Renders an ad's cut in the shapes ad managers ask for (#283), one
+    /// shape after another, each with its texts to paste. Shapes already
+    /// written are not rendered again on resume.
+    PlacementExport,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 40] = [
+    pub const ALL: [JobKind; 41] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -238,6 +242,7 @@ impl JobKind {
         JobKind::ClaimsCheck,
         JobKind::ShotBackdrop,
         JobKind::ProductConcept,
+        JobKind::PlacementExport,
     ];
 
     /// Stable name stored in the database.
@@ -283,6 +288,7 @@ impl JobKind {
             JobKind::ClaimsCheck => "claims_check",
             JobKind::ShotBackdrop => "shot_backdrop",
             JobKind::ProductConcept => "product_concept",
+            JobKind::PlacementExport => "placement_export",
         }
     }
 }

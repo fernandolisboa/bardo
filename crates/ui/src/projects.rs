@@ -60,6 +60,7 @@ mod end_card;
 mod export;
 mod music;
 mod narration_ask;
+mod placements;
 mod render;
 mod scenes;
 mod upload;
@@ -341,6 +342,8 @@ pub struct ProjectsScreen {
     sponsor_problem: Option<Text>,
     /// Checking an ad's post texts would pass Claude's budget: asked first.
     posts_check_ask: Option<SpendEstimate>,
+    /// An ad's export for ads (#283).
+    placements: placements::Placements,
     /// "Change time" or "Cancel schedule" was clicked on a scheduled upload.
     schedule_edit: Option<upload::ScheduleEdit>,
     /// The change being sent to the network.
@@ -413,6 +416,7 @@ impl ProjectsScreen {
         let schedule_time = cx.new(|cx| InputState::new(window, cx));
         let upload_cover = cx.new(|cx| InputState::new(window, cx));
         let ad_sponsors = cx.new(|cx| InputState::new(window, cx).placeholder("17841400000000000"));
+        let placements = placements::Placements::new(window, cx);
         let brief_offer = cx.new(|cx| InputState::new(window, cx));
         let brief_call_to_action = cx.new(|cx| InputState::new(window, cx));
         let brief_link = cx.new(|cx| InputState::new(window, cx));
@@ -683,6 +687,7 @@ impl ProjectsScreen {
             ad_sponsors,
             sponsor_problem: None,
             posts_check_ask: None,
+            placements,
             cover_problem: None,
             schedule_edit: None,
             schedule_task: None,
@@ -855,6 +860,7 @@ impl ProjectsScreen {
         self.claims_ask = None;
         self.ad_acknowledged.clear();
         self.posts_check_ask = None;
+        self.placements.reset();
         self.versions_error = None;
         self.version_ask = None;
         self.narration_ask = None;
@@ -945,7 +951,11 @@ impl ProjectsScreen {
                 self.script_ask = None;
                 self.claims_ask = None;
             }
+            let opened = self.stage != stage && stage == Stage::Publish;
             self.stage = stage;
+            if opened {
+                self.refresh_placements(cx);
+            }
             self.ensure_render_checked(cx);
             cx.notify();
         }

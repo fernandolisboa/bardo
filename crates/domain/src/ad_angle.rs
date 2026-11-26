@@ -13,9 +13,9 @@
 use std::time::SystemTime;
 
 use crate::{
-    AdBrief, AdFramework, ChannelId, CheckedScript, ClaimId, ClaimsCheck, Confidence, JobId, Niche,
-    ProductId, ProductSheet, ProfileId, Reason, RepositoryError, Score, Theme, ThemeFieldError,
-    ThemeId, ThemeIdea, ThemeStatus, VideoLength, VideoProject, VideoProjectId,
+    AdBrief, AdFramework, AdTexts, ChannelId, CheckedScript, ClaimId, ClaimsCheck, Confidence,
+    JobId, Niche, ProductId, ProductSheet, ProfileId, Reason, RepositoryError, Score, Theme,
+    ThemeFieldError, ThemeId, ThemeIdea, ThemeStatus, VideoLength, VideoProject, VideoProjectId,
 };
 
 uuid_id!(
@@ -477,9 +477,31 @@ pub trait AdRepository: Send + Sync {
     /// becomes the current script's, and the check of the script it
     /// replaced is forgotten either way. All or none.
     fn accept_claims_check(&self, project: VideoProjectId) -> Result<(), RepositoryError>;
+
+    /// The texts an ad manager asks for (#283); `None` until written.
+    fn ad_texts(&self, project: VideoProjectId) -> Result<Option<AdTexts>, RepositoryError>;
+
+    /// Saves the project's ad texts in place of what it had.
+    fn save_ad_texts(
+        &self,
+        project: VideoProjectId,
+        texts: &AdTexts,
+    ) -> Result<(), RepositoryError>;
 }
 
 impl<T: AdRepository + ?Sized> AdRepository for std::sync::Arc<T> {
+    fn ad_texts(&self, project: VideoProjectId) -> Result<Option<AdTexts>, RepositoryError> {
+        (**self).ad_texts(project)
+    }
+
+    fn save_ad_texts(
+        &self,
+        project: VideoProjectId,
+        texts: &AdTexts,
+    ) -> Result<(), RepositoryError> {
+        (**self).save_ad_texts(project, texts)
+    }
+
     fn angles(
         &self,
         product: ProductId,

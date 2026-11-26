@@ -13,7 +13,7 @@
 use std::time::Duration;
 
 use crate::{
-    AspectRatio, BriefText, RepositoryError, ShotArea, ThumbnailLook, VideoProjectId, shot_frame,
+    BriefText, FrameShape, RepositoryError, ShotArea, ThumbnailLook, VideoProjectId, shot_frame,
 };
 
 /// The longest headline, in characters.
@@ -314,12 +314,16 @@ pub fn card_fingerprint(design: &CardDesign, brief: &BriefText, logo: Option<&[u
 /// what the networks lay over a video (in a vertical frame the bottom,
 /// with the caption and buttons, and the right edge, with the buttons; in
 /// a wide one a band at the bottom) and of what a zoom crops.
-pub fn card_room(aspect: AspectRatio) -> ShotArea {
-    let (width, height) = shot_frame(aspect);
-    // As shares of the frame: left, top, right, bottom.
-    let (left, top, right, bottom) = match aspect {
-        AspectRatio::Vertical => (0.07, 0.09, 0.15, 0.24),
-        AspectRatio::Landscape => (0.07, 0.08, 0.07, 0.16),
+pub fn card_room(shape: impl Into<FrameShape>) -> ShotArea {
+    let shape = shape.into();
+    let (width, height) = shot_frame(shape);
+    // As shares of the frame: left, top, right, bottom. A 4:5 or 1:1 ad
+    // (#283) shows in a feed with the network's text below it, not over it.
+    let (left, top, right, bottom) = match shape {
+        FrameShape::Vertical => (0.07, 0.09, 0.15, 0.24),
+        FrameShape::Landscape => (0.07, 0.08, 0.07, 0.16),
+        FrameShape::Portrait => (0.07, 0.07, 0.07, 0.1),
+        FrameShape::Square => (0.07, 0.07, 0.07, 0.09),
     };
     let x = (left * f64::from(width)).round() as u32;
     let y = (top * f64::from(height)).round() as u32;
@@ -367,20 +371,21 @@ const LOGO_HEIGHT: f64 = 0.11;
 const GAP: f64 = 0.03;
 
 impl CardLayout {
-    /// The layout of a card in `aspect` with its text at `text_place`, its
+    /// The layout of a card in `shape` with its text at `text_place`, its
     /// logo at `logo_place` when it has one, and a product image when it
     /// has one. Every part stays inside [`card_room`] and no two overlap.
     pub fn of(
-        aspect: AspectRatio,
+        shape: impl Into<FrameShape>,
         text_place: CardTextPlace,
         logo_place: CardLogoPlace,
         image: bool,
         logo: bool,
     ) -> CardLayout {
-        let (width, height) = shot_frame(aspect);
+        let shape = shape.into();
+        let (width, height) = shot_frame(shape);
         let short = f64::from(width.min(height));
         let gap = (GAP * short).round() as u32;
-        let mut room = card_room(aspect);
+        let mut room = card_room(shape);
         let logo_box = (
             ((LOGO_WIDTH * short).round() as u32).min(room.width),
             ((LOGO_HEIGHT * short).round() as u32).min(room.height / 4),
@@ -483,6 +488,7 @@ impl<T: EndCardRepository + ?Sized> EndCardRepository for std::sync::Arc<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AspectRatio;
 
     fn brief(offer: &str, call: &str, link: &str) -> BriefText {
         BriefText::new(offer, call, link).unwrap()
@@ -615,10 +621,10 @@ mod tests {
 
     #[test]
     fn every_part_of_a_card_keeps_clear_of_the_networks_and_of_each_other() {
-        for aspect in [AspectRatio::Vertical, AspectRatio::Landscape] {
+        for aspect in FrameShape::ALL {
             let room = card_room(aspect);
             let (width, height) = shot_frame(aspect);
-            if aspect == AspectRatio::Vertical {
+            if aspect == FrameShape::Vertical {
                 // The bottom fifth and the right edge stay clear.
                 assert!(room.bottom() <= height * 4 / 5);
                 assert!(room.right() <= width * 7 / 8);

@@ -7,8 +7,8 @@
 //! and above the band captions use, at every moment of the zoom.
 
 use crate::{
-    AspectRatio, BackdropDirection, CAPTION_BAND, DeviceKind, MotionStrength, ProductLayout,
-    ShotColor, ShotPlacement,
+    BackdropDirection, DeviceKind, FrameShape, MotionStrength, ProductLayout, ShotColor,
+    ShotPlacement, caption_band,
 };
 
 /// The short side of a composed picture, in pixels: 1080 × 1920 for a
@@ -92,20 +92,18 @@ pub struct ShotLayout {
     pub shadow: bool,
 }
 
-/// The size of a composed picture of `aspect`.
-pub fn shot_frame(aspect: AspectRatio) -> (u32, u32) {
-    let long = SHOT_SHORT_SIDE * 16 / 9;
-    match aspect {
-        AspectRatio::Vertical => (SHOT_SHORT_SIDE, long),
-        AspectRatio::Landscape => (long, SHOT_SHORT_SIDE),
-    }
+/// The size of a composed picture of `shape`: [`SHOT_SHORT_SIDE`] on its
+/// short side.
+pub fn shot_frame(shape: impl Into<FrameShape>) -> (u32, u32) {
+    shape.into().size()
 }
 
-/// The part of a frame of `aspect` a product's image may use: what the
-/// strongest zoom still shows, less a margin, and above the caption band
-/// from the zoom's first moment to its last.
-pub fn shot_room(aspect: AspectRatio) -> ShotArea {
-    let (width, height) = shot_frame(aspect);
+/// The part of a frame of `shape` a product's image may use: what the
+/// strongest zoom still shows, less a margin, and above the shape's
+/// caption band from the zoom's first moment to its last.
+pub fn shot_room(shape: impl Into<FrameShape>) -> ShotArea {
+    let shape = shape.into();
+    let (width, height) = shot_frame(shape);
     let zoom = MotionStrength::ALL
         .into_iter()
         .map(MotionStrength::zoom)
@@ -118,7 +116,7 @@ pub fn shot_room(aspect: AspectRatio) -> ShotArea {
     let top = (edge * f64::from(height)).ceil() + margin;
     // The band is a share of the screen. Zoomed in, a line of the picture
     // sits lower on the screen than it does in the whole picture.
-    let clear = 1.0 - CAPTION_BAND;
+    let clear = 1.0 - caption_band(shape);
     let above_band = clear.min(clear / zoom + edge);
     let bottom = (above_band * f64::from(height)).floor() - margin;
     ShotArea {
@@ -131,29 +129,30 @@ pub fn shot_room(aspect: AspectRatio) -> ShotArea {
 
 impl ShotLayout {
     /// The layout of a picture of `picture` pixels (width, height) in a
-    /// frame of `aspect`, set as `layout` and placed at `placement`: as
+    /// frame of `shape`, set as `layout` and placed at `placement`: as
     /// large as its room allows with what is drawn around it, in the
     /// picture's own shape, in the middle of the room's height.
     pub fn of(
-        aspect: AspectRatio,
+        shape: impl Into<FrameShape>,
         picture: (u32, u32),
         layout: ProductLayout,
         placement: ShotPlacement,
     ) -> ShotLayout {
-        Self::in_room(aspect, shot_room(aspect), picture, layout, placement)
+        let shape = shape.into();
+        Self::in_room(shape, shot_room(shape), picture, layout, placement)
     }
 
     /// As [`ShotLayout::of`], within `room` of the frame instead of the
     /// whole room a product shot keeps: the end card's (#281) place for
     /// its image.
     pub fn in_room(
-        aspect: AspectRatio,
+        shape: impl Into<FrameShape>,
         mut room: ShotArea,
         picture: (u32, u32),
         layout: ProductLayout,
         placement: ShotPlacement,
     ) -> ShotLayout {
-        let (width, height) = shot_frame(aspect);
+        let (width, height) = shot_frame(shape);
         if layout == ProductLayout::Cutout {
             let kept = ((SHADOW_DROP + SHADOW_BLUR) * f64::from(SHOT_SHORT_SIDE)).ceil() as u32;
             room.height = room.height.saturating_sub(kept).max(1);
@@ -287,7 +286,7 @@ pub enum BackdropPaint<'a> {
 /// How to compose one product shot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShotRecipe<'a> {
-    pub aspect: AspectRatio,
+    pub shape: FrameShape,
     pub layout: ProductLayout,
     pub placement: ShotPlacement,
     pub backdrop: BackdropPaint<'a>,
@@ -297,7 +296,7 @@ pub struct ShotRecipe<'a> {
 /// on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CardRecipe<'a> {
-    pub aspect: AspectRatio,
+    pub shape: FrameShape,
     pub layout: crate::CardLayout,
     pub backdrop: BackdropPaint<'a>,
     /// The product's image (its file's bytes) and how it is set, when the
@@ -336,6 +335,7 @@ pub trait ShotComposer: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AspectRatio;
     use crate::{Motion, MotionKind};
 
     /// Where a point of the picture (as shares of it) is on the screen
@@ -353,11 +353,14 @@ mod tests {
     fn a_composed_picture_has_the_frames_shape() {
         assert_eq!(shot_frame(AspectRatio::Vertical), (1080, 1920));
         assert_eq!(shot_frame(AspectRatio::Landscape), (1920, 1080));
+        // An export for ads composes in its own shapes too (#283).
+        assert_eq!(shot_frame(FrameShape::Portrait), (1080, 1350));
+        assert_eq!(shot_frame(FrameShape::Square), (1080, 1080));
     }
 
     /// Every layout of every shape of picture, at every place.
-    fn every_layout(picture: (u32, u32), mut check: impl FnMut(AspectRatio, ShotLayout)) {
-        for aspect in AspectRatio::ALL {
+    fn every_layout(picture: (u32, u32), mut check: impl FnMut(FrameShape, ShotLayout)) {
+        for aspect in FrameShape::ALL {
             for layout in ProductLayout::ALL {
                 for placement in ShotPlacement::ALL {
                     check(aspect, ShotLayout::of(aspect, picture, layout, placement));
@@ -439,7 +442,7 @@ mod tests {
 
     #[test]
     fn the_card_stays_on_screen_and_above_the_captions_under_the_strongest_zoom() {
-        for aspect in AspectRatio::ALL {
+        for aspect in FrameShape::ALL {
             let (width, height) = shot_frame(aspect);
             // The widest and the tallest pictures a product may have, in
             // every layout and place.
@@ -473,7 +476,7 @@ mod tests {
                                 );
                                 assert!((0.0..=1.0).contains(&x), "{aspect} {motion:?}: x {x}");
                                 assert!(
-                                    (0.0..=1.0 - CAPTION_BAND).contains(&y),
+                                    (0.0..=1.0 - caption_band(aspect)).contains(&y),
                                     "{aspect} {motion:?}: y {y}"
                                 );
                             }

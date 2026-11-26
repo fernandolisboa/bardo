@@ -9,6 +9,9 @@
 //! steps of its range ([`CROP_STEPS`]), not in pixels, so it holds for the
 //! source and for its smaller proxy alike.
 
+use std::fmt;
+use std::str::FromStr;
+
 use crate::AspectRatio;
 
 /// How many steps a crop position has across its range: 0 puts the window
@@ -56,7 +59,12 @@ impl CropPosition {
     /// The position that centers a window of `target`'s shape over
     /// `source` on the point `x`, `y` (fractions of the picture across and
     /// down), the window stopping at the picture's edges.
-    pub fn centered_on(source: PictureSize, target: AspectRatio, x: f32, y: f32) -> CropPosition {
+    pub fn centered_on(
+        source: PictureSize,
+        target: impl Into<FrameShape>,
+        x: f32,
+        y: f32,
+    ) -> CropPosition {
         let window = crop_window(source, target, CropPosition::CENTER);
         let axis = |point: f32, side: u32, size: u32| -> u16 {
             let slack = side.saturating_sub(size);
@@ -86,7 +94,7 @@ impl CropPosition {
     pub fn dragged(
         self,
         source: PictureSize,
-        target: AspectRatio,
+        target: impl Into<FrameShape>,
         dx: f64,
         dy: f64,
     ) -> CropPosition {
@@ -141,6 +149,120 @@ impl AspectRatio {
     }
 }
 
+/// The shape of a rendered frame: the editor's two (`AspectRatio`), and
+/// the two only an export for ads renders (#283): 4:5 and 1:1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FrameShape {
+    /// 9:16.
+    Vertical,
+    /// 16:9.
+    Landscape,
+    /// 4:5, the tallest shape a feed shows whole.
+    Portrait,
+    /// 1:1.
+    Square,
+}
+
+impl FrameShape {
+    pub const ALL: [FrameShape; 4] = [
+        FrameShape::Portrait,
+        FrameShape::Square,
+        FrameShape::Vertical,
+        FrameShape::Landscape,
+    ];
+
+    /// Width and height of the shape, in lowest terms.
+    pub fn ratio(self) -> (u32, u32) {
+        match self {
+            FrameShape::Vertical => (9, 16),
+            FrameShape::Landscape => (16, 9),
+            FrameShape::Portrait => (4, 5),
+            FrameShape::Square => (1, 1),
+        }
+    }
+
+    /// Its size in pixels, 1080 on the short side: 1080 × 1920,
+    /// 1920 × 1080, 1080 × 1350 and 1080 × 1080.
+    pub fn size(self) -> (u32, u32) {
+        let (across, down) = self.ratio();
+        let short = 1080;
+        if across <= down {
+            (short, short * down / across)
+        } else {
+            (short * across / down, short)
+        }
+    }
+
+    pub fn code(self) -> &'static str {
+        match self {
+            FrameShape::Vertical => "9:16",
+            FrameShape::Landscape => "16:9",
+            FrameShape::Portrait => "4:5",
+            FrameShape::Square => "1:1",
+        }
+    }
+
+    /// The shape as a folder's name (a colon is no part of one).
+    pub fn folder(self) -> &'static str {
+        match self {
+            FrameShape::Vertical => "9x16",
+            FrameShape::Landscape => "16x9",
+            FrameShape::Portrait => "4x5",
+            FrameShape::Square => "1x1",
+        }
+    }
+
+    /// The editor's shape it is, if any.
+    pub fn aspect(self) -> Option<AspectRatio> {
+        match self {
+            FrameShape::Vertical => Some(AspectRatio::Vertical),
+            FrameShape::Landscape => Some(AspectRatio::Landscape),
+            FrameShape::Portrait | FrameShape::Square => None,
+        }
+    }
+
+    /// The shapes an export for ads renders a cut of `cut` in: 4:5, 1:1
+    /// and the editor's other shape.
+    pub fn for_ads(cut: AspectRatio) -> [FrameShape; 3] {
+        let other = match cut {
+            AspectRatio::Vertical => FrameShape::Landscape,
+            AspectRatio::Landscape => FrameShape::Vertical,
+        };
+        [FrameShape::Portrait, FrameShape::Square, other]
+    }
+}
+
+impl From<AspectRatio> for FrameShape {
+    fn from(aspect: AspectRatio) -> Self {
+        match aspect {
+            AspectRatio::Vertical => FrameShape::Vertical,
+            AspectRatio::Landscape => FrameShape::Landscape,
+        }
+    }
+}
+
+impl fmt::Display for FrameShape {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+/// A shape code that is not one of [`FrameShape`]'s.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown frame shape: {0}")]
+pub struct UnknownFrameShape(pub String);
+
+impl FromStr for FrameShape {
+    type Err = UnknownFrameShape;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        FrameShape::ALL
+            .into_iter()
+            .find(|shape| shape.code() == s)
+            .ok_or_else(|| UnknownFrameShape(s.to_owned()))
+    }
+}
+
 /// A picture's size in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PictureSize {
@@ -170,8 +292,12 @@ pub struct CropRect {
 /// places its window the same way from whatever size of the picture it
 /// reads, sized to the output's exact shape, so it can differ from this one
 /// by a pixel or two.
-pub fn crop_window(source: PictureSize, target: AspectRatio, position: CropPosition) -> CropRect {
-    let (across, down) = target.ratio();
+pub fn crop_window(
+    source: PictureSize,
+    target: impl Into<FrameShape>,
+    position: CropPosition,
+) -> CropRect {
+    let (across, down) = target.into().ratio();
     let (source_width, source_height) = (u64::from(source.width), u64::from(source.height));
     let (width, height) = if source_width * u64::from(down) >= source_height * u64::from(across) {
         // Wider than the frame: full height.
@@ -335,5 +461,31 @@ mod tests {
     fn clips_start_filling_the_frame_from_the_middle() {
         assert_eq!(Framing::default(), Framing::Crop(CropPosition::CENTER));
         assert_eq!(AspectRatio::Vertical.ratio(), (9, 16));
+    }
+
+    #[test]
+    fn the_shapes_of_an_export_for_ads_are_1080_on_the_short_side() {
+        assert_eq!(FrameShape::Portrait.size(), (1080, 1350));
+        assert_eq!(FrameShape::Square.size(), (1080, 1080));
+        assert_eq!(FrameShape::Vertical.size(), (1080, 1920));
+        assert_eq!(FrameShape::Landscape.size(), (1920, 1080));
+        assert_eq!(
+            FrameShape::for_ads(AspectRatio::Vertical),
+            [
+                FrameShape::Portrait,
+                FrameShape::Square,
+                FrameShape::Landscape
+            ]
+        );
+        assert_eq!(
+            FrameShape::for_ads(AspectRatio::Landscape)[2],
+            FrameShape::Vertical
+        );
+        for shape in FrameShape::ALL {
+            assert_eq!(shape.code().parse::<FrameShape>(), Ok(shape));
+        }
+        // A 4:5 window of a wide picture takes its full height.
+        let window = crop_window(HD, FrameShape::Portrait, CropPosition::CENTER);
+        assert_eq!((window.width, window.height), (864, 1080));
     }
 }

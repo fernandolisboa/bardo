@@ -700,6 +700,21 @@ impl AdRepository for Database {
         .map_err(boxed)?;
         tx.commit().map_err(boxed)
     }
+
+    fn ad_texts(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Option<bardo_domain::AdTexts>, RepositoryError> {
+        self.read_ad_texts(project)
+    }
+
+    fn save_ad_texts(
+        &self,
+        project: VideoProjectId,
+        texts: &bardo_domain::AdTexts,
+    ) -> Result<(), RepositoryError> {
+        self.write_ad_texts(project, texts)
+    }
 }
 
 #[cfg(test)]

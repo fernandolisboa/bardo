@@ -734,6 +734,7 @@ pub(crate) fn out_of_date(what: &str) -> JobFailure {
 }
 
 /// Runs scene plan and image jobs.
+#[derive(Clone)]
 pub(crate) struct SceneHandler {
     pub(crate) owner: ProfileId,
     pub(crate) plans: Arc<dyn ScenePlanRepository>,
