@@ -9,9 +9,9 @@
 use std::io::Cursor;
 
 use bardo_domain::{
-    BackdropDirection, BackdropPaint, ComposedPicture, DeviceKind, DeviceOutline, ProductLayout,
-    SHADOW_BLUR, SHADOW_DROP, SHOT_SHORT_SIDE, ShotArea, ShotColor, ShotComposer, ShotError,
-    ShotLayout, ShotRecipe,
+    BackdropDirection, BackdropPaint, CardRecipe, ComposedPicture, DeviceKind, DeviceOutline,
+    ProductLayout, SHADOW_BLUR, SHADOW_DROP, SHOT_SHORT_SIDE, ShotArea, ShotColor, ShotComposer,
+    ShotError, ShotLayout, ShotPlacement, ShotRecipe,
 };
 use image::codecs::png::{CompressionType, FilterType as PngFilter, PngEncoder};
 use image::imageops::{self, FilterType};
@@ -61,65 +61,164 @@ const MOST_TONES: usize = 8;
 impl ShotComposer for ProductShots {
     fn compose(&self, image: &[u8], recipe: &ShotRecipe<'_>) -> Result<ComposedPicture, ShotError> {
         let picture = read(image)?;
-        // A photo with nothing see-through has nothing to stand cut out.
-        let layout = match recipe.layout {
-            ProductLayout::Cutout if picture.pixels().all(|pixel| pixel[3] == u8::MAX) => {
-                ProductLayout::Card
-            }
-            layout => layout,
-        };
         let layout = ShotLayout::of(
             recipe.aspect,
             (picture.width(), picture.height()),
-            layout,
+            standing(&picture, recipe.layout),
             recipe.placement,
         );
         let card = scaled(picture, layout.card.width, layout.card.height);
         let tones = tones_of(&card);
-        let mut frame = match recipe.backdrop {
-            BackdropPaint::Auto => {
-                RgbImage::from_pixel(layout.width, layout.height, Rgb(backdrop_of(&card)))
-            }
-            BackdropPaint::Plain {
-                from,
-                to,
-                direction,
-            } => gradient(layout.width, layout.height, from, to, direction),
-            BackdropPaint::Picture(bytes) => covering(bytes, layout.width, layout.height)?,
-        };
-        if layout.shadow {
-            cast_shadow(&mut frame, &card, layout.card);
-        }
-        if let Some(device) = layout.device {
-            draw_outline(&mut frame, device);
-        }
-        for (x, y, pixel) in card.enumerate_pixels() {
-            let cover = corner_cover(x, y, card.width(), card.height(), layout.radius)
-                * (f32::from(pixel[3]) / 255.0);
-            if cover <= 0.0 {
-                continue;
-            }
-            let shown = frame.get_pixel_mut(layout.card.x + x, layout.card.y + y);
-            for channel in 0..3 {
-                shown[channel] = if cover >= 1.0 {
-                    pixel[channel]
-                } else {
-                    let under = f32::from(shown[channel]);
-                    (under + (f32::from(pixel[channel]) - under) * cover).round() as u8
-                };
-            }
-        }
-        let mut png = Vec::new();
-        PngEncoder::new_with_quality(&mut png, CompressionType::Fast, PngFilter::Adaptive)
-            .write_image(
-                frame.as_raw(),
-                layout.width,
-                layout.height,
-                ExtendedColorType::Rgb8,
-            )
-            .map_err(|error| ShotError::Failed(error.to_string()))?;
-        Ok(ComposedPicture { png, tones })
+        let mut frame = backdrop(recipe.backdrop, layout.width, layout.height, Some(&card))?;
+        set_product(&mut frame, &card, &layout);
+        Ok(ComposedPicture {
+            png: png_of(&frame)?,
+            tones,
+        })
     }
+
+    fn compose_card(&self, recipe: &CardRecipe<'_>) -> Result<ComposedPicture, ShotError> {
+        let (width, height) = (recipe.layout.width, recipe.layout.height);
+        let product = match (recipe.product, recipe.layout.product) {
+            (Some((bytes, layout)), Some(room)) => {
+                let picture = read(bytes)?;
+                let layout = ShotLayout::in_room(
+                    recipe.aspect,
+                    room,
+                    (picture.width(), picture.height()),
+                    standing(&picture, layout),
+                    ShotPlacement::Center,
+                );
+                let card = scaled(picture, layout.card.width, layout.card.height);
+                Some((card, layout))
+            }
+            _ => None,
+        };
+        let tones = product
+            .as_ref()
+            .map_or_else(Vec::new, |(card, _)| tones_of(card));
+        let mut frame = backdrop(
+            recipe.backdrop,
+            width,
+            height,
+            product.as_ref().map(|(card, _)| card),
+        )?;
+        if let Some((card, layout)) = &product {
+            set_product(&mut frame, card, layout);
+        }
+        if let (Some(bytes), Some(area)) = (recipe.logo, recipe.layout.logo) {
+            let logo = read(bytes).map_err(|error| match error {
+                ShotError::Unreadable(why) => ShotError::Unreadable(format!("the logo: {why}")),
+                other => other,
+            })?;
+            let (w, h) = (
+                f64::from(logo.width().max(1)),
+                f64::from(logo.height().max(1)),
+            );
+            let scale = (f64::from(area.width) / w).min(f64::from(area.height) / h);
+            let shown_w = ((w * scale).round() as u32).clamp(1, area.width);
+            let shown_h = ((h * scale).round() as u32).clamp(1, area.height);
+            let logo = scaled(logo, shown_w, shown_h);
+            // In the corner it sits at the corner; with the text, in the
+            // middle of its box.
+            let x = match area.x > recipe.layout.text.x {
+                true => area.x + (area.width - shown_w) / 2,
+                false => area.x,
+            };
+            let at = ShotArea {
+                x,
+                y: area.y + (area.height - shown_h) / 2,
+                width: shown_w,
+                height: shown_h,
+            };
+            blend(&mut frame, &logo, at, 0);
+        }
+        Ok(ComposedPicture {
+            png: png_of(&frame)?,
+            tones,
+        })
+    }
+}
+
+/// How a picture stands: a photo with nothing see-through has nothing to
+/// stand cut out, so it is a card.
+fn standing(picture: &RgbaImage, layout: ProductLayout) -> ProductLayout {
+    match layout {
+        ProductLayout::Cutout if picture.pixels().all(|pixel| pixel[3] == u8::MAX) => {
+            ProductLayout::Card
+        }
+        layout => layout,
+    }
+}
+
+/// The frame's backdrop, `width` × `height`: a tone of `card`'s own color
+/// (a neutral dark with none), a color or gradient, or a drawn picture.
+fn backdrop(
+    paint: BackdropPaint<'_>,
+    width: u32,
+    height: u32,
+    card: Option<&RgbaImage>,
+) -> Result<RgbImage, ShotError> {
+    Ok(match paint {
+        BackdropPaint::Auto => RgbImage::from_pixel(
+            width,
+            height,
+            Rgb(card.map_or(ShotColor::BLACK.0, backdrop_of)),
+        ),
+        BackdropPaint::Plain {
+            from,
+            to,
+            direction,
+        } => gradient(width, height, from, to, direction),
+        BackdropPaint::Picture(bytes) => covering(bytes, width, height)?,
+    })
+}
+
+/// Sets the scaled product image `card` on `frame` as `layout` says: its
+/// shadow and outline first, then its pixels.
+fn set_product(frame: &mut RgbImage, card: &RgbaImage, layout: &ShotLayout) {
+    if layout.shadow {
+        cast_shadow(frame, card, layout.card);
+    }
+    if let Some(device) = layout.device {
+        draw_outline(frame, device);
+    }
+    blend(frame, card, layout.card, layout.radius);
+}
+
+/// Lays `picture` over `frame` at `at`, its corners rounded by `radius`,
+/// through its see-through pixels.
+fn blend(frame: &mut RgbImage, picture: &RgbaImage, at: ShotArea, radius: u32) {
+    for (x, y, pixel) in picture.enumerate_pixels() {
+        let cover = corner_cover(x, y, picture.width(), picture.height(), radius)
+            * (f32::from(pixel[3]) / 255.0);
+        if cover <= 0.0 {
+            continue;
+        }
+        let shown = frame.get_pixel_mut(at.x + x, at.y + y);
+        for channel in 0..3 {
+            shown[channel] = if cover >= 1.0 {
+                pixel[channel]
+            } else {
+                let under = f32::from(shown[channel]);
+                (under + (f32::from(pixel[channel]) - under) * cover).round() as u8
+            };
+        }
+    }
+}
+
+/// `frame` as a PNG file's bytes.
+fn png_of(frame: &RgbImage) -> Result<Vec<u8>, ShotError> {
+    let mut png = Vec::new();
+    PngEncoder::new_with_quality(&mut png, CompressionType::Fast, PngFilter::Adaptive)
+        .write_image(
+            frame.as_raw(),
+            frame.width(),
+            frame.height(),
+            ExtendedColorType::Rgb8,
+        )
+        .map_err(|error| ShotError::Failed(error.to_string()))?;
+    Ok(png)
 }
 
 /// The picture in a product image's file, upright as a camera's note of
@@ -572,6 +671,88 @@ mod tests {
     fn in_a_corner(x: u32, y: u32, layout: &ShotLayout) -> bool {
         let (width, height, radius) = (layout.card.width, layout.card.height, layout.radius);
         (x < radius || x >= width - radius) && (y < radius || y >= height - radius)
+    }
+
+    #[test]
+    fn an_end_card_holds_the_images_pixels_scaled_and_a_text_card_only_its_backdrop() {
+        use bardo_domain::{CardLayout, CardLogoPlace, CardTextPlace};
+        let source = pattern(1200, 800);
+        let logo = pattern(400, 200);
+        for aspect in AspectRatio::ALL {
+            let layout = CardLayout::of(
+                aspect,
+                CardTextPlace::Above,
+                CardLogoPlace::Corner,
+                true,
+                true,
+            );
+            let bytes = png(&source);
+            let logo_bytes = png(&logo);
+            let recipe = CardRecipe {
+                aspect,
+                layout,
+                backdrop: BackdropPaint::Plain {
+                    from: ShotColor([10, 20, 30]),
+                    to: ShotColor([10, 20, 30]),
+                    direction: bardo_domain::BackdropDirection::Down,
+                },
+                product: Some((&bytes, ProductLayout::Card)),
+                logo: Some(&logo_bytes),
+            };
+            let card = ProductShots.compose_card(&recipe).unwrap();
+            let shot = image::load_from_memory(&card.png).unwrap().into_rgb8();
+            assert_eq!(shot.dimensions(), shot_frame(aspect));
+            // The image sits whole in the card's place for it, its pixels
+            // only scaled.
+            let placed = ShotLayout::in_room(
+                aspect,
+                layout.product.unwrap(),
+                (1200, 800),
+                ProductLayout::Card,
+                ShotPlacement::Center,
+            );
+            let room = layout.product.unwrap();
+            assert!(placed.card.x >= room.x && placed.card.right() <= room.right());
+            assert!(placed.card.y >= room.y && placed.card.bottom() <= room.bottom());
+            let scaled = imageops::resize(&source, placed.card.width, placed.card.height, SCALING);
+            let mut compared = 0u32;
+            for (x, y, pixel) in scaled.enumerate_pixels() {
+                if in_a_corner(x, y, &placed) {
+                    continue;
+                }
+                assert_eq!(
+                    shot.get_pixel(placed.card.x + x, placed.card.y + y),
+                    pixel,
+                    "{aspect}: ({x}, {y})"
+                );
+                compared += 1;
+            }
+            assert!(compared > placed.card.width * placed.card.height * 9 / 10);
+            // The text's box is left to the backdrop, for the text.
+            let text = layout.text;
+            assert_eq!(
+                *shot.get_pixel(text.x + text.width / 2, text.y + text.height / 2),
+                Rgb([10, 20, 30])
+            );
+
+            // A card with no image: its backdrop alone.
+            let bare = CardRecipe {
+                product: None,
+                logo: None,
+                layout: CardLayout::of(
+                    aspect,
+                    CardTextPlace::Above,
+                    CardLogoPlace::Corner,
+                    false,
+                    false,
+                ),
+                ..recipe
+            };
+            let card = ProductShots.compose_card(&bare).unwrap();
+            let shot = image::load_from_memory(&card.png).unwrap().into_rgb8();
+            assert_eq!(shot.dimensions(), shot_frame(aspect));
+            assert!(shot.pixels().all(|pixel| *pixel == Rgb([10, 20, 30])));
+        }
     }
 
     #[test]

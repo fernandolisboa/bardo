@@ -41,15 +41,15 @@ The scenes of an [ad](brief.md) are planned from the **Ad scene plan** template 
 | **Drawn** | A picture from the scene's prompt, like the scenes of any video | The image model |
 | **Product in use** | The product being used, from the scene's prompt and the product's photo, [checked by you](#product-check) | The image model |
 | **Product shot** | One of the product's own images, as it is | Bardo, for free |
-| **End card** | The ad's last picture, over the call to action | Bardo, for free, from a product image; the image model when the product has none |
+| **End card** | The ad's [last picture](#end-card), from the call to action to after the last word | Bardo, for free, from a product image, its logo and your lines; a card of text when the product has no image |
 
-Which kinds a plan may use follows the product's [images](products.md#pictures): a product shot needs an image, and the product in use needs a **Photo**, since a **Screen** is only ever shown as it is. A product with no image gets drawn scenes and a drawn end card. Claude is told which kinds it may use and, by number, which images the product has; a kind the product does not allow comes back as a drawn scene, and a product shot that names an image the product does not have shows its first one. When the product has an image, the plan is asked to have the product on screen by the time the narration names it, with at least one product shot.
+Which kinds a plan may use follows the product's [images](products.md#pictures): a product shot needs an image, and the product in use needs a **Photo**, since a **Screen** is only ever shown as it is. A product with no image gets drawn scenes and an [end card](#end-card) of text. Claude is told which kinds it may use and, by number, which images the product has; a kind the product does not allow comes back as a drawn scene, and a product shot that names an image the product does not have shows its first one. When the product has an image, the plan is asked to have the product on screen by the time the narration names it, with at least one product shot.
 
 Bardo composes a product shot itself, on your computer, as soon as the plan is saved: the product's image, whole, over a plain backdrop in a color taken from the image ([how it looks](#shot-look) is yours to change), 1080 × 1920 for a vertical video and 1920 × 1080 for a wide one. The image is scaled to fit and never stretched, cut or redrawn, and it sits where neither the cut's motion nor a caption covers it. Composing costs nothing and needs no key, and the product's image never goes to an image or video model from a product shot. A composed picture is never animated ([Clips](clips.md#animate)), is never a reference for drawing another scene, is not offered as the set of a performed take, and in the editor it [only zooms](editor.md#motion).
 
 **Scene kind** in the picked scene changes what it is, among the kinds the product allows; **End card** is offered on the last scene only. A scene made a product shot is composed at once, and **Product image** picks which of the product's images it shows, numbered as on the product. When that image is small for the frame, the scene says so: enlarged, it may look soft. A scene made **Drawn** again goes back to the drawing it had; when it never had one, nothing is drawn until you ask with **Generate N images**, which shows the cost first. When the video changes shape, the composed pictures no longer fit and read **To compose**: **Compose product shots** (or **Compose picture** on the scene) makes them again, for free, and **Generate N images** makes them along with the drawings. A scene whose image was removed from the product says so and keeps the picture it has; when that picture has to be made again, the scene fails until you pick another image or kind for it. A render in the other shape (a long ad posted to a 9:16 network, or the other way round) shows a composed picture whole, with bars.
 
-The video's [estimate](projects.md#mode) counts composed scenes as free. Before an ad has a plan, it is estimated with a scene about every 3 seconds, of which two product shots and the end card are free when the product has an image.
+The video's [estimate](projects.md#mode) counts composed scenes as free. Before an ad has a plan, it is estimated with a scene about every 3 seconds, of which the end card is free, and two product shots more when the product has an image.
 
 <a id="product-check"></a>
 ## The product in use
@@ -67,7 +67,7 @@ Bardo does not judge likeness: the check is yours, by eye. A picture drawn again
 <a id="shot-look"></a>
 ## How a product shot looks
 
-A product shot (and an end card composed from a product image) has its own controls under **Scene kind**. Choosing a layout, a position or a backdrop composes the picture again, on your computer, for free; only drawing a new backdrop is paid.
+A product shot (and the [end card](#end-card)) has its own controls under **Scene kind**. On the end card, the image sits in the room its text leaves, so **Position** is not offered, and a card of text has only its backdrop. Choosing a layout, a position or a backdrop composes the picture again, on your computer, for free; only drawing a new backdrop is paid.
 
 - **Layout**, when the image offers more than one:
   - **Card**: the image with rounded corners. Every image may be a card.
@@ -80,6 +80,21 @@ A product shot (and an end card composed from a product image) has its own contr
   - **Draw a backdrop** has the image generator draw an empty surface or set in the video's [style](#style) and shape, with no product, text or logo. It sees none of the product's images, and is told only what kind of product it is. It costs one scene image: the estimate is beside the button, it counts toward the video's [cap](projects.md#mode), and it shows in Costs as **Product shot backdrop**. The new backdrop waits for you under **New backdrop to review**: **Keep and use** puts it behind this scene, **Discard** deletes it. While one waits, **Draw a backdrop** waits too. Kept backdrops are listed under **Drawn backdrops** for every product shot of the project and cost nothing more; pick one to show it. **Discard** under a kept backdrop deletes it, unless a product shot still shows it.
 
 Whatever the look, the product's image is only scaled: never stretched, cut or redrawn. A picture composed before looks existed reads **To compose** and is made again, for free, with **Compose product shots**.
+
+<a id="end-card"></a>
+## The end card
+
+The last scene of an ad is its end card, made like a [thumbnail](uploading.md#thumbnail) and never by a model: the backdrop, the product image the scene shows (whole, only scaled), the product's [logo](products.md#pictures) when it has one, and up to three lines drawn in Bardo's fonts. A product with no image gets a card of text, with its logo if it has one. Composing it costs nothing and needs no key, and none of it is sent anywhere. Its editor sits in the scene's inspector, under **Scene kind**:
+
+- **Headline**: starts as the brief's call to action; type your own, up to 40 characters.
+- **Second line**: starts as the brief's link or handle, kept as you type it; up to 60 characters, and it may be empty. A longer link starts without its query, then without its last path parts, so it still works. **Save card** saves both lines; the other choices save at once and keep lines you have not saved yet in their fields.
+- **Show the offer**: the offer line only ever shows the [brief's offer](brief.md), so while it is on, a new offer there shows on the card at once. With no offer in the brief there is no offer line, and an offer longer than 60 characters is left out whole rather than cut. What you type on the card is yours: the [claims check](script.md#claims) does not read it.
+- **Look**: **Bold**, **Yellow** or **Banner**, the thumbnail looks.
+- **Text**: **Above the image** or **Below the image**; a card of text sets its lines in the middle. The lines shrink to fit their place. **Logo**: **In the corner** or **With the text**. Every place keeps clear of the networks' buttons and captions, in 9:16 and in 16:9.
+
+Every change composes the card again, for free. Until it is, the inspector says **The picture shows an older design** and the scene reads **To compose**: the video does not [render](render.md#gates) with an older card. The card is composed for the shape the video is cut in, and again when that changes.
+
+In the cut, the card shows from the first word of the call to action until 1.5 seconds after the last word, and for at least 2.5 seconds; the music runs under it, no caption shows over it, and it [holds still](editor.md#motion). To turn it off, make the last scene another kind under **Scene kind**: the cut then ends with the narration. Making it **End card** again brings the card back with the design you saved.
 
 <a id="redraw"></a>
 ## Drawing again

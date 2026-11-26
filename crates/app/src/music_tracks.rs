@@ -404,15 +404,31 @@ impl Bardo {
         })
     }
 
-    /// The length of a new track for the project: its narration's.
-    fn music_length_for(
+    /// The length of a new track for the project: its narration's, or,
+    /// for an ad with an end card, its rough cut's, so the music runs
+    /// under the card after the last word (#281).
+    pub(crate) fn music_length_for(
         &self,
         project: VideoProjectId,
     ) -> Result<Option<Duration>, RepositoryError> {
-        Ok(self
-            .narrations
-            .narration(project)?
-            .map(|narration| music_length(narration.duration)))
+        let Some(narration) = self.narrations.narration(project)? else {
+            return Ok(None);
+        };
+        let cut = self
+            .scene_plans
+            .scene_plan(project)?
+            .filter(|plan| plan.end_card().is_some())
+            .map(|plan| {
+                bardo_domain::Timeline::rough_cut(
+                    &plan,
+                    &narration,
+                    bardo_domain::AspectRatio::Vertical,
+                )
+                .duration()
+            });
+        Ok(Some(music_length(
+            cut.unwrap_or(narration.duration).max(narration.duration),
+        )))
     }
 
     /// The project's generated tracks with their media assets.

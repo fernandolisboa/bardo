@@ -13,6 +13,7 @@ mod connection;
 mod cost;
 mod cut_suggestion;
 mod data_home;
+mod end_card;
 mod export;
 mod export_files;
 mod files;

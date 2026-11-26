@@ -718,6 +718,10 @@ pub struct Scene {
     shot: Option<ComposedShot>,
     /// How its product shot looks (#285): layout, place and backdrop.
     look: ShotLook,
+    /// What an end card (#281) shows besides its image and look, as the
+    /// fingerprint of the card's design (`crate::card_fingerprint`):
+    /// `None` until Bardo first composes it.
+    card: Option<String>,
     /// Which of its images were drawn with the product as a reference,
     /// and which picture and clip the user checked against the product's
     /// own image (#279).
@@ -801,6 +805,7 @@ impl Scene {
             product_image: None,
             shot: None,
             look: ShotLook::default(),
+            card: None,
             checks: ProductChecks::default(),
         }
     }
@@ -863,6 +868,7 @@ impl Scene {
             product_image: None,
             shot: None,
             look: ShotLook::default(),
+            card: None,
             checks: ProductChecks::default(),
         }
     }
@@ -893,6 +899,23 @@ impl Scene {
     /// when it is composed again.
     pub fn look(&self) -> ShotLook {
         self.look
+    }
+
+    /// The scene with the end card design it shows, as an adapter
+    /// rebuilds it.
+    pub fn with_card(mut self, card: Option<String>) -> Self {
+        self.card = card;
+        self
+    }
+
+    /// The end card design the scene shows, by its fingerprint (#281).
+    pub fn card(&self) -> Option<&str> {
+        self.card.as_deref()
+    }
+
+    /// Whether the scene is the end card (#281).
+    pub fn is_end_card(&self) -> bool {
+        self.kind == SceneKind::EndCard
     }
 
     /// The scene with what it holds about its product, as an adapter
@@ -1032,13 +1055,16 @@ impl Scene {
         self.product_image
     }
 
-    /// Whether Bardo composes the scene's picture from a product image
-    /// instead of having it drawn: a product shot, and an end card of a
-    /// product that has an image. Such a picture is free, is never
+    /// Whether Bardo composes the scene's picture instead of having it
+    /// drawn: a product shot, from a product image, and the end card,
+    /// with or without one (#281). Such a picture is free, is never
     /// animated and is never a reference for another scene.
     pub fn is_composed(&self) -> bool {
-        matches!(self.kind, SceneKind::ProductShot | SceneKind::EndCard)
-            && self.product_image.is_some()
+        match self.kind {
+            SceneKind::ProductShot => self.product_image.is_some(),
+            SceneKind::EndCard => true,
+            SceneKind::Drawn | SceneKind::ProductInUse => false,
+        }
     }
 
     /// The picture composed for it.
@@ -1048,14 +1074,26 @@ impl Scene {
 
     /// Whether a composed scene still waits for its picture in `aspect`:
     /// it has none, or the one it has shows another image, was made for
-    /// another shape or in another look.
+    /// another shape or in another look, or (an end card) shows another
+    /// design or none was set yet.
     pub fn needs_shot(&self, aspect: AspectRatio) -> bool {
         self.is_composed()
             && !self.shot.as_ref().is_some_and(|shot| {
-                Some(shot.image) == self.product_image
+                shot.image == self.product_image
                     && shot.aspect == aspect
                     && shot.look == Some(self.look)
+                    && (!self.is_end_card() || (self.card.is_some() && shot.card == self.card))
             })
+    }
+
+    /// Makes `card` the end card design the scene shows. Returns whether
+    /// it changed: its picture is then composed again, for free.
+    pub fn set_card(&mut self, card: String) -> bool {
+        if self.card.as_deref() == Some(card.as_str()) {
+            return false;
+        }
+        self.card = Some(card);
+        true
     }
 
     /// Makes `shot` the scene's composed picture. Returns the picture
@@ -1081,7 +1119,7 @@ impl Scene {
             true => self
                 .shot
                 .as_ref()
-                .filter(|shot| Some(shot.image) == self.product_image)
+                .filter(|shot| shot.image == self.product_image)
                 .map(|shot| shot.file.as_str()),
             false => self.image.as_ref().map(|image| image.file.as_str()),
         }
@@ -2094,6 +2132,24 @@ impl ScenePlan {
         (0..self.scenes.len())
             .filter(|&index| self.scenes[index].needs_drawing())
             .collect()
+    }
+
+    /// The end card (#281): the last scene, when it is of that kind.
+    pub fn end_card(&self) -> Option<usize> {
+        let last = self.scenes.len().checked_sub(1)?;
+        self.scenes[last].is_end_card().then_some(last)
+    }
+
+    /// Makes `card` the design the plan's end card shows. Returns the
+    /// card's index when that changed: its picture is then out of date
+    /// and is composed again, for free.
+    pub fn set_end_card(&mut self, card: String, now: SystemTime) -> Option<usize> {
+        let index = self.end_card()?;
+        if !self.scenes[index].set_card(card) {
+            return None;
+        }
+        self.updated_at = now;
+        Some(index)
     }
 
     /// Composed scenes that wait for their picture in `aspect`, which
@@ -4052,7 +4108,8 @@ mod tests {
     fn shot(image: ProductImageId, file: &str) -> ComposedShot {
         ComposedShot {
             file: file.into(),
-            image,
+            image: Some(image),
+            card: None,
             aspect: AspectRatio::Vertical,
             look: Some(ShotLook::default()),
             tones: Vec::new(),
@@ -4131,7 +4188,7 @@ mod tests {
     }
 
     #[test]
-    fn a_product_without_an_image_gets_drawn_scenes_and_a_drawn_end_card() {
+    fn a_product_without_an_image_gets_drawn_scenes_and_an_end_card_of_text() {
         let n = narration(STORY, 0);
         let plan = ad_plan(
             &n,
@@ -4150,9 +4207,12 @@ mod tests {
                 (SceneKind::EndCard, None),
             ]
         );
-        assert!(plan.scenes().iter().all(|scene| !scene.is_composed()));
-        assert_eq!(plan.missing_images(), [0, 1, 2], "every one is drawn");
-        assert!(plan.missing_shots(AspectRatio::Vertical).is_empty());
+        // The end card is composed with no image (#281): free, never
+        // drawn.
+        let composed: Vec<bool> = plan.scenes().iter().map(Scene::is_composed).collect();
+        assert_eq!(composed, [false, false, true]);
+        assert_eq!(plan.missing_images(), [0, 1], "the others are drawn");
+        assert_eq!(plan.missing_shots(AspectRatio::Vertical), [2]);
     }
 
     #[test]
@@ -4547,8 +4607,8 @@ mod tests {
         );
         assert_eq!(plan, before);
 
-        // The last scene can be the end card: composed when the product
-        // has an image, drawn when it has none.
+        // The last scene can be the end card: composed, with the
+        // product's image when it has one and as a card of text when not.
         assert_eq!(
             plan.set_scene_kind(2, SceneKind::EndCard, None, &both, later),
             Ok(KindChange::Compose)
@@ -4566,11 +4626,10 @@ mod tests {
                 &ProductPictures::default(),
                 later
             ),
-            Ok(KindChange::Drawn {
-                needs_image: true,
-                dropped: None,
-            })
+            Ok(KindChange::Compose)
         );
+        assert!(bare.scene(0).unwrap().is_composed());
+        assert_eq!(bare.scene(0).unwrap().product_image(), None);
     }
 
     #[test]

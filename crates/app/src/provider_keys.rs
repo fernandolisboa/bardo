@@ -416,6 +416,7 @@ mod tests {
                 personas: Arc::clone(&self.db) as _,
                 products: Arc::clone(&self.db) as _,
                 ads: Arc::clone(&self.db) as _,
+                end_cards: Arc::clone(&self.db) as _,
                 narrations: Arc::clone(&self.db) as _,
                 captures: Arc::clone(&self.db) as _,
                 staging: Arc::clone(&self.db) as _,

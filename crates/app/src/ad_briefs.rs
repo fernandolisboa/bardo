@@ -407,6 +407,12 @@ impl Bardo {
         let text = BriefText::new(offer, call_to_action, link).map_err(BriefError::Invalid)?;
         if brief.set_text(text, now()) {
             self.ads.save_brief(&brief)?;
+            // The end card's offer line shows the brief's offer (#281).
+            if let Ok(Some(video)) = self.themes.project(project)
+                && let Err(error) = self.refresh_end_card(&video)
+            {
+                tracing::warn!(%error, "the end card could not be brought up to date");
+            }
         }
         Ok(brief)
     }

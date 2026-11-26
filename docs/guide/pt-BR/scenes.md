@@ -41,15 +41,15 @@ As cenas de um [anúncio](brief.md) são planejadas a partir do modelo **Plano d
 | **Desenhada** | Uma imagem feita a partir do prompt da cena, como as cenas de qualquer vídeo | O modelo de imagem |
 | **Produto em uso** | O produto sendo usado, a partir do prompt da cena e da foto do produto, [conferido por você](#product-check) | O modelo de imagem |
 | **Foto do produto** | Uma das imagens do próprio produto, como ela é | O Bardo, de graça |
-| **Cartão final** | A última imagem do anúncio, sobre a chamada para ação | O Bardo, de graça, a partir de uma imagem do produto; o modelo de imagem quando o produto não tem nenhuma |
+| **Cartão final** | A [última imagem](#end-card) do anúncio, da chamada para ação até depois da última palavra | O Bardo, de graça, a partir de uma imagem do produto, do logo e das suas linhas; um cartão de texto quando o produto não tem imagem |
 
-Os tipos que um plano pode usar dependem das [imagens](products.md#pictures) do produto: uma foto do produto exige uma imagem, e o produto em uso exige uma **Foto**, porque uma **Tela** só é mostrada como ela é. Um produto sem imagem recebe cenas desenhadas e um cartão final desenhado. O Claude é avisado de quais tipos pode usar e, por número, de quais imagens o produto tem; um tipo que o produto não permite volta como cena desenhada, e uma foto do produto que cita uma imagem que o produto não tem mostra a primeira. Quando o produto tem imagem, o plano é pedido de modo que o produto esteja na tela quando a narração citar o nome dele, com pelo menos uma foto do produto.
+Os tipos que um plano pode usar dependem das [imagens](products.md#pictures) do produto: uma foto do produto exige uma imagem, e o produto em uso exige uma **Foto**, porque uma **Tela** só é mostrada como ela é. Um produto sem imagem recebe cenas desenhadas e um [cartão final](#end-card) de texto. O Claude é avisado de quais tipos pode usar e, por número, de quais imagens o produto tem; um tipo que o produto não permite volta como cena desenhada, e uma foto do produto que cita uma imagem que o produto não tem mostra a primeira. Quando o produto tem imagem, o plano é pedido de modo que o produto esteja na tela quando a narração citar o nome dele, com pelo menos uma foto do produto.
 
 O próprio Bardo compõe a foto do produto, no seu computador, assim que o plano é salvo: a imagem do produto, inteira, sobre um fundo liso numa cor tirada da imagem ([a aparência](#shot-look) você pode mudar), 1080 × 1920 num vídeo vertical e 1920 × 1080 num vídeo largo. A imagem é redimensionada para caber e nunca é esticada, cortada nem redesenhada, e fica onde nem o movimento do corte nem uma legenda a cobre. Compor não custa nada e não exige chave, e a imagem do produto nunca vai para um modelo de imagem ou de vídeo a partir de uma foto do produto. Uma imagem composta nunca é animada ([Clipes](clips.md#animate)), nunca serve de referência para desenhar outra cena, não é oferecida como cenário de uma tomada atuada e, no editor, [só recebe zoom](editor.md#motion).
 
 **Tipo de cena**, na cena escolhida, muda o que ela é, entre os tipos que o produto permite; **Cartão final** só aparece na última cena. Uma cena que vira foto do produto é composta na hora, e **Imagem do produto** escolhe qual das imagens do produto ela mostra, numeradas como no produto. Quando essa imagem é pequena para o quadro, a cena avisa: ampliada, ela pode ficar sem nitidez. Uma cena que volta a ser **Desenhada** retoma o desenho que tinha; se nunca teve um, nada é desenhado até você pedir em **Gerar N imagens**, que mostra o custo antes. Quando o vídeo muda de formato, as imagens compostas deixam de servir e aparecem como **A compor**: **Compor fotos do produto** (ou **Compor imagem**, na cena) faz essas imagens de novo, de graça, e **Gerar N imagens** as faz junto com os desenhos. Uma cena cuja imagem foi removida do produto avisa e fica com a imagem que tem; quando essa imagem precisa ser feita de novo, a cena falha até você escolher outra imagem ou outro tipo para ela. Um render no outro formato (um anúncio longo publicado numa rede 9:16, ou o contrário) mostra a imagem composta inteira, com faixas.
 
-A [estimativa](projects.md#mode) do vídeo conta as cenas compostas como gratuitas. Antes de o anúncio ter um plano, ele é estimado com uma cena a cada 3 segundos, das quais duas fotos do produto e o cartão final são gratuitos quando o produto tem imagem.
+A [estimativa](projects.md#mode) do vídeo conta as cenas compostas como gratuitas. Antes de o anúncio ter um plano, ele é estimado com uma cena a cada 3 segundos, das quais o cartão final é gratuito, e mais duas fotos do produto quando o produto tem imagem.
 
 <a id="product-check"></a>
 ## O produto em uso
@@ -67,7 +67,7 @@ O Bardo não julga a semelhança: a conferência é sua, a olho. Uma imagem dese
 <a id="shot-look"></a>
 ## A aparência de uma foto do produto
 
-Uma foto do produto (e um cartão final composto de uma imagem do produto) tem controles próprios abaixo de **Tipo de cena**. Escolher um layout, uma posição ou um fundo compõe a imagem de novo, no seu computador, de graça; só desenhar um fundo novo é pago.
+Uma foto do produto (e o [cartão final](#end-card)) tem controles próprios abaixo de **Tipo de cena**. No cartão final, a imagem fica no espaço que o texto deixa, então **Posição** não aparece, e um cartão de texto tem só o fundo. Escolher um layout, uma posição ou um fundo compõe a imagem de novo, no seu computador, de graça; só desenhar um fundo novo é pago.
 
 - **Layout**, quando a imagem oferece mais de um:
   - **Cartão**: a imagem com cantos arredondados. Toda imagem pode ser um cartão.
@@ -80,6 +80,21 @@ Uma foto do produto (e um cartão final composto de uma imagem do produto) tem c
   - **Desenhar um fundo** pede ao gerador de imagens uma superfície ou um cenário vazio no [estilo](#style) e no formato do vídeo, sem produto, texto ou logo. Ele não vê nenhuma imagem do produto e só fica sabendo que tipo de produto é. Custa uma imagem de cena: a estimativa fica ao lado do botão, conta para o [teto](projects.md#mode) do vídeo e aparece em Custos como **Fundo de foto do produto**. O fundo novo espera por você em **Novo fundo para revisar**: **Manter e usar** põe esse fundo atrás desta cena, **Descartar** apaga. Enquanto um espera, **Desenhar um fundo** espera também. Os fundos mantidos aparecem em **Fundos desenhados** para toda foto do produto do projeto e não custam mais nada; escolha um para mostrá-lo. **Descartar** abaixo de um fundo mantido o apaga, a não ser que uma foto do produto ainda o mostre.
 
 Seja qual for a aparência, a imagem do produto só é redimensionada: nunca esticada, cortada ou redesenhada. Uma imagem composta antes de existir aparência aparece como **A compor** e é feita de novo, de graça, em **Compor fotos do produto**.
+
+<a id="end-card"></a>
+## O cartão final
+
+A última cena de um anúncio é o cartão final, feito como uma [thumbnail](uploading.md#thumbnail) e nunca por um modelo: o fundo, a imagem do produto que a cena mostra (inteira, só redimensionada), o [logo](products.md#pictures) do produto quando ele tem um, e até três linhas desenhadas nas fontes do Bardo. Um produto sem imagem recebe um cartão de texto, com o logo se tiver. Compor não custa nada e não exige chave, e nada disso é enviado para lugar nenhum. O editor fica no inspetor da cena, abaixo de **Tipo de cena**:
+
+- **Título**: começa como a chamada para ação do briefing; digite o seu, com até 40 caracteres.
+- **Segunda linha**: começa como o link ou @ do briefing, mantido como você digitar; até 60 caracteres, e pode ficar vazia. Um link mais longo começa sem os parâmetros e depois sem as últimas partes do caminho, para continuar funcionando. **Salvar cartão final** salva as duas linhas; as outras escolhas salvam na hora e mantêm nos campos as linhas que você ainda não salvou.
+- **Mostrar a oferta**: a linha de oferta só mostra a [oferta do briefing](brief.md), então, enquanto **Mostrar a oferta** estiver ligado, uma oferta nova lá aparece no cartão na hora. Sem oferta no briefing, não há linha de oferta, e uma oferta com mais de 60 caracteres fica de fora inteira em vez de ser cortada. O que você digita no cartão é seu: a [checagem de afirmações](script.md#claims) não lê esse texto.
+- **Visual**: **Forte**, **Amarelo** ou **Faixa**, os visuais das thumbnails.
+- **Texto**: **Acima da imagem** ou **Abaixo da imagem**; um cartão de texto põe as linhas no meio. As linhas diminuem para caber no lugar. **Logo**: **No canto** ou **Junto ao texto**. Todo lugar fica longe dos botões e das legendas das redes, em 9:16 e em 16:9.
+
+Toda mudança compõe o cartão de novo, de graça. Até lá, o inspetor diz **A imagem mostra um design anterior** e a cena mostra **A compor**: o vídeo não é [renderizado](render.md#gates) com um cartão antigo. O cartão é composto no formato em que o vídeo é cortado, e de novo quando ele muda.
+
+No corte, o cartão aparece da primeira palavra da chamada para ação até 1,5 segundo depois da última palavra, e por pelo menos 2,5 segundos; a música continua por baixo, nenhuma legenda aparece sobre ele e ele [fica parado](editor.md#motion). Para desligar, faça da última cena outro tipo em **Tipo de cena**: o corte então termina com a narração. Voltar a cena para **Cartão final** traz o cartão de volta com o design que você salvou.
 
 <a id="redraw"></a>
 ## Desenhar de novo

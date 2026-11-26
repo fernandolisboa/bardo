@@ -28,6 +28,7 @@ use bardo_domain::{
     BytePlusField, BytePlusFieldError, ChapterFieldError, ChapterProblem, LookAssetError,
     LookAssetKind, TextPlacement, ThumbnailFieldError, ThumbnailLook,
 };
+use bardo_domain::{CardFieldError, CardLogoPlace, CardTextPlace};
 use bardo_domain::{ClaimError, ClaimKind, RestrictedCategory, SheetClaimError, SheetFieldError};
 use bardo_domain::{ClipFit, StyleChoice, VisualStyle};
 use bardo_domain::{
@@ -988,6 +989,28 @@ pub enum Text {
     SceneNothingToReview,
     ScenesNotLoaded,
     SceneFieldError(SceneFieldError),
+    /// An ad's end card (#281), in the Scenes inspector.
+    EndCardTitle,
+    EndCardHint,
+    EndCardHeadline,
+    EndCardSecondLine,
+    EndCardSecondLineHint,
+    EndCardShowOffer,
+    /// Placeholder: `{offer}`.
+    EndCardOfferIs,
+    EndCardNoOffer,
+    EndCardOfferTooLong,
+    EndCardLook,
+    EndCardTextPlace,
+    EndCardLogoPlace,
+    EndCardNoLogo,
+    EndCardSave,
+    EndCardSaved,
+    EndCardOutOfDate,
+    EndCardOff,
+    CardTextPlaceName(CardTextPlace),
+    CardLogoPlaceName(CardLogoPlace),
+    CardFieldError(CardFieldError),
     TemplatesTitle,
     TemplatesHint,
     TemplateKindName(TemplateKind),
@@ -2890,6 +2913,7 @@ pub enum Text {
     /// A render refused while scenes of the product in use wait for their check (#279).
     RenderProductUnchecked,
     RenderProductUncheckedScenes,
+    RenderEndCardOutOfDate,
     ProductCheckRefused,
     ProductUncheckedClip,
     ProductCheckTitle,
@@ -4147,6 +4171,34 @@ impl Text {
             Text::SceneFieldError(error) => match error {
                 SceneFieldError::PromptRequired => "scenes.error.prompt_required",
                 SceneFieldError::PromptTooLong => "scenes.error.prompt_too_long",
+            },
+            Text::EndCardTitle => "scenes.end_card.title",
+            Text::EndCardHint => "scenes.end_card.hint",
+            Text::EndCardHeadline => "scenes.end_card.headline",
+            Text::EndCardSecondLine => "scenes.end_card.second_line",
+            Text::EndCardSecondLineHint => "scenes.end_card.second_line_hint",
+            Text::EndCardShowOffer => "scenes.end_card.show_offer",
+            Text::EndCardOfferIs => "scenes.end_card.offer_is",
+            Text::EndCardNoOffer => "scenes.end_card.no_offer",
+            Text::EndCardOfferTooLong => "scenes.end_card.offer_too_long",
+            Text::EndCardLook => "scenes.end_card.look",
+            Text::EndCardTextPlace => "scenes.end_card.text_place",
+            Text::EndCardLogoPlace => "scenes.end_card.logo_place",
+            Text::EndCardNoLogo => "scenes.end_card.no_logo",
+            Text::EndCardSave => "scenes.end_card.save",
+            Text::EndCardSaved => "scenes.end_card.saved",
+            Text::EndCardOutOfDate => "scenes.end_card.out_of_date",
+            Text::EndCardOff => "scenes.end_card.off",
+            Text::CardTextPlaceName(place) => {
+                return format!("scenes.end_card.text_place_name.{}", place.code()).into();
+            }
+            Text::CardLogoPlaceName(place) => {
+                return format!("scenes.end_card.logo_place_name.{}", place.code()).into();
+            }
+            Text::CardFieldError(error) => match error {
+                CardFieldError::HeadlineEmpty => "scenes.end_card.error.headline_empty",
+                CardFieldError::HeadlineTooLong => "scenes.end_card.error.headline_too_long",
+                CardFieldError::SecondLineTooLong => "scenes.end_card.error.second_line_too_long",
             },
             Text::TemplatesTitle => "templates.title",
             Text::TemplatesHint => "templates.hint",
@@ -6032,6 +6084,7 @@ impl Text {
                 BackdropDirection::Diagonal => "scenes.look.direction.diagonal",
             },
             Text::RenderProductUnchecked => "render.product_unchecked",
+            Text::RenderEndCardOutOfDate => "render.end_card_out_of_date",
             Text::RenderProductUncheckedScenes => "render.product_unchecked_scenes",
             Text::ProductCheckRefused => "scenes.product.check_refused",
             Text::ProductUncheckedClip => "scenes.product.unchecked_clip",
@@ -7606,6 +7659,28 @@ mod tests {
         texts.extend(TextPlacement::ALL.map(Text::TextPlacementName));
         texts.extend(ThumbnailLook::ALL.map(Text::ThumbnailLookName));
         texts.extend(SceneFieldError::ALL.map(Text::SceneFieldError));
+        texts.extend([
+            Text::EndCardTitle,
+            Text::EndCardHint,
+            Text::EndCardHeadline,
+            Text::EndCardSecondLine,
+            Text::EndCardSecondLineHint,
+            Text::EndCardShowOffer,
+            Text::EndCardOfferIs,
+            Text::EndCardNoOffer,
+            Text::EndCardOfferTooLong,
+            Text::EndCardLook,
+            Text::EndCardTextPlace,
+            Text::EndCardLogoPlace,
+            Text::EndCardNoLogo,
+            Text::EndCardSave,
+            Text::EndCardSaved,
+            Text::EndCardOutOfDate,
+            Text::EndCardOff,
+        ]);
+        texts.extend(CardTextPlace::ALL.map(Text::CardTextPlaceName));
+        texts.extend(CardLogoPlace::ALL.map(Text::CardLogoPlaceName));
+        texts.extend(CardFieldError::ALL.map(Text::CardFieldError));
         texts.extend(TemplateKind::ALL.map(Text::TemplateKindName));
         texts.extend(TemplateVariable::ALL.map(Text::TemplateVariableHint));
         texts.extend(TemplateProblem::ALL.map(Text::TemplateProblem));
@@ -8273,6 +8348,7 @@ mod tests {
         texts.extend(ShotPlacement::ALL.map(Text::ShotPlacementName));
         texts.extend(BackdropDirection::ALL.map(Text::BackdropDirectionName));
         texts.push(Text::RenderProductUnchecked);
+        texts.push(Text::RenderEndCardOutOfDate);
         texts.push(Text::RenderProductUncheckedScenes);
         texts.push(Text::ProductCheckRefused);
         texts.push(Text::ProductUncheckedClip);

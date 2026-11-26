@@ -297,6 +297,9 @@ pub struct Timeline {
     /// Where the project's performed clips belong in the narration
     /// (`crate::PerformedPlace`): not saved with the cut, read with it.
     pub(crate) performed: Vec<crate::PerformedPlace>,
+    /// The plan's end card (#281), by scene index: no caption shows
+    /// while it is on screen. Read with the plan, not saved.
+    pub(crate) card: Option<usize>,
 }
 
 impl PartialEq for Timeline {
@@ -310,6 +313,7 @@ impl PartialEq for Timeline {
             captions,
             aspect,
             performed: _,
+            card: _,
         } = self;
         *video == other.video
             && *narration == other.narration
@@ -334,14 +338,33 @@ impl Timeline {
     /// (`crate::caption_lines`), in the default style. The cut is in
     /// `aspect` (the project's format), each clip filling the other shape
     /// from the middle.
+    ///
+    /// An ad's end card (#281), its last scene, stays on until
+    /// [`crate::END_CARD_TAIL`] after the narration's last word, and at
+    /// least [`crate::END_CARD_MIN`] from its start: the cut ends there.
     pub fn rough_cut(plan: &ScenePlan, narration: &Narration, aspect: AspectRatio) -> Timeline {
-        let end_frame = plan
-            .scenes()
-            .iter()
-            .map(|scene| nearest_frame(scene.end))
-            .chain([nearest_frame(narration.duration)])
-            .max()
-            .unwrap_or(0);
+        let card = plan.end_card();
+        let end_frame = match card {
+            Some(index) => {
+                let last_word = narration
+                    .words()
+                    .map(|(_, timing)| timing.end)
+                    .max()
+                    .unwrap_or(narration.duration);
+                let start = frame_time(nearest_frame(plan.scenes()[index].start));
+                // Never before the narration's file ends: its silence
+                // after the last word would play over black.
+                nearest_frame(crate::end_card_end(start, last_word))
+                    .max(nearest_frame(narration.duration))
+            }
+            None => plan
+                .scenes()
+                .iter()
+                .map(|scene| nearest_frame(scene.end))
+                .chain([nearest_frame(narration.duration)])
+                .max()
+                .unwrap_or(0),
+        };
         let mut starts: Vec<(usize, u64)> = Vec::new();
         for (index, scene) in plan.scenes().iter().enumerate() {
             let start = if starts.is_empty() {
@@ -397,6 +420,7 @@ impl Timeline {
             captions,
             aspect,
             performed: Vec::new(),
+            card,
         }
     }
 
@@ -441,6 +465,11 @@ impl Timeline {
                 .is_some_and(Scene::is_composed);
             if composed {
                 item.framing = Framing::Fit;
+            }
+            // The end card holds still: its text is read, not toured.
+            if item.scene().is_some() && item.scene() == self.card {
+                item.motion = None;
+                continue;
             }
             let panned = item.motion.filter(|motion| {
                 composed && !matches!(motion.kind, MotionKind::ZoomIn | MotionKind::ZoomOut)
@@ -546,6 +575,7 @@ impl Timeline {
             captions,
             aspect: saved.aspect,
             performed: Vec::new(),
+            card: plan.end_card(),
         };
         timeline.relayout();
         timeline.holds_together().then_some(timeline)
@@ -681,7 +711,45 @@ impl Timeline {
             })
             .collect();
         spans.sort_by_key(|span| (span.at, span.index));
+        // No caption over the end card (#281): the card says it.
+        let card: Vec<(Duration, Duration)> = self
+            .video
+            .iter()
+            .filter(|item| item.scene().is_some() && item.scene() == self.card)
+            .map(|item| (item.at, item.end()))
+            .collect();
+        if card.is_empty() {
+            return spans;
+        }
         spans
+            .into_iter()
+            .flat_map(|span| {
+                let mut pieces = vec![span];
+                for &(from, to) in &card {
+                    pieces = pieces
+                        .into_iter()
+                        .flat_map(|piece| {
+                            let before = (piece.at < from).then(|| CaptionSpan {
+                                duration: piece.duration.min(from - piece.at),
+                                ..piece
+                            });
+                            let after = (piece.end() > to).then(|| {
+                                let skipped = to.saturating_sub(piece.at);
+                                CaptionSpan {
+                                    at: piece.at + skipped,
+                                    duration: piece.duration - skipped,
+                                    from: piece.from + skipped,
+                                    ..piece
+                                }
+                            });
+                            before.into_iter().chain(after)
+                        })
+                        .collect();
+                }
+                pieces
+            })
+            .filter(|span| !span.duration.is_zero())
+            .collect()
     }
 
     /// When each word of `span`'s caption starts to light up on the
@@ -2078,6 +2146,67 @@ pub(crate) mod tests {
         );
     }
 
+    /// An ad's cut over "One. Buy it." whose second sentence, the call
+    /// to action, runs from 2 s to `call_end` and whose last scene, over
+    /// it, is the end card when `card` says so.
+    fn ad_cut(call_end: u64, card: bool) -> Timeline {
+        let mid = 2_000 + (call_end - 2_000) / 2;
+        let narration = narrated(
+            "One. Buy it.",
+            &[(0, 1_500), (2_000, mid), (mid, call_end)],
+            call_end + 200,
+        );
+        let mut scenes = vec![scene(0, 2_000), scene(2_000, call_end + 200)];
+        scenes[0].image = Some(image("scene-0.png"));
+        scenes[1].image = Some(image("scene-1.png"));
+        let mut plan = plan(scenes);
+        if card {
+            plan.set_scene_kind(
+                1,
+                crate::SceneKind::EndCard,
+                None,
+                &crate::ProductPictures::default(),
+                SystemTime::UNIX_EPOCH,
+            )
+            .unwrap();
+        }
+        Timeline::rough_cut(&plan, &narration, AspectRatio::Vertical)
+    }
+
+    #[test]
+    fn an_end_card_stays_after_the_last_word_and_never_too_briefly() {
+        // A call to action of 2 s: the cut ends 1.5 s after it.
+        let cut = ad_cut(4_000, true);
+        assert_eq!(cut.duration(), ms(5_500));
+        assert_eq!(cut.video()[1].end(), ms(5_500));
+        // Of 0.6 s: 1.9 s after, so the card had 2.5 s.
+        let cut = ad_cut(2_600, true);
+        assert_eq!(cut.duration(), ms(4_500));
+        assert_eq!(cut.video()[1].duration, ms(2_500));
+        // With no end card the cut ends with the narration.
+        let cut = ad_cut(4_000, false);
+        assert_eq!(cut.duration(), ms(4_200));
+    }
+
+    #[test]
+    fn no_caption_shows_while_the_end_card_is_on_screen() {
+        let cut = ad_cut(4_000, true);
+        let card = (cut.video()[1].at, cut.video()[1].end());
+        let spans = cut.caption_spans();
+        assert!(!spans.is_empty(), "the first sentence is captioned");
+        for span in &spans {
+            assert!(span.end() <= card.0 || span.at >= card.1, "{span:?}");
+        }
+        // Without the card, the call to action is captioned as usual.
+        let plain = ad_cut(4_000, false);
+        assert!(
+            plain
+                .caption_spans()
+                .iter()
+                .any(|span| span.end() > ms(2_000))
+        );
+    }
+
     /// A plan of three drawn scenes whose second is a product shot.
     fn plan_with_a_product_shot() -> ScenePlan {
         let mut scenes = vec![scene(0, 1_000), scene(1_000, 2_000), scene(2_000, 3_000)];
@@ -2120,7 +2249,8 @@ pub(crate) mod tests {
             .unwrap()
             .add_shot(crate::ComposedShot {
                 file: "shot-1.png".into(),
-                image: product,
+                image: Some(product),
+                card: None,
                 aspect: AspectRatio::Vertical,
                 look: Some(crate::ShotLook::default()),
                 tones: Vec::new(),

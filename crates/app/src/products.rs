@@ -361,6 +361,8 @@ impl Bardo {
         };
         self.products.save_logo(&logo)?;
         tracing::info!("imported a product logo");
+        // The ads' end cards show it (#281).
+        self.refresh_end_cards_of(id);
         Ok(logo)
     }
 
@@ -373,6 +375,7 @@ impl Bardo {
     pub fn remove_product_logo(&self, id: ProductId) -> Result<(), ProductError> {
         self.own_product(id)?;
         if self.products.remove_logo(id)? {
+            self.refresh_end_cards_of(id);
             Ok(())
         } else {
             Err(ProductError::NoLogo)

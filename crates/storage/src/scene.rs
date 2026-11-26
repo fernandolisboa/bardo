@@ -69,6 +69,9 @@ struct SceneRow {
     shot_tones: Option<String>,
     /// What it holds about the product in use (#279).
     product_checks: Option<String>,
+    /// The end card design it shows, and the one its picture shows (#281).
+    card: Option<String>,
+    shot_card: Option<String>,
 }
 
 /// What a scene holds about the product in use (#279) as stored; none
@@ -116,17 +119,27 @@ fn composed_shot(
     (file, image, aspect): (Option<String>, Option<String>, Option<String>),
     look: Option<&str>,
     tones: Option<&str>,
+    card: Option<String>,
 ) -> Result<Option<ComposedShot>, RepositoryError> {
     match (file, image, aspect) {
-        (Some(file), Some(image), Some(aspect)) => Ok(Some(ComposedShot {
-            file,
-            image: ProductImageId::from(uuid(&image)?),
-            aspect: aspect.parse::<AspectRatio>().map_err(boxed)?,
-            // A look that will not read is no look: the picture is
-            // composed again, for free.
-            look: look.and_then(ShotLook::from_code),
-            tones: tones.map(ShotColor::list_from_code).unwrap_or_default(),
-        })),
+        // An end card's picture may show no image (#281); every other
+        // shows one.
+        (Some(file), image, Some(aspect)) if image.is_some() || card.is_some() => {
+            Ok(Some(ComposedShot {
+                file,
+                image: image
+                    .as_deref()
+                    .map(uuid)
+                    .transpose()?
+                    .map(ProductImageId::from),
+                card,
+                aspect: aspect.parse::<AspectRatio>().map_err(boxed)?,
+                // A look that will not read is no look: the picture is
+                // composed again, for free.
+                look: look.and_then(ShotLook::from_code),
+                tones: tones.map(ShotColor::list_from_code).unwrap_or_default(),
+            }))
+        }
         // Half a composed picture is no picture: the scene waits to be
         // composed again, for free, and the rest of the plan still loads.
         _ => Ok(None),
@@ -307,8 +320,10 @@ impl SceneRow {
                 self.shot,
                 self.shot_look.as_deref(),
                 self.shot_tones.as_deref(),
+                self.shot_card,
             )?,
         )
+        .with_card(self.card)
         // A look that will not read is the first look.
         .with_look(
             self.look
@@ -328,7 +343,7 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                  motion_prompt, clip_provider, clip_model, clip_failure, position,
                  cast_members, planned_motion_prompt, place, image_portraits,
                  pending_portraits, kind, product_image_id, shot_file, shot_image_id,
-                 shot_aspect, look, shot_look, shot_tones, product_checks
+                 shot_aspect, look, shot_look, shot_tones, product_checks, card, shot_card
              FROM scene WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -359,6 +374,8 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                     shot_look: row.get(26)?,
                     shot_tones: row.get(27)?,
                     product_checks: row.get(28)?,
+                    card: row.get(29)?,
+                    shot_card: row.get(30)?,
                 },
                 row.get::<_, i64>(14)?,
             ))
@@ -572,9 +589,9 @@ fn insert_scene(
              failure, motion_prompt, clip_provider, clip_model, clip_failure, cast_members,
              planned_motion_prompt, place, image_portraits, pending_portraits, kind,
              product_image_id, shot_file, shot_image_id, shot_aspect, look, shot_look,
-             shot_tones, product_checks)
+             shot_tones, product_checks, card, shot_card)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-             ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
+             ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)",
         params![
             plan,
             position(index)?,
@@ -600,12 +617,17 @@ fn insert_scene(
             scene.kind().code(),
             scene.product_image().map(|image| image.to_string()),
             scene.shot().map(|shot| shot.file.as_str()),
-            scene.shot().map(|shot| shot.image.to_string()),
+            scene
+                .shot()
+                .and_then(|shot| shot.image)
+                .map(|image| image.to_string()),
             scene.shot().map(|shot| shot.aspect.code()),
             look_code(scene),
             shot_look_code(scene),
             shot_tones_code(scene),
             product_checks_code(scene),
+            scene.card(),
+            scene.shot().and_then(|shot| shot.card.as_deref()),
         ],
     )
     .map_err(boxed)?;
@@ -767,7 +789,7 @@ impl ScenePlanRepository for Database {
                      clip_failure = ?12, image_portraits = ?13, pending_portraits = ?14,
                      kind = ?15, product_image_id = ?16, shot_file = ?17,
                      shot_image_id = ?18, shot_aspect = ?19, look = ?20, shot_look = ?21,
-                     shot_tones = ?22, product_checks = ?23
+                     shot_tones = ?22, product_checks = ?23, card = ?24, shot_card = ?25
                  WHERE plan_id = ?1 AND position = ?2",
                 params![
                     id,
@@ -787,12 +809,17 @@ impl ScenePlanRepository for Database {
                     scene.kind().code(),
                     scene.product_image().map(|image| image.to_string()),
                     scene.shot().map(|shot| shot.file.as_str()),
-                    scene.shot().map(|shot| shot.image.to_string()),
+                    scene
+                        .shot()
+                        .and_then(|shot| shot.image)
+                        .map(|image| image.to_string()),
                     scene.shot().map(|shot| shot.aspect.code()),
                     look_code(scene),
                     shot_look_code(scene),
                     shot_tones_code(scene),
                     product_checks_code(scene),
+                    scene.card(),
+                    scene.shot().and_then(|shot| shot.card.as_deref()),
                 ],
             )
             .map_err(boxed)?;
@@ -1156,7 +1183,10 @@ mod tests {
             // then migrated.
             let mut conn = s.db.conn();
             conn.execute_batch(
-                "DROP TABLE product_concept;
+                "ALTER TABLE scene DROP COLUMN shot_card;
+                 ALTER TABLE scene DROP COLUMN card;
+                 DROP TABLE end_card;
+                 DROP TABLE product_concept;
                  ALTER TABLE scene DROP COLUMN product_checks;
                  DROP TABLE shot_backdrop;
                  ALTER TABLE scene DROP COLUMN shot_tones;
@@ -1408,7 +1438,8 @@ mod tests {
         };
         let shot = ComposedShot {
             file: "shot-0.png".into(),
-            image: photo,
+            image: Some(photo),
+            card: None,
             aspect: AspectRatio::Vertical,
             look: Some(look),
             tones: vec![ShotColor([1, 2, 3]), ShotColor([200, 100, 0])],
@@ -1425,6 +1456,32 @@ mod tests {
         assert_eq!(stored.scenes()[0].picture(), Some("shot-0.png"));
         assert_eq!(stored.scenes()[1].shot(), None);
         assert_eq!(stored.scenes()[1].look(), ShotLook::default());
+
+        // The end card's design and its picture's, by fingerprint (#281);
+        // a card of text shows no image.
+        plan.set_end_card("card-a".into(), time(1_800_000_021))
+            .unwrap();
+        let card = ComposedShot {
+            file: "card-1.png".into(),
+            image: None,
+            card: Some("card-a".into()),
+            aspect: AspectRatio::Vertical,
+            look: Some(ShotLook::default()),
+            tones: Vec::new(),
+        };
+        plan.scene_mut(1, time(1_800_000_022))
+            .unwrap()
+            .add_shot(card.clone());
+        s.db.save_scene(&plan, 1).unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored.scenes()[1].card(), Some("card-a"));
+        assert_eq!(stored.scenes()[1].shot(), Some(&card));
+        // It shows another image than the scene's: composed again.
+        assert!(stored.scenes()[1].needs_shot(AspectRatio::Vertical));
+        plan.set_end_card("card-b".into(), time(1_800_000_023));
+        s.db.save_scene(&plan, 1).unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored.scenes()[1].card(), Some("card-b"));
 
         // A look that will not read is the first look, and a picture whose
         // look will not read is composed again.
@@ -1458,7 +1515,8 @@ mod tests {
         assert_eq!(stored.scenes()[1].kind(), SceneKind::Drawn);
         s.db.conn()
             .execute(
-                "UPDATE scene SET kind = 'end_card', shot_file = 'x.png' WHERE position = 1",
+                "UPDATE scene SET kind = 'end_card', shot_file = 'x.png', shot_aspect = NULL
+                 WHERE position = 1",
                 [],
             )
             .unwrap();
@@ -1489,7 +1547,8 @@ mod tests {
         scene.add_drawing(image(&s, "waiting.png"), None, true);
         s.db.save_scene(&plan, 0).unwrap();
         let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
-        assert_eq!(stored, plan);
+        // The second scene was changed by hand above; only the first is saved.
+        assert_eq!(stored.scenes()[0], plan.scenes()[0]);
         let scene = &stored.scenes()[0];
         assert!(scene.product_checked() && scene.clip_checked());
         assert!(scene.pending_product_drawn());

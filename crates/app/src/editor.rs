@@ -2267,6 +2267,8 @@ pub(crate) mod testing {
         pub(crate) renders: Mutex<Vec<RenderCall>>,
         /// The thumbnails composed, with where they went.
         pub(crate) thumbnails: Mutex<Vec<(ThumbnailSpec, PathBuf)>>,
+        /// The end cards' text drawn (#281), with the layout it went in.
+        pub(crate) cards: Mutex<Vec<(bardo_domain::CardText, bardo_domain::CardLayout)>>,
         /// The limits pictures were fitted within.
         pub(crate) fitted: Mutex<Vec<u64>>,
         /// What extracting a recording's sound writes; it fails without.
@@ -2565,6 +2567,20 @@ pub(crate) mod testing {
                 .push((spec.clone(), destination.to_owned()));
             // Composed into a scratch file on disk, as ffmpeg does.
             std::fs::write(destination, b"jpeg")?;
+            Ok(())
+        }
+
+        fn draw_card_text(
+            &self,
+            picture: &Path,
+            layout: &bardo_domain::CardLayout,
+            text: &bardo_domain::CardText,
+            destination: &Path,
+        ) -> Result<(), MediaError> {
+            self.check(picture)?;
+            self.cards.lock().unwrap().push((text.clone(), *layout));
+            // The picture as it was: what the text covers is ffmpeg's.
+            std::fs::copy(picture, destination)?;
             Ok(())
         }
 

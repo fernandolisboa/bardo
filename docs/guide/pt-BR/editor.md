@@ -108,6 +108,8 @@ As legendas são feitas das palavras da narração e ficam na faixa CC. Selecion
 
 **Mostrar legendas** liga ou desliga todas na prévia e no render; a [etapa Render](render.md#review) avisa quando estão desligadas.
 
+O [cartão final](scenes.md#end-card) de um anúncio já diz a chamada para ação: nenhuma legenda aparece enquanto ele está na tela, na prévia ou no render. Um corte novo de anúncio termina 1,5 segundo depois da última palavra, com o cartão na tela por pelo menos 2,5 segundos, e a música gerada é feita longa o bastante para continuar por baixo dele.
+
 <a id="framing"></a>
 ## Enquadramento: 16:9 ou 9:16
 
@@ -128,7 +130,7 @@ Uma imagem parada não precisa ficar parada. O **Movimento** dela move a vista s
 
 Selecione uma imagem e escolha o movimento dela no inspetor, ou **Nenhum** para deixá-la parada, e a **Intensidade**: **Sutil** (8% mais perto), **Média** (15%) ou **Forte** (25%). **Usar em todas as imagens** põe o movimento da imagem selecionada em todas (com **Nenhum**, tira o movimento de todas), e **Variar em todas as imagens** alterna zooms e pans na intensidade da imagem selecionada, para nenhuma imagem se mover como a anterior. Uma imagem sem movimento mostra a intensidade do canal, a que um movimento escolhido recebe. Um corte novo começa com os movimentos do canal, variados a menos que você mude no [canal](channels.md#defaults).
 
-O movimento acontece sobre a imagem como ela está enquadrada: a janela 9:16 num corte vertical, a imagem inteira num 16:9. Onde a imagem aparece com faixas (**Ajustar** em 9:16, ou uma imagem alta em 16:9), as faixas se movem junto. Ele dura todo o tempo do clipe na tela, transições incluídas, então a imagem nunca para enquanto aparece. Dividir uma imagem dá o movimento inteiro a cada pedaço. Clipes têm movimento próprio, então o movimento vale só para imagens: uma cena que ganha um clipe guarda o movimento da imagem sem tocá-lo, e volta a tocá-lo se a cena mostrar a imagem de novo. Uma imagem que o Bardo compôs a partir de uma imagem de produto ([As cenas de um anúncio](scenes.md#ad)) aparece sempre inteira e só recebe zoom: nenhum pan nem enquadramento é oferecido para ela, e um pan aplicado a todas as imagens toca nela como um zoom de aproximação da mesma intensidade, para o produto ficar inteiro no quadro e livre das legendas.
+O movimento acontece sobre a imagem como ela está enquadrada: a janela 9:16 num corte vertical, a imagem inteira num 16:9. Onde a imagem aparece com faixas (**Ajustar** em 9:16, ou uma imagem alta em 16:9), as faixas se movem junto. Ele dura todo o tempo do clipe na tela, transições incluídas, então a imagem nunca para enquanto aparece. Dividir uma imagem dá o movimento inteiro a cada pedaço. Clipes têm movimento próprio, então o movimento vale só para imagens: uma cena que ganha um clipe guarda o movimento da imagem sem tocá-lo, e volta a tocá-lo se a cena mostrar a imagem de novo. Uma imagem que o Bardo compôs a partir de uma imagem de produto ([As cenas de um anúncio](scenes.md#ad)) aparece sempre inteira e só recebe zoom: nenhum pan nem enquadramento é oferecido para ela, e um pan aplicado a todas as imagens toca nela como um zoom de aproximação da mesma intensidade, para o produto ficar inteiro no quadro e livre das legendas. O [cartão final](scenes.md#end-card) de um anúncio fica parado, para as linhas serem lidas: ele não recebe movimento.
 
 A prévia e o render desenham o movimento do mesmo jeito, suave a uma fração de pixel; uma imagem em movimento leva um pouco mais para renderizar do que uma parada.
 

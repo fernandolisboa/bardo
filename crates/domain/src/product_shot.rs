@@ -140,8 +140,20 @@ impl ShotLayout {
         layout: ProductLayout,
         placement: ShotPlacement,
     ) -> ShotLayout {
+        Self::in_room(aspect, shot_room(aspect), picture, layout, placement)
+    }
+
+    /// As [`ShotLayout::of`], within `room` of the frame instead of the
+    /// whole room a product shot keeps: the end card's (#281) place for
+    /// its image.
+    pub fn in_room(
+        aspect: AspectRatio,
+        mut room: ShotArea,
+        picture: (u32, u32),
+        layout: ProductLayout,
+        placement: ShotPlacement,
+    ) -> ShotLayout {
         let (width, height) = shot_frame(aspect);
-        let mut room = shot_room(aspect);
         if layout == ProductLayout::Cutout {
             let kept = ((SHADOW_DROP + SHADOW_BLUR) * f64::from(SHOT_SHORT_SIDE)).ceil() as u32;
             room.height = room.height.saturating_sub(kept).max(1);
@@ -281,6 +293,21 @@ pub struct ShotRecipe<'a> {
     pub backdrop: BackdropPaint<'a>,
 }
 
+/// How to compose an end card's picture (#281), before its text is set
+/// on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CardRecipe<'a> {
+    pub aspect: AspectRatio,
+    pub layout: crate::CardLayout,
+    pub backdrop: BackdropPaint<'a>,
+    /// The product's image (its file's bytes) and how it is set, when the
+    /// card shows one: in `layout.product`, whole, only scaled.
+    pub product: Option<(&'a [u8], ProductLayout)>,
+    /// The logo's file bytes, when the card shows it: in `layout.logo`,
+    /// whole, only scaled.
+    pub logo: Option<&'a [u8]>,
+}
+
 /// A composed product shot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposedPicture {
@@ -300,6 +327,10 @@ pub trait ShotComposer: Send + Sync {
     /// JPEG or WebP) as `recipe` says. A cut-out layout of an image with
     /// no see-through pixel is a card.
     fn compose(&self, image: &[u8], recipe: &ShotRecipe<'_>) -> Result<ComposedPicture, ShotError>;
+
+    /// The picture of an end card (#281) as `recipe` says, without its
+    /// text, which the media engine sets on it.
+    fn compose_card(&self, recipe: &CardRecipe<'_>) -> Result<ComposedPicture, ShotError>;
 }
 
 #[cfg(test)]
