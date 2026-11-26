@@ -444,7 +444,7 @@ impl Bardo {
     /// state. Collects into `names` every name and id to mask.
     fn accounts_report(&self, names: &mut Vec<String>) -> String {
         let mut out = String::from("Network accounts\n\n");
-        let channels = match self.channels() {
+        let channels = match self.all_channels() {
             Ok(channels) => channels,
             Err(error) => {
                 let _ = writeln!(out, "could not read the channels: {error}");

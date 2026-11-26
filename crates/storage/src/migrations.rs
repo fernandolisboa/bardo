@@ -889,7 +889,15 @@ mod tests {
                         (SELECT COUNT(DISTINCT color) FROM project)
                  FROM project WHERE id = 'es'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .unwrap();
         assert_eq!((state.as_str(), favorite, opened), ("active", None, None));
@@ -963,7 +971,13 @@ mod tests {
         assert_eq!(
             origins("job"),
             [
-                [some("channel"), some("sea"), some("Deep Sea"), some("Deep Sea"), None],
+                [
+                    some("channel"),
+                    some("sea"),
+                    some("Deep Sea"),
+                    some("Deep Sea"),
+                    None
+                ],
                 [some("plain"), None, None, None, None],
                 [
                     some("video"),
@@ -977,7 +991,13 @@ mod tests {
         assert_eq!(
             origins("cost_record"),
             [
-                [some("channel"), some("sea"), some("Deep Sea"), some("Deep Sea"), None],
+                [
+                    some("channel"),
+                    some("sea"),
+                    some("Deep Sea"),
+                    some("Deep Sea"),
+                    None
+                ],
                 [some("none"), None, None, None, None],
                 [
                     some("video"),

@@ -872,6 +872,9 @@ impl JobQueue {
         let mut state = self.shared.state();
         self.shared.repository.save(&job)?;
         let id = job.id();
+        // The store fills in what the job is for (its project, channel and
+        // video, with their names) when it first saves it.
+        let job = self.shared.repository.job(id)?.unwrap_or(job);
         state.jobs.push(job);
         self.shared.changed();
         self.shared.wake.notify_all();

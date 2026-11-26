@@ -4871,3 +4871,71 @@ call = "Call to action"
 link = "Link"
 commercial = "Commercial disclosure: {disclosure}. Set the matching label in the ad manager when you create the ad."
 synthetic = "This video shows AI-generated content: mark it so where the ad manager asks."
+
+[project_switcher]
+no_project = "No project yet"
+search = "Search projects"
+favorites = "Favorites"
+recent = "Recent"
+all = "All projects"
+new_project = "New project…"
+star = "Add to favorites"
+unstar = "Remove from favorites"
+move_up = "Move up among the favorites"
+no_match = "No project matches."
+empty = "Create a project to group the channels of one brand."
+open = "Switch project"
+channels_none = "No channel"
+channels_one = "1 channel"
+channels_many = "{n} channels"
+never_opened = "Not opened yet"
+
+[project_form]
+title = "New project"
+hint = "A project holds the channels of one brand, with their ideas and videos. You work in one project at a time."
+name = "Name"
+name_placeholder = "e.g. Space stories"
+color = "Color"
+create = "Create project"
+cancel = "Cancel"
+
+[project_error]
+name_required = "Give the project a name."
+name_too_long = "Use at most 100 characters."
+name_taken = "You already have a project with this name."
+not_found = "This project no longer exists."
+not_saved = "Couldn't save the project. Try again."
+not_loaded = "Couldn't load the projects. Try again."
+
+[move_channel]
+button = "Move to another project…"
+title = "Move {channel} to another project"
+hint = "Its ideas, videos, network accounts and media go with it. Jobs and costs keep the project they were for."
+target = "Project"
+confirm = "Move channel"
+done = "{channel} is now in {project}."
+blocked = "This channel can't change projects now:"
+no_other = "Create another project first, in the project switcher by the logo."
+in_project = "Project: {project}"
+
+[project_filter]
+all = "All projects"
+none = "Not for a project"
+label = "Project"
+costs_by_project = "By project"
+
+[project_color]
+amber = "Amber"
+teal = "Teal"
+violet = "Violet"
+rose = "Rose"
+sky = "Sky"
+lime = "Lime"
+orange = "Orange"
+slate = "Slate"
+
+[move_channel_block]
+scheduled_post = "A post waits for its time in Bardo. Send it now or cancel its schedule first."
+held_on_network = "A post waits on its network to go public at its time. Make it public or remove it on the network first."
+active_job = "A job for this channel or one of its videos is queued or running. Wait for it or cancel it in Jobs."
+version_elsewhere = "One of its videos is a localized version of, or has one in, another channel of this project. Versions stay inside one project."

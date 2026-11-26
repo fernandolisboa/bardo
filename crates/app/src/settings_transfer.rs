@@ -469,6 +469,10 @@ impl ProductEntry {
 #[derive(Serialize, Deserialize)]
 struct ChannelEntry {
     name: String,
+    /// The project it belongs to, by name. Missing from files made before
+    /// projects: a project of the channel's own name.
+    #[serde(default)]
+    project: Option<String>,
     #[serde(default)]
     niche: String,
     #[serde(default)]
@@ -844,7 +848,7 @@ impl Bardo {
                 product.brief.name().to_owned(),
             );
         }
-        let channels = self.channels().unwrap_or_default();
+        let channels = self.all_channels().unwrap_or_default();
         for (index, channel) in channels.iter().enumerate() {
             push(
                 SettingsItem::Channel(index),
@@ -983,7 +987,8 @@ impl Bardo {
                 contents.products.push(ProductEntry::of(product));
             }
         }
-        for (index, channel) in self.channels().unwrap_or_default().iter().enumerate() {
+        let projects = self.projects().unwrap_or_default();
+        for (index, channel) in self.all_channels().unwrap_or_default().iter().enumerate() {
             if !has(SettingsItem::Channel(index)) {
                 continue;
             }
@@ -1008,6 +1013,10 @@ impl Bardo {
                 .collect();
             contents.channels.push(ChannelEntry {
                 name: details.name().to_owned(),
+                project: projects
+                    .iter()
+                    .find(|project| project.id == channel.project)
+                    .map(|project| project.name().to_owned()),
                 niche: details.niche().to_owned(),
                 themes: details.themes().to_vec(),
                 aesthetic_notes: details.aesthetic_notes().to_owned(),
@@ -1154,7 +1163,7 @@ impl Bardo {
                 entry.brief().is_none().then_some(ItemProblem::NotReadable),
             );
         }
-        let channels = self.channels().unwrap_or_default();
+        let channels = self.all_channels().unwrap_or_default();
         for (index, entry) in contents.channels.iter().enumerate() {
             let here = channels
                 .iter()
@@ -1505,13 +1514,16 @@ impl Bardo {
         };
         let draft = entry.draft(persona).ok_or(Text::SettingsFileItemNotRead)?;
         let existing = self
-            .channels()
+            .all_channels()
             .map_err(|_| failed)?
             .into_iter()
             .find(|channel| channel.details.same_name(&entry.name));
+        // A channel that is already here keeps its project; a new one
+        // joins the project named in the file, made when missing.
+        let project = entry.project.as_deref().unwrap_or(&entry.name);
         let channel = match existing {
             Some(existing) => self.update_channel(existing.id, draft),
-            None => self.create_channel(draft),
+            None => self.create_channel_in(Some(project), draft),
         }
         .map_err(|_| failed)?;
         let mut sign_ins_failed = Vec::new();
@@ -2004,6 +2016,65 @@ mod tests {
         other.import_settings(&file, &all);
         assert_eq!(other.channels().unwrap().len(), channels);
         assert_eq!(other.personas().unwrap().len(), personas);
+    }
+
+    #[test]
+    fn a_channel_arrives_in_its_projects_name_and_one_already_here_keeps_its_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = Harness::new();
+        let app = set_up(&source);
+        let brand = app
+            .create_project(bardo_domain::ProjectDraft {
+                name: "Marca".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        app.create_channel(ChannelDraft {
+            name: "Segundo".into(),
+            ..ChannelDraft::default()
+        })
+        .unwrap();
+        let path = export(&app, &ticked(&app.settings_to_export()), dir.path());
+        let target = Harness::new();
+        let mut other = target.start();
+        let mine = other
+            .create_project(bardo_domain::ProjectDraft {
+                name: "Meu".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        other
+            .create_channel(ChannelDraft {
+                name: "Segundo".into(),
+                ..ChannelDraft::default()
+            })
+            .unwrap();
+
+        let file = open(&other, &path);
+        let all = ticked(&other.settings_to_import(&file));
+        other.import_settings(&file, &all);
+
+        let project_of = |name: &str| {
+            let channel = other
+                .all_channels()
+                .unwrap()
+                .into_iter()
+                .find(|channel| channel.details.same_name(name))
+                .unwrap();
+            other
+                .projects()
+                .unwrap()
+                .into_iter()
+                .find(|project| project.id == channel.project)
+                .unwrap()
+        };
+        assert_eq!(
+            project_of("Arquivos do Espaço").name(),
+            "Arquivos do Espaço"
+        );
+        assert_eq!(project_of("Segundo").id, mine.id);
+        assert_ne!(brand.id, mine.id);
+        assert_eq!(other.open_project().unwrap().unwrap().id, mine.id);
     }
 
     #[test]

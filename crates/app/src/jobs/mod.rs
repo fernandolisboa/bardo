@@ -237,6 +237,16 @@ impl Bardo {
         JobGroups::group(self.jobs())
     }
 
+    /// The jobs `filter` keeps, grouped as the panel shows them.
+    pub fn job_groups_for(&self, filter: crate::ProjectFilter) -> JobGroups {
+        JobGroups::group(
+            self.jobs()
+                .into_iter()
+                .filter(|job| filter.keeps(job.origin().project))
+                .collect(),
+        )
+    }
+
     /// Grows whenever any job changes, so a view can poll it cheaply and
     /// re-read `jobs` only when it moved.
     pub fn jobs_revision(&self) -> u64 {
@@ -2195,6 +2205,7 @@ mod tests {
             tours: Box::new(Arc::clone(db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
             channels: Arc::clone(db) as _,
+            projects: Arc::clone(db) as _,
             jobs: Arc::clone(db) as Arc<dyn JobRepository>,
             themes: Arc::clone(db) as _,
             templates: Arc::clone(db) as _,

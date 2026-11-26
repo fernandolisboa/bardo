@@ -747,7 +747,9 @@ mod tests {
         let (db, owner) = database_with_profile();
         let narrator = persona(owner, "Narrator");
         PersonaRepository::save(&db, &narrator).unwrap();
-        let channel = Channel::new(owner, crate::project::test_project(&db, owner),
+        let channel = Channel::new(
+            owner,
+            crate::project::test_project(&db, owner),
             ChannelDetails::validate(ChannelDraft {
                 name: "Space Archives".into(),
                 default_persona: Some(narrator.id),
@@ -888,7 +890,9 @@ mod tests {
     #[test]
     fn a_channel_cannot_point_at_a_persona_that_does_not_exist() {
         let (db, owner) = database_with_profile();
-        let channel = Channel::new(owner, crate::project::test_project(&db, owner),
+        let channel = Channel::new(
+            owner,
+            crate::project::test_project(&db, owner),
             ChannelDetails::validate(ChannelDraft {
                 name: "Space Archives".into(),
                 default_persona: Some(PersonaId::new()),

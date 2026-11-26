@@ -4871,3 +4871,71 @@ call = "Chamada para ação"
 link = "Link"
 commercial = "Divulgação comercial: {disclosure}. Ative o rótulo correspondente no gerenciador de anúncios ao criar o anúncio."
 synthetic = "Este vídeo mostra conteúdo gerado por IA: marque isso onde o gerenciador de anúncios pedir."
+
+[project_switcher]
+no_project = "Nenhum projeto ainda"
+search = "Buscar projetos"
+favorites = "Favoritos"
+recent = "Recentes"
+all = "Todos"
+new_project = "Novo projeto…"
+star = "Adicionar aos favoritos"
+unstar = "Remover dos favoritos"
+move_up = "Subir entre os favoritos"
+no_match = "Nenhum projeto encontrado."
+empty = "Crie um projeto para reunir os canais de uma marca."
+open = "Trocar de projeto"
+channels_none = "Sem canal"
+channels_one = "1 canal"
+channels_many = "{n} canais"
+never_opened = "Ainda não aberto"
+
+[project_form]
+title = "Novo projeto"
+hint = "Um projeto reúne os canais de uma marca, com as ideias e os vídeos deles. Você trabalha em um projeto por vez."
+name = "Nome"
+name_placeholder = "ex.: Histórias do espaço"
+color = "Cor"
+create = "Criar projeto"
+cancel = "Cancelar"
+
+[project_error]
+name_required = "Dê um nome ao projeto."
+name_too_long = "Use no máximo 100 caracteres."
+name_taken = "Você já tem um projeto com esse nome."
+not_found = "Este projeto não existe mais."
+not_saved = "Não foi possível salvar o projeto. Tente de novo."
+not_loaded = "Não foi possível carregar os projetos. Tente de novo."
+
+[move_channel]
+button = "Mover para outro projeto…"
+title = "Mover {channel} para outro projeto"
+hint = "As ideias, os vídeos, as contas nas redes e a mídia dele vão junto. Tarefas e custos continuam no projeto em que aconteceram."
+target = "Projeto"
+confirm = "Mover canal"
+done = "{channel} agora está em {project}."
+blocked = "Este canal não pode mudar de projeto agora:"
+no_other = "Crie outro projeto antes, no seletor de projetos ao lado do logo."
+in_project = "Projeto: {project}"
+
+[project_filter]
+all = "Todos os projetos"
+none = "Fora de projetos"
+label = "Projeto"
+costs_by_project = "Por projeto"
+
+[project_color]
+amber = "Âmbar"
+teal = "Verde-azulado"
+violet = "Violeta"
+rose = "Rosa"
+sky = "Céu"
+lime = "Lima"
+orange = "Laranja"
+slate = "Ardósia"
+
+[move_channel_block]
+scheduled_post = "Uma publicação espera o horário no Bardo. Envie agora ou cancele o agendamento antes."
+held_on_network = "Uma publicação espera na rede para ficar pública no horário. Publique ou remova na rede antes."
+active_job = "Uma tarefa deste canal ou de um vídeo dele está na fila ou em andamento. Espere terminar ou cancele em Tarefas."
+version_elsewhere = "Um dos vídeos dele é versão localizada de outro canal deste projeto, ou tem uma versão lá. Versões ficam dentro de um projeto."

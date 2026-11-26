@@ -354,6 +354,27 @@ mod tests {
     }
 
     #[test]
+    fn a_post_held_on_the_network_keeps_its_channel_in_its_project() {
+        let s = scheduled(tomorrow());
+        let target = s
+            .app
+            .create_project(bardo_domain::ProjectDraft {
+                name: "Elsewhere".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            s.app.move_channel_blocks(s.project.channel).unwrap(),
+            [crate::MoveBlock::HeldOnNetwork]
+        );
+        assert!(matches!(
+            s.app.move_channel(s.project.channel, target.id),
+            Err(crate::ProjectError::MoveBlocked(blocks))
+                if blocks == [crate::MoveBlock::HeldOnNetwork]
+        ));
+    }
+
+    #[test]
     fn a_scheduled_upload_goes_up_private_with_its_time_and_waits_for_it() {
         let at = tomorrow();
         let s = scheduled(at);

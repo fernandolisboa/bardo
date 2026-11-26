@@ -435,6 +435,7 @@ mod tests {
                 tours: Box::new(Arc::clone(&self.db)),
                 agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
                 channels: Arc::clone(&self.db) as _,
+                projects: Arc::clone(&self.db) as _,
                 jobs: Arc::clone(&self.db) as Arc<dyn JobRepository>,
                 themes: Arc::clone(&self.db) as _,
                 templates: Arc::clone(&self.db) as _,

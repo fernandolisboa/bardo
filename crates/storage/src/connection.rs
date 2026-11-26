@@ -166,7 +166,9 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let profile = UserProfile::new(UiLanguage::EnUs);
         bardo_domain::ProfileRepository::save(&db, &profile).unwrap();
-        let channel = Channel::new(profile.id, crate::project::test_project(&db, profile.id),
+        let channel = Channel::new(
+            profile.id,
+            crate::project::test_project(&db, profile.id),
             ChannelDetails::validate(ChannelDraft {
                 name: "Space Archives".into(),
                 ..ChannelDraft::default()
@@ -263,7 +265,9 @@ mod tests {
 
     /// An account on `network` in a new channel of the account's owner.
     fn another_account(db: &Database, owner: ProfileId, network: Network) -> NetworkAccount {
-        let channel = Channel::new(owner, crate::project::test_project(db, owner),
+        let channel = Channel::new(
+            owner,
+            crate::project::test_project(db, owner),
             ChannelDetails::validate(ChannelDraft {
                 name: format!("Channel {}", Uuid::new_v4()),
                 ..ChannelDraft::default()

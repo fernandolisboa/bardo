@@ -13,7 +13,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::{
-    ChannelId, JobId, ProfileId, Provider, RepositoryError, TokenUsage, VideoProjectId, WorkOrigin,
+    ChannelId, JobId, ProfileId, ProjectId, Provider, RepositoryError, TokenUsage, VideoProjectId,
+    WorkOrigin,
 };
 
 uuid_id!(
@@ -770,6 +771,10 @@ pub struct Spend {
     pub channels: Vec<(Option<ChannelId>, Money)>,
     /// Per video project, most spent first.
     pub projects: Vec<(VideoProjectId, Money)>,
+    /// Per project the records were for, with the name it had on the
+    /// latest of them, most spent first; `None` collects records for no
+    /// project.
+    pub owners: Vec<(Option<ProjectId>, Option<String>, Money)>,
     /// The provider models that ran without a rate, each once.
     pub unpriced: Vec<(Provider, String)>,
 }
@@ -779,6 +784,8 @@ impl Spend {
         let mut spend = Spend::default();
         let mut channels: BTreeMap<Option<String>, (Option<ChannelId>, Money)> = BTreeMap::new();
         let mut projects: BTreeMap<String, (VideoProjectId, Money)> = BTreeMap::new();
+        let mut owners: BTreeMap<Option<String>, (Option<ProjectId>, Option<String>, Money)> =
+            BTreeMap::new();
         for record in records {
             let amount = record.cost.amount();
             spend.total = spend.total.saturating_add(amount);
@@ -788,6 +795,13 @@ impl Spend {
                 .entry(record.channel.map(|id| id.to_string()))
                 .or_insert((record.channel, Money::ZERO));
             channel.1 = channel.1.saturating_add(amount);
+            let owner = owners
+                .entry(record.origin.project.map(|id| id.to_string()))
+                .or_insert((record.origin.project, None, Money::ZERO));
+            owner.2 = owner.2.saturating_add(amount);
+            if record.origin.project_name.is_some() {
+                owner.1.clone_from(&record.origin.project_name);
+            }
             if let Some(project) = record.project {
                 let entry = projects
                     .entry(project.to_string())
@@ -807,6 +821,8 @@ impl Spend {
         spend.channels.sort_by_key(|row| std::cmp::Reverse(row.1));
         spend.projects = projects.into_values().collect();
         spend.projects.sort_by_key(|row| std::cmp::Reverse(row.1));
+        spend.owners = owners.into_values().collect();
+        spend.owners.sort_by_key(|row| std::cmp::Reverse(row.2));
         spend
     }
 
@@ -1487,6 +1503,40 @@ mod tests {
         );
         assert_eq!(spend.unpriced, [(Provider::Gemini, "img".to_owned())]);
         assert_eq!(Spend::of(&[]), Spend::default());
+    }
+
+    #[test]
+    fn spend_adds_up_per_project_with_its_latest_name() {
+        let brand = ProjectId::new();
+        let mut first = record(
+            Provider::Claude,
+            "opus",
+            Cost::Reported(dollars("0.10")),
+            None,
+            None,
+        );
+        first.origin.project = Some(brand);
+        first.origin.project_name = Some("Old name".into());
+        let mut second = first.clone();
+        second.id = CostRecordId::new();
+        second.cost = Cost::Reported(dollars("0.30"));
+        second.origin.project_name = Some("New name".into());
+        let loose = record(
+            Provider::Claude,
+            "opus",
+            Cost::Reported(dollars("0.05")),
+            None,
+            None,
+        );
+
+        let spend = Spend::of(&[first, second, loose]);
+        assert_eq!(
+            spend.owners,
+            [
+                (Some(brand), Some("New name".to_owned()), dollars("0.40")),
+                (None, None, dollars("0.05")),
+            ]
+        );
     }
 
     #[test]

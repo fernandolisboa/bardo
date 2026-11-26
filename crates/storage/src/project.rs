@@ -120,9 +120,14 @@ impl ProjectRepository for Database {
     }
 
     fn mark_opened(&self, id: ProjectId, at: SystemTime) -> Result<(), RepositoryError> {
+        // Later than any project opened before, even within the same
+        // millisecond, so the last one opened is always the open one.
         self.conn()
             .execute(
-                "UPDATE project SET opened_at = ?2 WHERE id = ?1",
+                "UPDATE project SET opened_at = MAX(?2,
+                     (SELECT COALESCE(MAX(other.opened_at), 0) + 1 FROM project other
+                      WHERE other.profile_id = project.profile_id))
+                 WHERE id = ?1",
                 params![id.to_string(), to_unix_millis(at)],
             )
             .map_err(boxed)?;
@@ -289,6 +294,10 @@ mod tests {
         db.save_project(&b).unwrap();
         let at = SystemTime::UNIX_EPOCH + Duration::from_millis(5_000);
         db.mark_opened(a.id, at).unwrap();
+        // Opened again at the same time, B still comes after A.
+        db.mark_opened(b.id, at).unwrap();
+        let b_opened = db.project(b.id).unwrap().unwrap().opened_at.unwrap();
+        assert!(b_opened > at);
         db.set_favorites(owner, &[b.id, a.id]).unwrap();
         let read = db.projects(owner).unwrap();
         assert_eq!(read[0].opened_at, Some(at));

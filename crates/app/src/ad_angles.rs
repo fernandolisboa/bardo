@@ -1064,7 +1064,9 @@ impl Bardo {
         channel: Option<ChannelId>,
     ) -> Result<AdAnglesView, AdAngleError> {
         let product = self.angle_product(product)?;
-        let channels = self.channels.list(self.profile.id)?;
+        let channels = self
+            .channels()
+            .map_err(|crate::AppError::Repository(error)| error)?;
         let channel = match channel {
             Some(id) => Some(self.angle_channel(id)?),
             None => channels.first().cloned(),

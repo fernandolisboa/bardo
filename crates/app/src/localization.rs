@@ -1179,6 +1179,7 @@ impl Bardo {
             .into_iter()
             .filter(|channel| {
                 channel.id != project.channel
+                    && channel.project == own.project
                     && Some(channel.id) != came_from
                     && other_audience(channel, own.details.language(), own.details.country())
                     && !made.iter().any(|made| made.project.channel == channel.id)
@@ -1268,6 +1269,11 @@ impl Bardo {
             .channels
             .get(project.channel)?
             .ok_or(LocalizationError::ProjectNotFound)?;
+        // Versions stay inside the project: another project's channel is
+        // never offered.
+        if target.project != own.project {
+            return Err(LocalizationError::ChannelNotFound);
+        }
         if target.id == own.id
             || Some(target.id) == self.came_from(project.id)?
             || !other_audience(&target, own.details.language(), own.details.country())
@@ -1760,6 +1766,52 @@ mod tests {
         assert!(matches!(
             app.make_version(version, source.channel, BudgetConsent::Ask),
             Err(LocalizationError::SameAudience)
+        ));
+    }
+
+    #[test]
+    fn a_channel_whose_video_has_a_version_elsewhere_stays_in_its_project() {
+        let h = Harness::new();
+        let app = h.start();
+        let (source, channel, _) = made(&h, &app);
+        let target = app
+            .create_project(bardo_domain::ProjectDraft {
+                name: "Elsewhere".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        for moving in [source.channel, channel.id] {
+            assert_eq!(
+                app.move_channel_blocks(moving).unwrap(),
+                [crate::MoveBlock::VersionElsewhere]
+            );
+            assert!(matches!(
+                app.move_channel(moving, target.id),
+                Err(crate::ProjectError::MoveBlocked(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn another_projects_channel_is_never_offered() {
+        let h = Harness::new();
+        let app = h.start();
+        let (source, _) = h.drawn_project(&app);
+        let home = app.open_project().unwrap().unwrap();
+        app.create_project(bardo_domain::ProjectDraft {
+            name: "Elsewhere".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let elsewhere = english_channel(&app);
+        app.switch_project(home.id).unwrap();
+
+        let view = app.versions(source.id).unwrap();
+        assert!(view.targets.is_empty());
+        assert_eq!(view.blocked, Some(VersionBlock::NoChannel));
+        assert!(matches!(
+            app.make_version(source.id, elsewhere.id, BudgetConsent::Ask),
+            Err(LocalizationError::ChannelNotFound)
         ));
     }
 
