@@ -18,9 +18,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    AspectRatio, ClipModelRef, ComposedShot, Generation, GenerationId, JobFailureKind, KindChange,
-    Narration, NarrationId, ProductImageId, ProductPictures, ProfileId, RepositoryError, SceneKind,
-    SceneKindError, StretchLimit, StyleChoice, VideoProjectId, spoken_words,
+    AspectRatio, BackdropId, ClipModelRef, ComposedShot, Generation, GenerationId, JobFailureKind,
+    KindChange, Narration, NarrationId, ProductImageId, ProductPictures, ProfileId,
+    RepositoryError, SceneKind, SceneKindError, ShotBackdropDrawing, ShotLook, StretchLimit,
+    StyleChoice, VideoProjectId, spoken_words,
 };
 
 uuid_id!(
@@ -694,6 +695,8 @@ pub struct Scene {
     product_image: Option<ProductImageId>,
     /// The picture Bardo composed for it, while it is a composed scene.
     shot: Option<ComposedShot>,
+    /// How its product shot looks (#285): layout, place and backdrop.
+    look: ShotLook,
 }
 
 /// Every stored field of a scene, for adapters that rebuild one.
@@ -738,6 +741,7 @@ impl Scene {
             kind: SceneKind::Drawn,
             product_image: None,
             shot: None,
+            look: ShotLook::default(),
         }
     }
 
@@ -798,6 +802,7 @@ impl Scene {
             kind: SceneKind::Drawn,
             product_image: None,
             shot: None,
+            look: ShotLook::default(),
         }
     }
 
@@ -814,6 +819,19 @@ impl Scene {
         self.product_image = product_image;
         self.shot = shot.filter(|_| self.is_composed());
         self
+    }
+
+    /// The scene with how its product shot looks, as an adapter rebuilds
+    /// it.
+    pub fn with_look(mut self, look: ShotLook) -> Self {
+        self.look = look;
+        self
+    }
+
+    /// How its product shot looks: kept while the scene is drawn, for
+    /// when it is composed again.
+    pub fn look(&self) -> ShotLook {
+        self.look
     }
 
     /// What the scene is: a drawn scene, unless an ad's plan says
@@ -842,14 +860,15 @@ impl Scene {
     }
 
     /// Whether a composed scene still waits for its picture in `aspect`:
-    /// it has none, or the one it has shows another image or was made
-    /// for another shape.
+    /// it has none, or the one it has shows another image, was made for
+    /// another shape or in another look.
     pub fn needs_shot(&self, aspect: AspectRatio) -> bool {
         self.is_composed()
-            && !self
-                .shot
-                .as_ref()
-                .is_some_and(|shot| Some(shot.image) == self.product_image && shot.aspect == aspect)
+            && !self.shot.as_ref().is_some_and(|shot| {
+                Some(shot.image) == self.product_image
+                    && shot.aspect == aspect
+                    && shot.look == Some(self.look)
+            })
     }
 
     /// Makes `shot` the scene's composed picture. Returns the picture
@@ -1935,6 +1954,31 @@ impl ScenePlan {
         })
     }
 
+    /// Makes the product shot of scene `index` look as `look` says.
+    /// Returns whether it changed: a changed look is composed again, for
+    /// free. Only a composed scene has a look to change.
+    pub fn set_shot_look(
+        &mut self,
+        index: usize,
+        look: ShotLook,
+        now: SystemTime,
+    ) -> Result<bool, SceneKindError> {
+        let scene = self
+            .scenes
+            .get_mut(index)
+            .ok_or(SceneKindError::NoSuchScene(index))?;
+        if !scene.is_composed() {
+            return Err(SceneKindError::NotComposed);
+        }
+        if scene.look == look {
+            return Ok(false);
+        }
+        scene.look = look;
+        scene.failure = None;
+        self.updated_at = now;
+        Ok(true)
+    }
+
     /// Scenes a clip can be made for that have none, accepted or waiting:
     /// what a new clip run animates.
     pub fn missing_clips(&self) -> Vec<usize> {
@@ -1986,6 +2030,20 @@ pub trait ScenePlanRepository: Send + Sync {
     /// Saves place `index` of the saved plan `plan` (its description),
     /// leaving the rest as it is. Fails when the plan is no longer saved.
     fn save_place(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError>;
+
+    /// The backdrops drawn for the project's product shots (#285), newest
+    /// first.
+    fn shot_backdrops(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<ShotBackdropDrawing>, RepositoryError>;
+
+    fn add_shot_backdrop(&self, backdrop: &ShotBackdropDrawing) -> Result<(), RepositoryError>;
+
+    /// Marks the backdrop kept: the user looked at it and wants it.
+    fn keep_shot_backdrop(&self, backdrop: BackdropId) -> Result<(), RepositoryError>;
+
+    fn remove_shot_backdrop(&self, backdrop: BackdropId) -> Result<(), RepositoryError>;
 }
 
 impl<T: ScenePlanRepository + ?Sized> ScenePlanRepository for Arc<T> {
@@ -2011,6 +2069,25 @@ impl<T: ScenePlanRepository + ?Sized> ScenePlanRepository for Arc<T> {
 
     fn save_place(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
         (**self).save_place(plan, index)
+    }
+
+    fn shot_backdrops(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<ShotBackdropDrawing>, RepositoryError> {
+        (**self).shot_backdrops(project)
+    }
+
+    fn add_shot_backdrop(&self, backdrop: &ShotBackdropDrawing) -> Result<(), RepositoryError> {
+        (**self).add_shot_backdrop(backdrop)
+    }
+
+    fn keep_shot_backdrop(&self, backdrop: BackdropId) -> Result<(), RepositoryError> {
+        (**self).keep_shot_backdrop(backdrop)
+    }
+
+    fn remove_shot_backdrop(&self, backdrop: BackdropId) -> Result<(), RepositoryError> {
+        (**self).remove_shot_backdrop(backdrop)
     }
 }
 
@@ -3758,6 +3835,8 @@ mod tests {
             file: file.into(),
             image,
             aspect: AspectRatio::Vertical,
+            look: Some(ShotLook::default()),
+            tones: Vec::new(),
         }
     }
 
@@ -3920,6 +3999,51 @@ mod tests {
         draw(&mut plan, &n, 0);
         assert_eq!(plan.scenes()[0].picture(), Some("scene-0.png"));
         assert!(plan.scenes()[0].can_animate());
+    }
+
+    #[test]
+    fn a_new_look_is_composed_again_and_keeps_its_picture_meanwhile() {
+        let n = narration(STORY, 0);
+        let photo = pictures(&[crate::ProductImageKind::Photo]);
+        let image_id = photo.first().unwrap();
+        let mut plan = ad_plan(
+            &n,
+            &photo,
+            vec![kinded(0, "drawn", None), kinded(1, "product_shot", None)],
+        );
+        plan.scene_mut(1, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .add_shot(shot(image_id, "shot-a.png"));
+        let look = ShotLook {
+            placement: crate::ShotPlacement::Left,
+            ..ShotLook::default()
+        };
+        let later = SystemTime::UNIX_EPOCH + Duration::from_secs(5);
+        assert_eq!(plan.set_shot_look(1, look, later), Ok(true));
+        assert_eq!(plan.updated_at, later);
+        assert_eq!(plan.scenes()[1].look(), look);
+        assert_eq!(plan.missing_shots(AspectRatio::Vertical), [1]);
+        assert_eq!(plan.scenes()[1].picture(), Some("shot-a.png"));
+        assert_eq!(plan.set_shot_look(1, look, later), Ok(false));
+        assert_eq!(
+            plan.set_shot_look(0, look, later),
+            Err(SceneKindError::NotComposed)
+        );
+        assert_eq!(
+            plan.set_shot_look(5, look, later),
+            Err(SceneKindError::NoSuchScene(5))
+        );
+
+        // A picture made before looks is composed again.
+        let mut old = shot(image_id, "shot-b.png");
+        old.look = None;
+        let scene = plan.scene_mut(1, SystemTime::UNIX_EPOCH).unwrap();
+        scene.add_shot(old);
+        assert!(scene.needs_shot(AspectRatio::Vertical));
+        let mut new = shot(image_id, "shot-c.png");
+        new.look = Some(look);
+        scene.add_shot(new);
+        assert!(!scene.needs_shot(AspectRatio::Vertical));
     }
 
     #[test]

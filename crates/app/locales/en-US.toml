@@ -360,6 +360,7 @@ look_framing = "Look framing"
 ad_angle_suggestion = "Ad angle suggestion"
 ad_angle_ranking = "Ad angle ranking"
 claims_check = "Claims check"
+shot_backdrop = "Product shot backdrop"
 
 [job.state]
 queued = "Queued"
@@ -3107,7 +3108,7 @@ body = "Each scene in order, with its time, its image and where it stands: to dr
 
 [tour.scenes.scene]
 title = "A scene"
-body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images."
+body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images. A product shot's layout, position and backdrop change for free too; only drawing a backdrop is paid, after its estimate, and a new one waits for you to keep or discard it."
 
 [tour.scenes.redraw]
 title = "Draw again"
@@ -4628,3 +4629,38 @@ drawn = "Drawn"
 product_in_use = "Product in use"
 product_shot = "Product shot"
 end_card = "End card"
+
+[scenes.look]
+backdrop_gone = "That backdrop is gone. Pick another one."
+backdrop_in_use = "A product shot still shows this backdrop. Give it another backdrop first."
+layout = "Layout"
+layout_hint = "How the product's image is set: as a card with rounded corners, standing cut out on the backdrop (a photo with a see-through background), or inside a plain phone or browser outline (a screen). Whatever the layout, the image is only scaled: never stretched, cut or redrawn."
+placement = "Position"
+backdrop = "Backdrop"
+backdrop_hint = "What is behind the product: a tone of its image, a color or a gradient between two (picked from the image's tones), or a backdrop drawn for this project. Changing it composes the picture again, for free."
+auto = "From the image"
+from = "Color"
+to = "Gradient to"
+drawn = "Drawn backdrops"
+draw = "Draw a backdrop"
+draw_hint = "The image generator draws an empty surface or set in the video's style, with no product, text or logo, and sees none of the product's images. It costs one scene image and waits for your review; while it waits, no other is drawn. A kept backdrop is free for every product shot of this project."
+drawing = "Drawing a backdrop…"
+to_review = "New backdrop to review"
+keep = "Keep and use"
+discard = "Discard"
+
+[scenes.look.layout_name]
+card = "Card"
+cutout = "Cut out"
+device = "Device"
+
+[scenes.look.placement_name]
+left = "Left"
+center = "Center"
+right = "Right"
+
+[scenes.look.direction]
+down = "Top to bottom"
+across = "Left to right"
+diagonal = "Diagonal"
+

@@ -134,7 +134,8 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::LookFraming, Arc::new(framing));
     let scenes = Arc::new(scenes);
     handlers.insert(JobKind::ScenePlan, Arc::clone(&scenes) as _);
-    handlers.insert(JobKind::SceneImages, scenes);
+    handlers.insert(JobKind::SceneImages, Arc::clone(&scenes) as _);
+    handlers.insert(JobKind::ShotBackdrop, scenes);
     handlers.insert(JobKind::SceneClips, Arc::new(clips));
     handlers.insert(JobKind::Proxies, Arc::new(proxies));
     handlers.insert(JobKind::MusicPrompt, Arc::new(music_prompts));
@@ -365,6 +366,7 @@ impl Bardo {
         let Some((project, calls)) = self
             .images_left(&job)
             .or_else(|| self.clips_left(&job))
+            .or_else(|| self.backdrop_left(&job))
             .or_else(|| self.script_calls_left(&job))
         else {
             return Ok(None);

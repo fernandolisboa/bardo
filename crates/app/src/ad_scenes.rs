@@ -20,9 +20,11 @@
 use std::time::SystemTime;
 
 use bardo_domain::{
-    AspectRatio, ComposedShot, JobFailure, JobFailureKind, JobId, KindChange, ProductId,
-    ProductImage, ProductImageId, ProductImageKind, ProductPictures, RenderedPrompt, SceneKind,
-    SceneKindError, ScenePlanId, TemplateBody, TemplateVariable, VideoProject, VideoProjectId,
+    AspectRatio, BackdropPaint, ComposedShot, JobFailure, JobFailureKind, JobId, KindChange,
+    ProductId, ProductImage, ProductImageId, ProductImageKind, ProductLayout, ProductPictures,
+    RenderedPrompt, SceneKind, SceneKindError, ScenePlanId, ShotBackdrop, ShotBackdropDrawing,
+    ShotLayout, ShotLook, ShotPlacement, ShotRecipe, TemplateBody, TemplateVariable, VideoProject,
+    VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -302,6 +304,7 @@ impl SceneHandler {
         let Some(wanted) = scene.product_image() else {
             return Ok(());
         };
+        let look = scene.look();
         // An image that cannot be read is this scene's failure, not the
         // job's: the other scenes are still made.
         let composed = self
@@ -331,8 +334,32 @@ impl SceneHandler {
                     })
             })
             .and_then(|image| {
+                let backdrop = self.backdrop_bytes(project, look.backdrop).map_err(|why| {
+                    JobFailure::new(JobFailureKind::Files, format!("scene {}: {why}", index + 1))
+                })?;
+                let recipe = ShotRecipe {
+                    aspect,
+                    layout: look.layout_for(image.kind, image.cut_out()),
+                    placement: look.placement,
+                    backdrop: match (look.backdrop, backdrop.as_deref()) {
+                        (
+                            ShotBackdrop::Plain {
+                                from,
+                                to,
+                                direction,
+                            },
+                            _,
+                        ) => BackdropPaint::Plain {
+                            from,
+                            to,
+                            direction,
+                        },
+                        (_, Some(bytes)) => BackdropPaint::Picture(bytes),
+                        _ => BackdropPaint::Auto,
+                    },
+                };
                 self.composer
-                    .compose(image.picture.bytes(), aspect)
+                    .compose(image.picture.bytes(), &recipe)
                     .map_err(|error| {
                         JobFailure::new(
                             JobFailureKind::Files,
@@ -340,8 +367,8 @@ impl SceneHandler {
                         )
                     })
             });
-        let png = match composed {
-            Ok(png) => png,
+        let picture = match composed {
+            Ok(picture) => picture,
             Err(failure) => {
                 if let Some(mut plan) = self.saved_plan(project, plan_id)? {
                     plan.scene_mut(index, SystemTime::now())
@@ -353,16 +380,20 @@ impl SceneHandler {
             }
         };
         let file = shot_file();
-        self.files.write(project, &file, &png).map_err(unexpected)?;
+        self.files
+            .write(project, &file, &picture.png)
+            .map_err(unexpected)?;
         // Read again: the user may have changed the scene meanwhile, and
         // their change must survive.
         let Some(mut plan) = self.saved_plan(project, plan_id)? else {
             crate::proxies::remove_media(self.files.as_ref(), project, &file);
             return Ok(());
         };
-        let still_wanted = plan
-            .scene(index)
-            .is_ok_and(|scene| scene.product_image() == Some(wanted) && scene.needs_shot(aspect));
+        let still_wanted = plan.scene(index).is_ok_and(|scene| {
+            scene.product_image() == Some(wanted)
+                && scene.look() == look
+                && scene.needs_shot(aspect)
+        });
         if !still_wanted {
             crate::proxies::remove_media(self.files.as_ref(), project, &file);
             return Ok(());
@@ -374,12 +405,38 @@ impl SceneHandler {
                 file,
                 image: wanted,
                 aspect,
+                look: Some(look),
+                tones: picture.tones,
             });
         self.plans.save_scene(&plan, index).map_err(unexpected)?;
         if let Some(unused) = unused {
             crate::proxies::remove_media(self.files.as_ref(), project, &unused.file);
         }
         Ok(())
+    }
+
+    /// The bytes of the drawn backdrop `backdrop` shows; none for one that
+    /// is painted. A drawn backdrop that is gone, or was never kept, is
+    /// why the scene cannot be composed.
+    fn backdrop_bytes(
+        &self,
+        project: VideoProjectId,
+        backdrop: ShotBackdrop,
+    ) -> Result<Option<Vec<u8>>, String> {
+        let ShotBackdrop::Drawn(id) = backdrop else {
+            return Ok(None);
+        };
+        let drawn = self
+            .plans
+            .shot_backdrops(project)
+            .map_err(|error| format!("the backdrops could not be read: {error}"))?
+            .into_iter()
+            .find(|drawn| drawn.id == id && drawn.kept)
+            .ok_or_else(|| "the backdrop it shows is gone".to_owned())?;
+        self.files
+            .read(project, &drawn.file)
+            .map(Some)
+            .map_err(|error| format!("the backdrop could not be read: {error}"))
     }
 
     /// Composes every picture `plan_id` waits for in `aspect`. A scene
@@ -427,18 +484,31 @@ pub struct SceneKinds {
     /// project that is no ad: its scenes have no kind.
     pub allowed: Vec<SceneKind>,
     /// The product's images a composed scene may show, in the product's
-    /// order: each one's id, what it is, and whether it is too small for
-    /// the video's frame, so it would look soft.
+    /// order: each one's id, what it is, the layouts it may be shown in
+    /// and in which it is too small for the video's frame, so it would
+    /// look soft.
     pub images: Vec<ShotImage>,
+    /// The backdrops drawn for the project's product shots, newest first:
+    /// kept, or waiting for the user's review (#285).
+    pub backdrops: Vec<ShotBackdropDrawing>,
+    /// What drawing one more backdrop would spend.
+    pub backdrop_estimate: crate::SpendEstimate,
+    /// A backdrop is being drawn.
+    pub drawing_backdrop: bool,
 }
 
 /// One of the product's images as a product shot may show it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShotImage {
     pub id: ProductImageId,
     pub kind: ProductImageKind,
-    /// Shown in the video's frame it is enlarged past its own pixels.
-    pub too_small: bool,
+    /// A photo with a see-through background, which may stand cut out.
+    pub cut_out: bool,
+    /// The layouts it may be shown in, the one it gets first first.
+    pub layouts: Vec<ProductLayout>,
+    /// The layouts in which, in the video's frame, it is enlarged past
+    /// its own pixels.
+    pub too_small: Vec<ProductLayout>,
 }
 
 impl SceneKinds {
@@ -447,11 +517,35 @@ impl SceneKinds {
         self.allowed.contains(&kind) && (kind != SceneKind::EndCard || index + 1 == scenes)
     }
 
-    /// Whether the product image `image` is too small for the frame.
-    pub fn too_small(&self, image: ProductImageId) -> bool {
-        self.images
-            .iter()
-            .any(|shown| shown.id == image && shown.too_small)
+    /// The product image `image`.
+    pub fn image(&self, image: ProductImageId) -> Option<&ShotImage> {
+        self.images.iter().find(|shown| shown.id == image)
+    }
+
+    /// The layout the product image `image` is shown in under `look`.
+    pub fn layout(&self, image: ProductImageId, look: &ShotLook) -> Option<ProductLayout> {
+        self.image(image)
+            .map(|shown| look.layout_for(shown.kind, shown.cut_out))
+    }
+
+    /// Whether the product image `image`, shown as `look` says, is too
+    /// small for the frame.
+    pub fn too_small(&self, image: ProductImageId, look: &ShotLook) -> bool {
+        self.image(image).is_some_and(|shown| {
+            shown
+                .too_small
+                .contains(&look.layout_for(shown.kind, shown.cut_out))
+        })
+    }
+
+    /// The kept backdrops a product shot may show.
+    pub fn kept_backdrops(&self) -> impl Iterator<Item = &ShotBackdropDrawing> {
+        self.backdrops.iter().filter(|backdrop| backdrop.kept)
+    }
+
+    /// The drawn backdrops waiting for the user's review.
+    pub fn backdrops_to_review(&self) -> impl Iterator<Item = &ShotBackdropDrawing> {
+        self.backdrops.iter().filter(|backdrop| !backdrop.kept)
     }
 }
 
@@ -512,13 +606,27 @@ impl Bardo {
                 .iter()
                 .map(|image| {
                     let size = (image.picture.width(), image.picture.height());
+                    let layouts = ProductLayout::offered(image.kind, image.cut_out());
+                    let too_small = layouts
+                        .iter()
+                        .copied()
+                        .filter(|layout| {
+                            ShotLayout::of(aspect, size, *layout, ShotPlacement::Center)
+                                .enlarges(size.0)
+                        })
+                        .collect();
                     ShotImage {
                         id: image.id,
                         kind: image.kind,
-                        too_small: bardo_domain::ShotLayout::of(aspect, size).enlarges(size.0),
+                        cut_out: image.cut_out(),
+                        layouts,
+                        too_small,
                     }
                 })
                 .collect(),
+            backdrops: self.scene_plans.shot_backdrops(project.id)?,
+            backdrop_estimate: self.backdrop_estimate()?,
+            drawing_backdrop: self.drawing_backdrop(project.id),
         })
     }
 
@@ -1251,8 +1359,12 @@ mod ad_tests {
             ],
         );
         let kinds = app.scenes(project.id).unwrap().kinds;
-        assert!(kinds.too_small(images[0].id), "600 px shown past 900");
-        assert!(!kinds.too_small(images[1].id));
+        let look = bardo_domain::ShotLook::default();
+        assert!(
+            kinds.too_small(images[0].id, &look),
+            "600 px shown past 900"
+        );
+        assert!(!kinds.too_small(images[1].id, &look));
     }
 
     #[test]
@@ -1634,5 +1746,419 @@ mod ad_tests {
 
     fn plan_of(app: &Bardo, project: &VideoProject, index: usize) -> bardo_domain::Scene {
         plan(app, project).scene(index).unwrap().clone()
+    }
+
+    fn picture_of(
+        h: &Harness,
+        project: &VideoProject,
+        scene: &bardo_domain::Scene,
+    ) -> image::RgbImage {
+        let file = &scene.shot().unwrap().file;
+        image::load_from_memory(&h.files.read(project.id, file).unwrap())
+            .unwrap()
+            .into_rgb8()
+    }
+
+    fn backdrop_costs(h: &Harness, project: &VideoProject) -> usize {
+        h.db.project_costs(project.id)
+            .unwrap()
+            .iter()
+            .filter(|record| record.purpose == CostPurpose::ShotBackdrop)
+            .count()
+    }
+
+    #[test]
+    fn each_image_is_set_in_the_layout_it_offers_first_and_a_screen_in_a_device() {
+        use bardo_domain::{ProductLayout, ShotLook};
+        let h = Harness::new();
+        let app = start(&h);
+        let (product, project, images) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        // A photo with a see-through background.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cut.png");
+        image::RgbaImage::from_fn(900, 900, |x, _| match x < 450 {
+            true => image::Rgba([30, 90, 200, 255]),
+            false => image::Rgba([0, 0, 0, 0]),
+        })
+        .save(&path)
+        .unwrap();
+        let cut = app.import_product_image(product.id, &path, true).unwrap();
+        let kinds = app.scene_kinds(project.id).unwrap();
+        let look = ShotLook::default();
+        assert_eq!(
+            kinds.image(images[0].id).unwrap().layouts,
+            [ProductLayout::Device, ProductLayout::Card]
+        );
+        assert_eq!(
+            kinds.image(images[1].id).unwrap().layouts,
+            [ProductLayout::Card]
+        );
+        assert_eq!(
+            kinds.image(cut.id).unwrap().layouts,
+            [ProductLayout::Cutout, ProductLayout::Card]
+        );
+        assert_eq!(
+            kinds.layout(images[0].id, &look),
+            Some(ProductLayout::Device)
+        );
+        assert_eq!(kinds.layout(cut.id, &look), Some(ProductLayout::Cutout));
+        // A layout the image does not offer is the one it offers first.
+        let device = ShotLook {
+            layout: Some(ProductLayout::Device),
+            ..look
+        };
+        assert_eq!(
+            kinds.layout(images[1].id, &device),
+            Some(ProductLayout::Card)
+        );
+
+        let plan = plan_with(&h, &app, &project, usual());
+        // The end card shows the screen: in a phone, over the backdrop.
+        let end = plan.scene(3).unwrap();
+        assert_eq!(end.shot().unwrap().look, Some(look));
+        assert!(!end.shot().unwrap().tones.is_empty());
+        let picture = picture_of(&h, &project, end);
+        let layout = bardo_domain::ShotLayout::of(
+            bardo_domain::AspectRatio::Vertical,
+            (800, 1600),
+            ProductLayout::Device,
+            bardo_domain::ShotPlacement::Center,
+        );
+        let outline = layout.device.unwrap();
+        let rim = picture.get_pixel(outline.area.x + 1, outline.area.y + outline.area.height / 2);
+        assert_ne!(rim, picture.get_pixel(0, 0), "an outline around the screen");
+        assert_eq!(
+            picture
+                .get_pixel(layout.card.x + 10, layout.card.y + layout.card.height / 2)
+                .0,
+            [200, 60, 40],
+            "the screen's own pixels"
+        );
+    }
+
+    #[test]
+    fn changing_a_shots_look_composes_it_again_for_free() {
+        use bardo_domain::{
+            BackdropDirection, ProductLayout, ShotBackdrop, ShotColor, ShotLook, ShotPlacement,
+        };
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, images) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        let plan = plan_with(&h, &app, &project, usual());
+        let before = plan.scene(1).unwrap().shot().unwrap().clone();
+
+        let look = ShotLook {
+            layout: Some(ProductLayout::Card),
+            placement: ShotPlacement::Left,
+            backdrop: ShotBackdrop::Plain {
+                from: ShotColor([10, 120, 90]),
+                to: ShotColor([240, 240, 230]),
+                direction: BackdropDirection::Down,
+            },
+        };
+        let job = app.set_shot_look(project.id, 1, look).unwrap().unwrap();
+        done(&app, job);
+        let scene = plan_of(&app, &project, 1);
+        assert_eq!(scene.look(), look);
+        let shot = scene.shot().unwrap();
+        assert_eq!(shot.look, Some(look));
+        assert_ne!(shot.file, before.file);
+        assert!(
+            h.files.read(project.id, &before.file).is_err(),
+            "the old picture goes"
+        );
+        let picture = picture_of(&h, &project, &scene);
+        assert_eq!(picture.get_pixel(0, 0).0, [10, 120, 90]);
+        let room = bardo_domain::shot_room(bardo_domain::AspectRatio::Vertical);
+        let card = bardo_domain::ShotLayout::of(
+            bardo_domain::AspectRatio::Vertical,
+            (1200, 900),
+            ProductLayout::Card,
+            ShotPlacement::Left,
+        )
+        .card;
+        assert_eq!(card.x, room.x);
+        assert_eq!(
+            picture
+                .get_pixel(card.x + card.width / 2, card.y + card.height / 2)
+                .0,
+            [200, 60, 40]
+        );
+        // Nothing was drawn or paid for.
+        assert_eq!(drawings(&h), 0);
+        assert_eq!(image_costs(&h, &project) + backdrop_costs(&h, &project), 0);
+        // The same look again changes nothing.
+        assert_eq!(app.set_shot_look(project.id, 1, look).unwrap(), None);
+        // A drawn scene has no look.
+        assert!(matches!(
+            app.set_shot_look(project.id, 0, look),
+            Err(SceneError::Kind(SceneKindError::NotComposed))
+        ));
+        // Another image keeps the look; a layout it does not offer is its
+        // first.
+        done(
+            &app,
+            match app
+                .set_scene_kind(project.id, 1, SceneKind::ProductShot, Some(images[0].id))
+                .unwrap()
+            {
+                KindChanged::Composing(job) => job,
+                other => panic!("{other:?}"),
+            },
+        );
+        let scene = plan_of(&app, &project, 1);
+        assert_eq!(scene.look(), look);
+        assert_eq!(scene.shot().unwrap().image, images[0].id);
+        assert_eq!(drawings(&h), 0);
+    }
+
+    #[test]
+    fn a_drawn_backdrop_is_estimated_paid_reviewed_and_then_free_for_every_shot() {
+        use bardo_domain::{ShotBackdrop, ShotLook, StyleChoice, VisualStyle};
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        app.set_project_style(
+            project.id,
+            Some(StyleChoice::Catalog(VisualStyle::FilmNoir)),
+        )
+        .unwrap();
+        plan_with(&h, &app, &project, usual());
+        let kinds = app.scene_kinds(project.id).unwrap();
+        assert!(kinds.backdrop_estimate.providers[0].amount.is_some());
+        assert!(kinds.backdrops.is_empty());
+
+        done(
+            &app,
+            app.draw_shot_backdrop(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        // One drawing: the video's style and shape, no reference, nothing
+        // of the product but its kind.
+        let requests = h.images.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 1);
+        let request = &requests[0];
+        assert!(request.references.is_empty());
+        assert_eq!(request.shape, bardo_domain::AspectRatio::Vertical.into());
+        assert!(StyleChoice::Catalog(VisualStyle::FilmNoir).drew(&request.prompt));
+        assert!(request.prompt.contains("no product"));
+        assert!(!request.prompt.contains("Notebook") && !request.prompt.contains("refill"));
+        assert_eq!(backdrop_costs(&h, &project), 1);
+        assert_eq!(image_costs(&h, &project), 0);
+
+        // It waits for review: no scene may show it yet.
+        let kinds = app.scene_kinds(project.id).unwrap();
+        let drawn = kinds.backdrops_to_review().next().unwrap().clone();
+        assert_eq!(kinds.kept_backdrops().count(), 0);
+        let on_it = ShotLook {
+            backdrop: ShotBackdrop::Drawn(drawn.id),
+            ..ShotLook::default()
+        };
+        assert!(matches!(
+            app.set_shot_look(project.id, 1, on_it),
+            Err(SceneError::NoSuchBackdrop)
+        ));
+        // Kept, it is shown behind the scene it was kept for, and then
+        // behind any other, for free.
+        done(
+            &app,
+            app.keep_shot_backdrop(project.id, drawn.id, Some(1))
+                .unwrap()
+                .unwrap(),
+        );
+        assert_eq!(plan_of(&app, &project, 1).look(), on_it);
+        assert_eq!(plan_of(&app, &project, 1).shot().unwrap().look, Some(on_it));
+        done(
+            &app,
+            app.set_shot_look(project.id, 3, on_it).unwrap().unwrap(),
+        );
+        assert_eq!(plan_of(&app, &project, 3).shot().unwrap().look, Some(on_it));
+        assert_eq!(h.images.requests.lock().unwrap().len(), 1);
+        assert_eq!(backdrop_costs(&h, &project), 1);
+        // A backdrop a scene shows stays.
+        assert!(matches!(
+            app.discard_shot_backdrop(project.id, drawn.id),
+            Err(SceneError::BackdropInUse)
+        ));
+
+        // Another one, discarded: its file and row go.
+        done(
+            &app,
+            app.draw_shot_backdrop(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let other = app
+            .scene_kinds(project.id)
+            .unwrap()
+            .backdrops_to_review()
+            .next()
+            .unwrap()
+            .clone();
+        app.discard_shot_backdrop(project.id, other.id).unwrap();
+        assert!(h.files.read(project.id, &other.file).is_err());
+        let kinds = app.scene_kinds(project.id).unwrap();
+        assert_eq!(kinds.backdrops.len(), 1);
+        assert_eq!(kinds.kept_backdrops().next().unwrap().id, drawn.id);
+    }
+
+    #[test]
+    fn a_backdrop_is_kept_for_a_scene_only_when_that_scene_may_show_it() {
+        use bardo_domain::ShotBackdrop;
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        plan_with(&h, &app, &project, usual());
+        done(
+            &app,
+            app.draw_shot_backdrop(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let drawn = app
+            .scene_kinds(project.id)
+            .unwrap()
+            .backdrops_to_review()
+            .next()
+            .unwrap()
+            .clone();
+        let drawn_scene = (0..plan(&app, &project).scenes().len())
+            .find(|index| !plan_of(&app, &project, *index).is_composed())
+            .unwrap();
+        // Asked for a drawn scene, nothing is kept.
+        assert!(matches!(
+            app.keep_shot_backdrop(project.id, drawn.id, Some(drawn_scene)),
+            Err(SceneError::Kind(bardo_domain::SceneKindError::NotComposed))
+        ));
+        let kinds = app.scene_kinds(project.id).unwrap();
+        assert_eq!(kinds.kept_backdrops().count(), 0);
+        assert_eq!(kinds.backdrops_to_review().count(), 1);
+
+        // Shown behind scene 1, then that scene drawn again: no product
+        // shot shows it, so it may go.
+        done(
+            &app,
+            app.keep_shot_backdrop(project.id, drawn.id, Some(1))
+                .unwrap()
+                .unwrap(),
+        );
+        assert_eq!(
+            plan_of(&app, &project, 1).look().backdrop,
+            ShotBackdrop::Drawn(drawn.id)
+        );
+        app.set_scene_kind(project.id, 1, SceneKind::Drawn, None)
+            .unwrap();
+        app.discard_shot_backdrop(project.id, drawn.id).unwrap();
+        assert!(app.scene_kinds(project.id).unwrap().backdrops.is_empty());
+    }
+
+    #[test]
+    fn a_backdrop_job_tried_again_pays_only_for_what_it_has_not_drawn() {
+        use bardo_domain::{JobState, ProviderFailure, ProviderFailureKind};
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        plan_with(&h, &app, &project, usual());
+        *h.images.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid credentials",
+        ));
+        let job = app
+            .draw_shot_backdrop(project.id, BudgetConsent::Ask)
+            .unwrap();
+        let failed = crate::scenes::tests::wait_done(&app, job);
+        assert_eq!(failed.state(), JobState::Failed);
+        let (of, left) = app.backdrop_left(&failed).unwrap();
+        assert_eq!(of, project.id);
+        assert_eq!(left.len(), 1, "a backdrop not drawn is still to pay for");
+        assert!(app.scene_kinds(project.id).unwrap().backdrops.is_empty());
+
+        *h.images.failure.lock().unwrap() = None;
+        app.retry_job(job).unwrap();
+        let ran = crate::scenes::tests::wait_done(&app, job);
+        assert_eq!(ran.state(), JobState::Done);
+        assert_eq!(app.scene_kinds(project.id).unwrap().backdrops.len(), 1);
+        assert_eq!(backdrop_costs(&h, &project), 1);
+        // Once it drew, running it again has nothing left to pay for.
+        assert!(app.backdrop_left(&ran).unwrap().1.is_empty());
+    }
+
+    #[test]
+    fn a_version_keeps_each_shots_look_on_a_copy_of_its_backdrop() {
+        use std::collections::HashMap;
+
+        use bardo_domain::{BackdropId, ProductLayout, ShotBackdrop, ShotLook, ShotPlacement};
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        plan_with(&h, &app, &project, usual());
+        done(
+            &app,
+            app.draw_shot_backdrop(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let drawn = app.scene_kinds(project.id).unwrap().backdrops[0].id;
+        done(
+            &app,
+            app.keep_shot_backdrop(project.id, drawn, Some(1))
+                .unwrap()
+                .unwrap(),
+        );
+        let look = ShotLook {
+            layout: Some(ProductLayout::Card),
+            placement: ShotPlacement::Left,
+            backdrop: ShotBackdrop::Drawn(drawn),
+        };
+        if let Some(job) = app.set_shot_look(project.id, 1, look).unwrap() {
+            done(&app, job);
+        }
+        let copy = BackdropId::new();
+        let version = crate::localization::copy_plan(
+            &plan(&app, &project),
+            bardo_domain::VideoProjectId::new(),
+            &HashMap::from([(drawn, copy)]),
+            std::time::SystemTime::now(),
+        );
+        let copied = version.scene(1).unwrap();
+        let expected = ShotLook {
+            backdrop: ShotBackdrop::Drawn(copy),
+            ..look
+        };
+        assert_eq!(copied.look(), expected);
+        // Its picture was composed in that look: nothing to compose again.
+        assert_eq!(copied.shot().unwrap().look, Some(expected));
+        // A backdrop that did not come along is shown as the automatic one.
+        let bare = crate::localization::copy_plan(
+            &plan(&app, &project),
+            bardo_domain::VideoProjectId::new(),
+            &HashMap::new(),
+            std::time::SystemTime::now(),
+        );
+        assert_eq!(bare.scene(1).unwrap().look().backdrop, ShotBackdrop::Auto);
+    }
+
+    #[test]
+    fn a_backdrop_past_the_videos_cap_is_asked_for_first_and_needs_an_ad() {
+        let h = Harness::new();
+        let app = start(&h);
+        let (_, project, _) = narrated_ad(&h, &app, &A_SCREEN_AND_A_PHOTO);
+        app.set_spend_cap(project.id, "0.01").unwrap();
+        assert!(matches!(
+            app.draw_shot_backdrop(project.id, BudgetConsent::Ask),
+            Err(SceneError::OverBudget(_))
+        ));
+        assert_eq!(drawings(&h), 0);
+        done(
+            &app,
+            app.draw_shot_backdrop(project.id, BudgetConsent::Confirmed)
+                .unwrap(),
+        );
+        assert_eq!(drawings(&h), 1);
+
+        // A video that is no ad has no product shots to draw for.
+        let other = crate::scenes::tests::project(&app);
+        assert!(
+            app.draw_shot_backdrop(other.id, BudgetConsent::Ask)
+                .is_err()
+        );
+        assert_eq!(drawings(&h), 1);
     }
 }

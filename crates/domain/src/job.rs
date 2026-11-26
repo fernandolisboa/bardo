@@ -162,6 +162,9 @@ pub enum JobKind {
     /// (docs/spec/marketing-videos.md). A generated ad script is checked
     /// by the job that wrote it.
     ClaimsCheck,
+    /// Has the image provider draw a backdrop for an ad's product shots
+    /// (#285); it waits for the user to keep it.
+    ShotBackdrop,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -190,7 +193,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 38] = [
+    pub const ALL: [JobKind; 39] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -229,6 +232,7 @@ impl JobKind {
         JobKind::AdAngleSuggestion,
         JobKind::AdAngleRanking,
         JobKind::ClaimsCheck,
+        JobKind::ShotBackdrop,
     ];
 
     /// Stable name stored in the database.
@@ -272,6 +276,7 @@ impl JobKind {
             JobKind::AdAngleSuggestion => "ad_angle_suggestion",
             JobKind::AdAngleRanking => "ad_angle_ranking",
             JobKind::ClaimsCheck => "claims_check",
+            JobKind::ShotBackdrop => "shot_backdrop",
         }
     }
 }

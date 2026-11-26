@@ -702,6 +702,9 @@ pub struct NewVersion {
     /// Copies of the source's media, and of its generated tracks.
     pub media: Vec<MediaAsset>,
     pub tracks: Vec<MusicTrack>,
+    /// Copies of the source's kept drawn backdrops (#285), which the
+    /// copied scenes' looks name.
+    pub backdrops: Vec<crate::ShotBackdropDrawing>,
     pub localization: Localization,
 }
 

@@ -14,18 +14,19 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, CarriedCut, CastMember, CastRecord, Channel, ChannelId, ChannelRepository,
-    ContentLanguage, CostPurpose, CostRecordId, Country, Gap, GeneratedScript, Generation,
-    GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, Localization,
+    ApiKey, BackdropId, CarriedCut, CastMember, CastRecord, Channel, ChannelId, ChannelRepository,
+    ComposedShot, ContentLanguage, CostPurpose, CostRecordId, Country, Gap, GeneratedScript,
+    Generation, GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, Localization,
     LocalizationRepository, MediaAsset, MediaAssetId, MediaAssetRepository, MusicTrack,
     MusicTrackRepository, Narration, NarrationRepository, NewVersion, PlacedScene, ProfileId,
     ProjectFiles, Provider, RenderedPrompt, RepositoryError, Scene, SceneClip, SceneImage,
     ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository, SceneRecord, Script,
-    ScriptRepository, SecretStore, SourceSentence, Stop, TemplateKind, TemplateUsed,
-    TemplateValues, TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort, TextFormat,
-    TextGenerator, TextRequest, Theme, ThemeIdea, ThemeRepository, TimelineRepository, UiLanguage,
-    VideoProject, VideoProjectId, adaptation_gaps, join_adapted, localized_cut, place_scenes,
-    placed_scene_notes, scene_sentences, sentence_times, sentence_words, sentences, source_gaps,
+    ScriptRepository, SecretStore, ShotBackdrop, ShotBackdropDrawing, ShotLook, SourceSentence,
+    Stop, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
+    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, Theme, ThemeIdea,
+    ThemeRepository, TimelineRepository, UiLanguage, VideoProject, VideoProjectId, adaptation_gaps,
+    join_adapted, localized_cut, place_scenes, placed_scene_notes, scene_sentences, sentence_times,
+    sentence_words, sentences, source_gaps,
 };
 use serde::{Deserialize, Serialize};
 
@@ -342,8 +343,23 @@ fn other_audience(channel: &Channel, language: ContentLanguage, country: Country
 /// generation records, prompts and model picks, the cast with its
 /// portraits and the places, and which portraits each image was drawn
 /// with; nothing waiting for review, no failures and no clip of an image
-/// the scene no longer shows.
-fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> ScenePlan {
+/// the scene no longer shows. A product shot keeps its look, naming the
+/// copy of its drawn backdrop that `backdrops` gives (#285).
+pub(crate) fn copy_plan(
+    plan: &ScenePlan,
+    project: VideoProjectId,
+    backdrops: &HashMap<BackdropId, BackdropId>,
+    now: SystemTime,
+) -> ScenePlan {
+    let copied_look = |look: ShotLook| ShotLook {
+        backdrop: match look.backdrop {
+            ShotBackdrop::Drawn(id) => backdrops
+                .get(&id)
+                .map_or(ShotBackdrop::Auto, |copy| ShotBackdrop::Drawn(*copy)),
+            other => other,
+        },
+        ..look
+    };
     let copied = |generation: &Generation| Generation {
         id: GenerationId::new(),
         project,
@@ -429,7 +445,15 @@ fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> Scen
             )
             // An ad's scene keeps what it is, and a composed one its
             // picture (#278): the file is copied with the others.
-            .with_kind(scene.kind(), scene.product_image(), scene.shot().cloned())
+            .with_kind(
+                scene.kind(),
+                scene.product_image(),
+                scene.shot().map(|shot| ComposedShot {
+                    look: shot.look.map(copied_look),
+                    ..shot.clone()
+                }),
+            )
+            .with_look(copied_look(scene.look()))
         })
         .collect();
     ScenePlan::restore(ScenePlanRecord {
@@ -778,7 +802,27 @@ impl LocalizationHandler {
             );
             let carried = CarriedCut::of(&cut, &plan);
 
-            let new_plan = copy_plan(&plan, version, now);
+            // The kept drawn backdrops come along, under ids of their own,
+            // so the copied product shots keep their looks.
+            let mut backdrop_ids: HashMap<BackdropId, BackdropId> = HashMap::new();
+            let backdrops: Vec<ShotBackdropDrawing> = self
+                .plans
+                .shot_backdrops(source.id)
+                .map_err(unexpected)?
+                .into_iter()
+                .filter(|backdrop| backdrop.kept)
+                .map(|backdrop| {
+                    let id = BackdropId::new();
+                    backdrop_ids.insert(backdrop.id, id);
+                    ShotBackdropDrawing {
+                        id,
+                        project: version,
+                        job: None,
+                        ..backdrop
+                    }
+                })
+                .collect();
+            let new_plan = copy_plan(&plan, version, &backdrop_ids, now);
             let mut ids: HashMap<MediaAssetId, MediaAssetId> = HashMap::new();
             // Performed clips are lip-synced to the source's narration: the
             // version leaves them out.
@@ -825,6 +869,7 @@ impl LocalizationHandler {
                 .files()
                 .map(str::to_owned)
                 .chain(media.iter().map(|asset| asset.file.clone()))
+                .chain(backdrops.iter().map(|backdrop| backdrop.file.clone()))
                 .collect();
             names.sort();
             names.dedup();
@@ -865,6 +910,7 @@ impl LocalizationHandler {
                 plan: new_plan,
                 media,
                 tracks: copied_tracks,
+                backdrops,
                 localization,
             }) {
                 remove_copies(&copied);

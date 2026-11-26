@@ -105,6 +105,7 @@ mod scene_kind;
 mod scene_plan_size;
 mod schedule;
 mod script;
+mod shot_look;
 mod speech;
 mod staging;
 mod take_analysis;
@@ -316,7 +317,8 @@ pub use product_sheet::{
     SheetSource, SheetTaken, SheetText, WrittenClaim, WrittenSheet, WrittenSource,
 };
 pub use product_shot::{
-    SHOT_SHORT_SIDE, ShotArea, ShotComposer, ShotError, ShotLayout, shot_frame, shot_room,
+    BackdropPaint, ComposedPicture, DeviceOutline, SHADOW_BLUR, SHADOW_DROP, SHOT_SHORT_SIDE,
+    ShotArea, ShotComposer, ShotError, ShotLayout, ShotRecipe, shot_frame, shot_room,
 };
 pub use production::{
     AnimatedScenes, HOOK_LENGTH, NARRATION_CHARS_PER_SECOND, ProductionMode, TYPICAL_AD_SCENE,
@@ -370,6 +372,10 @@ pub use schedule::{
 pub use script::{
     GeneratedScript, NoPendingScript, Script, ScriptFieldError, ScriptRecord, ScriptRepository,
     ScriptText,
+};
+pub use shot_look::{
+    BackdropDirection, BackdropId, DeviceKind, ProductLayout, ShotBackdrop, ShotBackdropDrawing,
+    ShotColor, ShotLook, ShotPlacement,
 };
 pub use speech::{
     AlignedSpeech, Alignment, AlignmentRequest, ChangedSpeech, CharTiming, Speech, SpeechAligner,

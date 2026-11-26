@@ -9,7 +9,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
 
 use crate::media::{insert_asset, insert_track};
-use crate::scene::write_scene_plan;
+use crate::scene::{insert_backdrop, write_scene_plan};
 use crate::script::write_script;
 use crate::theme::{ProjectRow, SELECT_PROJECT, insert_project};
 use crate::timeline::{
@@ -470,6 +470,9 @@ impl LocalizationRepository for Database {
         for track in &version.tracks {
             insert_track(&tx, track)?;
         }
+        for backdrop in &version.backdrops {
+            insert_backdrop(&tx, backdrop)?;
+        }
         insert_localization(&tx, &version.localization)?;
         tx.commit().map_err(boxed)
     }
@@ -501,15 +504,15 @@ mod tests {
     use std::time::SystemTime;
 
     use bardo_domain::{
-        AspectRatio, AssetSource, CaptionHighlight, CaptionStyle, Channel, ChannelDetails,
-        ChannelDraft, ChannelRepository, ContentLanguage, Country, CropPosition, Framing,
-        GeneratedScript, Generation, LocalizationRepository, MediaAsset, MediaAssetId,
+        AspectRatio, AssetSource, BackdropId, CaptionHighlight, CaptionStyle, Channel,
+        ChannelDetails, ChannelDraft, ChannelRepository, ContentLanguage, Country, CropPosition,
+        Framing, GeneratedScript, Generation, LocalizationRepository, MediaAsset, MediaAssetId,
         MediaAssetRepository, MediaKind, Motion, MotionKind, MotionStrength, MusicTrack,
         MusicTrackRepository, NarrationId, Niche, ProfileRepository, Provider, Scene, SceneImage,
         ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, ScriptRepository,
-        TemplateBody, TemplateKind, TemplateRepository, TemplateUsed, TemplateVersion, Theme,
-        ThemeIdea, ThemeRepository, TimelineRepository, TokenUsage, Transition, TransitionKind,
-        UiLanguage, UserProfile,
+        ShotBackdropDrawing, TemplateBody, TemplateKind, TemplateRepository, TemplateUsed,
+        TemplateVersion, Theme, ThemeIdea, ThemeRepository, TimelineRepository, TokenUsage,
+        Transition, TransitionKind, UiLanguage, UserProfile,
     };
 
     use super::*;
@@ -735,6 +738,7 @@ mod tests {
             },
             created_at: time(1_800_000_015),
         };
+        let version_id = project.id;
         NewVersion {
             theme,
             project,
@@ -743,6 +747,17 @@ mod tests {
             plan,
             media: vec![music],
             tracks: vec![track],
+            backdrops: vec![ShotBackdropDrawing {
+                id: BackdropId::new(),
+                project: version_id,
+                file: "backdrop-1.png".into(),
+                prompt: "An empty surface".into(),
+                provider: Provider::Gemini,
+                model: "gemini-image".into(),
+                job: None,
+                drawn_at: time(1_800_000_016),
+                kept: true,
+            }],
             localization,
         }
     }
@@ -758,6 +773,7 @@ mod tests {
         assert_eq!(db.script(id).unwrap().as_ref(), Some(&version.script));
         assert_eq!(db.scene_plan(id).unwrap().as_ref(), Some(&version.plan));
         assert_eq!(db.media_assets(id).unwrap(), version.media);
+        assert_eq!(db.shot_backdrops(id).unwrap(), version.backdrops);
         assert_eq!(
             db.music_tracks(id).unwrap().all(),
             version.tracks.as_slice()

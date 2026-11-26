@@ -2120,6 +2120,8 @@ pub(crate) mod tests {
                 file: "shot-1.png".into(),
                 image: product,
                 aspect: AspectRatio::Vertical,
+                look: Some(crate::ShotLook::default()),
+                tones: Vec::new(),
             });
         let cut = Timeline::rough_cut(&plan, &narration, AspectRatio::Vertical);
         assert_eq!(

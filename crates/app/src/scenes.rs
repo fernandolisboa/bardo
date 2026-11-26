@@ -139,6 +139,13 @@ pub enum SceneError {
     /// end card.
     #[error(transparent)]
     Kind(#[from] SceneKindError),
+    /// The drawn backdrop named is not one of the project's, or was not
+    /// kept (#285).
+    #[error("no such backdrop")]
+    NoSuchBackdrop,
+    /// A scene still shows the backdrop: it cannot be discarded.
+    #[error("a scene shows the backdrop")]
+    BackdropInUse,
     #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
@@ -177,6 +184,8 @@ impl SceneError {
             SceneError::ClipModelNotOffered => Text::SceneClipModelNotOffered,
             SceneError::Kind(SceneKindError::NoSuchScene(_)) => Text::SceneNotFound,
             SceneError::Kind(_) => Text::SceneKindNotAllowed,
+            SceneError::NoSuchBackdrop => Text::ShotBackdropGone,
+            SceneError::BackdropInUse => Text::ShotBackdropInUse,
             SceneError::Template(error) => error.message(),
             SceneError::Repository(_) => Text::ScenesNotLoaded,
         }
@@ -728,6 +737,7 @@ impl JobHandler for SceneHandler {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
         match cx.kind() {
             JobKind::ScenePlan => self.plan(payload, cx),
+            JobKind::ShotBackdrop => self.draw_backdrop(payload, cx.id()),
             _ => self.draw(payload, cx.id(), Some(cx)),
         }
     }
@@ -5326,6 +5336,34 @@ pub(crate) mod tests {
 
             fn save_place(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
                 self.inner.save_place(plan, index)
+            }
+
+            fn shot_backdrops(
+                &self,
+                project: VideoProjectId,
+            ) -> Result<Vec<bardo_domain::ShotBackdropDrawing>, RepositoryError> {
+                self.inner.shot_backdrops(project)
+            }
+
+            fn add_shot_backdrop(
+                &self,
+                backdrop: &bardo_domain::ShotBackdropDrawing,
+            ) -> Result<(), RepositoryError> {
+                self.inner.add_shot_backdrop(backdrop)
+            }
+
+            fn keep_shot_backdrop(
+                &self,
+                backdrop: bardo_domain::BackdropId,
+            ) -> Result<(), RepositoryError> {
+                self.inner.keep_shot_backdrop(backdrop)
+            }
+
+            fn remove_shot_backdrop(
+                &self,
+                backdrop: bardo_domain::BackdropId,
+            ) -> Result<(), RepositoryError> {
+                self.inner.remove_shot_backdrop(backdrop)
             }
         }
 

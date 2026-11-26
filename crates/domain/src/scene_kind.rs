@@ -3,7 +3,7 @@
 //! composed by Bardo from one of the product's own images. Scenes of a
 //! video that is no ad have no kind: they are drawn scenes.
 
-use crate::{AspectRatio, ProductImage, ProductImageId, ProductImageKind};
+use crate::{AspectRatio, ProductImage, ProductImageId, ProductImageKind, ShotColor, ShotLook};
 
 /// What one scene of an ad is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -122,6 +122,12 @@ pub struct ComposedShot {
     pub image: ProductImageId,
     /// The frame's shape it was composed for.
     pub aspect: AspectRatio,
+    /// The look it was composed in (#285); `None` for a picture made
+    /// before looks, which is composed again.
+    pub look: Option<ShotLook>,
+    /// Tones of the product's image, for the user to build a backdrop
+    /// from.
+    pub tones: Vec<ShotColor>,
 }
 
 /// A scene's kind cannot change that way.
@@ -138,6 +144,9 @@ pub enum SceneKindError {
     /// The image named is not one of the product's.
     #[error("the product has no such image")]
     NoSuchImage,
+    /// Only a scene Bardo composes has a product shot's look.
+    #[error("the scene is not a product shot")]
+    NotComposed,
 }
 
 /// What changing a scene's kind leaves to do.
