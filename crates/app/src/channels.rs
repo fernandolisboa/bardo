@@ -222,7 +222,7 @@ mod tests {
             costs: Arc::clone(db) as _,
             files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
             folders: Arc::clone(db) as _,
-            project_folders: bardo_storage::MemoryProjectFolders::for_database(&db),
+            project_folders: bardo_storage::MemoryProjectFolders::for_database(db),
             places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
             research: Arc::clone(db) as _,
