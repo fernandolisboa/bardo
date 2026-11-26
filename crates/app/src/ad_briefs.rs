@@ -243,6 +243,7 @@ impl ScriptBrief {
             ),
             (TemplateVariable::Offer, line(text.offer())),
             (TemplateVariable::CallToAction, line(text.call_to_action())),
+            (TemplateVariable::Link, line(text.link())),
             (TemplateVariable::MustSay, line(notes.must_say())),
             (TemplateVariable::NeverSay, line(notes.never_say())),
         ]
@@ -261,6 +262,7 @@ pub(crate) fn unset_ad_values() -> Vec<(TemplateVariable, String)> {
         TemplateVariable::BriefClaims,
         TemplateVariable::Offer,
         TemplateVariable::CallToAction,
+        TemplateVariable::Link,
         TemplateVariable::MustSay,
         TemplateVariable::NeverSay,
     ]

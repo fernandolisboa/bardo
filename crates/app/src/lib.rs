@@ -4,6 +4,7 @@
 mod about;
 mod ad_angles;
 mod ad_briefs;
+mod ad_publishing;
 mod ad_scenes;
 mod ads;
 mod agent;
@@ -111,6 +112,7 @@ pub use ad_angles::{
     AngleClaim,
 };
 pub use ad_briefs::{BriefClaimRow, BriefError, BriefStanding, BriefView};
+pub use ad_publishing::{AdPublishing, PostsCheckView};
 pub use ad_scenes::{KindChanged, SceneKinds, ShotImage};
 pub use agent::{AgentError, AgentStatus, AgentWork};
 pub use appearance::{EditorPalette, Palette, Rgb, Rgba, TrackColors, UiFont, palette};
@@ -239,8 +241,8 @@ pub use updates::{
     install_block_text, this_data_home,
 };
 pub use uploads::{
-    DraftNote, SpecProblem, UploadBlock, UploadChoices, UploadReview, UploadReviewError,
-    UploadState, upload_state,
+    AdUploadChoices, DraftNote, SpecProblem, UploadBlock, UploadChoices, UploadReview,
+    UploadReviewError, UploadState, upload_state,
 };
 pub use voice_samples::{SampleAudio, SamplePlayer, VoiceSample, VoiceSampleError, VoiceSampling};
 pub use youtube_policy::{
@@ -822,6 +824,7 @@ impl Bardo {
             owner: profile.id,
             scripts: Arc::clone(&scripts),
             ads: Arc::clone(&ads),
+            exports: Arc::clone(&exports),
             text: Arc::clone(&providers.text),
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
@@ -1028,6 +1031,7 @@ impl Bardo {
         let metadata_handler = MetadataHandler {
             owner: profile.id,
             exports: Arc::clone(&exports),
+            ads: Arc::clone(&ads),
             text: Arc::clone(&providers.text),
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
@@ -1602,6 +1606,7 @@ pub(crate) mod testing {
 
         fn is_check(request: &TextRequest) -> bool {
             request.instructions == crate::claims_check::CHECK_INSTRUCTIONS
+                || request.instructions == crate::claims_check::POSTS_CHECK_INSTRUCTIONS
         }
 
         /// Queues an answer proposing these titles, each with an angle.

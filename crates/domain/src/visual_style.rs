@@ -76,6 +76,19 @@ impl VisualStyle {
         VisualStyle::Chalkboard,
     ];
 
+    /// Whether its pictures read as photographs or film: a realistic
+    /// picture of a real thing drawn in it was not filmed.
+    pub fn is_photographic(self) -> bool {
+        matches!(
+            self,
+            VisualStyle::Photorealistic
+                | VisualStyle::CinematicFilm
+                | VisualStyle::DocumentaryPhoto
+                | VisualStyle::VintageFilm
+                | VisualStyle::FilmNoir
+        )
+    }
+
     /// The stable code it is stored under.
     pub fn code(self) -> &'static str {
         match self {

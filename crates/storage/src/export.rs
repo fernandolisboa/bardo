@@ -1,8 +1,8 @@
 use bardo_domain::{
-    Export, ExportRepository, Network, NetworkAccountId, ProfileId, RenderId, RepositoryError,
-    VideoMetadata, VideoMetadataDraft, VideoProjectId,
+    AdPostReview, Export, ExportRepository, Network, NetworkAccountId, ProfileId, RenderId,
+    RepositoryError, VideoMetadata, VideoMetadataDraft, VideoProjectId,
 };
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::script::{generation, insert_generation};
@@ -186,6 +186,52 @@ impl ExportRepository for Database {
             .map_err(boxed)?;
         Ok(())
     }
+
+    fn export_ad_review(
+        &self,
+        project: VideoProjectId,
+        network: Network,
+    ) -> Result<Option<AdPostReview>, RepositoryError> {
+        let row = self
+            .conn()
+            .query_row(
+                "SELECT disclosure, acknowledged FROM export_ad_review
+                 WHERE project_id = ?1 AND network = ?2",
+                params![project.to_string(), network.code()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(boxed)?;
+        Ok(row.map(|(disclosure, acknowledged)| AdPostReview {
+            disclosure: crate::ad_review::disclosure_of(&disclosure),
+            sponsors: Vec::new(),
+            acknowledged: crate::ad_review::lines_of(&acknowledged),
+        }))
+    }
+
+    fn save_export_ad_review(
+        &self,
+        project: VideoProjectId,
+        network: Network,
+        review: &AdPostReview,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "INSERT INTO export_ad_review (project_id, network, disclosure, acknowledged)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (project_id, network) DO UPDATE SET
+                     disclosure = excluded.disclosure,
+                     acknowledged = excluded.acknowledged",
+                params![
+                    project.to_string(),
+                    network.code(),
+                    review.disclosure.code(),
+                    review.acknowledged.join("\n"),
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -319,5 +365,37 @@ mod tests {
         db.save_export(&export).unwrap();
         assert_eq!(db.exports(project.id).unwrap(), [export]);
         assert_eq!(db.exports(VideoProjectId::new()).unwrap(), []);
+    }
+
+    #[test]
+    fn an_exports_ad_review_round_trips_per_network_and_is_replaced() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        assert_eq!(
+            db.export_ad_review(project.id, Network::Kick).unwrap(),
+            None
+        );
+        let review = bardo_domain::AdPostReview {
+            disclosure: bardo_domain::CommercialDisclosure::YourBrand,
+            sponsors: Vec::new(),
+            acknowledged: vec!["category:health".into()],
+        };
+        db.save_export_ad_review(project.id, Network::Kick, &review)
+            .unwrap();
+        assert_eq!(
+            db.export_ad_review(project.id, Network::Kick).unwrap(),
+            Some(review)
+        );
+        assert_eq!(db.export_ad_review(project.id, Network::X).unwrap(), None);
+        let again = bardo_domain::AdPostReview {
+            disclosure: bardo_domain::CommercialDisclosure::None,
+            ..Default::default()
+        };
+        db.save_export_ad_review(project.id, Network::Kick, &again)
+            .unwrap();
+        assert_eq!(
+            db.export_ad_review(project.id, Network::Kick).unwrap(),
+            Some(again)
+        );
     }
 }

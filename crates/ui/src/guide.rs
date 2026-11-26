@@ -226,6 +226,8 @@ pub mod refs {
     pub const UPLOADING_THUMBNAIL: GuideRef = at("uploading", "thumbnail");
     pub const UPLOADING_DISCLOSURE: GuideRef = at("uploading", "disclosure");
     pub const UPLOADING_REVIEW: GuideRef = at("uploading", "review");
+    pub const UPLOADING_COMMERCIAL: GuideRef = at("uploading", "commercial");
+    pub const UPLOADING_AD_REVIEW: GuideRef = at("uploading", "ad-review");
     pub const UPLOAD_STATES: GuideRef = at("uploading", "states");
     pub const YOUTUBE_KEPT_PRIVATE: GuideRef = at("platform-audits", "youtube-private");
     pub const UPLOADING_POST: GuideRef = at("uploading", "post");
@@ -250,7 +252,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 122] = [
+    pub const ALL: [GuideRef; 124] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -351,6 +353,8 @@ pub mod refs {
         UPLOADING_THUMBNAIL,
         UPLOADING_DISCLOSURE,
         UPLOADING_REVIEW,
+        UPLOADING_COMMERCIAL,
+        UPLOADING_AD_REVIEW,
         UPLOAD_STATES,
         YOUTUBE_KEPT_PRIVATE,
         UPLOADING_POST,

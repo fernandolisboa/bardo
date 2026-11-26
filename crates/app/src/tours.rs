@@ -1204,7 +1204,8 @@ pub const NETWORKS: Tour = {
 
 /// Publish: the networks, each one's metadata and limits, a long video's
 /// YouTube thumbnail and chapters, the synthetic content disclosure, the
-/// upload review and when it goes, export, and the post. Its steps only
+/// upload review and when it goes (an ad's with its commercial disclosure
+/// and acknowledgements), export, and the post. Its steps only
 /// explain: nothing is uploaded, exported or linked.
 pub const PUBLISH: Tour = {
     const AT: Stage = Stage::Publish;
@@ -1212,7 +1213,7 @@ pub const PUBLISH: Tour = {
     const NETWORK: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Publish,
-        version: 3,
+        version: 4,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "networks", TourAnchor::Collection).learn(PAGE, "networks"),

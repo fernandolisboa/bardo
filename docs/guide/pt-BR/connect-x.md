@@ -79,6 +79,7 @@ Se o cartão disser que a porta está em uso, outro programa no seu computador o
 Na etapa Publicar, uma conta do X conectada oferece **Revisar envio** quando o preset dela está renderizado e o texto escrito.
 
 - **A revisão** mostra o arquivo, a conta e o texto do post como o X recebe (com o rodapé da conta e as hashtags), o preço que o X cobra por ele e **Rótulo de feito com IA**, ligado quando a narração usou uma voz realista. O X não tem título, visibilidade nem capa num post.
+- **Um anúncio** marcado como **Parceria paga** vai com o selo de parceria paga do X. Veja [Divulgação comercial](uploading.md#commercial).
 - **Enviar e postar** manda o arquivo em partes e, quando o X termina de processar, faz o post. O Bardo confere a cada minuto; se o X ainda estiver processando depois de uns quinze minutos, o post mostra **Ainda processando** e **Verificar de novo** retoma depois.
 - **Orçamento.** Com um orçamento para o X na tela [Custos](costs.md), um post que chegaria a ele pergunta antes; **Gerar mesmo assim** posta.
 - **Parar e retomar.** Um envio parado ou interrompido continua depois da última parte que o X recebeu. O X guarda um envio por 24 horas; um envio que passou disso, ou que o X descartou, vai de novo do início, no máximo duas vezes.

@@ -548,18 +548,25 @@ impl Bardo {
         Ok(values)
     }
 
+    /// The thumbnail template filled with the project's facts. The text
+    /// Claude writes for an ad's thumbnail is told the rules of every ad
+    /// after the template's instructions, as an ad's script is (#282).
     fn render_thumbnail_prompt(
         &self,
         project: &VideoProject,
         template: &TemplateVersion,
     ) -> Result<RenderedPrompt, ThumbnailError> {
-        template
+        let mut rendered = template
             .body
             .render(&self.thumbnail_values(project)?)
             .map_err(|missing| {
                 // Every thumbnail variable has a value above.
                 ThumbnailError::Repository(RepositoryError(Box::new(missing)))
-            })
+            })?;
+        if project.is_ad() {
+            rendered.instructions = crate::ads::with_ad_rules(&rendered.instructions);
+        }
+        Ok(rendered)
     }
 
     /// The pictures a thumbnail can sit on: drawn backgrounds, newest

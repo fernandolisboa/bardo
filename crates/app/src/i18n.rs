@@ -31,6 +31,7 @@ use bardo_domain::{
 use bardo_domain::{CardFieldError, CardLogoPlace, CardTextPlace};
 use bardo_domain::{ClaimError, ClaimKind, RestrictedCategory, SheetClaimError, SheetFieldError};
 use bardo_domain::{ClipFit, StyleChoice, VisualStyle};
+use bardo_domain::{CommercialDisclosure, SponsorError};
 use bardo_domain::{
     ProductFieldError, ProductImageError, ProductImageKind, ProductKind, ProductOwnership,
 };
@@ -1008,6 +1009,48 @@ pub enum Text {
     EndCardSaved,
     EndCardOutOfDate,
     EndCardOff,
+    AdItemSensitive,
+    AdItemUnbackedScript,
+    AdItemUnbackedPosts,
+    AdItemScriptNotChecked,
+    AdItemPostsNotChecked,
+    AdItemUnconfirmed,
+    AdItemCategory,
+    AdItemConcept,
+    AdItemsHeading,
+    AdNotAcknowledged,
+    AdReviewTitle,
+    AdReviewHint,
+    AdAcknowledgeAll,
+    AdAcknowledgeLeft,
+    CommercialTitle,
+    CommercialHint,
+    CommercialName(CommercialDisclosure),
+    CommercialSent(Network),
+    CommercialInStudio,
+    CommercialTikTokYourBrand,
+    CommercialTikTokBranded,
+    CommercialReminder,
+    CommercialReminderLabel,
+    CommercialReminderTikTokYourBrand,
+    CommercialReminderTikTokBranded,
+    CommercialReminderNoLabel,
+    CommercialReminderNothing,
+    CommercialChangeNote,
+    SponsorsLabel,
+    SponsorsHint,
+    SponsorError(SponsorError),
+    StudioLink,
+    PostsCheckTitle,
+    PostsCheckHint,
+    PostsCheckRun,
+    PostsCheckRunning,
+    PostsCheckNone,
+    PostsCheckOutdated,
+    PostsCheckAllBacked,
+    PostsCheckUnbacked,
+    PostsCheckSaveFirst,
+    PostsCheckStopped,
     CardTextPlaceName(CardTextPlace),
     CardLogoPlaceName(CardLogoPlace),
     CardFieldError(CardFieldError),
@@ -4189,6 +4232,59 @@ impl Text {
             Text::EndCardSaved => "scenes.end_card.saved",
             Text::EndCardOutOfDate => "scenes.end_card.out_of_date",
             Text::EndCardOff => "scenes.end_card.off",
+            Text::AdItemSensitive => "ad_publishing.item.sensitive",
+            Text::AdItemUnbackedScript => "ad_publishing.item.unbacked_script",
+            Text::AdItemUnbackedPosts => "ad_publishing.item.unbacked_posts",
+            Text::AdItemScriptNotChecked => "ad_publishing.item.script_not_checked",
+            Text::AdItemPostsNotChecked => "ad_publishing.item.posts_not_checked",
+            Text::AdItemUnconfirmed => "ad_publishing.item.unconfirmed",
+            Text::AdItemCategory => "ad_publishing.item.category",
+            Text::AdItemConcept => "ad_publishing.item.concept",
+            Text::AdItemsHeading => "ad_publishing.items_heading",
+            Text::AdNotAcknowledged => "ad_publishing.not_acknowledged",
+            Text::AdReviewTitle => "ad_publishing.review_title",
+            Text::AdReviewHint => "ad_publishing.review_hint",
+            Text::AdAcknowledgeAll => "ad_publishing.acknowledge_all",
+            Text::AdAcknowledgeLeft => "ad_publishing.acknowledge_left",
+            Text::CommercialTitle => "ad_publishing.commercial.title",
+            Text::CommercialHint => "ad_publishing.commercial.hint",
+            Text::CommercialName(disclosure) => {
+                return format!("ad_publishing.commercial.name.{}", disclosure.code()).into();
+            }
+            Text::CommercialSent(network) => {
+                return format!("ad_publishing.commercial.sent.{}", network.code()).into();
+            }
+            Text::CommercialInStudio => "ad_publishing.commercial.in_studio",
+            Text::CommercialTikTokYourBrand => "ad_publishing.commercial.tiktok_your_brand",
+            Text::CommercialTikTokBranded => "ad_publishing.commercial.tiktok_branded",
+            Text::CommercialReminder => "ad_publishing.commercial.reminder",
+            Text::CommercialReminderLabel => "ad_publishing.commercial.reminder_label",
+            Text::CommercialReminderTikTokYourBrand => {
+                "ad_publishing.commercial.reminder_tiktok_your_brand"
+            }
+            Text::CommercialReminderTikTokBranded => {
+                "ad_publishing.commercial.reminder_tiktok_branded"
+            }
+            Text::CommercialReminderNoLabel => "ad_publishing.commercial.reminder_no_label",
+            Text::CommercialReminderNothing => "ad_publishing.commercial.reminder_nothing",
+            Text::CommercialChangeNote => "ad_publishing.commercial.change_note",
+            Text::SponsorsLabel => "ad_publishing.sponsors.label",
+            Text::SponsorsHint => "ad_publishing.sponsors.hint",
+            Text::SponsorError(error) => match error {
+                SponsorError::NotAnId => "ad_publishing.sponsors.not_an_id",
+                SponsorError::TooMany => "ad_publishing.sponsors.too_many",
+            },
+            Text::StudioLink => "ad_publishing.studio_link",
+            Text::PostsCheckTitle => "ad_publishing.posts_check.title",
+            Text::PostsCheckHint => "ad_publishing.posts_check.hint",
+            Text::PostsCheckRun => "ad_publishing.posts_check.run",
+            Text::PostsCheckRunning => "ad_publishing.posts_check.running",
+            Text::PostsCheckNone => "ad_publishing.posts_check.none",
+            Text::PostsCheckOutdated => "ad_publishing.posts_check.outdated",
+            Text::PostsCheckAllBacked => "ad_publishing.posts_check.all_backed",
+            Text::PostsCheckUnbacked => "ad_publishing.posts_check.unbacked",
+            Text::PostsCheckSaveFirst => "ad_publishing.posts_check.save_first",
+            Text::PostsCheckStopped => "ad_publishing.posts_check.stopped",
             Text::CardTextPlaceName(place) => {
                 return format!("scenes.end_card.text_place_name.{}", place.code()).into();
             }
@@ -7681,6 +7777,52 @@ mod tests {
         texts.extend(CardTextPlace::ALL.map(Text::CardTextPlaceName));
         texts.extend(CardLogoPlace::ALL.map(Text::CardLogoPlaceName));
         texts.extend(CardFieldError::ALL.map(Text::CardFieldError));
+        texts.extend([
+            Text::AdItemSensitive,
+            Text::AdItemUnbackedScript,
+            Text::AdItemUnbackedPosts,
+            Text::AdItemScriptNotChecked,
+            Text::AdItemPostsNotChecked,
+            Text::AdItemUnconfirmed,
+            Text::AdItemCategory,
+            Text::AdItemConcept,
+            Text::AdItemsHeading,
+            Text::AdNotAcknowledged,
+            Text::AdReviewTitle,
+            Text::AdReviewHint,
+            Text::AdAcknowledgeAll,
+            Text::AdAcknowledgeLeft,
+            Text::CommercialTitle,
+            Text::CommercialHint,
+            Text::CommercialInStudio,
+            Text::CommercialTikTokYourBrand,
+            Text::CommercialTikTokBranded,
+            Text::CommercialReminder,
+            Text::CommercialReminderLabel,
+            Text::CommercialReminderTikTokYourBrand,
+            Text::CommercialReminderTikTokBranded,
+            Text::CommercialReminderNoLabel,
+            Text::CommercialReminderNothing,
+            Text::CommercialChangeNote,
+            Text::SponsorsLabel,
+            Text::SponsorsHint,
+            Text::StudioLink,
+            Text::PostsCheckTitle,
+            Text::PostsCheckHint,
+            Text::PostsCheckRun,
+            Text::PostsCheckRunning,
+            Text::PostsCheckNone,
+            Text::PostsCheckOutdated,
+            Text::PostsCheckAllBacked,
+            Text::PostsCheckUnbacked,
+            Text::PostsCheckSaveFirst,
+            Text::PostsCheckStopped,
+        ]);
+        texts.extend(CommercialDisclosure::ALL.map(Text::CommercialName));
+        texts.extend(
+            [Network::YouTube, Network::InstagramReels, Network::X].map(Text::CommercialSent),
+        );
+        texts.extend([SponsorError::NotAnId, SponsorError::TooMany].map(Text::SponsorError));
         texts.extend(TemplateKind::ALL.map(Text::TemplateKindName));
         texts.extend(TemplateVariable::ALL.map(Text::TemplateVariableHint));
         texts.extend(TemplateProblem::ALL.map(Text::TemplateProblem));

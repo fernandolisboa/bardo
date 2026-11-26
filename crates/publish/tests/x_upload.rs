@@ -42,6 +42,8 @@ fn video() -> VideoUpload {
         publish_at: None,
         share_to_feed: true,
         cover: Duration::ZERO,
+        paid_partnership: false,
+        sponsors: Vec::new(),
     }
 }
 
@@ -503,6 +505,21 @@ fn a_video_without_synthetic_content_goes_without_the_label() {
     };
     let (_, sent) = publish(&["post-created"], &video);
     assert_eq!(body(&sent[0]).get("made_with_ai"), None);
+}
+
+#[test]
+fn a_paid_partnership_post_carries_its_label_and_others_do_not() {
+    let (_, sent) = publish(&["post-created"], &video());
+    assert_eq!(body(&sent[0]).get("paid_partnership"), None);
+    let video = VideoUpload {
+        paid_partnership: true,
+        ..video()
+    };
+    let (_, sent) = publish(&["post-created"], &video);
+    assert_eq!(
+        body(&sent[0]).get("paid_partnership"),
+        Some(&Value::Bool(true))
+    );
 }
 
 #[test]

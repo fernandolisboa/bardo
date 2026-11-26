@@ -1179,6 +1179,7 @@ ad_angles = "Ângulos de anúncio"
 ad_script = "Roteiro de anúncio"
 ad_scene_plan = "Plano de cenas de anúncio"
 concept_prompt = "Prompt de conceito"
+ad_metadata = "Metadados de anúncio"
 
 [templates.variable]
 channel_name = "O nome do canal."
@@ -1224,6 +1225,7 @@ must_say = "O que todo anúncio do produto precisa dizer, vindo do briefing do p
 never_say = "O que nenhum anúncio do produto pode dizer, vindo do briefing do produto."
 product_images = "As imagens do produto, numeradas a partir de 0, uma por linha: se cada uma é uma foto ou uma tela, e o tamanho (\"none\" quando o produto não tem imagem)."
 scene_kinds = "Os tipos que uma cena deste anúncio pode ter, um por linha, conforme as imagens do produto: uma foto do produto precisa de uma imagem, o produto em uso precisa de uma foto."
+link = "O link ou perfil para onde o anúncio leva o espectador, vindo da etapa Briefing (\"not set\" quando vazio)."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."
@@ -3449,7 +3451,7 @@ body = "Quando a voz do narrador é sintética e realista, cada rede pede que vo
 
 [tour.publish.upload]
 title = "A revisão do envio"
-body = "Revisar envio mostra exatamente o que vai para o YouTube, o Instagram, o TikTok ou o X: o arquivo, a conta, o texto, a miniatura, suas escolhas e quando vai ao ar. Nada é enviado até você confirmar."
+body = "Revisar envio mostra exatamente o que vai para o YouTube, o Instagram, o TikTok ou o X: o arquivo, a conta, o texto, a miniatura, suas escolhas e quando vai ao ar. A revisão de um anúncio também traz a divulgação comercial e os itens que você confirma antes. Nada é enviado até você confirmar."
 
 [tour.publish.export]
 title = "Exportar"
@@ -4750,3 +4752,64 @@ not_saved = "Não foi possível salvar a imagem de conceito. Tente de novo."
 [projects.concept]
 badge = "Conceito"
 hint = "Este vídeo apresenta uma ideia, não um produto que existe: o produto era uma ideia quando o projeto começou."
+
+[ad_publishing]
+items_heading = "Antes de postar este anúncio, tenha em mente:"
+not_acknowledged = "Confirme cada item da revisão do anúncio primeiro."
+review_title = "Antes de este anúncio sair"
+review_hint = "O Bardo lista o que este anúncio diz que pede o seu cuidado. A decisão é sua; confirme cada item para seguir. As confirmações ficam guardadas com o post."
+acknowledge_all = "Confirmar todos"
+acknowledge_left = "{n} a confirmar"
+studio_link = "Abrir no YouTube Studio"
+
+[ad_publishing.item]
+sensitive = "Afirmação sensível usada: \"{claim}\". Garanta que você pode comprová-la."
+unbacked_script = "O roteiro afirma \"{says}\", que nenhuma afirmação do briefing sustenta."
+unbacked_posts = "Os textos do post afirmam \"{says}\", que nenhuma afirmação do briefing sustenta."
+script_not_checked = "O roteiro não foi conferido com as afirmações como está agora."
+posts_not_checked = "Os textos do post não foram conferidos com as afirmações como estão agora."
+unconfirmed = "O produto não confirma mais uma afirmação que este anúncio usa: \"{claim}\"."
+category = "O produto está numa categoria com regras próprias nas redes: {category}. Confira as regras de anúncio de cada rede."
+concept = "Este vídeo mostra uma ideia, não um produto que existe. Diga isso onde você postar."
+
+[ad_publishing.commercial]
+title = "Divulgação comercial"
+hint = "Se este post promove a sua própria marca ou o produto de um cliente, à parte da divulgação de conteúdo sintético. Começa pelo dono do produto; a decisão é sua."
+in_studio = "O Bardo declarou a promoção paga com este envio. Você pode conferir \"Inclui promoção paga\" nos Detalhes do vídeo no YouTube Studio."
+tiktok_your_brand = "O rascunho vai para a sua caixa de entrada do TikTok, que não recebe divulgação: antes de postar, ative \"Divulgar conteúdo da publicação\" e escolha \"Sua marca\"."
+tiktok_branded = "O rascunho vai para a sua caixa de entrada do TikTok, que não recebe divulgação: antes de postar, ative \"Divulgar conteúdo da publicação\" e escolha \"Conteúdo de marca\". O TikTok não permite conteúdo de marca num post privado."
+reminder = "Divulgação comercial: {disclosure}."
+reminder_label = "Ative o selo de parceria paga ou de promoção paga do {network} ao publicar."
+reminder_tiktok_your_brand = "Antes de publicar, ative \"Divulgar conteúdo da publicação\" no TikTok e escolha \"Sua marca\"."
+reminder_tiktok_branded = "Antes de publicar, ative \"Divulgar conteúdo da publicação\" no TikTok e escolha \"Conteúdo de marca\". O TikTok não permite conteúdo de marca num post privado."
+reminder_no_label = "O {network} não tem selo para isso: diga no post."
+reminder_nothing = "O {network} não pede mais nada para isso."
+change_note = "Uma mudança aqui vale só para este envio; ela fica guardada com o post."
+
+[ad_publishing.commercial.name]
+none = "Nenhuma"
+your_brand = "Sua marca"
+paid_partnership = "Parceria paga"
+
+[ad_publishing.commercial.sent]
+youtube = "O Bardo declara a promoção paga com o envio: o YouTube mostra \"Inclui promoção paga\" no vídeo."
+instagram_reels = "O Bardo envia o selo \"Parceria paga\" do Instagram com o Reel. Se o Instagram recusar, o Bardo mostra o motivo e nunca posta sem o selo."
+x = "O Bardo envia o selo de parceria paga do X com o post."
+
+[ad_publishing.sponsors]
+label = "Contas de marca (opcional)"
+hint = "Até dois ids de conta do Instagram das marcas, separados por vírgula. Elas aparecem como parceiras pagas."
+not_an_id = "Digite ids de conta do Instagram: só números, separados por vírgula."
+too_many = "O Instagram aceita até duas contas de marca."
+
+[ad_publishing.posts_check]
+title = "Afirmações nos textos do post"
+hint = "O Claude lê o título e o texto de cada rede e liga cada afirmação sobre o produto a uma afirmação da etapa Briefing. Escrever os metadados já os confere; confira de novo depois das suas edições."
+run = "Conferir os textos do post"
+running = "Conferindo os textos do post com as afirmações do briefing…"
+none = "Os textos do post ainda não foram conferidos."
+outdated = "Os textos do post ou o briefing mudaram depois da checagem. Confira de novo."
+all_backed = "Cada afirmação nos textos do post tem uma afirmação que a sustenta."
+unbacked = "O que nenhuma afirmação sustenta:"
+save_first = "Salve ou desfaça as edições antes: a checagem lê os textos salvos."
+stopped = "A última checagem dos textos do post parou. Confira de novo."

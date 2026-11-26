@@ -57,3 +57,7 @@ if an upload misbehaves):
   container expired).
 - `permalink.http`: `GET /<media>?fields=permalink,shortcode`.
 - `rate-limited.http`: code 4, the app's request limit.
+- `container-branded-refused.http`: a paid-partnership container refused
+  because the account cannot post branded content, with the reason the
+  reference gives for it (made from the documented message; the exact
+  code is assumed).

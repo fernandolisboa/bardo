@@ -1,12 +1,13 @@
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ChannelId, Earnings, Insights, JobId, MetricsSnapshot, Money, MoneyReport, Network,
-    NetworkAccountId, OwnerMetrics, PostLink, PostRetention, ProfileId, Publication, PublicationId,
-    PublicationKind, PublicationRepository, RenderId, RepositoryError, RetentionCurve,
-    RetentionPoint, Share, ThumbnailOutcome, Upload, UploadStatus, VideoProjectId, Visibility,
+    AdPostReview, ChannelId, Earnings, Insights, JobId, MetricsSnapshot, Money, MoneyReport,
+    Network, NetworkAccountId, OwnerMetrics, PostLink, PostRetention, ProfileId, Publication,
+    PublicationId, PublicationKind, PublicationRepository, RenderId, RepositoryError,
+    RetentionCurve, RetentionPoint, Share, ThumbnailOutcome, Upload, UploadStatus, VideoProjectId,
+    Visibility,
 };
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
 
 use crate::{Database, boxed, from_unix_millis, to_unix_millis};
@@ -565,6 +566,57 @@ impl PublicationRepository for Database {
         Ok(())
     }
 
+    fn ad_review(&self, id: PublicationId) -> Result<Option<AdPostReview>, RepositoryError> {
+        let row = self
+            .conn()
+            .query_row(
+                "SELECT disclosure, sponsors, acknowledged FROM publication_ad_review
+                 WHERE publication_id = ?1",
+                [id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(boxed)?;
+        Ok(
+            row.map(|(disclosure, sponsors, acknowledged)| AdPostReview {
+                disclosure: crate::ad_review::disclosure_of(&disclosure),
+                sponsors: crate::ad_review::lines_of(&sponsors),
+                acknowledged: crate::ad_review::lines_of(&acknowledged),
+            }),
+        )
+    }
+
+    fn save_ad_review(
+        &self,
+        id: PublicationId,
+        review: &AdPostReview,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "INSERT INTO publication_ad_review (publication_id, disclosure, sponsors,
+                                                   acknowledged)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (publication_id) DO UPDATE SET
+                     disclosure = excluded.disclosure,
+                     sponsors = excluded.sponsors,
+                     acknowledged = excluded.acknowledged",
+                params![
+                    id.to_string(),
+                    review.disclosure.code(),
+                    review.sponsors.join("\n"),
+                    review.acknowledged.join("\n"),
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
     fn save_sync(
         &self,
         checked: &[Publication],
@@ -909,6 +961,28 @@ mod tests {
         );
         assert_eq!(db.publication(yt.id).unwrap(), Some(yt));
         assert_eq!(db.publication(PublicationId::new()).unwrap(), None);
+    }
+
+    #[test]
+    fn an_ads_review_is_kept_with_its_publication_and_goes_with_it() {
+        let (db, _, project) = setup();
+        let yt = youtube(&project, "dQw4w9WgXcQ");
+        db.save_publication(&yt).unwrap();
+        assert_eq!(db.ad_review(yt.id).unwrap(), None);
+        let review = bardo_domain::AdPostReview {
+            disclosure: bardo_domain::CommercialDisclosure::PaidPartnership,
+            sponsors: vec!["17841400000000001".into(), "9".into()],
+            acknowledged: vec!["concept".into(), "sensitive:Lasts 40 hours".into()],
+        };
+        db.save_ad_review(yt.id, &review).unwrap();
+        assert_eq!(db.ad_review(yt.id).unwrap(), Some(review.clone()));
+        let none = bardo_domain::AdPostReview::default();
+        db.save_ad_review(yt.id, &none).unwrap();
+        assert_eq!(db.ad_review(yt.id).unwrap(), Some(none));
+        // A new post for the network replaces the publication and its review.
+        db.save_publication(&youtube(&project, "aaaaaaaaaaa"))
+            .unwrap();
+        assert_eq!(db.ad_review(yt.id).unwrap(), None);
     }
 
     fn uploading(project: &VideoProject) -> Publication {

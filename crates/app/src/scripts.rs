@@ -189,6 +189,8 @@ pub(crate) struct ScriptHandler {
     pub(crate) scripts: Arc<dyn ScriptRepository>,
     /// Where an ad script's claims check is kept.
     pub(crate) ads: Arc<dyn AdRepository>,
+    /// The post texts a check of an ad's posts reads (#282).
+    pub(crate) exports: Arc<dyn bardo_domain::ExportRepository>,
     pub(crate) text: Arc<dyn TextGenerator>,
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) costs: CostBook,
@@ -448,7 +450,7 @@ impl Bardo {
                 if !self.check_left(project, &text, job.id()) {
                     return None;
                 }
-                vec![check.call(&text)]
+                vec![check.call(&text, bardo_domain::CheckedScript::Current)]
             }
             // It wrote its script, which was put aside since.
             None if job.checkpoint() == Some(WRITTEN) => return None,
@@ -479,7 +481,7 @@ impl Bardo {
     /// The facts an ad script template is filled with: the channel's and
     /// the video's, as any script's, and the ad's own from `brief`. What
     /// the user typed, a page said or a model wrote goes in as data.
-    fn ad_script_values(
+    pub(crate) fn ad_script_values(
         &self,
         project: &VideoProject,
         brief: Option<&ScriptBrief>,
@@ -1295,6 +1297,7 @@ mod tests {
             owner: app.profile().id,
             scripts: Arc::clone(&first.db) as _,
             ads: Arc::clone(&first.db) as _,
+            exports: Arc::clone(&first.db) as _,
             text: Arc::clone(&first.text) as _,
             secrets: Arc::clone(&first.secrets) as _,
             costs: crate::costs::CostBook {

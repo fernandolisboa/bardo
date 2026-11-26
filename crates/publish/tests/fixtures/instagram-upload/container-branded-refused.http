@@ -1,0 +1,4 @@
+HTTP/2 400 
+content-type: application/json; charset=UTF-8
+
+{"error":{"message":"Creator is not eligible for branded content.","type":"OAuthException","code":10,"is_transient":false,"error_user_msg":"Creator is not eligible for branded content.","fbtrace_id":"AFixtureTrace0102"}}

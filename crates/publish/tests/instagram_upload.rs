@@ -40,6 +40,8 @@ fn video() -> VideoUpload {
         publish_at: None,
         share_to_feed: false,
         cover: Duration::from_millis(2_500),
+        paid_partnership: false,
+        sponsors: Vec::new(),
     }
 }
 
@@ -140,6 +142,8 @@ fn a_new_upload_makes_a_reel_container_with_the_review_and_sends_the_whole_file(
     assert_eq!(create.field("share_to_feed").as_deref(), Some("false"));
     assert_eq!(create.field("thumb_offset").as_deref(), Some("2500"));
     assert_eq!(create.field("is_ai_generated").as_deref(), Some("true"));
+    assert!(create.field("is_paid_partnership").is_none());
+    assert!(create.field("branded_content_sponsor_ids").is_none());
     assert!(
         create.field("access_token").is_none(),
         "the token goes in a header"
@@ -172,6 +176,60 @@ fn a_reel_without_the_ai_label_does_not_send_one() {
     let create = &uploader.transport().sent()[0];
     assert!(create.field("is_ai_generated").is_none());
     assert_eq!(create.field("share_to_feed").as_deref(), Some("true"));
+}
+
+#[test]
+fn a_paid_partnership_reel_carries_the_label_and_the_brands_typed() {
+    let uploader = uploader(&["container-created", "rupload-ok"]);
+    let mut run = FakeRun::new();
+    let video = VideoUpload {
+        paid_partnership: true,
+        sponsors: vec!["17841400000000001".into(), "17841400000000002".into()],
+        ..video()
+    };
+
+    uploader.upload(&video, &mut run).unwrap();
+
+    let create = &uploader.transport().sent()[0];
+    assert_eq!(create.field("is_paid_partnership").as_deref(), Some("true"));
+    assert_eq!(
+        create.field("branded_content_sponsor_ids").as_deref(),
+        Some("[17841400000000001,17841400000000002]")
+    );
+}
+
+#[test]
+fn a_paid_partnership_without_brands_carries_the_label_alone() {
+    let uploader = uploader(&["container-created", "rupload-ok"]);
+    let mut run = FakeRun::new();
+    let video = VideoUpload {
+        paid_partnership: true,
+        ..video()
+    };
+
+    uploader.upload(&video, &mut run).unwrap();
+
+    let create = &uploader.transport().sent()[0];
+    assert_eq!(create.field("is_paid_partnership").as_deref(), Some("true"));
+    assert!(create.field("branded_content_sponsor_ids").is_none());
+}
+
+#[test]
+fn a_refused_paid_partnership_says_metas_reason_and_sends_nothing_else() {
+    let uploader = uploader(&["container-branded-refused"]);
+    let mut run = FakeRun::new();
+    let video = VideoUpload {
+        paid_partnership: true,
+        ..video()
+    };
+
+    let error = uploader.upload(&video, &mut run).unwrap_err();
+
+    assert!(error.detail.contains("branded content"), "{}", error.detail);
+    // The user sees Meta's reason, not a generic permission problem.
+    assert_eq!(error.kind, UploadErrorKind::LabelRefused);
+    let sent = uploader.transport().sent();
+    assert_eq!(sent.len(), 1, "no container without the label");
 }
 
 #[test]

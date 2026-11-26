@@ -24,7 +24,7 @@ A linha de cada rede tem uma caixa: marque as redes a exportar. Redes ainda não
 A exportação de cada projeto tem uma pasta, com uma pasta por rede dentro, com o nome da rede. Cada uma tem:
 
 - o vídeo renderizado, no preset da rede;
-- o `metadata.txt`, no idioma da interface: o título, a descrição ou legenda e as tags para colar em cada campo, a visibilidade a escolher e, quando a voz é sintética, onde ativar o rótulo da rede;
+- o `metadata.txt`, no idioma da interface: o título, a descrição ou legenda e as tags para colar em cada campo, a visibilidade a escolher e, quando a voz é sintética, onde ativar o rótulo da rede; num anúncio, a divulgação comercial e o que ativar ao publicar, e os itens que você confirmou antes de exportar ([Antes de um anúncio ir ao ar](uploading.md#ad-review));
 - na pasta do YouTube, o `thumbnail.jpg` quando o projeto tem uma [miniatura](uploading.md#thumbnail) salva, para aplicar no YouTube Studio.
 
 **Mostrar na pasta** abre a pasta, e **Detalhes** mostra o caminho dela. O inspetor também tem **Copiar** ao lado de cada campo, para colar direto do Bardo.

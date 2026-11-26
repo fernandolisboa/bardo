@@ -79,6 +79,7 @@ If the card says the port is in use, another program on your computer holds port
 At the Publish stage, a connected X account offers **Review upload** once its preset is rendered and its text written.
 
 - **The review** shows the file, the account and the post text as X gets it (with the account's footer and hashtags), the price X bills for it, and **Made with AI label**, on when the narration used a realistic voice. X has no title, visibility or cover for a post.
+- **An ad** marked **Paid partnership** goes with X's paid partnership label. See [Commercial disclosure](uploading.md#commercial).
 - **Upload and post** sends the file in chunks and, once X has processed it, makes the post. Bardo checks once a minute; if X is still processing after about a quarter of an hour, the post shows **Still processing** and **Check again** picks it up later.
 - **Budget.** With a budget for X on the [Costs](costs.md) screen, a post that would reach it asks first; **Generate anyway** posts it.
 - **Stop and resume.** A stopped or interrupted upload resumes after the last chunk X took. X keeps an upload for 24 hours; an upload past that, or one X dropped, goes again from the start, twice at most.

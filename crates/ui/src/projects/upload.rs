@@ -39,8 +39,8 @@ use bardo_app::bardo_domain::{
     JobId, PublicationId, ScheduleProblem, Visibility, format_cover_time, parse_cover_time,
 };
 use bardo_app::{
-    BudgetConsent, Control, MissedPostError, ScheduleError, ScheduleResult, Text, TourAnchor,
-    UploadBlock, UploadChoices, UploadReview, UploadReviewError, UploadState,
+    AdUploadChoices, BudgetConsent, Control, MissedPostError, ScheduleError, ScheduleResult, Text,
+    TourAnchor, UploadBlock, UploadChoices, UploadReview, UploadReviewError, UploadState,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -167,6 +167,10 @@ impl ProjectsScreen {
             self.schedule_edit = None;
             self.schedule_notice = None;
             self.cover_problem = None;
+            self.ad_disclosure = None;
+            self.sponsor_problem = None;
+            self.ad_sponsors
+                .update(cx, |input, cx| input.set_value("", window, cx));
             let cover = self
                 .bardo
                 .read(cx)
@@ -368,7 +372,22 @@ impl ProjectsScreen {
             }
         }
         self.upload_budget_ask = None;
-        match self.bardo.read(cx).start_upload(&review, choices) {
+        self.sponsor_problem = None;
+        let started = match &review.ad {
+            // An ad goes with its disclosure and the items acknowledged.
+            Some(_) => {
+                let ad_choices = AdUploadChoices {
+                    disclosure: self.ad_disclosure,
+                    sponsors: self.ad_sponsors.read(cx).value().to_string(),
+                    acknowledged: self.ad_acknowledged.clone(),
+                };
+                self.bardo
+                    .read(cx)
+                    .start_ad_upload(&review, choices, &ad_choices)
+            }
+            None => self.bardo.read(cx).start_upload(&review, choices),
+        };
+        match started {
             Ok(_) => {
                 self.upload_draft = None;
                 self.upload_error = None;
@@ -382,6 +401,9 @@ impl ProjectsScreen {
             }
             Err(UploadReviewError::CoverPastEnd) => {
                 self.cover_problem = Some(Text::UploadCoverPastEnd);
+            }
+            Err(UploadReviewError::Sponsors(problem)) => {
+                self.sponsor_problem = Some(Text::SponsorError(problem));
             }
             Err(error) => {
                 if matches!(
@@ -599,6 +621,7 @@ impl ProjectsScreen {
             );
         }
         section = section.child(actions);
+        section = section.children(self.studio_note(now, cx));
         if let Some(block) = block.filter(|_| !active) {
             section = section.child(muted(cx, tr(bardo, Text::UploadBlocked(block))));
         }
@@ -1135,6 +1158,17 @@ impl ProjectsScreen {
             card = card.child(replace);
         }
 
+        // An ad: its commercial disclosure and what the user acknowledges.
+        let ad_left = review.ad.as_ref().map_or(0, |ad| self.ad_left(ad));
+        if let Some(ad) = &review.ad {
+            card = card.child(self.commercial_section(review, ad, cx));
+            if let Some(items) = self.ad_items("upload-ad-item", ad, cx) {
+                card = card.child(items);
+            }
+        }
+        let bardo = self.bardo.read(cx);
+        let network = bardo.text(Text::NetworkName(review.network)).into_owned();
+        let with_network = |text: Text| bardo.text_with(text, &[("network", &network)]);
         if let Some(note) = review
             .cost
             .as_ref()
@@ -1219,7 +1253,7 @@ impl ProjectsScreen {
                                 Text::UploadStart
                             },
                         ))
-                        .disabled(!ready || self.upload_budget_ask.is_some())
+                        .disabled(!ready || ad_left > 0 || self.upload_budget_ask.is_some())
                         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                             this.confirm_upload(window, cx);
                         })),

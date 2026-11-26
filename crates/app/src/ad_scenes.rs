@@ -896,7 +896,7 @@ mod tests {
 /// The scenes of an ad from end to end: the plan's request, the kinds it
 /// keeps, the pictures composed and what never reaches a model.
 #[cfg(test)]
-mod ad_tests {
+pub(crate) mod ad_tests {
     use bardo_domain::{
         CostPurpose, CostRepository, Product, ProductImage, ProductImageKind, ProductionMode,
         ProjectFiles, Provider, SceneKind, SceneKindError, ScenePlan, TemplateKind, TextFormat,
@@ -909,7 +909,7 @@ mod ad_tests {
     use crate::scenes::{PLAN_SCHEMA, SceneError};
     use crate::{Bardo, BudgetConsent};
 
-    const AD: &str = "Tired of buying notebooks? This one refills. \
+    pub(crate) const AD: &str = "Tired of buying notebooks? This one refills. \
                       It lasts three school years. Get yours.";
 
     /// A picture of one colour, as a PNG file.
@@ -924,7 +924,7 @@ mod ad_tests {
         bytes
     }
 
-    fn add_image(
+    pub(crate) fn add_image(
         app: &Bardo,
         product: &Product,
         size: (u32, u32),
@@ -941,7 +941,7 @@ mod ad_tests {
 
     /// An ad project whose product has `images`, with its brief confirmed,
     /// its script written and its narration read.
-    fn narrated_ad(
+    pub(crate) fn narrated_ad(
         h: &Harness,
         app: &Bardo,
         images: &[((u32, u32), ProductImageKind)],
@@ -975,7 +975,7 @@ mod ad_tests {
 
     /// A plan's answer of one scene a sentence, each of `kinds`: a kind
     /// and the position of the product image it shows (-1 for none).
-    fn answer(kinds: [(&str, i64); 4]) -> String {
+    pub(crate) fn answer(kinds: [(&str, i64); 4]) -> String {
         let prompts = [
             "A student frowning at a notebook with no page left",
             "The notebook open on a desk",
@@ -1009,7 +1009,12 @@ mod ad_tests {
         ])
     }
 
-    fn plan_with(h: &Harness, app: &Bardo, project: &VideoProject, answer: String) -> ScenePlan {
+    pub(crate) fn plan_with(
+        h: &Harness,
+        app: &Bardo,
+        project: &VideoProject,
+        answer: String,
+    ) -> ScenePlan {
         h.answer(answer);
         done(
             app,
@@ -1046,7 +1051,7 @@ mod ad_tests {
         (picture.width(), picture.height())
     }
 
-    const A_SCREEN_AND_A_PHOTO: [((u32, u32), ProductImageKind); 2] = [
+    pub(crate) const A_SCREEN_AND_A_PHOTO: [((u32, u32), ProductImageKind); 2] = [
         ((800, 1600), ProductImageKind::Screen),
         ((1200, 900), ProductImageKind::Photo),
     ];

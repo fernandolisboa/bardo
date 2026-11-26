@@ -5,7 +5,11 @@
 //! - `POST /<IG_USER_ID>/media` with `media_type=REELS` and
 //!   `upload_type=resumable` makes a container with the caption, the cover
 //!   frame (`thumb_offset`, in milliseconds), `share_to_feed` and the AI
-//!   label (`is_ai_generated`); Meta answers with its id.
+//!   label (`is_ai_generated`); for a paid partnership (#282) the label
+//!   `is_paid_partnership` and, when the user typed them, up to two brand
+//!   accounts (`branded_content_sponsor_ids`, a JSON array of Instagram
+//!   user ids). Meta answers with its id. A refusal shows Meta's reason:
+//!   nothing is sent again without the label.
 //! - The file goes to `rupload.facebook.com/ig-api-upload/<version>/<id>`
 //!   in one `POST` with `Authorization: OAuth <token>`, `offset` and
 //!   `file_size`. After an interruption the container's
@@ -22,7 +26,7 @@
 //!   account published through the API in the moving window and how many
 //!   it allows. Bardo reads the numbers each time and never assumes one.
 //!
-//! Docs checked 2026-10-04: <https://developers.facebook.com/docs/instagram-platform/content-publishing>,
+//! Docs checked 2026-10-04, and 2026-11-26 for the paid-partnership fields: <https://developers.facebook.com/docs/instagram-platform/content-publishing>,
 //! <https://developers.facebook.com/docs/instagram-platform/content-publishing/resumable-uploads>,
 //! <https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media>,
 //! <https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-container>,
@@ -145,8 +149,28 @@ impl<T: Transport> InstagramUploader<T> {
         if video.synthetic {
             fields.push(("is_ai_generated", "true"));
         }
+        let sponsors = format!("[{}]", video.sponsors.join(","));
+        if video.paid_partnership {
+            fields.push(("is_paid_partnership", "true"));
+            if !video.sponsors.is_empty() {
+                fields.push(("branded_content_sponsor_ids", sponsors.as_str()));
+            }
+        }
         let url = format!("{}/{account}/media", self.endpoints.graph);
-        let body = self.graph(HttpRequest::post_form(url, &fields), token)?;
+        let body = self
+            .graph(HttpRequest::post_form(url, &fields), token)
+            .map_err(|error| match error.kind {
+                // A refusal of the label is the user's to see: the Reel never
+                // goes without it.
+                UploadErrorKind::NotAllowed
+                | UploadErrorKind::Invalid
+                | UploadErrorKind::Unexpected
+                    if video.paid_partnership =>
+                {
+                    UploadError::new(UploadErrorKind::LabelRefused, error.detail)
+                }
+                _ => error,
+            })?;
         body["id"]
             .as_str()
             .filter(|id| is_id(id))

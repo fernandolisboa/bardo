@@ -89,6 +89,7 @@ Os tokens de acesso e de renovação ficam no Gerenciador de Credenciais do Wind
 
 1. Na etapa **Publicação** de um projeto, escolha a conta do TikTok e **Revisar envio**. A revisão mostra o arquivo renderizado, a conta conectada e a legenda para colar. Um arquivo que o TikTok não aceitaria aparece no lugar, com o que mudar.
 2. Marque **Lembrar do rótulo de conteúdo gerado por IA** quando o vídeo tiver conteúdo realista de IA (vem marcado quando a narração usa uma voz realista). O TikTok define o rótulo no app dele; o Bardo lembra você quando o rascunho chegar.
+   Um anúncio também precisa da divulgação comercial do TikTok, que o envio para a caixa de entrada não leva: antes de publicar o rascunho, ative **Divulgar conteúdo da publicação** no app e escolha **Sua marca** ou **Conteúdo de marca**, como a revisão diz. O TikTok não permite conteúdo de marca num post privado. Veja [Divulgação comercial](uploading.md#commercial).
 3. Escolha **Enviar à caixa de entrada do TikTok**. O Bardo manda o arquivo em partes e retoma da última que o TikTok confirmou se a conexão cair ou você parar. Depois de uma hora o TikTok esquece um envio não terminado, então retomar mais tarde manda o arquivo de novo.
 4. Quando o TikTok tem o rascunho, o post mostra **Rascunho no TikTok** com a legenda e um botão **Copiar legenda**. Abra a caixa de entrada do TikTok no app, cole a legenda, ative o rótulo de IA se for lembrado e poste (ou agende).
 5. De volta ao Bardo, escolha **Marcar como publicado** e cole o link do post, para o Bardo acompanhá-lo como qualquer outro post.

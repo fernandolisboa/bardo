@@ -58,19 +58,21 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    CostPurpose, DraftRoom, DueStep, Job, JobFailure, JobFailureKind, JobId, JobKind,
-    JobRepository, JobState, LIMIT_RECHECK, MetadataProblem, Metered, Network, NetworkAccount,
-    NetworkAccountId, NetworkAccountRepository, NetworkPost, Post, Progress, ProjectFiles,
-    Provider, Publication, PublicationId, PublicationKind, PublicationRepository, ReelFile,
-    ReelSpecProblem, Render, RenderRepository, RepositoryError, ScheduleProblem, SecretText,
-    SignInFailureKind, TIKTOK_DRAFT_WINDOW, TIKTOK_PENDING_DRAFTS, ThumbnailOutcome, TikTokFile,
-    TikTokSpecProblem, Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome,
-    UploadRun, UploadStatus, VideoProjectId, VideoState, VideoUpload, VideoUploader, Visibility,
-    check_publish_time, check_reel, check_tiktok, draft_room, due_step, mp4_layout, prepare_at,
-    video_container, x_post_model,
+    AdPostReview, CommercialDisclosure, CostPurpose, DisclosureStep, DraftRoom, DueStep, Job,
+    JobFailure, JobFailureKind, JobId, JobKind, JobRepository, JobState, LIMIT_RECHECK,
+    MetadataProblem, Metered, Network, NetworkAccount, NetworkAccountId, NetworkAccountRepository,
+    NetworkPost, Post, Progress, ProjectFiles, Provider, Publication, PublicationId,
+    PublicationKind, PublicationRepository, ReelFile, ReelSpecProblem, Render, RenderRepository,
+    RepositoryError, ScheduleProblem, SecretText, SignInFailureKind, SponsorError,
+    TIKTOK_DRAFT_WINDOW, TIKTOK_PENDING_DRAFTS, ThumbnailOutcome, TikTokFile, TikTokSpecProblem,
+    Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus,
+    VideoProjectId, VideoState, VideoUpload, VideoUploader, Visibility, check_publish_time,
+    check_reel, check_tiktok, disclosure_step, draft_room, due_step, mp4_layout, prepare_at,
+    sponsor_ids, unacknowledged, video_container, x_post_model,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::ad_publishing::AdPublishing;
 use crate::connections::Connections;
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::export::{ExportError, ExportTarget};
@@ -204,6 +206,25 @@ pub struct UploadReview {
     /// What was reviewed (render, cut, post, publication replaced), to
     /// tell when it changed.
     stamp: String,
+    /// An ad's commercial disclosure and what the user acknowledges before
+    /// it goes out (#282); `None` for any other project.
+    pub ad: Option<AdPublishing>,
+    /// The YouTube Studio page of the uploaded video, where the user can
+    /// check its *Includes paid promotion*: for a YouTube post uploaded as
+    /// a paid partnership; `None` otherwise.
+    pub studio_link: Option<String>,
+}
+
+/// What the user picked in an ad's upload review (#282), beside
+/// [`UploadChoices`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AdUploadChoices {
+    /// The commercial disclosure; `None` keeps the review's default.
+    pub disclosure: Option<CommercialDisclosure>,
+    /// The brand accounts of a paid-partnership Reel, as typed.
+    pub sponsors: String,
+    /// The keys of the review's items the user acknowledged.
+    pub acknowledged: Vec<String>,
 }
 
 impl UploadReview {
@@ -349,6 +370,12 @@ pub enum UploadReviewError {
     /// asks, with the estimate, and the user confirms or not.
     #[error("the post would reach the budget")]
     OverBudget(SpendEstimate),
+    /// An ad's review asks for acknowledgements the user did not give.
+    #[error("the ad's review is not acknowledged")]
+    NotAcknowledged,
+    /// The brand accounts typed for a paid-partnership Reel are not usable.
+    #[error("the brand accounts are not usable: {0}")]
+    Sponsors(SponsorError),
     #[error(transparent)]
     Job(#[from] JobActionError),
     #[error(transparent)]
@@ -368,6 +395,8 @@ impl UploadReviewError {
             UploadReviewError::CoverPastEnd => Text::UploadCoverPastEnd,
             UploadReviewError::PrivacyNotAccepted => Text::PrivacyNotAccepted,
             UploadReviewError::OverBudget(_) => Text::BudgetReachedTitle,
+            UploadReviewError::NotAcknowledged => Text::AdNotAcknowledged,
+            UploadReviewError::Sponsors(error) => Text::SponsorError(*error),
             UploadReviewError::NoSchedule
             | UploadReviewError::NotNow
             | UploadReviewError::Job(_)
@@ -598,6 +627,13 @@ struct UploadPayload {
     /// has the video (YouTube).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     thumbnail: Option<String>,
+    /// An ad's paid-partnership label, sent where the network takes it
+    /// with the upload (#282).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    paid_partnership: bool,
+    /// The brand accounts a paid-partnership Reel names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sponsors: Vec<String>,
 }
 
 /// Whether an upload job's payload sends the thumbnail picture `file`.
@@ -622,6 +658,8 @@ impl UploadPayload {
             publish_at: self.publish_at.map(from_millis),
             share_to_feed: self.share_to_feed,
             cover: Duration::from_millis(self.cover_ms),
+            paid_partnership: self.paid_partnership,
+            sponsors: self.sponsors.clone(),
         })
     }
 }
@@ -729,6 +767,11 @@ fn failure_of(error: &UploadError, network: Network) -> (JobFailure, Option<Uplo
         UploadErrorKind::NotAllowed => (
             JobFailureKind::NotAllowed,
             Some(UploadFailure::Job(JobFailureKind::NotAllowed)),
+        ),
+        // The network's own reason for refusing the label, as it said it.
+        UploadErrorKind::LabelRefused => (
+            JobFailureKind::NotAllowed,
+            Some(UploadFailure::Rejected(error.detail.clone())),
         ),
         UploadErrorKind::RateLimited
         | UploadErrorKind::NetworkDown
@@ -2136,14 +2179,14 @@ impl Bardo {
         &self,
         project: VideoProjectId,
         network: Network,
-    ) -> Result<(ExportTarget, bool), UploadReviewError> {
+    ) -> Result<(ExportTarget, bool, Option<AdPublishing>), UploadReviewError> {
         let view = self.export_view(project)?;
         let target = view
             .targets
             .into_iter()
             .find(|target| target.network == network)
             .ok_or(UploadReviewError::NoAccount)?;
-        Ok((target, view.disclosure))
+        Ok((target, view.disclosure, view.ad))
     }
 
     /// The upload review of the project's account on `network`.
@@ -2152,7 +2195,7 @@ impl Bardo {
         project: VideoProjectId,
         network: Network,
     ) -> Result<UploadReview, UploadReviewError> {
-        let (target, synthetic) = self.upload_target(project, network)?;
+        let (target, synthetic, ad) = self.upload_target(project, network)?;
         let account = self
             .network_accounts
             .get(target.account)?
@@ -2210,7 +2253,7 @@ impl Bardo {
             },
             false => None,
         };
-        let stamp = format!(
+        let mut stamp = format!(
             "{}|{}|{}|{}|{synthetic}|{channel}|{destination}|{}",
             target
                 .render
@@ -2228,6 +2271,26 @@ impl Bardo {
                 .map(|(file, _)| file.as_str())
                 .unwrap_or_default(),
         );
+        // An ad's default disclosure and items too: a change to either needs
+        // a new review. Any other project's stamp is as before.
+        if let Some(ad) = &ad {
+            stamp.push('|');
+            stamp.push_str(&ad.stamp());
+        }
+        let studio_link = match replaces.as_ref() {
+            Some(publication) if network == Network::YouTube && publication.upload().is_some() => {
+                match (
+                    publication.post_id(),
+                    self.publications.ad_review(publication.id)?,
+                ) {
+                    (Some(video), Some(review)) if review.disclosure.is_paid() => {
+                        Some(Bardo::studio_link(video))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
         let cost = match (&post, network.bills_posts()) {
             (Some(post), true) => {
                 let text = post.text.as_deref().unwrap_or_default();
@@ -2257,6 +2320,8 @@ impl Bardo {
             spec_problems,
             drafts_free_at,
             stamp,
+            ad,
+            studio_link,
         })
     }
 
@@ -2368,6 +2433,20 @@ impl Bardo {
         review: &UploadReview,
         choices: UploadChoices,
     ) -> Result<JobId, UploadReviewError> {
+        self.start_ad_upload(review, choices, &AdUploadChoices::default())
+    }
+
+    /// [`Bardo::start_upload`] for an ad (#282), with its commercial
+    /// disclosure, the brand accounts of a paid-partnership Reel and the
+    /// review's items the user acknowledged: an ad with any left out does
+    /// not start. The label goes where the network takes it with the
+    /// upload, and the review is kept with the publication.
+    pub fn start_ad_upload(
+        &self,
+        review: &UploadReview,
+        choices: UploadChoices,
+        ad_choices: &AdUploadChoices,
+    ) -> Result<JobId, UploadReviewError> {
         if review.network == Network::YouTube && !self.profile.accepted_privacy() {
             return Err(UploadReviewError::PrivacyNotAccepted);
         }
@@ -2382,6 +2461,30 @@ impl Bardo {
         if now.replaces.is_some() && !choices.replace {
             return Err(UploadReviewError::ReplaceNotConfirmed);
         }
+        let ad_review = match &now.ad {
+            None => None,
+            Some(ad) => {
+                if !unacknowledged(&ad.items, &ad_choices.acknowledged).is_empty() {
+                    return Err(UploadReviewError::NotAcknowledged);
+                }
+                let disclosure = ad_choices.disclosure.unwrap_or(ad.disclosure);
+                let sent = disclosure_step(now.network, disclosure) == DisclosureStep::Sent;
+                let sponsors = match (sent, now.network) {
+                    (true, Network::InstagramReels) => {
+                        sponsor_ids(&ad_choices.sponsors).map_err(UploadReviewError::Sponsors)?
+                    }
+                    _ => Vec::new(),
+                };
+                Some(AdPostReview {
+                    disclosure,
+                    sponsors,
+                    acknowledged: ad.keys(),
+                })
+            }
+        };
+        let paid_partnership = ad_review.as_ref().is_some_and(|review| {
+            disclosure_step(now.network, review.disclosure) == DisclosureStep::Sent
+        });
         let (Some(render), Some(post), Some(size)) = (&now.render, &now.post, now.size) else {
             return Err(UploadReviewError::Changed);
         };
@@ -2444,6 +2547,11 @@ impl Bardo {
                 .as_ref()
                 .filter(|_| choices.thumbnail)
                 .map(|(file, _)| file.clone()),
+            paid_partnership,
+            sponsors: ad_review
+                .as_ref()
+                .map(|review| review.sponsors.clone())
+                .unwrap_or_default(),
         };
         let job = match starts_at {
             Some(at) => Job::scheduled(self.profile.id, JobKind::Upload, to_json(&payload), at),
@@ -2470,6 +2578,14 @@ impl Bardo {
             insights_id: None,
         };
         self.publications.save_publication(&publication)?;
+        if let Some(review) = &ad_review
+            && let Err(error) = self.publications.save_ad_review(publication.id, review)
+        {
+            if let Err(error) = self.publications.remove_publication(publication.id) {
+                tracing::warn!("could not remove the unreviewed upload: {error}");
+            }
+            return Err(error.into());
+        }
         match self.jobs.enqueue(job) {
             Ok(id) => {
                 tracing::info!(network = now.network.code(), "queued an upload");
@@ -3359,6 +3475,8 @@ pub(crate) mod tests {
                 publish_at: None,
                 share_to_feed: true,
                 cover: Duration::ZERO,
+                paid_partnership: false,
+                sponsors: Vec::new(),
             }]
         );
         assert!(

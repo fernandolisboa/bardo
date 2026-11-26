@@ -15,6 +15,10 @@
 //! - 500, 502, 503 and 504 are worth resuming after a wait; the job queue
 //!   waits and resumes. `quotaExceeded` (the project's 100 uploads a day)
 //!   is not.
+//! - An ad's paid partnership also sends the part
+//!   `paidProductPlacementDetails` with `hasPaidProductPlacement: true`
+//!   (YouTube's *Includes paid promotion*); any other video is sent as
+//!   before.
 //! - A scheduled upload goes `private` with `status.publishAt` (ISO 8601);
 //!   YouTube makes it public at that time, and publishes a past time at
 //!   once, so a session never starts once the time passed.
@@ -133,8 +137,15 @@ impl<T: Transport> YouTubeUploader<T> {
                 "the publish time passed before the upload started",
             ));
         }
+        // A paid partnership also declares its paid product placement,
+        // which YouTube shows as *Includes paid promotion*.
+        let parts = if video.paid_partnership {
+            "snippet,status,paidProductPlacementDetails"
+        } else {
+            "snippet,status"
+        };
         let url = format!(
-            "{}/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+            "{}/upload/youtube/v3/videos?uploadType=resumable&part={parts}",
             self.endpoints.api
         );
         let request = HttpRequest::post_json(url, resource(video).to_string())
@@ -478,14 +489,18 @@ fn resource(video: &VideoUpload) -> Value {
         status["privacyStatus"] = json!(Visibility::Private.code());
         status["publishAt"] = json!(Rfc3339(at).to_string());
     }
-    json!({
+    let mut resource = json!({
         "snippet": {
             "title": video.title,
             "description": video.description,
             "tags": video.tags,
         },
         "status": status,
-    })
+    });
+    if video.paid_partnership {
+        resource["paidProductPlacementDetails"] = json!({ "hasPaidProductPlacement": true });
+    }
+    resource
 }
 
 fn unexpected(detail: &str) -> UploadError {

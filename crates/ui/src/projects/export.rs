@@ -24,7 +24,7 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{Sizable as _, StyledExt as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, ClipboardItem, SharedString, Window, div, px};
 
@@ -216,7 +216,7 @@ impl ProjectsScreen {
     }
 
     /// Whether the fields differ from the stored metadata.
-    fn metadata_dirty(&self, cx: &App) -> bool {
+    pub(super) fn metadata_dirty(&self, cx: &App) -> bool {
         self.metadata_loaded
             .as_ref()
             .is_some_and(|(_, stored)| *stored != self.metadata_draft(cx))
@@ -436,7 +436,15 @@ impl ProjectsScreen {
             return;
         };
         let chosen = self.chosen_networks();
-        match self.bardo.read(cx).start_export(view, &chosen) {
+        let started = match &view.ad {
+            // An ad goes with the items acknowledged on the stage.
+            Some(_) => self
+                .bardo
+                .read(cx)
+                .start_ad_export(view, &chosen, &self.ad_acknowledged),
+            None => self.bardo.read(cx).start_export(view, &chosen),
+        };
+        match started {
             Ok(_) => {
                 self.export_choices.clear();
                 self.export_error = None;
@@ -485,6 +493,10 @@ impl ProjectsScreen {
         parts.toolbar = Some(self.export_toolbar(view, cx));
         parts.notices.extend(self.export_notices(view, cx));
         parts.collection = Some(self.export_targets(view, cx));
+        if let Some(ad) = &view.ad {
+            let writing = is_running(view.metadata_job.as_ref());
+            parts.content.push(self.ad_review_card(ad, writing, cx));
+        }
         parts.inspector = self
             .shown_network(view)
             .map(|target| self.network_inspector(view, target, cx));
@@ -665,10 +677,21 @@ impl ProjectsScreen {
         // An export writes the stored metadata: unsaved edits are saved or
         // reverted first.
         if chosen > 0 && !rendering && !self.metadata_dirty(cx) {
+            // An ad's items are acknowledged first, in its card below.
+            let ad_left = view.ad.as_ref().map_or(0, |ad| self.ad_left(ad));
+            if ad_left > 0 {
+                row = row.child(
+                    div()
+                        .text_sm()
+                        .text_color(look(cx).tokens.text2)
+                        .child(tr(bardo, Text::AdNotAcknowledged)),
+                );
+            }
             row = row.child(
                 Button::new("export-start")
                     .small()
                     .primary()
+                    .disabled(ad_left > 0)
                     .label(SharedString::from(
                         bardo.text_with(Text::ExportStart, &[("n", &chosen.to_string())]),
                     ))

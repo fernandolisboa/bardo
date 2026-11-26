@@ -45,6 +45,8 @@ fn video() -> VideoUpload {
         publish_at: None,
         share_to_feed: true,
         cover: Duration::ZERO,
+        paid_partnership: false,
+        sponsors: Vec::new(),
     }
 }
 

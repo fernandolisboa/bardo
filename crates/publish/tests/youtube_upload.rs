@@ -41,6 +41,8 @@ fn video() -> VideoUpload {
         publish_at: None,
         share_to_feed: true,
         cover: Duration::ZERO,
+        paid_partnership: false,
+        sponsors: Vec::new(),
     }
 }
 
@@ -195,6 +197,46 @@ fn a_new_upload_starts_a_session_and_sends_the_file_in_chunks() {
         .flat_map(|chunk| chunk.bytes.clone())
         .collect();
     assert_eq!(all, run.file, "every byte once, in order");
+}
+
+#[test]
+fn a_paid_partnership_declares_its_paid_promotion_and_others_do_not() {
+    let paid = uploader(&[
+        "session-started",
+        "chunk-incomplete-1",
+        "chunk-incomplete-2",
+        "upload-complete",
+    ]);
+    let paid_video = VideoUpload {
+        paid_partnership: true,
+        ..video()
+    };
+    paid.upload(&paid_video, &mut FakeRun::new()).unwrap();
+    let start = &paid.transport().sent()[0];
+    assert!(
+        start
+            .url
+            .ends_with("&part=snippet,status,paidProductPlacementDetails"),
+        "{}",
+        start.url
+    );
+    let body: serde_json::Value = serde_json::from_str(&start.body).unwrap();
+    assert_eq!(
+        body["paidProductPlacementDetails"],
+        serde_json::json!({ "hasPaidProductPlacement": true })
+    );
+
+    let plain = uploader(&[
+        "session-started",
+        "chunk-incomplete-1",
+        "chunk-incomplete-2",
+        "upload-complete",
+    ]);
+    plain.upload(&video(), &mut FakeRun::new()).unwrap();
+    let start = &plain.transport().sent()[0];
+    assert!(start.url.ends_with("&part=snippet,status"), "{}", start.url);
+    let body: serde_json::Value = serde_json::from_str(&start.body).unwrap();
+    assert!(body.get("paidProductPlacementDetails").is_none());
 }
 
 #[test]

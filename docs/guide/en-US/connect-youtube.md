@@ -93,6 +93,8 @@ While the upload runs, Bardo refuses to render the project, since the render wou
 
 Bardo checks on YouTube's processing for about an hour. If YouTube is still processing the video after that, the post shows **Still processing**; select **Check again** later.
 
+An ad uploaded as a **Paid partnership** goes with its paid product placement declared, which YouTube shows as **Includes paid promotion** under the video's Details; once the video is up, **Open in YouTube Studio** lets you check it. See [Commercial disclosure](uploading.md#commercial).
+
 Pasting a post's link over an uploaded video asks first, and replaces the upload in Bardo only; the video stays on YouTube.
 
 <a id="schedule"></a>
