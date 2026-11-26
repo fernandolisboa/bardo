@@ -1867,7 +1867,11 @@ impl ProjectsScreen {
             header.trail = vec![
                 div()
                     .w(px(200.))
-                    .child(Select::new(&self.channel_select).xsmall())
+                    .child(kit::channel_pick(
+                        Select::new(&self.channel_select).xsmall(),
+                        &self.channels,
+                        cx,
+                    ))
                     .into_any_element(),
             ];
             return header;
@@ -1948,7 +1952,11 @@ impl ProjectsScreen {
             tr(bardo, Text::DestinationName(Destination::Projects)).into_any_element(),
             div()
                 .w(px(200.))
-                .child(Select::new(&self.channel_select).xsmall())
+                .child(kit::channel_pick(
+                    Select::new(&self.channel_select).xsmall(),
+                    &self.channels,
+                    cx,
+                ))
                 .into_any_element(),
         ];
         let mut meta = format!(

@@ -276,7 +276,7 @@ impl ProjectList {
         let (mut opened, never): (Vec<_>, Vec<_>) = rest
             .into_iter()
             .partition(|project| project.opened_at.is_some());
-        opened.sort_by(|a, b| b.opened_at.cmp(&a.opened_at));
+        opened.sort_by_key(|project| std::cmp::Reverse(project.opened_at));
         let older = opened.split_off(opened.len().min(Self::RECENT));
         let mut all: Vec<Project> = older.into_iter().chain(never).collect();
         all.sort_by(|a, b| {

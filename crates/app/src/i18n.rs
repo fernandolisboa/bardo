@@ -74,6 +74,7 @@ pub enum Text {
     ChannelNotFound,
     ChannelNotSaved,
     ChannelFieldError(ChannelFieldError),
+    CostsUnknownProject,
     SwitcherNoProject,
     SwitcherSearch,
     SwitcherFavorites,
@@ -3097,6 +3098,7 @@ impl Text {
     fn key(self) -> Cow<'static, str> {
         let key = match self {
             Text::AppName => "app.name",
+            Text::CostsUnknownProject => "project_spend.unknown",
             Text::SwitcherNoProject => "project_switcher.no_project",
             Text::SwitcherSearch => "project_switcher.search",
             Text::SwitcherFavorites => "project_switcher.favorites",
@@ -6752,6 +6754,7 @@ mod tests {
     fn all_texts() -> Vec<Text> {
         let mut texts = vec![
             Text::AppName,
+            Text::CostsUnknownProject,
             Text::SwitcherNoProject,
             Text::SwitcherSearch,
             Text::SwitcherFavorites,

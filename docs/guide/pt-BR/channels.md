@@ -13,7 +13,7 @@ Um canal é um nicho para um mercado: um assunto, um idioma, um país e um narra
 <a id="list"></a>
 ## Seus canais
 
-A lista mostra cada canal com o nicho e o país. Escolha um para editá-lo ao lado da lista; **Novo canal** limpa o formulário para um canal novo. **Criar canal** (ou **Salvar alterações**) confere o formulário e diz, embaixo de cada campo, o que ainda falta.
+A lista mostra cada canal com o nicho e o país. Escolha um para editá-lo ao lado da lista; **Novo canal** limpa o formulário para um canal novo. **Criar canal** (ou **Salvar alterações**) confere o formulário e diz, embaixo de cada campo, o que ainda falta. Um canal pertence a um [projeto](your-projects.md); **Mover para outro projeto…**, embaixo do formulário, passa o canal para outro ([O projeto dele](#project)).
 
 <a id="niche"></a>
 ## Nicho e temas
@@ -89,6 +89,11 @@ Alguns modelos de vídeo só fazem clipes de poucas durações fixas, como 5 ou 
 - **Esticar um clipe em até**: quanto um clipe pode durar além da duração com que foi feito, de 5% a 100%, de 5 em 5, e 40% a menos que você mude. Com 40%, um clipe de 5 segundos cobre uma cena de até 7 segundos, e uma cena mais longa leva a duração seguinte. Um limite menor deixa o movimento mais perto do que o modelo fez e paga mais segundos; um maior desacelera mais e paga menos. Só aparece enquanto os clipes ficam em câmera lenta.
 
 Modelos que aceitam qualquer duração dentro de uma faixa não mudam: os clipes deles são feitos com a duração da cena. As duas escolhas valem para os próximos clipes; um clipe já feito continua tocando do jeito em que foi feito ([Clipes em câmera lenta](clips.md#stretch)).
+
+<a id="project"></a>
+## O projeto dele
+
+Um canal em edição mostra, embaixo do formulário, o [projeto](your-projects.md) a que pertence. **Mover para outro projeto…** escolhe o projeto para onde ele vai, e o canal leva junto as ideias, os vídeos, as contas nas redes e a mídia; depois disso ele sai das telas deste projeto. O Bardo diz o que impede a mudança enquanto uma publicação espera o horário, uma tarefa do canal está na fila ou em andamento, ou um vídeo dele tem uma versão localizada em outro canal do projeto: veja [Mover um canal](your-projects.md#move).
 
 <a id="accounts"></a>
 ## Depois: as contas de rede

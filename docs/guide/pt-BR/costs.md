@@ -50,3 +50,8 @@ Uma geração que chamaria um modelo sem preço pergunta antes de começar e diz
 ## Os vídeos mais caros
 
 **Vídeos mais caros** lista os projetos de vídeo que mais custaram no mês, com o canal de cada um. Um vídeo que você removeu continua aqui como **Vídeo removido**, porque as chamadas dele foram pagas.
+
+<a id="projects"></a>
+## Gasto por projeto
+
+**Por projeto** mostra quanto cada [projeto](your-projects.md) gastou no mês, com a cor dele; chamadas feitas para nenhum projeto, como a amostra de voz de uma persona, contam como **Fora de projetos**. O filtro **Projeto** embaixo escolhe de quem são os canais e vídeos que **Por canal** e **Vídeos mais caros** mostram. Ele começa no projeto aberto; os números do topo e os orçamentos continuam sendo do perfil inteiro, porque os provedores cobram o perfil. Um custo guarda os nomes do projeto, do canal e do vídeo para que foi, como eram quando foi pago.

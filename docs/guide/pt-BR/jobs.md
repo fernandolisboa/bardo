@@ -15,6 +15,11 @@ Trabalho longo roda como **tarefa**: pesquisa, roteiro, narração, imagens, cli
 
 **Tarefas** na navegação abre um painel ao lado da tela em que você está (por cima do lado direito dela, numa janela estreita), e fecha de novo; a linha ao lado diz quantas tarefas estão rodando ou esperando. O painel agrupa as tarefas em **Em execução**, **Na fila**, **Com falha** e **Encerradas**, cada cartão com o que a tarefa faz e onde ela está. Uma tarefa que espera a hora dela, como um post agendado, diz quando sai.
 
+<a id="filter"></a>
+## Tarefas por projeto
+
+As tarefas rodam para o perfil inteiro, seja qual for o [projeto](your-projects.md) aberto. O filtro **Projeto** no alto do painel mostra as tarefas de um projeto, as que não são de nenhum projeto (um backup, uma atualização, a voz de uma persona) ou todas; ele começa no projeto aberto. Cada cartão diz o projeto, o canal e o vídeo da tarefa, com os nomes que tinham quando ela entrou na fila. A contagem ao lado de **Tarefas** na navegação continua sendo do perfil inteiro.
+
 <a id="progress"></a>
 ## Progresso
 

@@ -163,7 +163,7 @@ impl Bardo {
             return Err(ProjectError::NotFound);
         }
         self.projects.mark_opened(id, SystemTime::now())?;
-        Ok(self.profile_project(id)?)
+        self.profile_project(id)
     }
 
     fn profile_project(&self, id: ProjectId) -> Result<Project, ProjectError> {

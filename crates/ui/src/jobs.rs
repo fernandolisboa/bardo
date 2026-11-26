@@ -7,11 +7,12 @@ use std::time::Duration;
 
 use bardo_app::bardo_domain::{Job, JobId, JobState, Progress as JobProgress};
 use bardo_app::{
-    Bardo, BudgetConsent, Control, JobActionError, JobGroups, Side, SpendEstimate, TestJob, Text,
-    TourAnchor,
+    Bardo, BudgetConsent, Control, JobActionError, JobGroups, ProjectFilter, Side, SpendEstimate,
+    TestJob, Text, TourAnchor,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::progress::Progress;
+use gpui_kit::component::select::{Select, SelectEvent};
 use gpui_kit::component::{
     ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
@@ -22,7 +23,7 @@ use gpui_kit::{
 
 use crate::appearance::look;
 use crate::guide;
-use crate::kit::{self, Tone};
+use crate::kit::{self, FilterChoice, FilterSelect, Tone};
 use crate::shell::tr;
 use crate::spend::budget_question;
 use crate::tour::Anchored as _;
@@ -33,7 +34,12 @@ const POLL_EVERY: Duration = Duration::from_millis(100);
 
 pub struct JobsPanel {
     bardo: Entity<Bardo>,
+    /// The jobs the filter keeps.
     groups: JobGroups,
+    /// Jobs running or waiting in the whole profile, whatever the filter.
+    active: usize,
+    filter: ProjectFilter,
+    filter_select: FilterSelect,
     revision: u64,
     error: Option<Text>,
     /// The job whose retry waits for an answer about its cost, with the
@@ -46,7 +52,7 @@ pub struct JobsPanel {
 }
 
 impl JobsPanel {
-    pub fn new(bardo: Entity<Bardo>, cx: &mut Context<Self>) -> Self {
+    pub fn new(bardo: Entity<Bardo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -55,15 +61,41 @@ impl JobsPanel {
                 }
             }
         });
+        let filter = bardo.read(cx).starting_filter();
+        let choices = kit::filter_choices(bardo.read(cx));
+        let filter_select = kit::filter_select(choices, filter, window, cx);
         // Labels follow the interface language.
-        let subscriptions = vec![cx.observe(&bardo, |_, _, cx| cx.notify())];
-        let (groups, revision) = {
+        let subscriptions = vec![
+            cx.observe(&bardo, |_, _, cx| cx.notify()),
+            cx.subscribe(
+                &filter_select,
+                |this,
+                 _,
+                 event: &SelectEvent<
+                    gpui_kit::component::searchable_list::SearchableVec<FilterChoice>,
+                >,
+                 cx| {
+                    if let SelectEvent::Confirm(Some(filter)) = event {
+                        this.filter = *filter;
+                        this.regroup(cx);
+                    }
+                },
+            ),
+        ];
+        let (groups, active, revision) = {
             let bardo = bardo.read(cx);
-            (bardo.job_groups(), bardo.jobs_revision())
+            (
+                bardo.job_groups_for(filter),
+                bardo.job_groups().active(),
+                bardo.jobs_revision(),
+            )
         };
         Self {
             bardo,
             groups,
+            active,
+            filter,
+            filter_select,
             revision,
             error: None,
             asking: None,
@@ -73,16 +105,34 @@ impl JobsPanel {
         }
     }
 
-    /// Jobs still running or waiting, for the badge on the panel's toggle.
+    /// Jobs still running or waiting in the whole profile, for the badge
+    /// on the panel's toggle.
     pub fn active(&self) -> usize {
-        self.groups.active()
+        self.active
+    }
+
+    /// Another project opened: the filter starts on it, and lists the
+    /// projects as they are now.
+    pub fn project_switched(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.filter = self.bardo.read(cx).starting_filter();
+        let choices = kit::filter_choices(self.bardo.read(cx));
+        kit::refill_filter(&self.filter_select, choices, self.filter, window, cx);
+        self.regroup(cx);
+    }
+
+    fn regroup(&mut self, cx: &mut Context<Self>) {
+        let bardo = self.bardo.read(cx);
+        self.groups = bardo.job_groups_for(self.filter);
+        self.active = bardo.job_groups().active();
+        cx.notify();
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let bardo = self.bardo.read(cx);
         let revision = bardo.jobs_revision();
         if revision != self.revision {
-            self.groups = bardo.job_groups();
+            self.groups = bardo.job_groups_for(self.filter);
+            self.active = bardo.job_groups().active();
             self.revision = revision;
             // A question on screen follows the queue: what another job
             // drew or sent since is no longer asked about, and a job that
@@ -158,6 +208,24 @@ impl JobsPanel {
                 };
                 kit::status_with(tone, icon, tr(bardo, Text::JobStateName(state)), cx)
             });
+
+        // What the job is for, with the names it had then (#333).
+        let origin = job.origin();
+        let names: Vec<&str> = [
+            origin.project_name.as_deref(),
+            origin.channel_name.as_deref(),
+            origin.video_title.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let origin = (!names.is_empty()).then(|| {
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .truncate()
+                .child(SharedString::from(names.join(" · ")))
+        });
 
         // Done jobs need no bar; others show it once there is progress.
         let show_progress = state == JobState::Running
@@ -317,6 +385,7 @@ impl JobsPanel {
             .p_3()
             .gap_2()
             .child(header)
+            .children(origin)
             .children(progress)
             .children(status)
             .children(question)
@@ -472,6 +541,16 @@ impl Render for JobsPanel {
                     .px_3()
                     .pb_3()
                     .gap_4()
+                    .child(kit::anchor_in(
+                        TourAnchor::Control(Control::JobsFilter),
+                        kit::field(
+                            tr(bardo, Text::FilterProjectLabel),
+                            None,
+                            Select::new(&self.filter_select).small().into_any_element(),
+                            None,
+                        ),
+                        Some(&self.scroll),
+                    ))
                     .child(test_jobs)
                     .children(error)
                     .children(empty)

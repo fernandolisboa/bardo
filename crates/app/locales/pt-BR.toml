@@ -46,7 +46,7 @@ PT = "Portugal"
 
 [channels]
 title = "Canais"
-empty = "Nenhum canal ainda. Crie um para direcionar pesquisa e geração ao público dele."
+empty = "Este projeto ainda não tem canal. Crie um para direcionar pesquisa e geração ao público dele."
 not_loaded = "Não foi possível carregar seus canais. Reinicie o Bardo para tentar de novo."
 new = "Novo canal"
 
@@ -539,7 +539,7 @@ not_byteplus_credentials = "Preencha os cinco campos da BytePlus."
 
 [research]
 title = "Pesquisa"
-no_channels = "Crie um canal primeiro. A pesquisa usa o país-alvo e o idioma do conteúdo dele."
+no_channels = "Este projeto ainda não tem canal. Crie um em Canais antes: a pesquisa usa o país-alvo e o idioma do conteúdo dele."
 channel = "Canal"
 seeds = "Nichos ou palavras-chave"
 seeds_placeholder = "história espacial\nmistérios da guerra fria\ncriaturas do fundo do mar"
@@ -577,7 +577,7 @@ seed_too_long = "Use no máximo 100 caracteres por nicho."
 
 [themes]
 title = "Temas"
-no_channels = "Crie um canal primeiro. As ideias são escritas para o nicho, o público e o estilo dele."
+no_channels = "Este projeto ainda não tem canal. Crie um em Canais antes: as ideias são escritas para o nicho, o público e o estilo dele."
 channel = "Canal"
 niche = "Nicho"
 no_niche = "Dê um nicho ao canal, ou pesquise nichos para ele primeiro."
@@ -642,7 +642,7 @@ nav = "Projetos"
 title = "Projetos de vídeo"
 empty = "Aprove uma ideia em Temas, ou um ângulo de anúncio em Produtos, para começar um projeto de vídeo."
 started = "Projeto de vídeo iniciado: {title}"
-no_channels = "Crie um canal e aprove um dos temas dele para começar um projeto de vídeo."
+no_channels = "Este projeto ainda não tem canal. Crie um em Canais e aprove um dos temas dele para começar um projeto de vídeo."
 narrator = "Narrador"
 narrator_channel = "Padrão do canal: {name}"
 narrator_channel_none = "Padrão do canal (nenhuma definida)"
@@ -2391,7 +2391,7 @@ insights_pending = "Os números do {network} chegam na próxima sincronização.
 [performance]
 info = "Como as publicações do canal se saem. Vincule publicações na etapa Publicação de um projeto. As do YouTube sincronizam os números públicos e, com a conta do canal conectada, também tempo de exibição, retenção e receita. As do Instagram e do TikTok sincronizam seus números quando a conta do canal nessa rede está conectada. As do X e do Kick guardam o link."
 empty = "Nenhuma publicação vinculada neste canal ainda. Marque uma exportação como publicada na etapa Publicação de um projeto."
-no_channels = "Crie um canal para acompanhar as publicações dele aqui."
+no_channels = "Este projeto ainda não tem canal. Crie um em Canais para acompanhar as publicações dele aqui."
 history_title = "Visualizações do canal ao longo do tempo"
 history_empty = "O gráfico começa depois de duas sincronizações."
 posts = "Publicações"
@@ -2894,6 +2894,10 @@ name = "Tour de boas-vindas"
 title = "Boas-vindas ao Bardo"
 body = "Em dois minutos, este tour mostra onde fica cada coisa. Avance com Próximo ou com as setas do teclado e saia quando quiser com Esc. Retomar tour, no Guia, volta para onde você parou."
 
+[tour.welcome.projects]
+title = "Seus projetos"
+body = "Um projeto reúne os canais de uma marca, com as ideias e os vídeos deles. O seletor ao lado do logo abre outro projeto, deixa à mão seus favoritos e os recentes e cria projetos novos. As telas mostram o projeto aberto."
+
 [tour.welcome.strategy]
 title = "Estratégia"
 body = "Pesquise nichos, ranqueie ideias de vídeo e veja como foram os vídeos que você publicou. É aqui que você decide o que fazer em seguida."
@@ -3355,7 +3359,7 @@ name = "Tour dos canais"
 
 [tour.channels.list]
 title = "Seus canais"
-body = "Cada canal é um nicho para um mercado. Escolha um canal para editá-lo, ou crie um em Novo canal; pesquisas, ideias, projetos e contas de rede pertencem sempre a um canal."
+body = "Os canais do projeto aberto: cada um é um nicho para um mercado. Escolha um canal para editá-lo, ou crie um em Novo canal; pesquisas, ideias, projetos de vídeo e contas de rede pertencem sempre a um canal. Embaixo do formulário de um canal, Mover para outro projeto leva o canal, com o trabalho dele, para outro dos seus projetos."
 
 [tour.channels.niche]
 title = "Nicho, temas e estética"
@@ -3520,12 +3524,20 @@ body = "Quanto os vídeos de cada canal custaram no mês. Um mês sem gastos diz
 title = "Os vídeos mais caros"
 body = "Os projetos de vídeo que mais custaram no mês, com o canal de cada um."
 
+[tour.costs.projects]
+title = "Por projeto"
+body = "Quanto cada projeto gastou no mês. O filtro escolhe de quem são os canais e vídeos das listas abaixo; ele começa no projeto aberto, e os totais e os orçamentos continuam sendo do perfil inteiro."
+
 [tour.jobs]
 name = "Tour de Tarefas"
 
 [tour.jobs.panel]
 title = "O painel Tarefas"
 body = "Trabalho longo roda como tarefa enquanto você continua trabalhando. Este painel abre ao lado de qualquer tela e agrupa as tarefas: em execução, na fila, com falha e encerradas."
+
+[tour.jobs.filter]
+title = "Filtro de projeto"
+body = "As tarefas rodam para o perfil inteiro. O filtro mostra as tarefas de um projeto, as que não são de nenhum projeto ou todas; ele começa no projeto aberto, e cada tarefa diz o projeto, o canal e o vídeo para que é."
 
 [tour.jobs.progress]
 title = "Progresso"
@@ -4116,7 +4128,7 @@ same_audience = "Escolha um canal em outro idioma ou país."
 already_made = "Esse canal já tem uma versão deste vídeo."
 no_narration = "Faça a narração primeiro: a versão adapta as frases dela."
 no_plan = "Planeje as cenas na narração atual primeiro: a versão as mantém."
-no_channel = "Nenhum outro canal fala outro idioma ou para outro país. Crie um na tela Canais."
+no_channel = "Nenhum outro canal deste projeto fala outro idioma ou para outro país. Crie um na tela Canais."
 busy = "Uma versão deste vídeo já está sendo feita, ou uma tarefa cancelada ainda está parando."
 not_saved = "Não foi possível carregar ou salvar as versões. Tente de novo."
 ad_project = "Um anúncio ainda não tem versões em outros idiomas: o produto, o briefing e as afirmações dele não são levados para outro canal. Aprove um ângulo para esse canal em Produtos."
@@ -4939,3 +4951,6 @@ scheduled_post = "Uma publicação espera o horário no Bardo. Envie agora ou ca
 held_on_network = "Uma publicação espera na rede para ficar pública no horário. Publique ou remova na rede antes."
 active_job = "Uma tarefa deste canal ou de um vídeo dele está na fila ou em andamento. Espere terminar ou cancele em Tarefas."
 version_elsewhere = "Um dos vídeos dele é versão localizada de outro canal deste projeto, ou tem uma versão lá. Versões ficam dentro de um projeto."
+
+[project_spend]
+unknown = "Projeto removido"

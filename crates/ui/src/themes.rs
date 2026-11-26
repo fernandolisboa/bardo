@@ -380,7 +380,7 @@ impl ThemesScreen {
             .gap_3()
             .child(field(
                 tr(bardo, Text::ThemesChannel),
-                Select::new(&self.channel_select).into_any_element(),
+                kit::channel_pick(Select::new(&self.channel_select), &self.channels, cx),
             ))
             .child(if has_niche {
                 field(

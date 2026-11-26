@@ -327,7 +327,11 @@ impl ResearchScreen {
                             .font_medium()
                             .child(tr(bardo, Text::ResearchChannel)),
                     )
-                    .child(Select::new(&self.channel_select))
+                    .child(kit::channel_pick(
+                        Select::new(&self.channel_select),
+                        &self.channels,
+                        cx,
+                    ))
                     .children(market.map(|market| {
                         div()
                             .text_xs()

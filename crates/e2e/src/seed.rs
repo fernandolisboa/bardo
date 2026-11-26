@@ -72,9 +72,18 @@ pub fn seed_showcase(bardo: &mut Bardo) -> anyhow::Result<Value> {
 
     let templates = Templates::first(&db, profile, now)?;
     let persona = persona(&db, profile)?;
+    // Both channels in one project, the open one; two more in the
+    // switcher, one of them a favorite.
+    let archives = project(&db, profile, "Archives", ProjectColor::Teal, now)?;
+    let kitchen = project(&db, profile, "Kitchen Lab", ProjectColor::Amber, now)?;
+    project(&db, profile, "Product Ads", ProjectColor::Violet, now)?;
+    ProjectRepository::mark_opened(&db, kitchen, now - Duration::from_secs(3600))?;
+    ProjectRepository::mark_opened(&db, archives, now)?;
+    ProjectRepository::set_favorites(&db, profile, &[kitchen])?;
     let space = channel(
         &db,
         profile,
+        archives,
         ChannelDraft {
             name: "Space Archives".into(),
             niche: "space history".into(),
@@ -89,6 +98,7 @@ pub fn seed_showcase(bardo: &mut Bardo) -> anyhow::Result<Value> {
     let sea = channel(
         &db,
         profile,
+        archives,
         ChannelDraft {
             name: "Vozes do Mar".into(),
             niche: "naufrágios".into(),
@@ -374,10 +384,32 @@ fn ad(
     Ok(())
 }
 
-fn channel(db: &Database, profile: ProfileId, draft: ChannelDraft) -> anyhow::Result<Channel> {
+fn project(
+    db: &Database,
+    profile: ProfileId,
+    name: &str,
+    color: ProjectColor,
+    at: SystemTime,
+) -> anyhow::Result<ProjectId> {
+    let details = ProjectDetails::validate(ProjectDraft {
+        name: name.into(),
+        color,
+    })
+    .map_err(|error| anyhow!("a project: {error:?}"))?;
+    let project = Project::new(profile, details, at);
+    ProjectRepository::save_project(db, &project)?;
+    Ok(project.id)
+}
+
+fn channel(
+    db: &Database,
+    profile: ProfileId,
+    project: ProjectId,
+    draft: ChannelDraft,
+) -> anyhow::Result<Channel> {
     let details =
         ChannelDetails::validate(draft).map_err(|errors| anyhow!("a channel: {errors:?}"))?;
-    let channel = Channel::new(profile, details);
+    let channel = Channel::new(profile, project, details);
     ChannelRepository::save(db, &channel)?;
     Ok(channel)
 }
@@ -526,7 +558,7 @@ fn ranked_ideas(
     now: SystemTime,
 ) -> anyhow::Result<()> {
     let past = PastPerformance::of_channel(
-        &db.projects(channel.id)?,
+        &ThemeRepository::projects(db, channel.id)?,
         &db.channel_publications(channel.id)?,
         &db.channel_snapshots(channel.id)?,
     );
@@ -1043,6 +1075,7 @@ fn spend(
                 channel: Some(channel.id),
                 project: Some(project.id),
                 job: None,
+                origin: WorkOrigin::default(),
                 at: now - Duration::from_secs(3600),
             }
         };

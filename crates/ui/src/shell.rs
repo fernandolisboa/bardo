@@ -30,6 +30,7 @@ use crate::parts::{BudgetMeter, Navigation};
 use crate::performance::{OpenRetention, PerformanceScreen};
 use crate::personas::PersonasScreen;
 use crate::products::ProductsScreen;
+use crate::project_switcher::{ProjectSwitched, ProjectSwitcher};
 use crate::projects::{OpenEditor, ProjectsScreen};
 use crate::research::ResearchScreen;
 use crate::settings::SettingsScreen;
@@ -60,6 +61,8 @@ pub struct Shell {
     templates: Entity<TemplatesScreen>,
     costs: Entity<CostsScreen>,
     settings: Entity<SettingsScreen>,
+    /// The title bar's project switcher.
+    switcher: Entity<ProjectSwitcher>,
     /// Kept alive while closed, so the navigation's count stays current.
     jobs: Entity<JobsPanel>,
     jobs_open: bool,
@@ -106,7 +109,8 @@ impl Shell {
         let templates = cx.new(|cx| TemplatesScreen::new(bardo.clone(), window, cx));
         let costs = cx.new(|cx| CostsScreen::new(bardo.clone(), window, cx));
         let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
-        let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
+        let switcher = cx.new(|cx| ProjectSwitcher::new(bardo.clone(), window, cx));
+        let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), window, cx));
         let missed = cx.new(|cx| MissedPosts::new(bardo.clone(), window, cx));
         let guide = cx.new(|cx| Guide::new(bardo.clone(), missed.clone(), cx));
         let guide_screen = cx.new(|cx| GuideScreen::new(bardo.clone(), window, cx));
@@ -118,6 +122,14 @@ impl Shell {
             cx,
         );
         let subscriptions = vec![
+            // Another project opened: every screen shows it now.
+            cx.subscribe_in(
+                &switcher,
+                window,
+                |this, _, _: &ProjectSwitched, window, cx| {
+                    this.project_switched(window, cx);
+                },
+            ),
             // A job that moved may have spent something.
             cx.observe(&jobs, |this, _, cx| {
                 if this.bardo.read(cx).jobs_revision() != this.spend_revision {
@@ -245,6 +257,7 @@ impl Shell {
             templates,
             costs,
             settings,
+            switcher,
             jobs,
             jobs_open: false,
             missed,
@@ -266,6 +279,31 @@ impl Shell {
             shell.go(GuidePlace::Settings(SettingsTab::Backup), window, cx);
         }
         shell
+    }
+
+    /// Re-reads every screen that shows the open project, and starts Jobs
+    /// and Costs on it.
+    fn project_switched(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.channels
+            .update(cx, |channels, cx| channels.reload(window, cx));
+        self.accounts
+            .update(cx, |accounts, cx| accounts.reload(window, cx));
+        self.research
+            .update(cx, |research, cx| research.reload_channels(window, cx));
+        self.themes
+            .update(cx, |themes, cx| themes.reload_channels(window, cx));
+        self.performance
+            .update(cx, |performance, cx| performance.reload(window, cx));
+        self.projects
+            .update(cx, |projects, cx| projects.reload(window, cx));
+        self.products
+            .update(cx, |products, cx| products.reload(window, cx));
+        self.costs
+            .update(cx, |costs, cx| costs.project_switched(window, cx));
+        self.jobs
+            .update(cx, |jobs, cx| jobs.project_switched(window, cx));
+        self.refresh_spend(cx);
+        cx.notify();
     }
 
     fn refresh_spend(&mut self, cx: &mut Context<Self>) {
@@ -299,7 +337,7 @@ impl Shell {
             match place {
                 Destination::Channels => self
                     .channels
-                    .update(cx, |channels, cx| channels.reload_personas(window, cx)),
+                    .update(cx, |channels, cx| channels.reload(window, cx)),
                 Destination::Accounts => self
                     .accounts
                     .update(cx, |accounts, cx| accounts.reload(window, cx)),
@@ -852,7 +890,17 @@ impl Render for Shell {
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::on_open_guide))
             .on_action(cx.listener(Self::on_tour_this_screen))
-            .child(TitleBar::new(colors).dev(dev))
+            .child(
+                TitleBar::new(colors)
+                    .dev(dev)
+                    // The editor works on one video: switching waits until
+                    // it closes.
+                    .switcher(
+                        self.editor
+                            .is_none()
+                            .then(|| self.switcher.clone().into_any_element()),
+                    ),
+            )
             .child(
                 div()
                     .relative()
