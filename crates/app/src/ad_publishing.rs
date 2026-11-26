@@ -795,6 +795,7 @@ mod tests {
         );
 
         // Once YouTube made the video, the review links its Studio page.
+        done(&app, job);
         let review = app.upload_review(project.id, Network::YouTube).unwrap();
         let uploaded = review.replaces.as_ref().unwrap();
         assert_eq!(uploaded.id, publication.id);
