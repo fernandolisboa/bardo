@@ -2,7 +2,7 @@ use bardo_domain::{
     ChannelId, Confidence, EvidenceScope, JobId, Money, Niche, PerformanceEvidence,
     PerformanceReason, PersonaId, ProductId, ProductionMode, ProfileId, Reason, RepositoryError,
     Score, SpendCap, StyleChoice, Theme, ThemeId, ThemeIdea, ThemeRanking, ThemeRecord,
-    ThemeRepository, VideoFormat, VideoLength, VideoProject, VideoProjectId,
+    ThemeRepository, VideoFormat, VideoLength, VideoProject, VideoProjectId, VideoSettings,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -247,9 +247,9 @@ pub(crate) fn upsert_theme(tx: &Transaction<'_>, theme: &Theme) -> Result<(), Re
 pub(crate) struct ProjectRow {
     id: String,
     owner: String,
-    channel: String,
+    channel: Option<String>,
     niche: String,
-    theme: String,
+    theme: Option<String>,
     title: String,
     created_at: i64,
     persona: Option<String>,
@@ -287,9 +287,15 @@ impl ProjectRow {
         Ok(VideoProject {
             id: VideoProjectId::from(uuid(&self.id)?),
             owner: ProfileId::from(uuid(&self.owner)?),
-            channel: ChannelId::from(uuid(&self.channel)?),
+            channel: self
+                .channel
+                .map(|id| uuid(&id).map(ChannelId::from))
+                .transpose()?,
             niche: niche(&self.niche)?,
-            theme: ThemeId::from(uuid(&self.theme)?),
+            theme: self
+                .theme
+                .map(|id| uuid(&id).map(ThemeId::from))
+                .transpose()?,
             title: self.title,
             created_at: from_unix_millis(self.created_at),
             persona: self
@@ -341,9 +347,9 @@ pub(crate) fn insert_project(
         params![
             project.id.to_string(),
             project.owner.to_string(),
-            project.channel.to_string(),
+            project.channel.map(|id| id.to_string()),
             project.niche.label(),
-            project.theme.to_string(),
+            project.theme.map(|id| id.to_string()),
             project.title,
             to_unix_millis(project.created_at),
             project.persona.map(|id| id.to_string()),
@@ -424,6 +430,83 @@ impl ThemeRepository for Database {
         let tx = conn.transaction().map_err(boxed)?;
         insert_project(&tx, theme, project)?;
         tx.commit().map_err(boxed)
+    }
+
+    fn start_loose(
+        &self,
+        project: &VideoProject,
+        settings: &VideoSettings,
+        folder: &std::path::Path,
+    ) -> Result<(), RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        tx.execute(
+            "INSERT INTO video_project (id, profile_id, channel_id, niche, theme_id, title,
+                                        created_at, persona_id, video_format, production_mode,
+                                        spend_cap_micros, video_length, visual_style,
+                                        spend_cap_kind, product_id, folder_name, loose_folder)
+             VALUES (?1, ?2, NULL, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, ?13,
+                     ?14)",
+            params![
+                project.id.to_string(),
+                project.owner.to_string(),
+                project.niche.label(),
+                project.title,
+                to_unix_millis(project.created_at),
+                project.persona.map(|id| id.to_string()),
+                project.format.map(VideoFormat::code),
+                project.production.map(ProductionMode::code),
+                project.spend_cap.own().map(micros).transpose()?,
+                project.length.map(VideoLength::code),
+                project.style.map(StyleChoice::code),
+                project.spend_cap.code(),
+                bardo_domain::video_folder_name(&project.title, project.id),
+                crate::folders::path_text(folder),
+            ],
+        )
+        .map_err(boxed)?;
+        crate::channel::save_video_settings(&tx, &project.id.to_string(), settings)?;
+        tx.commit().map_err(boxed)
+    }
+
+    fn loose_projects(&self, owner: ProfileId) -> Result<Vec<VideoProject>, RepositoryError> {
+        let rows = self
+            .conn()
+            .prepare_cached(&format!(
+                "{SELECT_PROJECT} WHERE profile_id = ?1 AND channel_id IS NULL
+                 ORDER BY created_at DESC"
+            ))
+            .and_then(|mut statement| {
+                statement
+                    .query_map([owner.to_string()], ProjectRow::read)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .map_err(boxed)?;
+        rows.into_iter().map(ProjectRow::into_project).collect()
+    }
+
+    fn video_settings(&self, id: VideoProjectId) -> Result<Option<VideoSettings>, RepositoryError> {
+        crate::channel::video_settings(&self.conn(), &id.to_string())
+    }
+
+    fn move_loose(&self, id: VideoProjectId, channel: ChannelId) -> Result<(), RepositoryError> {
+        let changed = self
+            .conn()
+            .execute(
+                "UPDATE video_project SET channel_id = ?2
+                 WHERE id = ?1 AND channel_id IS NULL
+                   AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ?2
+                               AND c.profile_id = video_project.profile_id)",
+                params![id.to_string(), channel.to_string()],
+            )
+            .map_err(boxed)?;
+        if changed == 1 {
+            Ok(())
+        } else {
+            Err(invalid(
+                "only a loose video moves to a channel of its profile",
+            ))
+        }
     }
 
     fn projects(&self, channel: ChannelId) -> Result<Vec<VideoProject>, RepositoryError> {
@@ -593,6 +676,83 @@ mod tests {
             position,
             Some(JobId::new()),
         )
+    }
+
+    fn loose_settings(title: &str) -> (ThemeIdea, VideoSettings) {
+        let idea = ThemeIdea::new(title, "Told with a coin").unwrap();
+        let source = ChannelDetails::validate(ChannelDraft {
+            name: "Céu Profundo".into(),
+            niche: "space history".into(),
+            aesthetic_notes: "Ink on paper".into(),
+            language: bardo_domain::ContentLanguage::Portuguese,
+            country: bardo_domain::Country::Brazil,
+            format: VideoFormat::Long,
+            ..ChannelDraft::default()
+        })
+        .unwrap();
+        let settings = VideoSettings::starting(&idea, Some(&source), |_| true);
+        (idea, settings)
+    }
+
+    #[test]
+    fn a_loose_video_keeps_its_settings_and_lists_apart_from_channels() {
+        let (db, channel) = setup();
+        let (idea, settings) = loose_settings("Why the Moon drifts away");
+        let video = bardo_domain::loose_video(channel.owner, &idea, &settings, time(1_800_000_100));
+        let folder = std::path::Path::new("/docs/Bardo/Global/Loose videos");
+        db.start_loose(&video, &settings, folder).unwrap();
+
+        assert_eq!(db.project(video.id).unwrap(), Some(video.clone()));
+        assert_eq!(
+            db.loose_projects(channel.owner).unwrap(),
+            std::slice::from_ref(&video)
+        );
+        assert!(db.projects(channel.id).unwrap().is_empty());
+        assert_eq!(db.video_settings(video.id).unwrap(), Some(settings.clone()));
+        assert_eq!(
+            bardo_domain::VideoFolders::video_folder_path(&db, video.id),
+            Some(folder.join(bardo_domain::video_folder_name(&video.title, video.id)))
+        );
+
+        // Moved into a project: it has the channel and keeps its settings.
+        db.move_loose(video.id, channel.id).unwrap();
+        let moved = db.project(video.id).unwrap().unwrap();
+        assert_eq!(moved.channel, Some(channel.id));
+        assert_eq!(moved.theme, None);
+        assert!(db.loose_projects(channel.owner).unwrap().is_empty());
+        assert_eq!(db.projects(channel.id).unwrap(), [moved]);
+        assert_eq!(db.video_settings(video.id).unwrap(), Some(settings));
+        // Its media waits for the move, from the loose videos' folder.
+        let to_move = bardo_domain::FolderRepository::videos_to_move(&db, channel.owner).unwrap();
+        let waiting = to_move.iter().find(|v| v.video == video.id).unwrap();
+        assert_eq!(waiting.to, channel.project);
+        assert_eq!(
+            waiting.from_loose.as_deref(),
+            Some(folder.join(waiting.folder_name()).as_path())
+        );
+        bardo_domain::FolderRepository::set_video_folder(
+            &db,
+            video.id,
+            channel.project,
+            &waiting.folder_name(),
+        )
+        .unwrap();
+        assert_eq!(
+            bardo_domain::FolderRepository::loose_folder(&db, video.id).unwrap(),
+            None
+        );
+        // A video moves to a channel once.
+        assert!(db.move_loose(video.id, channel.id).is_err());
+    }
+
+    #[test]
+    fn a_channel_s_video_has_no_settings_of_its_own() {
+        let (db, channel) = setup();
+        let mut t = theme(&channel, "Apollo 11", 0);
+        let project = t.approve(time(1_800_000_050)).unwrap();
+        db.start_project(&t, &project).unwrap();
+        assert_eq!(db.video_settings(project.id).unwrap(), None);
+        assert!(db.loose_projects(channel.owner).unwrap().is_empty());
     }
 
     fn ranking() -> ThemeRanking {

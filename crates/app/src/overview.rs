@@ -309,7 +309,7 @@ impl Bardo {
         let archived = self.archived_videos();
         for channel in &channels {
             let projects = self.themes.projects(channel.id)?;
-            let started: HashSet<_> = projects.iter().map(|video| video.theme).collect();
+            let started: HashSet<_> = projects.iter().filter_map(|video| video.theme).collect();
             for theme in self.themes.themes(channel.id)? {
                 match theme.status() {
                     ThemeStatus::Suggested if theme.ranking().is_some() => ideas.ranked += 1,

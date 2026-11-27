@@ -1226,7 +1226,7 @@ fn world(
             item: captain.id,
             look: Look::of(
                 StyleChoice::FromNotes,
-                channel.id,
+                Some(channel.id),
                 channel.details.aesthetic_notes(),
             ),
             file,

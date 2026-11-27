@@ -1475,7 +1475,7 @@ fn preview_failure(finished: Option<Result<(), MediaError>>) -> Text {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn project_cut(
     project: &VideoProject,
-    channel: Option<&bardo_domain::Channel>,
+    channel: Option<&bardo_domain::ChannelDetails>,
     plan: &bardo_domain::ScenePlan,
     narration: &bardo_domain::Narration,
     saved: Option<&bardo_domain::SavedTimeline>,
@@ -1484,17 +1484,15 @@ pub(crate) fn project_cut(
     performed: &PerformedCut,
 ) -> (Timeline, bool) {
     // A new cut's stills move as the channel says.
-    let motion = channel.map_or(MotionDefault::default(), |channel| channel.details.motion());
+    let motion = channel.map_or(MotionDefault::default(), |details| details.motion());
     // A new cut's captions take the channel's style and highlight.
-    let caption_style = channel.map_or(CaptionStyle::default(), |channel| {
-        channel.details.caption_style()
-    });
-    let caption_highlight = channel.map_or(CaptionHighlight::default(), |channel| {
-        channel.details.caption_highlight()
+    let caption_style = channel.map_or(CaptionStyle::default(), |details| details.caption_style());
+    let caption_highlight = channel.map_or(CaptionHighlight::default(), |details| {
+        details.caption_highlight()
     });
     // A new cut starts in the shape of the project's format.
     let aspect = project
-        .format(channel.map_or(VideoFormat::default(), |channel| channel.details.format()))
+        .format(channel.map_or(VideoFormat::default(), |details| details.format()))
         .aspect();
     let restored = saved.and_then(|saved| {
         let timeline = Timeline::restore(saved, plan, narration, assets)?;
@@ -1635,17 +1633,18 @@ impl Bardo {
     /// What the editor shows for `project` now.
     pub fn editor_view(&self, project: VideoProjectId) -> Result<EditorView, EditorError> {
         let project = self.editor_project(project)?;
-        let channel = self.channels.get(project.channel)?;
+        // A loose video's own settings stand in for its channel's (#341).
+        let channel = self.video_details(&project)?;
         let channel_name = channel
             .as_ref()
-            .map(|channel| channel.details.name().to_owned())
+            .map(|details| details.name().to_owned())
             .unwrap_or_default();
-        let transition = channel.as_ref().map_or(Transition::default(), |channel| {
-            channel.details.transition()
-        });
+        let transition = channel
+            .as_ref()
+            .map_or(Transition::default(), |details| details.transition());
         let motion = channel
             .as_ref()
-            .map_or(MotionDefault::default(), |channel| channel.details.motion());
+            .map_or(MotionDefault::default(), |details| details.motion());
         let narration = self.narrations.narration(project.id)?;
         let plan = self.scene_plans.scene_plan(project.id)?;
         let job = self.latest_proxies_job(project.id);
@@ -3282,7 +3281,7 @@ mod tests {
         let h = Harness::new();
         let app = h.start();
         let (project, _) = h.drawn_project(&app);
-        let mut channel = app.channels.get(project.channel).unwrap().unwrap();
+        let mut channel = app.channels.get(project.channel.unwrap()).unwrap().unwrap();
         let slide = Transition::new(TransitionKind::SlideLeft, 12);
         channel.details = ChannelDetails::validate(ChannelDraft {
             transition: slide,
@@ -3373,7 +3372,7 @@ mod tests {
         let h = Harness::new();
         let app = h.start();
         let (project, _) = h.drawn_project(&app);
-        let mut channel = app.channels.get(project.channel).unwrap().unwrap();
+        let mut channel = app.channels.get(project.channel.unwrap()).unwrap().unwrap();
         let strong = MotionDefault::new(MotionPattern::Varied, MotionStrength::Strong);
         channel.details = ChannelDetails::validate(ChannelDraft {
             motion: strong,
@@ -4519,7 +4518,7 @@ mod tests {
     /// `style`.
     fn channel_captions(app: &Bardo, project: &VideoProject, style: CaptionStyle) {
         use bardo_domain::{ChannelDetails, ChannelDraft};
-        let mut channel = app.channels.get(project.channel).unwrap().unwrap();
+        let mut channel = app.channels.get(project.channel.unwrap()).unwrap().unwrap();
         channel.details = ChannelDetails::validate(ChannelDraft {
             caption_style: style,
             ..ChannelDraft::from(&channel.details)
@@ -4596,7 +4595,7 @@ mod tests {
         let h = Harness::new();
         let app = h.start();
         let (project, _) = h.drawn_project(&app);
-        let mut channel = app.channels.get(project.channel).unwrap().unwrap();
+        let mut channel = app.channels.get(project.channel.unwrap()).unwrap().unwrap();
         channel.details = ChannelDetails::validate(ChannelDraft {
             caption_highlight: CaptionHighlight::Green,
             ..ChannelDraft::from(&channel.details)

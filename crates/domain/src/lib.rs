@@ -72,6 +72,7 @@ mod generation;
 mod image;
 mod job;
 mod localization;
+mod loose;
 mod market;
 mod media;
 mod metadata;
@@ -264,6 +265,7 @@ pub use localization::{
     TimeMap, adaptation_gaps, join_adapted, localized_cut, place_scenes, placed_scene_notes,
     scene_sentences, sentence_times, sentence_words, source_gaps,
 };
+pub use loose::{LOOSE_VIDEOS_DIR, SettingDifference, VideoSettings, loose_video};
 pub use market::{
     ContentLanguage, Country, Market, UnsupportedContentLanguage, UnsupportedCountry,
 };

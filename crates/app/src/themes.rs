@@ -1139,6 +1139,35 @@ impl Bardo {
         Ok(theme)
     }
 
+    /// Adds an idea the user typed (#341, *Write my own idea*) to the
+    /// channel's ideas in `niche`, unranked: ranking it is the user's
+    /// next step, as for any other.
+    pub fn write_theme(
+        &self,
+        channel: ChannelId,
+        niche: &str,
+        title: &str,
+        angle: &str,
+    ) -> Result<Theme, ThemeError> {
+        let channel = self.theme_channel(channel)?;
+        let niche = Niche::new(niche)
+            .or_else(|_| Niche::new(channel.details.niche()))
+            .map_err(ThemeError::InvalidNiche)?;
+        let idea = ThemeIdea::new(title, angle).map_err(ThemeError::Invalid)?;
+        let theme = Theme::suggested(
+            self.profile.id,
+            channel.id,
+            niche,
+            idea,
+            SystemTime::now(),
+            0,
+            None,
+        );
+        self.themes.save_themes(std::slice::from_ref(&theme))?;
+        tracing::info!("added an idea the user wrote");
+        Ok(theme)
+    }
+
     pub fn discard_theme(&self, id: ThemeId) -> Result<(), ThemeError> {
         let mut theme = self.own_theme(id)?;
         theme.discard()?;
@@ -1191,7 +1220,7 @@ impl Bardo {
             .themes
             .projects(channel)?
             .iter()
-            .map(|video| video.theme)
+            .filter_map(|video| video.theme)
             .collect();
         Ok(self
             .themes
@@ -1821,15 +1850,15 @@ mod tests {
         let theme = app.themes(channel.id, None).unwrap().themes[3].clone();
 
         let project = app.approve_theme(theme.id).unwrap();
-        assert_eq!(project.channel, channel.id);
+        assert_eq!(project.channel, Some(channel.id));
         assert_eq!(project.niche.label(), "space history");
-        assert_eq!(project.theme, theme.id);
+        assert_eq!(project.theme, Some(theme.id));
         assert_eq!(project.title, theme.idea().title());
         assert_eq!(project.owner, app.profile().id);
 
         let view = app.themes(channel.id, None).unwrap();
         let projects: Vec<_> = view.projects.iter().map(|p| (p.id, p.theme)).collect();
-        assert_eq!(projects, [(project.id, theme.id)]);
+        assert_eq!(projects, [(project.id, Some(theme.id))]);
         let approved = view.themes.iter().find(|t| t.id == theme.id).unwrap();
         assert_eq!(approved.status(), ThemeStatus::Approved);
         assert!(approved.ranking().is_some(), "the reasons stay visible");

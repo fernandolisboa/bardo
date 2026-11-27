@@ -135,12 +135,11 @@ impl WorldBook {
     /// The look a video is drawn in now: its style, and for the notes its
     /// channel and their text.
     pub(crate) fn look_of(&self, video: &VideoProject, style: StyleChoice) -> Look {
-        let notes = self
-            .channels
-            .get(video.channel)
+        // A loose video's own notes (#341) stand in for a channel's.
+        let notes = crate::loose::details_of(&*self.themes, &*self.channels, video)
             .ok()
             .flatten()
-            .map(|channel| channel.details.aesthetic_notes().to_owned())
+            .map(|details| details.aesthetic_notes().to_owned())
             .unwrap_or_default();
         Look::of(style, video.channel, &notes)
     }
@@ -154,8 +153,10 @@ impl WorldBook {
     /// How `video`'s pictures are rendered: its own style, else its
     /// channel's.
     fn style_of(&self, video: &VideoProject) -> StyleChoice {
-        let channel = self.channels.get(video.channel).ok().flatten();
-        video.style(channel.map_or(StyleChoice::default(), |channel| channel.details.style()))
+        let details = crate::loose::details_of(&*self.themes, &*self.channels, video)
+            .ok()
+            .flatten();
+        video.style(details.map_or(StyleChoice::default(), |details| details.style()))
     }
 
     /// [`WorldBook::lend_portrait`] for every member of the video's saved
@@ -1335,7 +1336,7 @@ impl Bardo {
             looks.push((
                 Look::of(
                     StyleChoice::FromNotes,
-                    channel.id,
+                    Some(channel.id),
                     channel.details.aesthetic_notes(),
                 ),
                 channel.details.name().to_owned(),
@@ -1451,10 +1452,11 @@ impl Bardo {
 
     /// The project a video belongs to, through its channel.
     fn video_owner(&self, video: &VideoProject) -> Result<Option<ProjectId>, RepositoryError> {
-        Ok(self
-            .channels
-            .get(video.channel)?
-            .map(|channel| channel.project))
+        // A loose video (#341) belongs to none: global items only.
+        match video.channel {
+            Some(channel) => Ok(self.channels.get(channel)?.map(|channel| channel.project)),
+            None => Ok(None),
+        }
     }
 
     /// Who appears in the video: what it picked and what it may pick.
@@ -1948,7 +1950,7 @@ mod tests {
     fn video_on(app: &Bardo, video: &VideoProject, title: &str) -> VideoProject {
         let mut theme = Theme::suggested(
             app.profile().id,
-            video.channel,
+            video.channel.unwrap(),
             Niche::new("space history").unwrap(),
             ThemeIdea::new(title, "").unwrap(),
             SystemTime::now(),
@@ -2160,7 +2162,7 @@ mod tests {
             .channels()
             .unwrap()
             .into_iter()
-            .find(|channel| channel.id == second.channel)
+            .find(|channel| Some(channel.id) == second.channel)
             .unwrap();
         let mut draft = ChannelDraft::from(&channel.details);
         draft.aesthetic_notes = "bright watercolor".into();
@@ -2921,7 +2923,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .map(|(look, _)| look)
-            .find(|look| look.channel() == Some(video.channel))
+            .find(|look| look.channel() == video.channel)
             .unwrap();
         let job = app
             .draw_world_picture(rosa.id, look.clone(), BudgetConsent::Ask)
@@ -3031,7 +3033,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .map(|(look, _)| look)
-            .find(|look| look.channel() == Some(video.channel))
+            .find(|look| look.channel() == video.channel)
             .unwrap();
         for _ in 0..2 {
             let job = app

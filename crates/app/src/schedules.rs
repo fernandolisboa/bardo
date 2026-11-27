@@ -364,11 +364,13 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            s.app.move_channel_blocks(s.project.channel).unwrap(),
+            s.app
+                .move_channel_blocks(s.project.channel.unwrap())
+                .unwrap(),
             [crate::MoveBlock::HeldOnNetwork]
         );
         assert!(matches!(
-            s.app.move_channel(s.project.channel, target.id),
+            s.app.move_channel(s.project.channel.unwrap(), target.id),
             Err(crate::ProjectError::MoveBlocked(blocks))
                 if blocks == [crate::MoveBlock::HeldOnNetwork]
         ));

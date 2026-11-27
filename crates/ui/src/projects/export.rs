@@ -42,6 +42,16 @@ fn is_running(job: Option<&Job>) -> bool {
 
 /// Tags as typed: separated by commas, new lines or a space before `#`
 /// (`#space #nasa`); a `#` inside a word stays (`C#`).
+/// The account a target posts as, `@handle`; a loose video's file
+/// target (no account) says *File*.
+fn target_handle(bardo: &Bardo, target: &ExportTarget) -> String {
+    if target.handle.is_empty() {
+        bardo.text(Text::LooseFileTarget).into_owned()
+    } else {
+        format!("@{}", target.handle)
+    }
+}
+
 fn split_tags(text: &str) -> Vec<String> {
     text.replace(" #", ",")
         .split([',', '\n'])
@@ -901,9 +911,10 @@ impl ProjectsScreen {
             });
             tile.selected = shown == Some(network);
             tile.title = Some(tr(bardo, Text::NetworkName(network)));
+            let handle = target_handle(bardo, target);
             tile.text = Some(SharedString::from(match line {
-                Some(line) if !line.is_empty() => format!("@{} · {line}", target.handle),
-                _ => format!("@{}", target.handle),
+                Some(line) if !line.is_empty() => format!("{handle} · {line}"),
+                _ => handle,
             }));
             // Once posted, the post says more than the export.
             let upload = target
@@ -1309,10 +1320,21 @@ impl ProjectsScreen {
             )
             .into_any_element()
         }));
+        // A loose video's file has no account to post it (#341).
+        let post = if target.handle.is_empty() {
+            kit::notice(
+                Tone::Info,
+                tr(self.bardo.read(cx), Text::LooseExportOnly),
+                cx,
+            )
+            .into_any_element()
+        } else {
+            self.post_section(view, target, cx)
+        };
         body.push(
             kit::anchor_in(
                 TourAnchor::Control(Control::PublishPost),
-                self.post_section(view, target, cx),
+                post,
                 Some(&self.publish_scroll),
             )
             .into_any_element(),
@@ -1324,9 +1346,9 @@ impl ProjectsScreen {
             .items_center()
             .flex_wrap()
             .child(div().font_semibold().child(SharedString::from(format!(
-                "{} · @{}",
+                "{} · {}",
                 bardo.text(Text::NetworkName(network)),
-                target.handle
+                target_handle(bardo, target)
             ))))
             .child(state_chip(bardo, target, cx))
             .when(

@@ -2996,6 +2996,10 @@ body = "Aprovar uma ideia começa um projeto de vídeo a partir dela. Editar o t
 title = "Seus projetos"
 body = "Os projetos começados a partir das ideias deste canal. Abra-os em Vídeos para escrever o roteiro e seguir em frente."
 
+[tour.themes.own]
+title = "Sua própria ideia"
+body = "Escrever minha ideia acrescenta uma ideia que você digita, título e ângulo, às ideias deste nicho. Ela entra sem ranking: ranqueie as ideias para ver onde ela fica e aprove como qualquer outra."
+
 [tour.performance]
 name = "Tour do Desempenho"
 
@@ -3044,15 +3048,15 @@ body = "O modo diz quais cenas viram clipes de IA e com qual modelo: Econômico 
 
 [tour.projects.stages]
 title = "As etapas"
-body = "Roteiro, narração, cenas, clipes, edição, render e publicação, nessa ordem. A linha sob cada etapa diz como ela está: pronta, gerando, para revisar, desatualizada ou o que ela espera."
-
-[tour.projects.unlock]
-title = "Como uma etapa se abre"
-body = "Uma etapa se abre assim que a anterior lhe dá com o que trabalhar: a narração lê o roteiro, e as cenas são cronometradas pela narração. Mude uma etapa anterior e o que foi feito a partir dela aparece como desatualizado."
+body = "Roteiro, narração, cenas, clipes, edição, render e publicação, nessa ordem. A linha sob cada etapa diz como ela está: pronta, gerando, para revisar, desatualizada ou o que ela espera. Cada uma se abre assim que a anterior lhe dá com o que trabalhar, e o que foi feito a partir de uma etapa anterior que mudou depois aparece como desatualizado."
 
 [tour.projects.cost]
 title = "Quanto já custou"
 body = "A linha sob o nome do projeto mostra o nicho, quando ele começou e quanto já custou, somando cada chamada paga, do roteiro aos clipes. Em Custos ficam os detalhes e os seus orçamentos."
+
+[tour.projects.loose]
+title = "Vídeos avulsos"
+body = "Com Sem projeto aberto no seletor, Vídeos lista os vídeos sem projeto e sem canal. Novo vídeo avulso começa um a partir de uma ideia que você digita, com as configurações de um canal que você escolhe ou os padrões de um canal novo. Um vídeo avulso passa por todas as etapas e exporta arquivos, mas nunca é enviado nem agendado; Mover para um projeto dá a ele um canal cujas contas o publicam, e ele mantém as próprias configurações."
 
 [tour.script]
 name = "Tour do Roteiro"
@@ -5481,3 +5485,49 @@ save_project = "Salvar em Mundo"
 [library.error]
 name_clash = "Este projeto já tem um item com esse nome. Escolha outro nome."
 other_project = "Isso pertence a outro projeto. Escolha um deste projeto ou um global."
+
+[loose]
+not_saved = "Não foi possível salvar o vídeo. Tente de novo."
+not_found = "Esse vídeo avulso não existe mais."
+move_busy = "Um trabalho deste vídeo está na fila ou rodando. Deixe terminar, ou cancele em Trabalhos, e depois mova o vídeo."
+move_archived = "Esse projeto está arquivado. Desarquive-o primeiro."
+switcher_row = "Sem projeto"
+count_none = "Nenhum vídeo avulso"
+count_one = "1 vídeo avulso"
+count_many = "{n} vídeos avulsos"
+title = "Vídeos avulsos"
+hint = "Vídeos sem projeto e sem canal, para um teste rápido. Eles exportam arquivos; para publicar um, mova-o para um projeto."
+new = "Novo vídeo avulso"
+form_title = "Novo vídeo avulso"
+form_hint = "Digite a ideia. O vídeo recebe todas as configurações que um canal dá aos seus vídeos, copiadas do canal que você escolher, ou os padrões de um canal novo. Só narradores e itens do mundo globais podem aparecer nele."
+idea_title = "Título"
+idea_title_placeholder = "ex.: Por que a Lua se afasta"
+idea_angle = "Ângulo"
+idea_angle_placeholder = "A abordagem do vídeo sobre o tema (opcional)"
+copy_from = "Configurações de"
+copy_defaults = "Os padrões de um canal novo"
+create = "Começar o vídeo"
+cancel = "Cancelar"
+empty = "Nenhum vídeo avulso ainda. Comece um a partir de uma ideia sua."
+export_only = "Um vídeo avulso exporta arquivos e nunca é enviado nem agendado. Mova-o para um projeto para publicá-lo."
+file_target = "Arquivo"
+move = "Mover para um projeto…"
+move_title = "Mover para um projeto"
+move_hint = "O vídeo passa a usar as contas de rede do canal para publicar e mantém as próprias configurações. A pasta dele vai para a pasta do projeto."
+move_channel = "Projeto e canal"
+move_confirm = "Mover o vídeo"
+move_no_channels = "Nenhum projeto tem canal ainda. Crie um em um projeto primeiro."
+moved = "Movido. O vídeo agora está entre os vídeos do projeto."
+differs_language = "Este vídeo está em {video}; o canal fala {channel}. O vídeo continua em {video}."
+differs_country = "Este vídeo mira {video}; o canal, {channel}. O vídeo continua com {video}."
+overview = "Nenhum projeto está aberto. Seus vídeos avulsos ficam em Vídeos."
+open_videos = "Mostrar os vídeos avulsos"
+
+[own_idea]
+button = "Escrever minha ideia"
+title = "Sua própria ideia"
+hint = "Ela entra nas ideias deste nicho sem ranking. Ranqueie as ideias para ver onde ela fica."
+channel = "Canal"
+save = "Adicionar a ideia"
+cancel = "Cancelar"
+saved = "Ideia adicionada. Ranqueie as ideias para ver onde ela fica."

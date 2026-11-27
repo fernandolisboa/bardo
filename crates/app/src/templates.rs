@@ -1203,13 +1203,17 @@ impl Bardo {
     }
 
     /// The version the next generation of `kind` for a video of `channel`
-    /// uses: its project's template, else the global one.
+    /// uses: its project's template, else the global one (a loose video,
+    /// with no channel, uses the global one).
     pub(crate) fn channel_template(
         &self,
         kind: TemplateKind,
-        channel: ChannelId,
+        channel: impl Into<Option<ChannelId>>,
     ) -> Result<TemplateVersion, TemplateError> {
-        let project = self.channels.get(channel)?.map(|channel| channel.project);
+        let project = match channel.into() {
+            Some(channel) => self.channels.get(channel)?.map(|channel| channel.project),
+            None => None,
+        };
         self.current_template_in(kind, project)
     }
 

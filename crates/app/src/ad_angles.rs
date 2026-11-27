@@ -1143,7 +1143,7 @@ impl Bardo {
                     project: angle.theme().and_then(|theme| {
                         projects
                             .iter()
-                            .find(|project| project.theme == theme)
+                            .find(|project| project.theme == Some(theme))
                             .map(|project| project.id)
                     }),
                     claims: leans_on,
@@ -2407,13 +2407,13 @@ mod tests {
 
         let project = app.approve_ad_angle(row.angle.id).unwrap();
 
-        assert_eq!(project.channel, channel.id);
+        assert_eq!(project.channel, Some(channel.id));
         assert_eq!(project.product, Some(product.id));
         assert!(project.is_ad());
         assert_eq!(project.title, row.angle.idea().title());
         assert_eq!(project.niche.label(), "Stationery");
         assert_eq!(project.length, Some(bardo_domain::AD_START_LENGTH));
-        let theme = app.themes.theme(project.theme).unwrap().unwrap();
+        let theme = app.themes.theme(project.theme.unwrap()).unwrap().unwrap();
         assert_eq!(theme.status(), ThemeStatus::Approved);
         assert_eq!(theme.idea().angle(), row.angle.idea().angle());
 

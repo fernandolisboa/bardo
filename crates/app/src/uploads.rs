@@ -3129,7 +3129,7 @@ pub(crate) mod tests {
     pub(crate) const ACCESS: &str = "ya29.upload-access";
 
     fn youtube(s: &Setup) -> NetworkAccount {
-        NetworkAccountRepository::list(&*s.h.db, s.project.channel)
+        NetworkAccountRepository::list(&*s.h.db, s.project.channel.unwrap())
             .unwrap()
             .into_iter()
             .find(|account| account.network == Network::YouTube)
@@ -3996,7 +3996,7 @@ pub(crate) mod reel_tests {
     }
 
     fn reels(s: &Setup) -> NetworkAccount {
-        NetworkAccountRepository::list(&*s.h.db, s.project.channel)
+        NetworkAccountRepository::list(&*s.h.db, s.project.channel.unwrap())
             .unwrap()
             .into_iter()
             .find(|account| account.network == Network::InstagramReels)
@@ -4599,7 +4599,7 @@ mod tiktok_tests {
     }
 
     fn tiktok(s: &Setup) -> NetworkAccount {
-        NetworkAccountRepository::list(&*s.h.db, s.project.channel)
+        NetworkAccountRepository::list(&*s.h.db, s.project.channel.unwrap())
             .unwrap()
             .into_iter()
             .find(|account| account.network == Network::TikTok)
@@ -5053,7 +5053,7 @@ mod x_tests {
     }
 
     fn x_account(s: &Setup) -> NetworkAccount {
-        NetworkAccountRepository::list(&*s.h.db, s.project.channel)
+        NetworkAccountRepository::list(&*s.h.db, s.project.channel.unwrap())
             .unwrap()
             .into_iter()
             .find(|account| account.network == Network::X)

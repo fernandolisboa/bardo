@@ -622,7 +622,7 @@ impl ProjectsScreen {
             tile.title = Some(tr(bardo, Text::NetworkName(target.network)));
             tile.text = Some(SharedString::from(format!(
                 "{} · {}",
-                target.handle,
+                handle_or_file(bardo, &target.handle),
                 bardo.preset_summary(&target.preset)
             )));
             tile.time = Some(tr(bardo, last_state(target)));
@@ -672,7 +672,7 @@ impl ProjectsScreen {
             .child(div().font_semibold().child(SharedString::from(format!(
                 "{} · {}",
                 bardo.text(Text::NetworkName(target.network)),
-                target.handle
+                handle_or_file(bardo, &target.handle)
             ))))
             .child(state_chip(bardo, state, cx))
             .into_any_element();
@@ -825,5 +825,15 @@ fn last_state(target: &RenderTarget) -> Text {
         (None, _) => Text::RenderLastNone,
         (Some(_), true) => Text::RenderLastCurrent,
         (Some(_), false) => Text::RenderLastOutdated,
+    }
+}
+
+/// The account's handle; a loose video's file target (no account, #341)
+/// says *File*.
+fn handle_or_file(bardo: &Bardo, handle: &str) -> String {
+    if handle.is_empty() {
+        bardo.text(Text::LooseFileTarget).into_owned()
+    } else {
+        handle.to_owned()
     }
 }

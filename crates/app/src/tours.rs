@@ -343,6 +343,10 @@ pub enum Control {
     JobsFilter,
     /// The title bar's project switcher, on every screen.
     OpenProject,
+    /// Videos, with *No project* open: *New loose video*.
+    LooseNew,
+    /// Themes: *Write my own idea*.
+    OwnIdea,
     /// Overview: the videos in progress.
     OverviewVideos,
     /// Overview: the first video's next step and its Continue.
@@ -658,7 +662,7 @@ pub const THEMES: Tour = {
     const IDEAS: WhenMissing = WhenMissing::LightPart(TourAnchor::Collection);
     Tour {
         id: TourId::Themes,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "pick", TourAnchor::Control(Control::ThemesPick))
@@ -679,6 +683,9 @@ pub const THEMES: Tour = {
             on(AT, "projects", TourAnchor::Control(Control::ThemesProjects))
                 .missing(WhenMissing::LightPart(TourAnchor::Inspector))
                 .learn(PAGE, "projects"),
+            on(AT, "own", TourAnchor::Control(Control::OwnIdea))
+                .missing(WhenMissing::LightPart(TourAnchor::Inspector))
+                .learn(PAGE, "own-idea"),
         ],
     }
 };
@@ -719,7 +726,7 @@ pub const PROJECTS: Tour = {
     const HEADER: WhenMissing = WhenMissing::LightPart(TourAnchor::Header);
     Tour {
         id: TourId::Projects,
-        version: 6,
+        version: 7,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "switcher", control(Control::ProjectSwitcher))
@@ -735,8 +742,10 @@ pub const PROJECTS: Tour = {
                 .missing(HEADER)
                 .learn(PAGE, "mode"),
             on(AT, "stages", TourAnchor::Stages).learn(PAGE, "stages"),
-            on(AT, "unlock", TourAnchor::Stages).learn(PAGE, "unlock"),
             on(AT, "cost", TourAnchor::Header).learn(PAGE, "cost"),
+            on(AT, "loose", control(Control::LooseNew))
+                .missing(HEADER)
+                .learn(PAGE, "loose-videos"),
         ],
     }
 };

@@ -577,7 +577,9 @@ impl Bardo {
             }
             Removable::Video(id) => {
                 let video = self.removable_video(id)?;
-                let project = self.project_of_channel(video.channel);
+                let project = video
+                    .channel
+                    .and_then(|channel| self.project_of_channel(channel));
                 let deleted = vec![DeletedWork {
                     id: id.as_uuid(),
                     owner: self.profile.id,
@@ -1081,7 +1083,7 @@ mod tests {
         assert_eq!(s.trash.recycled(), [folder]);
         assert!(s.app.video_projects(channel.id).unwrap().is_empty());
 
-        let theme = s.app.themes.theme(video.theme).unwrap().unwrap();
+        let theme = s.app.themes.theme(video.theme.unwrap()).unwrap().unwrap();
         assert_eq!(theme.status(), ThemeStatus::Approved);
         assert!(
             s.app
@@ -1090,7 +1092,7 @@ mod tests {
                 .contains(&theme.id)
         );
         let again = s.app.restart_theme(theme.id).unwrap();
-        assert_eq!(again.theme, theme.id);
+        assert_eq!(again.theme, Some(theme.id));
         assert!(s.app.themes_without_video(channel.id).unwrap().is_empty());
         assert!(
             s.app.restart_theme(theme.id).is_err(),

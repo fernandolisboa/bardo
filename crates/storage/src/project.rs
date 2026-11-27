@@ -132,7 +132,9 @@ impl ProjectRepository for Database {
             .execute(
                 "UPDATE project SET opened_at = MAX(?2,
                      (SELECT COALESCE(MAX(other.opened_at), 0) + 1 FROM project other
-                      WHERE other.profile_id = project.profile_id))
+                      WHERE other.profile_id = project.profile_id),
+                     (SELECT COALESCE(u.loose_opened_at, 0) + 1 FROM user_profile u
+                      WHERE u.id = project.profile_id))
                  WHERE id = ?1",
                 params![id.to_string(), to_unix_millis(at)],
             )
@@ -158,6 +160,33 @@ impl ProjectRepository for Database {
         tx.commit().map_err(boxed)
     }
 
+    fn loose_opened(&self, owner: ProfileId) -> Result<Option<SystemTime>, RepositoryError> {
+        let at: Option<Option<i64>> = self
+            .conn()
+            .query_row(
+                "SELECT loose_opened_at FROM user_profile WHERE id = ?1",
+                [owner.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(boxed)?;
+        Ok(at.flatten().map(from_unix_millis))
+    }
+
+    fn mark_loose_opened(&self, owner: ProfileId, at: SystemTime) -> Result<(), RepositoryError> {
+        // Later than any project opened before, as `mark_opened` is.
+        self.conn()
+            .execute(
+                "UPDATE user_profile SET loose_opened_at = MAX(?2,
+                     (SELECT COALESCE(MAX(p.opened_at), 0) + 1 FROM project p
+                      WHERE p.profile_id = user_profile.id))
+                 WHERE id = ?1",
+                params![owner.to_string(), to_unix_millis(at)],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
     fn move_channel(&self, channel: ChannelId, to: ProjectId) -> Result<(), RepositoryError> {
         self.conn()
             .execute(
@@ -176,15 +205,17 @@ impl ProjectRepository for Database {
 /// video id `video`'s channel, with that video's title either way (a
 /// version names its source video and the channel it is made for):
 /// columns `project_id`, `project_name`, `channel_name` and `video_title`.
-/// No row when neither names a channel.
+/// A loose video (#341) has a title and no project or channel. No row when
+/// neither names a channel or a video.
 pub(crate) fn origin_of(video: &str, channel: &str) -> String {
     format!(
         "(SELECT p.id AS project_id, p.name AS project_name, c.name AS channel_name,
                  v.title AS video_title
-          FROM channel c
-          JOIN project p ON p.id = c.owner_project_id
+          FROM (SELECT 1)
           LEFT JOIN video_project v ON v.id = ({video})
-          WHERE c.id = COALESCE(({channel}), v.channel_id))"
+          LEFT JOIN channel c ON c.id = COALESCE(({channel}), v.channel_id)
+          LEFT JOIN project p ON p.id = c.owner_project_id
+          WHERE c.id IS NOT NULL OR v.id IS NOT NULL)"
     )
 }
 

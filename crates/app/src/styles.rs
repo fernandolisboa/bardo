@@ -25,11 +25,8 @@ impl Bardo {
     /// How `project`'s pictures are rendered: its own style, else its
     /// channel's (from the notes when the channel is gone).
     pub fn video_style(&self, project: &VideoProject) -> Result<StyleChoice, RepositoryError> {
-        let channel = self.channels.get(project.channel)?;
-        Ok(
-            project
-                .style(channel.map_or(StyleChoice::default(), |channel| channel.details.style())),
-        )
+        let details = self.video_details(project)?;
+        Ok(project.style(details.map_or(StyleChoice::default(), |details| details.style())))
     }
 
     /// Sets the project's own style, or goes back to the channel's
@@ -169,7 +166,7 @@ mod tests {
         let project = cast_project(&h, &app);
         assert_eq!(app.video_style(&project).unwrap(), StyleChoice::FromNotes);
 
-        let channel = app.channels.get(project.channel).unwrap().unwrap();
+        let channel = app.channels.get(project.channel.unwrap()).unwrap().unwrap();
         app.update_channel(
             channel.id,
             ChannelDraft {

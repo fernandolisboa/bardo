@@ -28,7 +28,7 @@ use crate::layout;
 use crate::library::LibraryScope;
 use crate::missed::{MissedChanged, MissedPosts};
 use crate::network_accounts::OpenNetworkSettings;
-use crate::overview::{OpenIdeas, OpenVideo, OverviewScreen};
+use crate::overview::{OpenIdeas, OpenLooseVideos, OpenVideo, OverviewScreen};
 use crate::parts::{BudgetMeter, Navigation, ShownPlace};
 use crate::performance::{OpenRetention, PerformanceScreen};
 use crate::personas::PersonasScreen;
@@ -168,6 +168,13 @@ impl Shell {
             cx.subscribe_in(&overview, window, |this, _, _: &OpenIdeas, window, cx| {
                 this.pick(Destination::Themes, window, cx);
             }),
+            cx.subscribe_in(
+                &overview,
+                window,
+                |this, _, _: &OpenLooseVideos, window, cx| {
+                    this.pick(Destination::Videos, window, cx);
+                },
+            ),
             // Another project opened: every screen shows it now.
             cx.subscribe_in(
                 &switcher,

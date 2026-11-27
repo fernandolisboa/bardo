@@ -713,9 +713,8 @@ impl Bardo {
         project: &VideoProject,
     ) -> Result<Option<Persona>, RepositoryError> {
         let channel_default = self
-            .channels
-            .get(project.channel)?
-            .and_then(|channel| channel.details.default_persona());
+            .video_details(project)?
+            .and_then(|details| details.default_persona());
         let Some(id) = project.narrator(channel_default) else {
             return Ok(None);
         };
@@ -1135,7 +1134,7 @@ pub(crate) mod tests {
     pub(crate) fn project(app: &Bardo) -> VideoProject {
         let project = project_without_persona(app, "Space Archives");
         let persona = documentary_narrator(app);
-        let channel = app.channels.get(project.channel).unwrap().unwrap();
+        let channel = app.channels.get(project.channel.unwrap()).unwrap().unwrap();
         app.update_channel(
             channel.id,
             ChannelDraft {

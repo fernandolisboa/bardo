@@ -508,11 +508,8 @@ impl Bardo {
     /// The channel's thumbnail look.
     fn channel_look(&self, project: &VideoProject) -> Result<ThumbnailLook, RepositoryError> {
         Ok(self
-            .channels
-            .get(project.channel)?
-            .map_or(ThumbnailLook::default(), |channel| {
-                channel.details.thumbnail_look()
-            }))
+            .video_details(project)?
+            .map_or(ThumbnailLook::default(), |details| details.thumbnail_look()))
     }
 
     /// The project's thumbnail as stored, or a new one in the channel's
@@ -925,11 +922,14 @@ pub(crate) mod tests {
             .channels()
             .unwrap()
             .into_iter()
-            .find(|channel| channel.id == project.channel)
+            .find(|channel| Some(channel.id) == project.channel)
             .unwrap();
         let mut draft = bardo_domain::ChannelDraft::from(&channel.details);
         draft.thumbnail_look = ThumbnailLook::Banner;
-        let details = app.update_channel(project.channel, draft).unwrap().details;
+        let details = app
+            .update_channel(project.channel.unwrap(), draft)
+            .unwrap()
+            .details;
         assert_eq!(details.thumbnail_look(), ThumbnailLook::Banner);
         let view = app.thumbnail(project.id).unwrap();
         assert_eq!(view.thumbnail.design.look, ThumbnailLook::Banner);

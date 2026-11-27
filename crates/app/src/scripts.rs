@@ -517,24 +517,26 @@ impl Bardo {
         &self,
         project: &VideoProject,
     ) -> Result<TemplateValues, ScriptError> {
-        let channel = self
-            .channels
-            .get(project.channel)?
+        // A loose video's own settings stand in for its channel's (#341).
+        let details = self
+            .video_details(project)?
             .ok_or(ScriptError::ProjectNotFound)?;
-        let angle = self
-            .themes
-            .theme(project.theme)?
-            .map(|theme| theme.idea().angle().to_owned())
-            .unwrap_or_default();
+        let angle = self.video_angle(project)?;
         let english = Catalog::load(UiLanguage::EnUs);
-        let details = &channel.details;
+        let details = &details;
+        // A loose video has no channel to name.
+        let channel_name = if project.is_loose() {
+            String::new()
+        } else {
+            details.name().to_owned()
+        };
         // The project's own persona, else the channel's default.
         let persona = self
             .narrator(project)?
             .map(|persona| persona.details.describe());
         let format = project.format(details.format());
         Ok(TemplateValues::from([
-            (TemplateVariable::ChannelName, details.name().to_owned()),
+            (TemplateVariable::ChannelName, or_not_set(&channel_name)),
             (TemplateVariable::ChannelNiche, or_not_set(details.niche())),
             (
                 TemplateVariable::ChannelThemes,
@@ -1011,7 +1013,7 @@ mod tests {
             .into_iter()
             .find(|p| p.details.name() == "Documentary Narrator (en-US)")
             .unwrap();
-        let channel = app.channels.get(project.channel).unwrap().unwrap();
+        let channel = app.channels.get(project.channel.unwrap()).unwrap().unwrap();
         app.update_channel(
             channel.id,
             ChannelDraft {
@@ -1268,7 +1270,7 @@ mod tests {
             Err(ScriptError::ChannelNotFound)
         ));
         let ids: Vec<_> = app
-            .video_projects(project.channel)
+            .video_projects(project.channel.unwrap())
             .unwrap()
             .iter()
             .map(|p| p.id)

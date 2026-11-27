@@ -572,7 +572,12 @@ impl Bardo {
             .ok_or(PersonaError::ProjectNotFound)?;
         if let Some(id) = persona {
             let found = self.own_persona(id)?;
-            if !usable_in(found.owner_project, self.channel_project(project.channel)?) {
+            // A loose video (no channel) uses global narrators only.
+            let owner = match project.channel {
+                Some(channel) => self.channel_project(channel)?,
+                None => None,
+            };
+            if !usable_in(found.owner_project, owner) {
                 return Err(PersonaError::OtherProject);
             }
         }

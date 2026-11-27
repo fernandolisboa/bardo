@@ -1217,9 +1217,8 @@ impl Bardo {
             return Err(CaptureError::OverBudget(estimate));
         }
         let language = self
-            .channels
-            .get(project.channel)?
-            .map_or("en", |channel| channel.details.language().code());
+            .video_details(&project)?
+            .map_or("en", |details| details.language().code());
         let confirmed_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
@@ -1240,7 +1239,7 @@ impl Bardo {
             language: language.to_owned(),
             text: script.text().as_str().to_owned(),
             mode: self
-                .capture_take_model(project.channel)
+                .capture_take_model(&project)
                 .map(|model| model.default_mode().code().to_owned()),
         };
         // Only now, when the import goes ahead: what an earlier capture

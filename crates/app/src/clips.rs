@@ -49,13 +49,13 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, ChannelId, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel, ClipModelRef,
-    ClipRequest, ClipStatus, ClipSubmission, CostPurpose, CostRecordId, Generation, GenerationId,
-    ImageFormat, Job, JobFailure, JobFailureKind, JobId, JobKind, Metered, Money,
-    NarrationRepository, ProductionMode, ProfileId, Progress, ProjectFiles, Provider,
-    ProviderFailure, ProviderFailureKind, RepositoryError, Scene, SceneClip, ScenePlan,
-    ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, StagedImage, StretchLimit,
-    TokenUsage, VideoProject, VideoProjectId,
+    ApiKey, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel, ClipModelRef, ClipRequest,
+    ClipStatus, ClipSubmission, CostPurpose, CostRecordId, Generation, GenerationId, ImageFormat,
+    Job, JobFailure, JobFailureKind, JobId, JobKind, Metered, Money, NarrationRepository,
+    ProductionMode, ProfileId, Progress, ProjectFiles, Provider, ProviderFailure,
+    ProviderFailureKind, RepositoryError, Scene, SceneClip, ScenePlan, ScenePlanId,
+    ScenePlanRepository, ScenePrompt, SecretStore, StagedImage, StretchLimit, TokenUsage,
+    VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1412,10 +1412,10 @@ impl Bardo {
     pub(crate) fn channel_clip_model(
         &self,
         models: &[ClipModel],
-        channel: ChannelId,
+        video: &VideoProject,
     ) -> Result<Option<ClipModel>, RepositoryError> {
         Ok(self
-            .channel_clip_choice(models, channel)?
+            .channel_clip_choice(models, video)?
             .map(|(model, _)| model))
     }
 
@@ -1425,12 +1425,11 @@ impl Bardo {
     fn channel_clip_choice(
         &self,
         models: &[ClipModel],
-        channel: ChannelId,
+        video: &VideoProject,
     ) -> Result<Option<(ClipModel, Option<String>)>, RepositoryError> {
         let chosen = self
-            .channels
-            .get(channel)?
-            .and_then(|channel| channel.details.clip_model().cloned());
+            .video_details(video)?
+            .and_then(|details| details.clip_model().cloned());
         let retired = self.retired_clip_models();
         Ok(chosen
             .and_then(|chosen| saved_clip_model(models, &retired, &chosen))
@@ -1442,13 +1441,12 @@ impl Bardo {
     /// scene (the default limit when the channel is gone).
     pub(crate) fn channel_clip_stretch(
         &self,
-        channel: ChannelId,
+        video: &VideoProject,
     ) -> Result<Option<StretchLimit>, RepositoryError> {
         Ok(self
-            .channels
-            .get(channel)?
-            .map_or(Some(StretchLimit::DEFAULT), |channel| {
-                channel.details.clip_stretch()
+            .video_details(video)?
+            .map_or(Some(StretchLimit::DEFAULT), |details| {
+                details.clip_stretch()
             }))
     }
 
@@ -1586,8 +1584,7 @@ impl Bardo {
     ) -> Result<ClipsView, SceneError> {
         let models = self.clip_models();
         let retired = self.retired_clip_models();
-        let (channel_model, channel_replaces) =
-            self.channel_clip_choice(&models, project.channel)?.unzip();
+        let (channel_model, channel_replaces) = self.channel_clip_choice(&models, project)?.unzip();
         let mode = self.production_mode(project)?;
         let default_model = Self::mode_clip_model(mode, &models, channel_model.as_ref()).cloned();
         // Only said when the channel's model is the one in use: the other
@@ -1605,7 +1602,7 @@ impl Bardo {
             });
         };
         let rates = self.cost_book.rates()?;
-        let stretch = self.channel_clip_stretch(project.channel)?;
+        let stretch = self.channel_clip_stretch(project)?;
         let jobs = self.clip_jobs(plan.project);
         let scenes: Vec<SceneClipView> = plan
             .scenes()
@@ -1970,7 +1967,7 @@ mod tests {
             .channels()
             .unwrap()
             .into_iter()
-            .find(|channel| channel.id == project.channel)
+            .find(|channel| Some(channel.id) == project.channel)
             .unwrap();
         app.update_channel(
             channel.id,
@@ -2209,7 +2206,7 @@ mod tests {
             .channels()
             .unwrap()
             .into_iter()
-            .find(|channel| channel.id == project.channel)
+            .find(|channel| Some(channel.id) == project.channel)
             .unwrap();
         channel.details = bardo_domain::ChannelDetails::validate(ChannelDraft {
             clip_model: Some(google(model)),
@@ -2331,7 +2328,7 @@ mod tests {
             .channels()
             .unwrap()
             .into_iter()
-            .find(|channel| channel.id == project.channel)
+            .find(|channel| Some(channel.id) == project.channel)
             .unwrap();
         assert_eq!(saved.details.clip_model(), Some(&omni));
         let view = app.scenes(project.id).unwrap().clips;
@@ -2561,7 +2558,7 @@ mod tests {
         channel_uses(&app, &project, None);
         let default = |app: &Bardo| {
             let model = app
-                .channel_clip_model(&app.clip_models(), project.channel)
+                .channel_clip_model(&app.clip_models(), &project)
                 .unwrap()
                 .unwrap();
             (model.id.provider(), model.id.model().to_owned())
@@ -2986,7 +2983,7 @@ mod tests {
             .channels()
             .unwrap()
             .into_iter()
-            .find(|channel| channel.id == project.channel)
+            .find(|channel| Some(channel.id) == project.channel)
             .unwrap();
         app.update_channel(
             channel.id,

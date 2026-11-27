@@ -89,6 +89,20 @@ impl FolderRepository for Database {
             .transpose()
     }
 
+    fn loose_folder(&self, video: VideoProjectId) -> Result<Option<PathBuf>, RepositoryError> {
+        let row: Option<(String, String)> = self
+            .conn()
+            .query_row(
+                "SELECT loose_folder, folder_name FROM video_project
+                 WHERE id = ?1 AND loose_folder IS NOT NULL AND folder_name IS NOT NULL",
+                [video.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(boxed)?;
+        Ok(row.map(|(folder, name)| PathBuf::from(folder).join(name)))
+    }
+
     fn videos_to_move(&self, owner: ProfileId) -> Result<Vec<VideoToMove>, RepositoryError> {
         type Row = (
             String,
@@ -97,12 +111,13 @@ impl FolderRepository for Database {
             Option<String>,
             Option<String>,
             Option<String>,
+            Option<String>,
         );
         let rows: Vec<Row> = self
             .conn()
             .prepare(
                 "SELECT v.id, v.title, c.owner_project_id, v.folder_project_id, f.folder,
-                        v.folder_name
+                        v.folder_name, v.loose_folder
                  FROM video_project v
                  JOIN channel c ON c.id = v.channel_id
                  LEFT JOIN project f ON f.id = v.folder_project_id
@@ -121,24 +136,36 @@ impl FolderRepository for Database {
                             row.get(3)?,
                             row.get(4)?,
                             row.get(5)?,
+                            row.get(6)?,
                         ))
                     })?
                     .collect()
             })
             .map_err(boxed)?;
         rows.into_iter()
-            .map(|(video, title, to, from_project, from_folder, name)| {
-                let from = match (from_project, name) {
-                    (Some(project), Some(name)) => Some(video_folder(project, from_folder, name)?),
-                    _ => None,
-                };
-                Ok(VideoToMove {
-                    video: VideoProjectId::from(uuid(&video)?),
-                    title,
-                    to: ProjectId::from(uuid(&to)?),
-                    from,
-                })
-            })
+            .map(
+                |(video, title, to, from_project, from_folder, name, loose)| {
+                    // A loose video that moved into a project comes from the
+                    // loose videos' folder.
+                    let from_loose = match (&loose, &name) {
+                        (Some(loose), Some(name)) => Some(PathBuf::from(loose).join(name)),
+                        _ => None,
+                    };
+                    let from = match (from_project, name) {
+                        (Some(project), Some(name)) => {
+                            Some(video_folder(project, from_folder, name)?)
+                        }
+                        _ => None,
+                    };
+                    Ok(VideoToMove {
+                        video: VideoProjectId::from(uuid(&video)?),
+                        title,
+                        to: ProjectId::from(uuid(&to)?),
+                        from,
+                        from_loose,
+                    })
+                },
+            )
             .collect()
     }
 
@@ -177,7 +204,8 @@ impl FolderRepository for Database {
     ) -> Result<(), RepositoryError> {
         self.conn()
             .execute(
-                "UPDATE video_project SET folder_project_id = ?2, folder_name = ?3 WHERE id = ?1",
+                "UPDATE video_project SET folder_project_id = ?2, folder_name = ?3, loose_folder = NULL
+                 WHERE id = ?1",
                 params![video.to_string(), project.to_string(), name],
             )
             .map_err(boxed)?;
@@ -187,8 +215,14 @@ impl FolderRepository for Database {
 
 impl VideoFolders for Database {
     fn video_folder_path(&self, video: VideoProjectId) -> Option<PathBuf> {
-        match FolderRepository::video_folder(self, video) {
-            Ok(folder) => folder.and_then(|folder| folder.path()),
+        let found = FolderRepository::video_folder(self, video).and_then(|folder| {
+            match folder.and_then(|folder| folder.path()) {
+                Some(path) => Ok(Some(path)),
+                None => self.loose_folder(video),
+            }
+        });
+        match found {
+            Ok(folder) => folder,
             Err(error) => {
                 tracing::warn!("could not read where video {video}'s media is: {error}");
                 None
@@ -329,6 +363,7 @@ mod tests {
                 title: "Apollo".into(),
                 to: world.space.id,
                 from: None,
+                from_loose: None,
             }]
         );
         let name = to_move[0].folder_name();

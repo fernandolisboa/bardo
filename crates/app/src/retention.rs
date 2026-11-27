@@ -271,7 +271,7 @@ mod tests {
         let (project, _) = h.drawn_project(&app);
         let youtube = app
             .add_network_account(
-                project.channel,
+                project.channel.unwrap(),
                 Network::YouTube,
                 bardo_domain::NetworkAccountDraft {
                     handle: "archives".into(),

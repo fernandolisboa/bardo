@@ -113,12 +113,9 @@ impl Bardo {
         &self,
         project: &VideoProject,
     ) -> Result<ProductionMode, RepositoryError> {
-        let channel = self.channels.get(project.channel)?;
-        Ok(
-            project.production(channel.map_or(ProductionMode::default(), |channel| {
-                channel.details.production()
-            })),
-        )
+        let details = self.video_details(project)?;
+        Ok(project
+            .production(details.map_or(ProductionMode::default(), |details| details.production())))
     }
 
     /// Sets the project's own mode, or goes back to the channel's
@@ -203,14 +200,11 @@ impl Bardo {
     pub fn production(&self, project: VideoProjectId) -> Result<ProductionView, ScriptError> {
         let project = self.production_project(project)?;
         let channel_mode = self
-            .channels
-            .get(project.channel)?
-            .map_or(ProductionMode::default(), |channel| {
-                channel.details.production()
-            });
+            .video_details(&project)?
+            .map_or(ProductionMode::default(), |details| details.production());
         let work = self.video_work(&project)?;
         let models = self.clip_models();
-        let channel_model = self.channel_clip_model(&models, project.channel)?;
+        let channel_model = self.channel_clip_model(&models, &project)?;
         let mut estimates = Vec::with_capacity(ProductionMode::ALL.len());
         for mode in ProductionMode::ALL {
             estimates.push(self.mode_estimate(&work, mode, &models, channel_model.as_ref())?);
@@ -232,7 +226,7 @@ impl Bardo {
     fn remaining_in_mode(&self, project: &VideoProject) -> Result<Money, RepositoryError> {
         let work = self.video_work(project)?;
         let models = self.clip_models();
-        let channel_model = self.channel_clip_model(&models, project.channel)?;
+        let channel_model = self.channel_clip_model(&models, project)?;
         let mode = self.production_mode(project)?;
         Ok(self
             .mode_estimate(&work, mode, &models, channel_model.as_ref())?
@@ -360,7 +354,7 @@ impl Bardo {
         Ok(VideoWork {
             calls,
             scenes,
-            stretch: self.channel_clip_stretch(project.channel)?,
+            stretch: self.channel_clip_stretch(project)?,
         })
     }
 
@@ -571,7 +565,7 @@ mod tests {
             .channels()
             .unwrap()
             .into_iter()
-            .find(|channel| channel.id == short.channel)
+            .find(|channel| Some(channel.id) == short.channel)
             .unwrap();
         app.update_channel(
             channel.id,
@@ -728,7 +722,7 @@ mod tests {
             .channels()
             .unwrap()
             .into_iter()
-            .find(|channel| channel.id == project.channel)
+            .find(|channel| Some(channel.id) == project.channel)
             .unwrap();
         app.update_channel(
             channel.id,

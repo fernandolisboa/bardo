@@ -450,7 +450,7 @@ impl Bardo {
     /// channel. Encoders and loudness come after, from `RenderChecks`.
     pub fn render_review(&self, project: VideoProjectId) -> Result<RenderReview, RenderError> {
         let view = self.editor_view(project)?;
-        let accounts = self.network_accounts.list(view.project.channel)?;
+        let accounts = self.target_accounts(&view.project)?;
         let renders = self.renders.renders(project)?;
         let format = self.video_format(&view.project)?;
         let presets: Vec<RenderPreset> = accounts
@@ -929,7 +929,7 @@ pub(crate) mod tests {
         draft: NetworkAccountDraft,
     ) -> NetworkAccount {
         app.add_network_account(
-            project.channel,
+            project.channel.unwrap(),
             network,
             NetworkAccountDraft {
                 handle: "archives".into(),

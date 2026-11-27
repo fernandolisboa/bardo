@@ -17,9 +17,8 @@ impl Bardo {
     /// What kind of video `project` makes: its own format, else its
     /// channel's (a Short when the channel is gone).
     pub fn video_format(&self, project: &VideoProject) -> Result<VideoFormat, RepositoryError> {
-        let channel = self.channels.get(project.channel)?;
-        Ok(project
-            .format(channel.map_or(VideoFormat::default(), |channel| channel.details.format())))
+        let details = self.video_details(project)?;
+        Ok(project.format(details.map_or(VideoFormat::default(), |details| details.format())))
     }
 
     /// Sets the project's own format, or goes back to the channel's
@@ -232,7 +231,7 @@ mod tests {
 
         let youtube = app
             .add_network_account(
-                project.channel,
+                project.channel.unwrap(),
                 Network::YouTube,
                 NetworkAccountDraft {
                     handle: "archives".into(),
@@ -270,7 +269,7 @@ mod tests {
         );
 
         app.add_network_account(
-            project.channel,
+            project.channel.unwrap(),
             Network::YouTube,
             NetworkAccountDraft {
                 handle: "archives".into(),

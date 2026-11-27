@@ -544,10 +544,15 @@ fn network_line(account: &NetworkAccount, language: &str) -> String {
     if footer > 0 && rules.text.is_some() {
         parts.push(format!("the account adds a footer of {footer} characters"));
     }
+    let handle = account.details.handle();
+    if handle.is_empty() {
+        // A loose video's file target: no account stands behind it.
+        return format!("- {}: {}.", account.network.code(), parts.join("; "));
+    }
     format!(
         "- {} (@{}): {}.",
         account.network.code(),
-        account.details.handle(),
+        handle,
         parts.join("; ")
     )
 }
@@ -900,9 +905,8 @@ impl Bardo {
             .map(|script| script.text().as_str().to_owned())
             .unwrap_or_else(|| "no script yet".to_owned());
         let channel_language = self
-            .channels
-            .get(project.channel)?
-            .map(|channel| channel.details.language())
+            .video_details(project)?
+            .map(|details| details.language())
             .ok_or(ExportError::ProjectNotFound)?;
         let english = Catalog::load(UiLanguage::EnUs);
         let networks = accounts
@@ -1105,7 +1109,7 @@ impl Bardo {
     /// The project's Publishing stage.
     pub fn export_view(&self, project: VideoProjectId) -> Result<ExportView, ExportError> {
         let project = self.export_project(project)?;
-        let accounts = self.network_accounts.list(project.channel)?;
+        let accounts = self.target_accounts(&project)?;
         let renders = self.renders.renders(project.id)?;
         let current: Vec<NetworkAccountId> = match self.render_review(project.id) {
             Ok(review) => review
@@ -1242,7 +1246,7 @@ impl Bardo {
         if self.work_busy(&Work::Metadata(project.id.to_string())) {
             return Err(ExportError::Busy);
         }
-        let accounts = self.network_accounts.list(project.channel)?;
+        let accounts = self.target_accounts(&project)?;
         if accounts.is_empty() {
             return Err(ExportError::NoAccounts);
         }
@@ -1430,11 +1434,16 @@ impl Bardo {
     ) -> String {
         let (width, height) = render.preset.dimensions();
         let mut blocks = vec![
-            format!(
-                "{} · @{}",
-                self.text(Text::NetworkName(target.network)),
-                target.handle
-            ),
+            if target.handle.is_empty() {
+                // A loose video's file: no account stands behind it.
+                self.text(Text::NetworkName(target.network)).into_owned()
+            } else {
+                format!(
+                    "{} · @{}",
+                    self.text(Text::NetworkName(target.network)),
+                    target.handle
+                )
+            },
             self.text_with(
                 Text::ExportFileVideo,
                 &[
@@ -1642,7 +1651,7 @@ pub(crate) mod tests {
         draft: NetworkAccountDraft,
     ) {
         app.add_network_account(
-            project.channel,
+            project.channel.unwrap(),
             network,
             NetworkAccountDraft {
                 handle: "archives".into(),

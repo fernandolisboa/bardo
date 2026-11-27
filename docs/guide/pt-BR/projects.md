@@ -105,3 +105,17 @@ Nada é jogado fora quando uma etapa anterior muda. O que foi feito a partir del
 ## Quanto já custou
 
 A linha sob o nome do projeto mostra o nicho, quando ele começou e, assim que algo for pago, quanto o projeto já custou: cada chamada a um provedor para este vídeo, do roteiro aos clipes. Cada geração mostra a estimativa antes de você começar, e uma chamada que passaria de um orçamento ou do [teto](#mode) do vídeo pergunta antes. [Custos](bardo:go/costs) separa os gastos por provedor, canal e vídeo; veja [Suas chaves de API](api-keys.md#budgets) para os orçamentos.
+
+<a id="loose-videos"></a>
+## Vídeos avulsos
+
+Um vídeo avulso não tem projeto nem canal: um teste rápido de uma ideia antes de ela ganhar lugar num projeto. Escolha **Sem projeto** no fim do [seletor de projetos](your-projects.md#no-project) e Vídeos lista os vídeos avulsos, com **Mostrar arquivados**, **Arquivar…** e **Excluir…** como em qualquer vídeo.
+
+**Novo vídeo avulso** pede a ideia, um título e um ângulo opcional, e **Configurações de**: um canal cujas configurações o vídeo copia (idioma, país, narrador, formato, estilo, modelos e o resto que um canal dá aos vídeos), ou **Os padrões de um canal novo**. O vídeo guarda essas configurações como suas; mudar o canal depois não muda o vídeo. Só itens globais aparecem nele: um narrador que pertence a um projeto fica de fora, e [Quem aparece](world.md) oferece só a biblioteca global.
+
+Um vídeo avulso passa por todas as etapas, do roteiro à renderização, e exporta uma pasta por rede em Publicar. Sem conta por trás, cada rede aparece como **Arquivo**, com a predefinição dessa rede; ele nunca é enviado nem agendado, e a publicação dele não pode ser vinculada. A pasta dele fica em **Global\Loose videos** na pasta base ([A pasta de um projeto](storage.md#project-folder)).
+
+<a id="move-to-a-project"></a>
+## Mover para um projeto
+
+**Mover para um projeto…** ao lado do nome de um vídeo avulso escolhe um canal entre os canais dos projetos ativos, listados como **Projeto › Canal**. Quando o idioma ou o país do vídeo são diferentes dos do canal, o Bardo avisa antes de mover: o vídeo mantém os seus. **Mover o vídeo** dá o canal a ele. Ele passa a usar as contas de rede do canal, então pode ser enviado e agendado como qualquer vídeo, mantém como suas as configurações que tinha, e a pasta dele vai para a pasta do projeto numa tarefa ([Tarefas](jobs.md)). Um vídeo avulso não é movido enquanto uma tarefa dele está na fila ou rodando, nem para um projeto arquivado.

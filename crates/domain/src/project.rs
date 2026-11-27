@@ -331,6 +331,13 @@ pub trait ProjectRepository: Send + Sync {
     /// Gives the channel to another project, with its themes, videos and
     /// network accounts (they follow their channel).
     fn move_channel(&self, channel: ChannelId, to: ProjectId) -> Result<(), RepositoryError>;
+
+    /// When the owner last opened *No project* (the loose videos, #341);
+    /// `None` if never.
+    fn loose_opened(&self, owner: ProfileId) -> Result<Option<SystemTime>, RepositoryError>;
+
+    /// Records that the owner opened *No project* at `at`.
+    fn mark_loose_opened(&self, owner: ProfileId, at: SystemTime) -> Result<(), RepositoryError>;
 }
 
 impl<T: ProjectRepository + ?Sized> ProjectRepository for Arc<T> {
@@ -356,6 +363,14 @@ impl<T: ProjectRepository + ?Sized> ProjectRepository for Arc<T> {
 
     fn move_channel(&self, channel: ChannelId, to: ProjectId) -> Result<(), RepositoryError> {
         (**self).move_channel(channel, to)
+    }
+
+    fn loose_opened(&self, owner: ProfileId) -> Result<Option<SystemTime>, RepositoryError> {
+        (**self).loose_opened(owner)
+    }
+
+    fn mark_loose_opened(&self, owner: ProfileId, at: SystemTime) -> Result<(), RepositoryError> {
+        (**self).mark_loose_opened(owner, at)
     }
 }
 
