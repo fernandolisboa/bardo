@@ -60,7 +60,9 @@ impl ProjectKeysPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut subscriptions = vec![cx.observe(&bardo, |this, _, cx| this.follow_project(cx))];
+        let mut subscriptions = vec![cx.observe_in(&bardo, window, |this, _, window, cx| {
+            this.follow_project(window, cx)
+        })];
         let rows = Provider::with_keys()
             .map(|provider| {
                 // Masked: a key never shows on screen, even while typed.
@@ -132,7 +134,7 @@ impl ProjectKeysPanel {
 
     /// Another project opened: what was typed, failed or under test was
     /// for the one before.
-    fn follow_project(&mut self, cx: &mut Context<Self>) {
+    fn follow_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let open = self
             .bardo
             .read(cx)
@@ -142,6 +144,21 @@ impl ProjectKeysPanel {
             .map(|p| p.id);
         if open != self.project {
             self.project = open;
+            // A key typed for one project is never saved as another's.
+            let inputs = self
+                .rows
+                .values()
+                .map(|row| row.input.clone())
+                .chain(
+                    self.byteplus
+                        .iter()
+                        .filter(|(field, _)| field.is_secret())
+                        .map(|(_, input)| input.clone()),
+                )
+                .collect::<Vec<_>>();
+            for input in inputs {
+                input.update(cx, |input, cx| input.set_value("", window, cx));
+            }
             for row in self.rows.values_mut() {
                 row.error = None;
                 row.testing = None;

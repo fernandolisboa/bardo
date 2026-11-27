@@ -574,10 +574,13 @@ pub(crate) fn sweep_staged(
     staging: &dyn StagingRepository,
     generators: &[Arc<dyn TakeGenerator>],
     secrets: &dyn SecretStore,
+    owner_of: &dyn Fn(VideoProjectId) -> Option<bardo_domain::ProjectId>,
     now: SystemTime,
 ) -> Result<(), JobFailure> {
     let due = staging.staged_due(owner, now).map_err(unexpected)?;
-    let mut keys: Vec<(Provider, Option<ApiKey>)> = Vec::new();
+    // Each file is deleted with the key that staged it: its video's
+    // project's own key when it has one, else the app's (#343).
+    let mut keys: Vec<(Option<bardo_domain::ProjectId>, Provider, Option<ApiKey>)> = Vec::new();
     let mut first = None;
     for upload in due {
         let Some(generator) = generators
@@ -588,14 +591,16 @@ pub(crate) fn sweep_staged(
             staging.remove_staged(&upload.file).map_err(unexpected)?;
             continue;
         };
+        let paying = owner_of(upload.project);
         let key = match keys
             .iter()
-            .find(|(provider, _)| *provider == upload.provider)
+            .find(|(project, provider, _)| *project == paying && *provider == upload.provider)
         {
-            Some((_, key)) => key.clone(),
+            Some((_, _, key)) => key.clone(),
             None => {
+                let _work = crate::project_keys::work_for(paying);
                 let key = secrets.get(owner, upload.provider).ok().flatten();
-                keys.push((upload.provider, key.clone()));
+                keys.push((paying, upload.provider, key.clone()));
                 key
             }
         };
@@ -629,6 +634,23 @@ pub(crate) struct StagingCleanupHandler {
     pub(crate) staging: Arc<dyn StagingRepository>,
     pub(crate) generators: Vec<Arc<dyn TakeGenerator>>,
     pub(crate) secrets: Arc<dyn SecretStore>,
+    pub(crate) projects: Arc<dyn ThemeRepository>,
+    pub(crate) channels: Arc<dyn ChannelRepository>,
+}
+
+/// The project a video belongs to, through its channel; `None` for a
+/// loose video or one that is gone.
+pub(crate) fn video_owner(
+    projects: &dyn ThemeRepository,
+    channels: &dyn ChannelRepository,
+    video: VideoProjectId,
+) -> Option<bardo_domain::ProjectId> {
+    let channel = projects.project(video).ok().flatten()?.channel?;
+    channels
+        .get(channel)
+        .ok()
+        .flatten()
+        .map(|channel| channel.project)
 }
 
 impl JobHandler for StagingCleanupHandler {
@@ -638,6 +660,7 @@ impl JobHandler for StagingCleanupHandler {
             self.staging.as_ref(),
             &self.generators,
             self.secrets.as_ref(),
+            &|video| video_owner(&*self.projects, &*self.channels, video),
             SystemTime::now(),
         )
     }
@@ -1161,6 +1184,7 @@ impl TakeRun<'_> {
             handler.staging.as_ref(),
             &generators,
             handler.secrets.as_ref(),
+            &|video| video_owner(&*handler.projects, &*handler.channels, video),
             SystemTime::now(),
         ) {
             tracing::warn!(detail = %failure.detail, "staged files were not deleted yet");

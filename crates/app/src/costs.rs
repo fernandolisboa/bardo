@@ -1520,6 +1520,21 @@ impl Bardo {
             .collect();
         keys.sort();
         keys.dedup();
+        // A deleted project keeps the name its costs keep (#336).
+        let deletions = self.deleted_work();
+        let kept_name = |project: ProjectId| {
+            deletions
+                .iter()
+                .find(|deleted| deleted.id == project.as_uuid())
+                .and_then(|deleted| crate::DeletedName::from(deleted).name)
+                .or_else(|| {
+                    spend
+                        .owners
+                        .iter()
+                        .find(|(id, _, _)| *id == Some(project))
+                        .and_then(|(_, name, _)| name.clone())
+                })
+        };
         let mut rows: Vec<ProjectKeySpend> = keys
             .into_iter()
             .map(|(project, provider)| {
@@ -1530,7 +1545,9 @@ impl Bardo {
                     .map(|monthly| Budget { provider, monthly });
                 ProjectKeySpend {
                     project,
-                    name: now.map(|project| project.name().to_owned()),
+                    name: now
+                        .map(|project| project.name().to_owned())
+                        .or_else(|| kept_name(project)),
                     color: now.map(|project| project.details.color()),
                     provider,
                     saved: self.project_has_key(project, provider),

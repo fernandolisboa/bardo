@@ -747,7 +747,7 @@ impl Bardo {
         if self.work_busy(&Work::Script(project.id.to_string())) {
             return Err(ScriptError::Busy);
         }
-        if self.provider_key(Provider::Claude).state == KeyState::NotSet {
+        if self.work_key_state(Provider::Claude) == KeyState::NotSet {
             return Err(ScriptError::MissingKey(Provider::Claude));
         }
         let check = CheckBrief::of(&brief);

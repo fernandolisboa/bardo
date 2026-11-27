@@ -1924,8 +1924,10 @@ mod tests {
             ],
         )
         .unwrap();
-        app.save_project_key(project, Provider::Claude, OWN).unwrap();
-        app.set_project_budget(project, Provider::Claude, "7").unwrap();
+        app.save_project_key(project, Provider::Claude, OWN)
+            .unwrap();
+        app.set_project_budget(project, Provider::Claude, "7")
+            .unwrap();
 
         // Only the app's own keys are offered.
         assert_eq!(app_keys(&app), before);

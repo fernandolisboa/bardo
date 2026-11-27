@@ -194,7 +194,7 @@ impl Bardo {
         if self.drawing_backdrop(project.id) {
             return Err(SceneError::Busy);
         }
-        if self.provider_key(Provider::Gemini).state == KeyState::NotSet {
+        if self.work_key_state(Provider::Gemini) == KeyState::NotSet {
             return Err(SceneError::MissingKey(Provider::Gemini));
         }
         if let Err(estimate) = self.check_video_budget(project.id, &[backdrop_call()], consent)? {

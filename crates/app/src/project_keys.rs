@@ -306,14 +306,21 @@ impl Bardo {
             .set_project_key(owner, project, provider, &key)
             .map_err(|error| store_failure(keys.redactor(), provider, "save", error))?;
         // Noted after the key is in the store: a job never finds the note
-        // without the key.
-        keys.rows()
-            .save_project_key(&ProjectKey {
-                project,
-                provider,
-                saved_at: SystemTime::now(),
-            })
-            .map_err(|error| ProviderKeyError::Store(SecretStoreError(error.to_string().into())))?;
+        // without the key. A note that fails takes the key back out, so no
+        // secret is left that nothing points to.
+        let noted = keys.rows().save_project_key(&ProjectKey {
+            project,
+            provider,
+            saved_at: SystemTime::now(),
+        });
+        if let Err(error) = noted {
+            if let Err(undo) = keys.store().delete_project_key(owner, project, provider) {
+                tracing::warn!(provider = provider.code(), %project, "a project's key stayed after its note failed: {undo}");
+            }
+            return Err(ProviderKeyError::Store(SecretStoreError(
+                error.to_string().into(),
+            )));
+        }
         tracing::info!(provider = provider.code(), %project, "saved a project's key");
         keys.replace_project(project, provider, KeyState::Saved { hint: key.hint() });
         Ok(())
@@ -329,14 +336,19 @@ impl Bardo {
         self.owned_project(project)?;
         let owner = self.profile.id;
         let keys = &mut self.provider_keys;
-        // The note goes first: a job reading meanwhile uses the app's key
-        // rather than find a note without its key.
-        keys.rows()
-            .remove_project_key(project, provider)
-            .map_err(|error| ProviderKeyError::Store(SecretStoreError(error.to_string().into())))?;
+        // The key goes first: when it cannot, nothing changed. When the
+        // note then cannot go, the project still says it has a key that is
+        // no longer there, and its work stops rather than pay with the
+        // app's key; removing again finishes.
         keys.store()
             .delete_project_key(owner, project, provider)
             .map_err(|error| store_failure(keys.redactor(), provider, "remove", error))?;
+        if let Err(error) = keys.rows().remove_project_key(project, provider) {
+            keys.replace_project(project, provider, KeyState::Unreadable);
+            return Err(ProviderKeyError::Store(SecretStoreError(
+                error.to_string().into(),
+            )));
+        }
         tracing::info!(provider = provider.code(), %project, "removed a project's key");
         keys.replace_project(project, provider, KeyState::NotSet);
         Ok(())

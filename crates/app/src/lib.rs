@@ -1048,6 +1048,8 @@ impl Bardo {
             staging: Arc::clone(&staging),
             generators: providers.takes.clone(),
             secrets: Arc::clone(&secrets),
+            projects: Arc::clone(&themes),
+            channels: Arc::clone(&channels),
         };
         let framing_handler = crate::look_framing::LookFramingHandler {
             personas: Arc::clone(&personas),

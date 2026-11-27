@@ -1250,7 +1250,7 @@ impl Bardo {
         if accounts.is_empty() {
             return Err(ExportError::NoAccounts);
         }
-        if self.provider_key(Provider::Claude).state == KeyState::NotSet {
+        if self.work_key_state(Provider::Claude) == KeyState::NotSet {
             return Err(ExportError::MissingKey(Provider::Claude));
         }
         let template = self.metadata_template(&project)?;

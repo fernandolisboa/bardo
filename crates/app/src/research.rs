@@ -370,7 +370,10 @@ impl Bardo {
         if fetches > 0 && !self.profile.accepted_privacy() {
             return Err(ResearchError::PrivacyNotAccepted);
         }
-        if fetches > 0 && self.provider_key(Provider::YouTubeData).state == KeyState::NotSet {
+        if fetches > 0
+            && self.key_state_for(self.project_of_channel(channel.id), Provider::YouTubeData)
+                == KeyState::NotSet
+        {
             return Err(ResearchError::MissingKey);
         }
         self.research.set_seeds(channel.id, &seeds)?;

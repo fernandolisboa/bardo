@@ -346,7 +346,9 @@ impl Bardo {
                 let provider = voice.provider();
                 let call = PlannedCall::new(provider, CostPurpose::VoiceSample, 1)
                     .with_characters(text_chars(&source));
-                if let Err(estimate) = self.check_budget(&[call], consent)? {
+                // A sample is read with the app's key, whatever project is
+                // open, so it answers to the app's budget.
+                if let Err(estimate) = self.check_budget_for(None, &[call], consent)? {
                     return Err(VoiceSampleError::OverBudget(estimate));
                 }
                 let key = self

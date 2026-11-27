@@ -432,8 +432,14 @@ impl Bardo {
         if consent == BudgetConsent::Confirmed {
             return Ok(Ok(()));
         }
-        let mut estimate = self.estimate(calls)?;
-        if let Some(project) = self.themes.project(project)?
+        let video = self.themes.project(project)?;
+        // The video's own project pays, whichever project is open.
+        let owner = video
+            .as_ref()
+            .and_then(|video| video.channel)
+            .and_then(|channel| self.project_of_channel(channel));
+        let mut estimate = self.estimate_for(owner, calls)?;
+        if let Some(project) = video
             && let Some(cap) = project.spend_cap.amount(self.video_format(&project)?)
         {
             let spent = self.project_spend(project.id)?;

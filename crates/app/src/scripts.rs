@@ -687,7 +687,7 @@ impl Bardo {
         if self.work_busy(&Work::Script(project.id.to_string())) {
             return Err(ScriptError::Busy);
         }
-        if self.provider_key(Provider::Claude).state == KeyState::NotSet {
+        if self.work_key_state(Provider::Claude) == KeyState::NotSet {
             return Err(ScriptError::MissingKey(Provider::Claude));
         }
         if let Some(localization) = self.localizations.localization(project.id)? {
@@ -1561,6 +1561,26 @@ mod tests {
         assert_eq!(estimate.providers[0].paid_by, KeyPayer::App);
         assert_eq!(estimate.level(), BudgetLevel::Reached);
         assert!(app.project_keys(owner)[0].budget.is_none());
+    }
+
+    #[test]
+    fn a_project_with_its_own_key_writes_scripts_without_the_apps() {
+        const OWN_KEY: &str = "sk-ant-api03-own-project-key-0002";
+        let h = Harness::new();
+        h.answer(&["Draft one."]);
+        let mut app = h.start();
+        let video = project(&app);
+        assert!(matches!(
+            app.generate_script(video.id, BudgetConsent::Ask),
+            Err(ScriptError::MissingKey(_))
+        ));
+        let owner = app
+            .project_of_channel(video.channel.expect("a channel's video"))
+            .expect("the channel's project");
+        app.save_project_key(owner, Provider::Claude, OWN_KEY)
+            .unwrap();
+        generate(&app, &video);
+        assert_eq!(*h.text.keys.lock().unwrap(), [OWN_KEY]);
     }
 
     #[test]

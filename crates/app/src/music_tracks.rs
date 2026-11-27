@@ -495,7 +495,7 @@ impl Bardo {
             return Err(MusicTrackError::Busy);
         }
         let provider = self.music.provider();
-        if self.provider_key(provider).state == KeyState::NotSet {
+        if self.work_key_state(provider) == KeyState::NotSet {
             return Err(MusicTrackError::MissingKey(provider));
         }
         if let Err(estimate) =

@@ -241,7 +241,7 @@ impl Bardo {
         if self.work_busy(&Work::Metadata(project.id.to_string())) {
             return Err(ExportError::Busy);
         }
-        if self.provider_key(Provider::Claude).state == KeyState::NotSet {
+        if self.work_key_state(Provider::Claude) == KeyState::NotSet {
             return Err(ExportError::MissingKey(Provider::Claude));
         }
         let check = CheckBrief::of(&brief);
