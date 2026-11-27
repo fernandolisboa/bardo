@@ -219,6 +219,7 @@ impl WorldScreen {
             _poll: poll,
             _subscriptions: subscriptions,
         };
+        screen.resolve_owner(cx);
         screen.reload_list(cx);
         screen.relabel(window, cx);
         if let Some(first) = screen.first_listed() {
@@ -231,6 +232,7 @@ impl WorldScreen {
     /// backup may have changed it.
     pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let owner = self.owner;
+        self.resolve_owner(cx);
         self.reload_list(cx);
         self.relabel(window, cx);
         let stored = self.editing.and_then(|id| {
@@ -255,13 +257,24 @@ impl WorldScreen {
         cx.notify();
     }
 
-    fn reload_list(&mut self, cx: &mut Context<Self>) {
-        let bardo = self.bardo.read(cx);
+    /// Reads which project's world shows: only when the screen reloads,
+    /// so a form is never saved into a project opened meanwhile.
+    fn resolve_owner(&mut self, cx: &App) {
         self.owner = match self.scope {
             WorldScope::Global => None,
-            WorldScope::Project => bardo.open_project().ok().flatten().map(|p| p.id),
+            WorldScope::Project => self
+                .bardo
+                .read(cx)
+                .open_project()
+                .ok()
+                .flatten()
+                .map(|p| p.id),
         };
         self.no_project = self.scope == WorldScope::Project && self.owner.is_none();
+    }
+
+    fn reload_list(&mut self, cx: &mut Context<Self>) {
+        let bardo = self.bardo.read(cx);
         if self.no_project {
             self.cards.clear();
             self.load_failed = false;
@@ -869,6 +882,9 @@ impl WorldScreen {
             )
         });
         let drawing = card.drawing;
+        // A picture is drawn from the saved appearance, so edits are saved
+        // first.
+        let dirty = self.dirty(cx);
         v_flex()
             .gap_2()
             .child(
@@ -887,7 +903,9 @@ impl WorldScreen {
                             .outline()
                             .label(tr(bardo, Text::WorldPictureDraw))
                             .loading(drawing)
-                            .disabled(drawing || self.ask.is_some() || self.looks.is_empty())
+                            .disabled(
+                                drawing || dirty || self.ask.is_some() || self.looks.is_empty(),
+                            )
                             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                 this.draw(BudgetConsent::Ask, cx)
                             })),

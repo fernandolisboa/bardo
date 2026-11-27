@@ -346,6 +346,9 @@ impl Shell {
         self.products
             .update(cx, |products, cx| products.reload(window, cx));
         self.world.update(cx, |world, cx| world.reload(window, cx));
+        // The global world's looks are the open project's channels'.
+        self.global_world
+            .update(cx, |world, cx| world.reload(window, cx));
         self.costs
             .update(cx, |costs, cx| costs.project_switched(window, cx));
         self.jobs

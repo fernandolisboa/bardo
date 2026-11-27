@@ -484,7 +484,11 @@ impl FixedMember {
 fn without_article(name: &str) -> &str {
     let trimmed = name.trim();
     for article in ["the ", "a ", "an "] {
-        if trimmed.len() > article.len() && trimmed[..article.len()].eq_ignore_ascii_case(article) {
+        if trimmed.len() > article.len()
+            && trimmed
+                .get(..article.len())
+                .is_some_and(|start| start.eq_ignore_ascii_case(article))
+        {
             return trimmed[article.len()..].trim_start();
         }
     }
@@ -1589,7 +1593,12 @@ impl SceneHandler {
         let name = cast.name.clone();
         let description = cast.description().clone();
         let character = cast.character();
-        let prompt = cast.portrait_prompt(style);
+        // A world character's appearance says nothing of the video's look:
+        // a look from the notes adds them.
+        let prompt = match (&look, character) {
+            (Some(look), Some(_)) => crate::world::portrait_in_look(cast, look),
+            _ => cast.portrait_prompt(style),
+        };
         let request = ImageRequest {
             prompt: prompt.clone(),
             shape: ImageShape::Portrait,

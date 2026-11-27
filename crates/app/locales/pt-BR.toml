@@ -5181,6 +5181,7 @@ start = "Começar um vídeo"
 no_video = "O vídeo dela foi excluído."
 
 [world.error]
+video_busy = "Um vídeo que mostra este personagem está planejando ou desenhando as cenas: tente de novo quando terminar."
 not_found = "Este personagem não existe mais."
 name_taken = "Já existe um personagem com este nome aqui. Ele pode estar entre os arquivados."
 in_use = "Vídeos em andamento usam este personagem, então ele não pode ser excluído: {videos}. Arquive-o em vez disso."

@@ -5181,6 +5181,7 @@ start = "Start a video"
 no_video = "Its video was deleted."
 
 [world.error]
+video_busy = "A video that shows this character is planning or drawing its scenes: try again when it finishes."
 not_found = "This character no longer exists."
 name_taken = "A character with this name already exists here. It may be among the archived ones."
 in_use = "Videos in progress use this character, so it cannot be deleted: {videos}. Archive it instead."

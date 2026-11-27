@@ -189,6 +189,10 @@ impl WorldBook {
         let Some(picture) = self.kept(character, look).map_err(unexpected)? else {
             return Ok(None);
         };
+        // A picture of an older appearance is no portrait of this one.
+        if !drawn_from(&picture, found.details.appearance()) {
+            return Ok(None);
+        }
         let folder = self.folder(found.owner_project);
         let bytes = match self.files.read(&folder, &picture.file) {
             Ok(bytes) => bytes,
@@ -198,9 +202,15 @@ impl WorldBook {
                     format!("the world folder {} cannot be reached", folder.display()),
                 ));
             }
-            Err(error) => {
-                tracing::warn!("a world picture would not read and is let go: {error}");
+            // Gone: let go, so the next portrait is drawn and kept.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                tracing::warn!("a world picture's file is gone and is let go: {error}");
                 self.world.remove_picture(picture.id).map_err(unexpected)?;
+                return Ok(None);
+            }
+            // Held by another program for a moment: drawn this time, kept.
+            Err(error) => {
+                tracing::warn!("a world picture would not read: {error}");
                 return Ok(None);
             }
         };
@@ -264,21 +274,50 @@ impl WorldBook {
             tracing::warn!("could not keep a portrait in the world: {error}");
             return Ok(());
         }
-        self.world.save_picture(&ReferencePicture {
-            id,
-            character,
-            look,
-            file,
-            provenance: PictureProvenance {
-                provider: drawn.provider,
-                model: drawn.model.clone(),
-                prompt: drawn.prompt.clone(),
-                generated_at: drawn.generated_at,
-                job: drawn.job,
-                origin,
+        self.save_replacing(
+            found.owner_project,
+            &ReferencePicture {
+                id,
+                character,
+                look,
+                file,
+                provenance: PictureProvenance {
+                    provider: drawn.provider,
+                    model: drawn.model.clone(),
+                    prompt: drawn.prompt.clone(),
+                    generated_at: drawn.generated_at,
+                    job: drawn.job,
+                    origin,
+                },
+                kept: true,
             },
-            kept: true,
-        })
+        )
+    }
+
+    /// Saves `picture`, removing the file of the one of the same look and
+    /// review state it replaces.
+    pub(crate) fn save_replacing(
+        &self,
+        owner: Option<ProjectId>,
+        picture: &ReferencePicture,
+    ) -> Result<(), RepositoryError> {
+        let replaced: Vec<ReferencePicture> = self
+            .world
+            .pictures(picture.character)?
+            .into_iter()
+            .filter(|other| {
+                other.id != picture.id
+                    && other.look == picture.look
+                    && other.kept == picture.kept
+                    && other.file != picture.file
+            })
+            .collect();
+        self.world.save_picture(picture)?;
+        let folder = self.folder(owner);
+        for other in replaced {
+            let _ = self.files.remove(&folder, &other.file);
+        }
+        Ok(())
     }
 
     /// Removes the picture and its file.
@@ -290,6 +329,26 @@ impl WorldBook {
         // A file that will not go only costs disk space.
         let _ = self.files.remove(&self.folder(owner), &picture.file);
     }
+}
+
+/// A world character's portrait prompt in `look`: a look from a channel's
+/// notes adds the notes, since the character's appearance as written says
+/// nothing of how the video is drawn (#337).
+pub(crate) fn portrait_in_look(cast: &CastMember, look: &Look) -> String {
+    let prompt = cast.portrait_prompt(look.style());
+    match look.notes() {
+        Some(notes) if !notes.trim().is_empty() => {
+            format!(
+                "{prompt}\n\nDraw it in the look of the video, from its aesthetic notes: {notes}"
+            )
+        }
+        _ => prompt,
+    }
+}
+
+/// Whether `picture` was drawn from `appearance`: its prompt holds it.
+fn drawn_from(picture: &ReferencePicture, appearance: &str) -> bool {
+    picture.provenance.prompt.contains(appearance)
 }
 
 /// The name of a world picture's file, keeping the drawing's extension.
@@ -345,6 +404,9 @@ pub enum WorldError {
     /// A picture is being drawn for it already.
     #[error("busy")]
     Busy,
+    /// A video that shows it is planning or drawing its scenes.
+    #[error("a video is busy")]
+    VideoBusy,
     /// No picture waits for review.
     #[error("nothing waiting")]
     NothingWaiting,
@@ -379,6 +441,7 @@ impl WorldError {
             WorldError::InstructionTooLong => Text::WhoAppearsInstructionTooLong,
             WorldError::OtherProject => Text::WorldNotFound,
             WorldError::Busy => Text::WorldPictureBusy,
+            WorldError::VideoBusy => Text::WorldVideoBusy,
             WorldError::NothingWaiting => Text::WorldPictureNothingWaiting,
             WorldError::MissingKey => Text::WorldPictureMissingKey,
             WorldError::FolderNotFound => Text::FolderNotFound,
@@ -531,6 +594,12 @@ impl JobHandler for WorldPictureHandler {
             },
             found.owner_project,
         );
+        // Read again: an appearance changed or a character deleted while
+        // it was drawn is not what this picture shows.
+        match self.book.world.character(character).map_err(unexpected)? {
+            Some(now) if now.details.appearance() == payload.appearance => {}
+            _ => return Ok(()),
+        }
         let id = ReferencePictureId::new();
         let file = format!("character-{id}.{}", image.format.extension());
         self.book
@@ -538,22 +607,24 @@ impl JobHandler for WorldPictureHandler {
             .write(&folder, &file, &image.bytes)
             .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))?;
         self.book
-            .world
-            .save_picture(&ReferencePicture {
-                id,
-                character,
-                look,
-                file,
-                provenance: PictureProvenance {
-                    provider: Provider::Gemini,
-                    model: image.model,
-                    prompt: payload.prompt,
-                    generated_at: SystemTime::now(),
-                    job: Some(job),
-                    origin: PictureOrigin::World,
+            .save_replacing(
+                found.owner_project,
+                &ReferencePicture {
+                    id,
+                    character,
+                    look,
+                    file,
+                    provenance: PictureProvenance {
+                        provider: Provider::Gemini,
+                        model: image.model,
+                        prompt: payload.prompt,
+                        generated_at: SystemTime::now(),
+                        job: Some(job),
+                        origin: PictureOrigin::World,
+                    },
+                    kept: false,
                 },
-                kept: false,
-            })
+            )
             .map_err(unexpected)
     }
 }
@@ -663,6 +734,17 @@ impl Bardo {
         let details = CharacterDetails::validate(draft).map_err(WorldError::Field)?;
         self.name_free(character.owner_project, details.name(), Some(id))?;
         let new_look = details.appearance() != character.details.appearance();
+        if new_look {
+            let busy = self
+                .world_book
+                .world
+                .character_uses(id)?
+                .into_iter()
+                .any(|used| !used.archived && self.scenes_idle(used.video).is_err());
+            if busy {
+                return Err(WorldError::VideoBusy);
+            }
+        }
         let pictures = self.world_book.world.pictures(id)?;
         if new_look && !confirmed {
             let videos: Vec<String> = self
@@ -874,7 +956,7 @@ impl Bardo {
             return Err(WorldError::OverBudget(estimate));
         }
         let prompt = as_cast(&character)
-            .map(|cast| cast.portrait_prompt(look.style()))
+            .map(|cast| portrait_in_look(&cast, &look))
             .ok_or(WorldError::Field(CharacterFieldError::AppearanceTooLong))?;
         let payload = PicturePayload {
             character: id.to_string(),
@@ -903,6 +985,10 @@ impl Bardo {
             .find(|candidate| candidate.id == picture && !candidate.kept)
             .cloned()
             .ok_or(WorldError::NothingWaiting)?;
+        if !drawn_from(&waiting, found.details.appearance()) {
+            self.world_book.drop_picture(found.owner_project, &waiting);
+            return Err(WorldError::NothingWaiting);
+        }
         let replaced = pictures
             .iter()
             .find(|candidate| candidate.kept && candidate.look == waiting.look)
@@ -1051,6 +1137,11 @@ impl Bardo {
         if cast.character().is_some() {
             return Err(WorldError::NameTaken);
         }
+        // A job drawing the scenes holds the plan: it would write the member
+        // back unlinked.
+        if self.scenes_idle(video).is_err() {
+            return Err(WorldError::VideoBusy);
+        }
         let name = cast
             .name
             .trim_start_matches(|c: char| !c.is_alphanumeric())
@@ -1083,6 +1174,16 @@ impl Bardo {
         if let Ok(cast) = plan.cast_mut(member, SystemTime::now()) {
             *cast = cast.clone().with_character(Some(character.id));
             self.scene_plans.save_cast_member(&plan, member)?;
+        }
+        // The video now shows the character: it is picked, so planning
+        // again keeps it, while there is room. The plan already has it.
+        let mut picks = self.world_book.world.picks(video)?;
+        if picks.len() < MAX_PICKED {
+            picks.push(CastPick {
+                character: character.id,
+                instruction: String::new(),
+            });
+            self.world_book.world.set_picks(video, &picks, false)?;
         }
         Ok(character)
     }
@@ -1334,6 +1435,12 @@ mod tests {
 
         draw(&app, &video);
         assert_eq!(portraits_asked(&h), 1);
+        let portrait = h.images.requests.lock().unwrap()[0].prompt.clone();
+        assert!(portrait.contains(ROSA));
+        assert!(
+            portrait.contains("grainy 1960s film"),
+            "the channel's notes are the look: {portrait}"
+        );
         let kept = kept_pictures(&app, rosa.id);
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].provenance.origin, PictureOrigin::Video);
@@ -1652,5 +1759,70 @@ mod tests {
         plan(&h, &app, &second);
         draw(&app, &second);
         assert_eq!(portraits_asked(&h), 1, "the saved portrait is reused");
+    }
+
+    #[test]
+    fn a_name_with_accents_or_an_article_is_matched_without_failing() {
+        let h = Harness::new();
+        let app = h.start();
+        let video = h.narrated_project(&app);
+        let avo = character(&app, owner(&app), "Avó Aïcha", ROSA);
+        pick(&app, &video, &[(&avo, "")]);
+        h.answer(
+            serde_json::json!({
+                "cast": [{"name": "A avó Aïcha", "description": "An old lady"},
+                         {"name": "Ébano", "description": "A black dog"}],
+                "scenes": [
+                    {"first_sentence": 0, "prompt": "Her", "cast": [0, 1], "motion": "Still"},
+                    {"first_sentence": 2, "prompt": "Her again", "cast": [0, 1], "motion": "Still"},
+                ],
+            })
+            .to_string(),
+        );
+        done(
+            &app,
+            app.plan_scenes(video.id, true, BudgetConsent::Ask).unwrap(),
+        );
+        let plan = app.scenes(video.id).unwrap().plan.unwrap();
+        assert_eq!(plan.cast().len(), 2);
+        assert_eq!(plan.cast()[1].character(), None, "an extra");
+    }
+
+    #[test]
+    fn a_new_drawing_replaces_the_one_waiting_and_a_stale_one_is_not_kept() {
+        let h = Harness::new();
+        let app = h.start();
+        let video = project(&app);
+        let owner = owner(&app);
+        let rosa = character(&app, owner, "Rosa", ROSA);
+        let look = app
+            .world_looks()
+            .unwrap()
+            .into_iter()
+            .map(|(look, _)| look)
+            .find(|look| look.channel() == Some(video.channel))
+            .unwrap();
+        for _ in 0..2 {
+            let job = app
+                .draw_world_picture(rosa.id, look.clone(), BudgetConsent::Ask)
+                .unwrap();
+            done(&app, job);
+        }
+        let folder = app.world_book.folder(owner);
+        assert_eq!(h.world_files.names(&folder).len(), 1, "no file left behind");
+        let request = h.images.requests.lock().unwrap()[0].prompt.clone();
+        assert!(request.contains("grainy 1960s film"), "{request}");
+
+        // An appearance changed since: the waiting picture shows another face.
+        let waiting = app.world_book.world.pictures(rosa.id).unwrap().remove(0);
+        let mut draft = CharacterDraft::from(&rosa.details);
+        draft.appearance = BENTO.into();
+        app.edit_character(rosa.id, draft, true).unwrap();
+        app.world_book.world.save_picture(&waiting).unwrap();
+        assert!(matches!(
+            app.keep_world_picture(rosa.id, waiting.id),
+            Err(WorldError::NothingWaiting)
+        ));
+        assert!(kept_pictures(&app, rosa.id).is_empty());
     }
 }
