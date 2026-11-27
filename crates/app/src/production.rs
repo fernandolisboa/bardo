@@ -384,7 +384,7 @@ impl Bardo {
             let Some(model) = model else { continue };
             clips += 1;
             let provider = model.id.provider();
-            if missing_key.is_none() && self.provider_key(provider).state == KeyState::NotSet {
+            if missing_key.is_none() && self.work_key_state(provider) == KeyState::NotSet {
                 missing_key = Some(provider);
             }
             calls.push(

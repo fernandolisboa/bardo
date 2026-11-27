@@ -13,8 +13,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::{
-    ChannelId, JobId, ProfileId, ProjectId, Provider, RepositoryError, TokenUsage, VideoProjectId,
-    WorkOrigin,
+    ChannelId, JobId, KeyPayer, ProfileId, ProjectBudget, ProjectId, Provider, RepositoryError,
+    TokenUsage, VideoProjectId, WorkOrigin,
 };
 
 uuid_id!(
@@ -754,6 +754,8 @@ pub struct CostRecord {
     /// The project, channel and video it was for, with their names when it
     /// was recorded: the store fills it in from `project` or `channel`.
     pub origin: WorkOrigin,
+    /// Whose key paid: the app's, or a project's own (#343).
+    pub paid_by: KeyPayer,
 }
 
 impl CostRecord {
@@ -782,6 +784,11 @@ pub struct Spend {
     pub owners: Vec<(Option<ProjectId>, Option<String>, Money)>,
     /// The provider models that ran without a rate, each once.
     pub unpriced: Vec<(Provider, String)>,
+    /// Per provider, what the app's key paid: what the app's budgets count.
+    pub app_keys: BTreeMap<Provider, Money>,
+    /// Per project and provider, what the project's own key paid: what the
+    /// project's budgets count. By project, then provider.
+    pub project_keys: Vec<(ProjectId, Provider, Money)>,
 }
 
 impl Spend {
@@ -791,6 +798,7 @@ impl Spend {
         let mut projects: BTreeMap<String, (VideoProjectId, Money)> = BTreeMap::new();
         let mut owners: BTreeMap<Option<String>, (Option<ProjectId>, Option<String>, Money)> =
             BTreeMap::new();
+        let mut project_keys: BTreeMap<(ProjectId, Provider), Money> = BTreeMap::new();
         for record in records {
             let amount = record.cost.amount();
             spend.total = spend.total.saturating_add(amount);
@@ -813,6 +821,18 @@ impl Spend {
                     .or_insert((project, Money::ZERO));
                 entry.1 = entry.1.saturating_add(amount);
             }
+            match record.paid_by {
+                KeyPayer::App => {
+                    let paid = spend.app_keys.entry(record.provider).or_default();
+                    *paid = paid.saturating_add(amount);
+                }
+                KeyPayer::Project(project) => {
+                    let paid = project_keys
+                        .entry((project, record.provider))
+                        .or_insert(Money::ZERO);
+                    *paid = paid.saturating_add(amount);
+                }
+            }
             if record.cost == Cost::Unpriced
                 && !spend
                     .unpriced
@@ -828,11 +848,28 @@ impl Spend {
         spend.projects.sort_by_key(|row| std::cmp::Reverse(row.1));
         spend.owners = owners.into_values().collect();
         spend.owners.sort_by_key(|row| std::cmp::Reverse(row.2));
+        spend.project_keys = project_keys
+            .into_iter()
+            .map(|((project, provider), amount)| (project, provider, amount))
+            .collect();
         spend
     }
 
     pub fn provider(&self, provider: Provider) -> Money {
         self.providers.get(&provider).copied().unwrap_or_default()
+    }
+
+    /// What `payer`'s key paid `provider`: what its budget counts.
+    pub fn paid_by(&self, payer: KeyPayer, provider: Provider) -> Money {
+        match payer {
+            KeyPayer::App => self.app_keys.get(&provider).copied().unwrap_or_default(),
+            KeyPayer::Project(project) => self
+                .project_keys
+                .iter()
+                .find(|(p, kind, _)| *p == project && *kind == provider)
+                .map(|(_, _, amount)| *amount)
+                .unwrap_or_default(),
+        }
     }
 }
 
@@ -895,6 +932,18 @@ pub trait CostRepository: Send + Sync {
     fn save_budget(&self, owner: ProfileId, budget: &crate::Budget) -> Result<(), RepositoryError>;
 
     fn remove_budget(&self, owner: ProfileId, provider: Provider) -> Result<(), RepositoryError>;
+
+    /// Every project's budgets for spending with its own keys (#343).
+    fn project_budgets(&self, owner: ProfileId) -> Result<Vec<ProjectBudget>, RepositoryError>;
+
+    /// Sets a project's budget for a provider, replacing the one it had.
+    fn save_project_budget(&self, budget: &ProjectBudget) -> Result<(), RepositoryError>;
+
+    fn remove_project_budget(
+        &self,
+        project: ProjectId,
+        provider: Provider,
+    ) -> Result<(), RepositoryError>;
 }
 
 impl<T: CostRepository + ?Sized> CostRepository for Arc<T> {
@@ -960,6 +1009,22 @@ impl<T: CostRepository + ?Sized> CostRepository for Arc<T> {
 
     fn remove_budget(&self, owner: ProfileId, provider: Provider) -> Result<(), RepositoryError> {
         (**self).remove_budget(owner, provider)
+    }
+
+    fn project_budgets(&self, owner: ProfileId) -> Result<Vec<ProjectBudget>, RepositoryError> {
+        (**self).project_budgets(owner)
+    }
+
+    fn save_project_budget(&self, budget: &ProjectBudget) -> Result<(), RepositoryError> {
+        (**self).save_project_budget(budget)
+    }
+
+    fn remove_project_budget(
+        &self,
+        project: ProjectId,
+        provider: Provider,
+    ) -> Result<(), RepositoryError> {
+        (**self).remove_project_budget(project, provider)
     }
 }
 
@@ -1427,6 +1492,7 @@ mod tests {
             job: None,
             at: SystemTime::UNIX_EPOCH,
             origin: WorkOrigin::default(),
+            paid_by: KeyPayer::App,
         }
     }
 
@@ -1541,6 +1607,39 @@ mod tests {
                 (Some(brand), Some("New name".to_owned()), dollars("0.40")),
                 (None, None, dollars("0.05")),
             ]
+        );
+    }
+
+    #[test]
+    fn spend_tells_the_apps_key_from_each_projects_own() {
+        let (brand, other) = (ProjectId::new(), ProjectId::new());
+        let paid = |amount: &str, provider: Provider, payer: KeyPayer| {
+            let mut record = record(provider, "m", Cost::Reported(dollars(amount)), None, None);
+            record.paid_by = payer;
+            // Work for a project may still pay with the app's key.
+            record.origin.project = Some(brand);
+            record
+        };
+        let spend = Spend::of(&[
+            paid("1", Provider::Claude, KeyPayer::App),
+            paid("2", Provider::Claude, KeyPayer::Project(brand)),
+            paid("4", Provider::Claude, KeyPayer::Project(brand)),
+            paid("8", Provider::Gemini, KeyPayer::Project(other)),
+        ]);
+        assert_eq!(spend.provider(Provider::Claude), dollars("7"));
+        assert_eq!(spend.paid_by(KeyPayer::App, Provider::Claude), dollars("1"));
+        assert_eq!(
+            spend.paid_by(KeyPayer::Project(brand), Provider::Claude),
+            dollars("6")
+        );
+        assert_eq!(
+            spend.paid_by(KeyPayer::Project(other), Provider::Gemini),
+            dollars("8")
+        );
+        assert_eq!(spend.paid_by(KeyPayer::App, Provider::Gemini), Money::ZERO);
+        assert_eq!(
+            spend.paid_by(KeyPayer::Project(other), Provider::Claude),
+            Money::ZERO
         );
     }
 

@@ -280,6 +280,15 @@ pub enum SetUpAgain {
         network: Network,
         handle: String,
     },
+    /// A project's own key (#343) is noted in the restored data and is not
+    /// on this computer: the project's work stops at a missing key until it
+    /// is saved again or removed.
+    ProjectKey {
+        project: bardo_domain::ProjectId,
+        /// The project's name, as the checklist shows it.
+        name: String,
+        provider: Provider,
+    },
 }
 
 /// What the user reviews before a restore.
@@ -492,6 +501,25 @@ impl Bardo {
                 })
                 .map(|network| SetUpAgain::AppCredentials(*network)),
         );
+        let projects = self.projects().unwrap_or_default();
+        let mut keys: Vec<SetUpAgain> = self
+            .provider_keys
+            .project_states()
+            .filter(|(_, _, state)| **state == KeyState::Unreadable)
+            .filter_map(|(project, provider, _)| {
+                let found = projects.iter().find(|found| found.id == project)?;
+                Some(SetUpAgain::ProjectKey {
+                    project,
+                    name: found.name().to_owned(),
+                    provider,
+                })
+            })
+            .collect();
+        keys.sort_by_key(|item| match item {
+            SetUpAgain::ProjectKey { name, provider, .. } => (name.to_lowercase(), *provider),
+            _ => (String::new(), Provider::Claude),
+        });
+        missing.extend(keys);
         let connections = self.connection_book.connections();
         for channel in self.all_channels().unwrap_or_default() {
             for account in self.network_accounts.list(channel.id).unwrap_or_default() {
@@ -916,6 +944,14 @@ mod tests {
             .save_app_credentials(Network::InstagramReels, META_ID, META_SECRET)
             .unwrap();
         let owner = s.app.profile().id;
+        // A project's own key is a secret like the app's (#343).
+        let brand = s
+            .app
+            .project_of_channel(s.project.channel.unwrap())
+            .unwrap();
+        s.app
+            .save_project_key(brand, Provider::Claude, "sk-ant-api03-project-own-key-0002")
+            .unwrap();
         let media = paths(dir.path()).projects.join(s.project.id.to_string());
         std::fs::create_dir_all(&media).unwrap();
         std::fs::write(media.join("narration.mp3"), b"narration").unwrap();
@@ -928,6 +964,12 @@ mod tests {
                 secrets.extend(key.sensitive_parts().into_iter().map(str::to_owned));
             }
         }
+        let own =
+            s.h.secrets
+                .project_key(owner, brand, Provider::Claude)
+                .unwrap()
+                .unwrap();
+        secrets.extend(own.sensitive_parts().into_iter().map(str::to_owned));
         let credentials =
             s.h.connection_secrets
                 .app_credentials(owner, Network::InstagramReels)
@@ -941,7 +983,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
         secrets.extend(tokens.sensitive_parts().into_iter().map(str::to_owned));
-        assert!(secrets.len() >= 6, "keys, credentials and tokens");
+        assert!(secrets.len() >= 7, "keys, credentials and tokens");
 
         let backup = dir.path().join("backup.zip");
         back_up(&s, &backup);
@@ -1111,6 +1153,30 @@ mod tests {
         let mut s = ready();
         let owner = s.app.profile().id;
         let account = reels_account(&s);
+        // The project's own key: noted in the database, not on this
+        // computer.
+        let brand = s
+            .app
+            .project_of_channel(s.project.channel.unwrap())
+            .unwrap();
+        let brand_name = s
+            .app
+            .projects()
+            .unwrap()
+            .into_iter()
+            .find(|project| project.id == brand)
+            .unwrap()
+            .name()
+            .to_owned();
+        bardo_domain::ProjectKeyRepository::save_project_key(
+            &*s.h.db,
+            &bardo_domain::ProjectKey {
+                project: brand,
+                provider: Provider::Gemini,
+                saved_at: SystemTime::now(),
+            },
+        )
+        .unwrap();
         // This computer has the database, not the secrets.
         s.h.connection_secrets
             .delete_tokens(owner, account)
@@ -1141,6 +1207,11 @@ mod tests {
                 SetUpAgain::Key(Provider::YouTubeData),
                 SetUpAgain::Key(Provider::HiggsfieldPlan),
                 SetUpAgain::AppCredentials(Network::InstagramReels),
+                SetUpAgain::ProjectKey {
+                    project: brand,
+                    name: brand_name,
+                    provider: Provider::Gemini,
+                },
                 SetUpAgain::Reconnect {
                     account,
                     network: Network::InstagramReels,

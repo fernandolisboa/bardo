@@ -15,6 +15,7 @@ appearance_tab = "Aparência"
 about_tab = "Sobre"
 publishing_tab = "Publicação"
 backup_tab = "Backup"
+project_tab = "Este projeto"
 
 [language]
 en-US = "English (US)"
@@ -1563,6 +1564,11 @@ channels_title = "Por canal"
 videos_title = "Vídeos mais caros"
 unknown_channel = "Canal desconhecido"
 unknown_video = "Vídeo removido"
+project_keys_title = "Chaves próprias dos projetos"
+project_keys_hint = "O que a chave própria de cada projeto pagou neste mês, contra o orçamento desse projeto. Não conta nos orçamentos acima."
+project_key_gone = "Chave removida"
+deleted_project_name = "Projeto excluído"
+paid_by_projects = "{amount} disso pago por chaves próprias de projetos"
 
 [costs.budget]
 none = "Sem orçamento"
@@ -1610,6 +1616,7 @@ unknown = "Custo estimado desconhecido: nenhuma tarifa cobre este modelo. Adicio
 near = "{provider}: {spent} do orçamento de {budget} gastos este mês; isto passa de 80%."
 redraw = "Desenhar uma cena de novo custa cerca de {amount}."
 project_spent = "Este vídeo até agora: {amount}"
+provider_own_key = "{provider} (chave deste projeto)"
 
 [budget]
 reached_title = "Orçamento atingido"
@@ -3724,6 +3731,21 @@ body = "Escolha outra pasta para os novos projetos, ou volte ao padrão. Os proj
 title = "Mudança de mídia"
 body = "A mídia de vídeos antigos, e de um canal movido para outro projeto, vai sozinha para a pasta do projeto, como uma tarefa."
 
+[tour.project-keys]
+name = "Tour deste projeto"
+
+[tour.project-keys.kept]
+title = "Chaves próprias"
+body = "Uma chave salva aqui paga o trabalho deste projeto no lugar da chave do app. Ela fica no Gerenciador de Credenciais do Windows, só para este projeto."
+
+[tour.project-keys.card]
+title = "Um cartão por provedor"
+body = "Salve, teste, substitua ou remova a chave do projeto. Sem ela, o cartão diz que o projeto usa a chave do app."
+
+[tour.project-keys.budget]
+title = "O orçamento dele"
+body = "O que a chave própria do projeto paga conta neste orçamento, não no do app. Custos mostra isso em Chaves próprias dos projetos."
+
 [tour.backup]
 name = "Tour do backup"
 
@@ -3987,6 +4009,7 @@ set_up_reconnect = "Reconectar {handle} no {network}"
 set_up_open = "Abrir"
 nothing_to_set_up = "Chaves, credenciais de app e logins estão todos no lugar."
 done = "Concluir"
+set_up_project_key = "A chave de {provider} de {project}"
 
 [settings_file]
 not_one = "Este arquivo não é um arquivo de configurações do Bardo."
@@ -5254,6 +5277,8 @@ running = "Excluindo…"
 name_mismatch = "Digite o nome exatamente como aparece."
 folder_not_removed = "A pasta não pôde ser removida (talvez um arquivo esteja aberto). Nada foi excluído."
 not_disconnected = "Uma conta não pôde ser desconectada, então os registros continuam. Tente de novo para terminar."
+keys_not_removed = "Uma das chaves próprias do projeto não pôde ser removida do Gerenciador de Credenciais do Windows, então nada foi apagado. Tente de novo."
+removes_keys = "As chaves de API próprias dele ({n}) são removidas do Gerenciador de Credenciais do Windows."
 
 [delete.permanent_reason]
 removable_drive = "Ela está num drive removível, que não tem Lixeira."
@@ -5564,6 +5589,7 @@ import_started = "Importando {name}. Ele aparece nesta lista quando a tarefa ter
 relinked = "{name} usa esta pasta agora."
 reopened = "{name} voltou como um projeto novo."
 opened_archived = "{name} está em Projetos arquivados: desarquive o projeto lá para abri-lo."
+keys = "Chaves e orçamentos…"
 
 [package_import]
 title = "Importar {name}"
@@ -5573,3 +5599,16 @@ contents = "{channels} canais · {videos} vídeos · {world} itens do mundo · {
 templates = "Modelos globais que ele usou"
 templates_hint = "Os marcados entram como modelos do próprio projeto e valem mais que os globais dentro dele. Os outros continuam os globais; os textos já escritos guardam o que os gerou."
 confirm = "Importar"
+
+[project_keys]
+budget_needs_key = "Salve antes a chave própria deste projeto: o orçamento conta o que essa chave paga."
+no_such_project = "Este projeto não existe mais. Abra outro."
+title = "Chaves próprias de {name}"
+hint = "Uma chave salva aqui paga o trabalho deste projeto no lugar da chave do app, e o que ela paga conta no orçamento deste projeto, não no do app. Um provedor sem chave aqui usa a chave de Chaves de API."
+info = "Como funciona a chave própria"
+no_project_open = "Abra um projeto para dar a ele chaves próprias. O trabalho fora de um projeto sempre usa as chaves de Chaves de API."
+uses_app = "Usa a chave do app"
+budget_label = "Orçamento mensal desta chave"
+budget_amount = "{budget} por mês"
+budget_none = "Sem orçamento: o que esta chave paga não tem limite."
+budget_hint = "O que a chave própria deste projeto paga conta neste orçamento, nunca no do app. O Bardo pergunta antes de uma etapa que chegaria a ele."

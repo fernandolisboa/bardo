@@ -56,6 +56,7 @@ mod product_concepts;
 mod product_sheets;
 mod production;
 mod products;
+mod project_keys;
 mod projects;
 mod provider_keys;
 mod proxies;
@@ -149,8 +150,8 @@ pub use control_videos::{
     ControlPlayer, ControlStatus, ControlVideoView, SetChoice, SetPicture, SetScene,
 };
 pub use costs::{
-    BudgetConsent, CapReached, CostError, CostsView, ProjectSpendRow, ProviderEstimate,
-    ProviderSpend, RateRow, SpendEstimate, SpendRow, SpendSummary,
+    BudgetConsent, CapReached, CostError, CostsView, ProjectKeySpend, ProjectSpendRow,
+    ProviderEstimate, ProviderSpend, RateRow, SpendEstimate, SpendRow, SpendSummary,
 };
 pub use cut_suggestions::{
     CHUNK_LIMITS, CutSuggestionError, SuggestionState, SuggestionView, SuggestionsView,
@@ -218,6 +219,7 @@ pub use product_concepts::{ConceptError, ConceptView};
 pub use product_sheets::{SheetError, SheetRun, SheetView};
 pub use production::{ModeEstimate, ProductionView};
 pub use products::ProductError;
+pub use project_keys::ProjectKeyStatus;
 pub use projects::{MoveBlock, ProjectError, ProjectFilter};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use publications::{
@@ -403,6 +405,9 @@ pub struct Repositories {
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
     /// call providers.
     pub secrets: Arc<dyn SecretStore>,
+    /// Which projects keep their own keys (#343); the keys are in
+    /// `secrets`. Shared with jobs that call providers.
+    pub project_keys: Arc<dyn bardo_domain::ProjectKeyRepository>,
     /// Network app credentials and OAuth tokens. Never the database
     /// (ADR-0008).
     pub connection_secrets: Arc<dyn ConnectionSecrets>,
@@ -523,6 +528,7 @@ impl Repositories {
             sharing: Arc::clone(&db) as _,
             packages: Arc::new(bardo_storage::LocalPackages::new(Arc::clone(&db))),
             world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
+            project_keys: Arc::clone(&db) as _,
             research: db,
             files,
             places: test_places(),
@@ -880,7 +886,15 @@ impl Bardo {
             installers,
             installer_runner,
             youtube_data,
+            project_keys,
         } = repositories;
+        // Handlers read keys through the ring: a job's own project's key
+        // when it has one, else the app's (#343). Settings keep the store.
+        let store = secrets;
+        let secrets: Arc<dyn SecretStore> = Arc::new(crate::project_keys::KeyRing::new(
+            Arc::clone(&store),
+            Arc::clone(&project_keys),
+        ));
         let (profile, first_start) = match profiles.load_default()? {
             Some(profile) => (profile, false),
             None => {
@@ -1209,8 +1223,13 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
-        let provider_keys =
-            ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
+        let provider_keys = ProviderKeys::load(
+            store,
+            providers.key_checker,
+            redactor.clone(),
+            profile.id,
+            project_keys,
+        );
         let upload_handler = crate::uploads::UploadHandler {
             publications: Arc::clone(&publications),
             accounts: Arc::clone(&network_accounts),
@@ -1738,6 +1757,8 @@ pub(crate) mod testing {
         pub(crate) hanging: std::sync::atomic::AtomicBool,
         /// Lets a hanging call end.
         pub(crate) release: std::sync::atomic::AtomicBool,
+        /// The key each request was sent with, in order.
+        pub(crate) keys: Mutex<Vec<String>>,
     }
 
     impl FakeTextGenerator {
@@ -1801,10 +1822,11 @@ pub(crate) mod testing {
     impl TextGenerator for FakeTextGenerator {
         fn generate_until(
             &self,
-            _key: &ApiKey,
+            key: &ApiKey,
             request: &TextRequest,
             stop: &Stop,
         ) -> Result<GeneratedText, ProviderFailure> {
+            self.keys.lock().unwrap().push(key.expose().to_owned());
             // As the adapter: nothing is sent once the stop asked, and an
             // answer on its way is given up where it is.
             if stop.asked() {
@@ -3761,6 +3783,7 @@ mod tests {
             world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
             places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
+            project_keys: Arc::clone(&db) as _,
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
             connection_secrets: Arc::new(MemorySecretStore::default()),

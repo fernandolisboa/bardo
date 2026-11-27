@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use bardo_domain::{
     ApiKey, AppCredentials, ConnectionSecrets, Network, NetworkAccountId, PlanSession, ProfileId,
-    Provider, SecretStore, SecretStoreError, TokenSet,
+    ProjectId, Provider, SecretStore, SecretStoreError, TokenSet,
 };
 use zeroize::Zeroizing;
 
@@ -43,6 +43,8 @@ pub fn platform_connection_secrets() -> Result<Box<dyn ConnectionSecrets>, Secre
 #[derive(Default)]
 pub struct MemorySecretStore {
     keys: Mutex<HashMap<(ProfileId, Provider), ApiKey>>,
+    /// Projects' own keys (#343).
+    project_keys: Mutex<HashMap<(ProfileId, ProjectId, Provider), ApiKey>>,
     /// App credentials and tokens, by credential name.
     blobs: Mutex<HashMap<String, Zeroizing<String>>>,
     /// Refuses every write of a credential, as a locked or full store would.
@@ -202,12 +204,69 @@ impl SecretStore for MemorySecretStore {
         self.keys().remove(&(owner, provider));
         Ok(())
     }
+
+    fn project_key(
+        &self,
+        owner: ProfileId,
+        project: ProjectId,
+        provider: Provider,
+    ) -> Result<Option<ApiKey>, SecretStoreError> {
+        Ok(self
+            .project_keys
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&(owner, project, provider))
+            .cloned())
+    }
+
+    fn set_project_key(
+        &self,
+        owner: ProfileId,
+        project: ProjectId,
+        provider: Provider,
+        key: &ApiKey,
+    ) -> Result<(), SecretStoreError> {
+        if self.fail_writes.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(SecretStoreError("the store refused the write".into()));
+        }
+        self.project_keys
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert((owner, project, provider), key.clone());
+        Ok(())
+    }
+
+    fn delete_project_key(
+        &self,
+        owner: ProfileId,
+        project: ProjectId,
+        provider: Provider,
+    ) -> Result<(), SecretStoreError> {
+        if self.fail_writes.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(SecretStoreError("the store refused the change".into()));
+        }
+        self.project_keys
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&(owner, project, provider));
+        Ok(())
+    }
 }
 
 /// Name of the credential holding a profile's key for a provider, as
 /// Windows Credential Manager lists it (under "Generic Credentials").
 pub fn credential_target(owner: ProfileId, provider: Provider) -> String {
     format!("Bardo/{owner}/{}", provider.code())
+}
+
+/// Name of the credential holding a project's own key for a provider
+/// (#343), beside the profile's keys.
+pub fn project_credential_target(
+    owner: ProfileId,
+    project: ProjectId,
+    provider: Provider,
+) -> String {
+    format!("Bardo/{owner}/project/{project}/{}", provider.code())
 }
 
 /// Name of the credential holding a profile's app credentials for a
@@ -309,7 +368,7 @@ mod credential_manager {
 
     use bardo_domain::{
         ApiKey, AppCredentials, ConnectionSecrets, Network, NetworkAccountId, PlanSession,
-        ProfileId, Provider, SecretStore, SecretStoreError, TokenSet,
+        ProfileId, ProjectId, Provider, SecretStore, SecretStoreError, TokenSet,
     };
     use keyring_core::Entry;
     use keyring_core::api::CredentialStoreApi as _;
@@ -318,7 +377,7 @@ mod credential_manager {
 
     use super::{
         MAX_BLOB_BYTES, SETTLE_PAUSE, StoreFailure, app_credentials_target, credential_target,
-        kept, malformed, not_kept, plan_target, tokens_target, too_long,
+        kept, malformed, not_kept, plan_target, project_credential_target, tokens_target, too_long,
     };
 
     /// Generic credentials in Windows Credential Manager, readable only by
@@ -341,6 +400,44 @@ mod credential_manager {
             self.store
                 .build(provider.code(), &owner, Some(&modifiers))
                 .map_err(|error| failure("address", &error))
+        }
+
+        /// A project's own key for a provider (#343).
+        fn project_entry(
+            &self,
+            owner: ProfileId,
+            project: ProjectId,
+            provider: Provider,
+        ) -> Result<Entry, SecretStoreError> {
+            let target = project_credential_target(owner, project, provider);
+            let modifiers = HashMap::from([("target", target.as_str()), ("persistence", "Local")]);
+            let user = format!("{owner}/{project}");
+            self.store
+                .build(provider.code(), &user, Some(&modifiers))
+                .map_err(|error| failure("address", &error))
+        }
+
+        fn read_key(entry: &Entry, provider: Provider) -> Result<Option<ApiKey>, SecretStoreError> {
+            match entry.get_password() {
+                Ok(stored) => ApiKey::parse(provider, &stored).map(Some).map_err(|error| {
+                    SecretStoreError(Box::new(StoreFailure(format!(
+                        "the stored {provider} key is not usable: {error}"
+                    ))))
+                }),
+                Err(keyring_core::Error::NoEntry) => Ok(None),
+                Err(error) => Err(failure("read", &error)),
+            }
+        }
+
+        fn write_key(entry: &Entry, key: &ApiKey) -> Result<(), SecretStoreError> {
+            // Windows keeps a password as UTF-16, little-endian.
+            let stored: Zeroizing<Vec<u8>> = Zeroizing::new(
+                key.expose()
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes)
+                    .collect(),
+            );
+            write_entry(entry, &stored, |entry| entry.set_password(key.expose()))
         }
 
         /// A credential addressed by its full name. `service` groups them
@@ -493,15 +590,7 @@ mod credential_manager {
             owner: ProfileId,
             provider: Provider,
         ) -> Result<Option<ApiKey>, SecretStoreError> {
-            match self.entry(owner, provider)?.get_password() {
-                Ok(stored) => ApiKey::parse(provider, &stored).map(Some).map_err(|error| {
-                    SecretStoreError(Box::new(StoreFailure(format!(
-                        "the stored {provider} key is not usable: {error}"
-                    ))))
-                }),
-                Err(keyring_core::Error::NoEntry) => Ok(None),
-                Err(error) => Err(failure("read", &error)),
-            }
+            Self::read_key(&self.entry(owner, provider)?, provider)
         }
 
         fn set(
@@ -510,20 +599,39 @@ mod credential_manager {
             provider: Provider,
             key: &ApiKey,
         ) -> Result<(), SecretStoreError> {
-            // Windows keeps a password as UTF-16, little-endian.
-            let stored: Zeroizing<Vec<u8>> = Zeroizing::new(
-                key.expose()
-                    .encode_utf16()
-                    .flat_map(u16::to_le_bytes)
-                    .collect(),
-            );
-            write_entry(&self.entry(owner, provider)?, &stored, |entry| {
-                entry.set_password(key.expose())
-            })
+            Self::write_key(&self.entry(owner, provider)?, key)
         }
 
         fn delete(&self, owner: ProfileId, provider: Provider) -> Result<(), SecretStoreError> {
             delete_entry(&self.entry(owner, provider)?)
+        }
+
+        fn project_key(
+            &self,
+            owner: ProfileId,
+            project: ProjectId,
+            provider: Provider,
+        ) -> Result<Option<ApiKey>, SecretStoreError> {
+            Self::read_key(&self.project_entry(owner, project, provider)?, provider)
+        }
+
+        fn set_project_key(
+            &self,
+            owner: ProfileId,
+            project: ProjectId,
+            provider: Provider,
+            key: &ApiKey,
+        ) -> Result<(), SecretStoreError> {
+            Self::write_key(&self.project_entry(owner, project, provider)?, key)
+        }
+
+        fn delete_project_key(
+            &self,
+            owner: ProfileId,
+            project: ProjectId,
+            provider: Provider,
+        ) -> Result<(), SecretStoreError> {
+            delete_entry(&self.project_entry(owner, project, provider)?)
         }
     }
 
@@ -628,7 +736,10 @@ mod tests {
         assert_eq!(store.get(owner, Provider::Claude).unwrap(), None);
 
         store.set(owner, Provider::Claude, &claude).unwrap();
-        assert_eq!(store.get(owner, Provider::Claude).unwrap(), Some(claude));
+        assert_eq!(
+            store.get(owner, Provider::Claude).unwrap(),
+            Some(claude.clone())
+        );
         assert_eq!(store.get(owner, Provider::Gemini).unwrap(), None);
         assert_eq!(store.get(other, Provider::Claude).unwrap(), None);
 
@@ -641,6 +752,49 @@ mod tests {
 
         store.delete(owner, Provider::Claude).unwrap();
         assert_eq!(store.get(owner, Provider::Claude).unwrap(), None);
+        store.delete(owner, Provider::Claude).unwrap();
+
+        // A project's own key is apart from the profile's and from every
+        // other project's (#343).
+        let (project, elsewhere) = (ProjectId::new(), ProjectId::new());
+        let own = key(Provider::Claude, "sk-ant-test-0003");
+        store.set(owner, Provider::Claude, &claude).unwrap();
+        assert_eq!(
+            store.project_key(owner, project, Provider::Claude).unwrap(),
+            None
+        );
+        store
+            .set_project_key(owner, project, Provider::Claude, &own)
+            .unwrap();
+        assert_eq!(
+            store.project_key(owner, project, Provider::Claude).unwrap(),
+            Some(own.clone())
+        );
+        assert_eq!(store.get(owner, Provider::Claude).unwrap(), Some(claude));
+        assert_eq!(
+            store
+                .project_key(owner, elsewhere, Provider::Claude)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store.project_key(other, project, Provider::Claude).unwrap(),
+            None
+        );
+        assert_eq!(
+            store.project_key(owner, project, Provider::Gemini).unwrap(),
+            None
+        );
+        store
+            .delete_project_key(owner, project, Provider::Claude)
+            .unwrap();
+        assert_eq!(
+            store.project_key(owner, project, Provider::Claude).unwrap(),
+            None
+        );
+        store
+            .delete_project_key(owner, project, Provider::Claude)
+            .unwrap();
         store.delete(owner, Provider::Claude).unwrap();
     }
 
@@ -790,6 +944,11 @@ mod tests {
         assert_eq!(
             credential_target(owner, Provider::YouTubeData),
             format!("Bardo/{owner}/youtube-data")
+        );
+        let project = ProjectId::new();
+        assert_eq!(
+            project_credential_target(owner, project, Provider::Claude),
+            format!("Bardo/{owner}/project/{project}/claude")
         );
     }
 

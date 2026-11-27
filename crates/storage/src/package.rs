@@ -60,7 +60,7 @@ const CHUNK: usize = 1024 * 1024;
 /// Tables that never travel: the profile's own, secrets' companions,
 /// caches and the queue's bookkeeping. `job` travels apart (done ones
 /// only), `user_profile` as the one row the records hang from.
-const LEFT_OUT: [&str; 13] = [
+const LEFT_OUT: [&str; 15] = [
     "user_profile",
     "job",
     "network_connection",
@@ -70,6 +70,10 @@ const LEFT_OUT: [&str; 13] = [
     "niche_research",
     "niche_research_upload",
     "budget",
+    // A project's own keys stay on this computer (#343), and so do
+    // the budgets that count what they pay.
+    "project_key",
+    "project_budget",
     "rate",
     "tour_progress",
     "runner_hold",

@@ -1486,6 +1486,84 @@ mod tests {
     }
 
     #[test]
+    fn a_projects_own_key_pays_its_scripts_and_only_its_budget_stops_them() {
+        use bardo_domain::{BudgetLevel, CostRepository as _, KeyPayer};
+
+        const OWN_KEY: &str = "sk-ant-api03-own-project-key-0002";
+        let h = Harness::new();
+        h.answer(&["Draft one.", "Draft two.", "Draft three."]);
+        let mut app = h.start_with_key();
+        price_claude(&h, &app);
+        let video = project(&app);
+        let owner = app
+            .project_of_channel(video.channel.expect("a channel's video"))
+            .expect("the channel's project");
+
+        // With the app's key: the app pays, as before.
+        generate(&app, &video);
+        // The project's own key pays from now on, the app's budget aside.
+        app.save_project_key(owner, Provider::Claude, OWN_KEY)
+            .unwrap();
+        app.set_budget(Provider::Claude, "2").unwrap();
+        let estimate = app.script(video.id).unwrap().estimate;
+        assert_eq!(estimate.level(), BudgetLevel::Under, "{estimate:?}");
+        assert_eq!(estimate.providers[0].paid_by, KeyPayer::Project(owner));
+        generate(&app, &video);
+        assert_eq!(
+            *h.text.keys.lock().unwrap(),
+            [CLAUDE_KEY, OWN_KEY],
+            "the second script was sent with the project's key"
+        );
+        let paid_by: Vec<_> = app
+            .cost_book
+            .costs
+            .project_costs(video.id)
+            .unwrap()
+            .into_iter()
+            .map(|record| record.paid_by)
+            .collect();
+        assert!(paid_by.contains(&KeyPayer::App), "{paid_by:?}");
+        assert!(paid_by.contains(&KeyPayer::Project(owner)), "{paid_by:?}");
+
+        // The app's $2 budget saw only the app's $2; the project's spend
+        // shows apart, against the project's own budget.
+        let view = app.costs(app.current_month()).unwrap();
+        let claude = &view.providers[0];
+        assert_eq!(claude.spent, dollars("4"));
+        assert_eq!(claude.project_keys, dollars("2"));
+        assert_eq!(claude.level, Some(BudgetLevel::Reached));
+        assert_eq!(view.project_keys.len(), 1);
+        assert_eq!(view.project_keys[0].spent, dollars("2"));
+        assert_eq!(view.project_keys[0].budget, None);
+
+        // A project budget reached stops the next script as the app's does.
+        app.set_project_budget(owner, Provider::Claude, "2")
+            .unwrap();
+        let asked = h.text.requests().len();
+        match app.generate_script(video.id, BudgetConsent::Ask) {
+            Err(ScriptError::OverBudget(estimate)) => {
+                let over: Vec<_> = estimate.over_budget().collect();
+                assert_eq!(over.len(), 1);
+                assert_eq!(over[0].paid_by, KeyPayer::Project(owner));
+                assert_eq!(over[0].spent, dollars("2"));
+                assert_eq!(over[0].budget, Some(dollars("2")));
+            }
+            other => panic!("expected the budget question, got {other:?}"),
+        }
+        assert_eq!(h.text.requests().len(), asked, "nothing ran");
+        let view = app.costs(app.current_month()).unwrap();
+        assert_eq!(view.project_keys[0].level, Some(BudgetLevel::Reached));
+
+        // Removing the key removes its budget: the app's key and budget
+        // are back, and the app's reached budget asks.
+        app.remove_project_key(owner, Provider::Claude).unwrap();
+        let estimate = app.script(video.id).unwrap().estimate;
+        assert_eq!(estimate.providers[0].paid_by, KeyPayer::App);
+        assert_eq!(estimate.level(), BudgetLevel::Reached);
+        assert!(app.project_keys(owner)[0].budget.is_none());
+    }
+
+    #[test]
     fn budgets_and_rates_check_what_is_typed() {
         use crate::CostError;
         use bardo_domain::{Meter, MoneyError, RateFieldError};

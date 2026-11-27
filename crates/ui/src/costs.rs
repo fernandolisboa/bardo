@@ -780,10 +780,24 @@ impl CostsScreen {
             ),
         });
 
-        columns(
+        // What projects' own keys paid is in the spend, not in the budget.
+        let by_projects = (spend.project_keys.micros() > 0).then(|| {
             div()
-                .font_semibold()
-                .child(tr(bardo, Text::ProviderName(provider))),
+                .text_xs()
+                .text_color(t.text2)
+                .child(SharedString::from(bardo.text_with(
+                    Text::CostsPaidByProjects,
+                    &[("amount", &bardo.money(spend.project_keys))],
+                )))
+        });
+        columns(
+            v_flex()
+                .child(
+                    div()
+                        .font_semibold()
+                        .child(tr(bardo, Text::ProviderName(provider))),
+                )
+                .children(by_projects),
             usage,
             div()
                 .font_family(mono.clone())
@@ -804,6 +818,111 @@ impl CostsScreen {
         .border_t(t.border_width)
         .border_color(t.border)
         .into_any_element()
+    }
+
+    /// What each project's own key paid this month against the project's
+    /// budget for it (#343); nothing when no project has its own key.
+    fn project_keys_table(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let keys = &self.view.as_ref()?.project_keys;
+        if keys.is_empty() {
+            return None;
+        }
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let t = look(cx).tokens;
+        let mono = theme.mono_font_family.clone();
+        let rows = keys.iter().enumerate().map(|(index, key)| {
+            let level_color = match key.level {
+                Some(BudgetLevel::Reached) => theme.danger,
+                Some(BudgetLevel::Warning) => theme.warning,
+                _ => t.accent,
+            };
+            let name: SharedString = match &key.name {
+                Some(name) => SharedString::from(name.clone()),
+                None => tr(bardo, Text::CostsDeletedProjectName),
+            };
+            let usage: AnyElement = match key.percent {
+                Some(percent) => Progress::new(("project-key-progress", index))
+                    .small()
+                    .color(level_color)
+                    .value(percent.min(100) as f32)
+                    .into_any_element(),
+                None => div()
+                    .text_sm()
+                    .text_color(t.text2)
+                    .child(tr(bardo, Text::BudgetNone))
+                    .into_any_element(),
+            };
+            let state = match key.level {
+                Some(BudgetLevel::Reached) => Some(kit::status(
+                    Tone::Danger,
+                    tr(bardo, Text::BudgetReached),
+                    cx,
+                )),
+                Some(BudgetLevel::Warning) => {
+                    Some(kit::status(Tone::Warning, tr(bardo, Text::BudgetNear), cx))
+                }
+                _ if !key.saved => Some(kit::status(
+                    Tone::Neutral,
+                    tr(bardo, Text::CostsProjectKeyGone),
+                    cx,
+                )),
+                _ => None,
+            };
+            columns(
+                v_flex()
+                    .min_w_0()
+                    .child(div().font_semibold().truncate().child(name))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(t.text2)
+                            .child(tr(bardo, Text::ProviderName(key.provider))),
+                    ),
+                usage,
+                div()
+                    .font_family(mono.clone())
+                    .child(SharedString::from(bardo.money(key.spent))),
+                div()
+                    .font_family(mono.clone())
+                    .text_color(t.text2)
+                    .child(SharedString::from(
+                        key.budget
+                            .map_or_else(|| "—".to_owned(), |b| bardo.money(b)),
+                    )),
+                h_flex().children(state),
+                h_flex(),
+            )
+            .py_2p5()
+            .text_sm()
+            .border_t(t.border_width)
+            .border_color(t.border)
+        });
+        let card = kit::card(cx)
+            .id("costs-project-keys")
+            .overflow_x_scroll()
+            .child(
+                v_flex()
+                    .min_w(px(BUDGETS_TABLE_MIN_WIDTH))
+                    .child(
+                        h_flex()
+                            .px_4()
+                            .py_2()
+                            .gap_2()
+                            .items_center()
+                            .text_sm()
+                            .font_semibold()
+                            .child(tr(bardo, Text::CostsProjectKeysTitle))
+                            .child(guide::info(
+                                bardo,
+                                "costs-project-keys-info",
+                                tr(bardo, Text::CostsProjectKeysHint),
+                                guide::refs::COSTS_PROJECT_KEYS,
+                            )),
+                    )
+                    .children(rows),
+            );
+        Some(card.into_any_element())
     }
 
     /// The month's spend by project, with the filter for the lists below.
@@ -1447,7 +1566,11 @@ impl Render for CostsScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let month = self.month_switch(cx);
         let summary = self.figures(cx);
-        let budgets = self.budgets_table(cx);
+        let budgets = v_flex()
+            .gap_3()
+            .child(self.budgets_table(cx))
+            .children(self.project_keys_table(cx))
+            .into_any_element();
         let rates = self.render_rates(cx).into_any_element();
         let aside = self.breakdown(cx);
         let on_pick = cx.listener(|this, index: &usize, _, cx| {

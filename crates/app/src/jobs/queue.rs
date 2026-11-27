@@ -1301,6 +1301,8 @@ fn spawn_worker(shared: &Arc<Shared>, job: &Job, stop: Arc<StopSignal>) -> std::
     let handler = shared.handlers.get(&job.kind()).cloned();
     let kind = job.kind();
     let payload = job.payload().to_owned();
+    // The project the job was queued for: its keys pay (#343).
+    let project = job.origin().project;
     let mut cx = JobContext {
         id: job.id(),
         kind,
@@ -1315,6 +1317,7 @@ fn spawn_worker(shared: &Arc<Shared>, job: &Job, stop: Arc<StopSignal>) -> std::
     thread::Builder::new()
         .name(format!("job-{kind}"))
         .spawn(move || {
+            let _keys = crate::project_keys::work_for(project);
             let result = match handler {
                 None => Err(JobFailure::unexpected(format!("no handler for {kind}"))),
                 Some(handler) => {

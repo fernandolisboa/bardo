@@ -34,6 +34,11 @@ Free providers, like the YouTube Data API, have a daily quota instead of a price
 
 The X API is a provider too, with no key: each post Bardo makes on X is billed from your X app's credits and recorded here under X (see [Connecting X](connect-x.md#costs)). A budget for X makes a post that would reach it ask first.
 
+<a id="project-keys"></a>
+## Projects' own keys
+
+A project can pay a provider with its [own key](project-keys.md) and keep its own monthly budget for it. What a project's key pays shows under the provider in **Budgets** as the part paid by projects' own keys, and does not count against the app's budget there. **Projects' own keys** lists, for each project with its own key (only the filtered one under a filter), what it paid this month against the project's budget, with the same warnings from 80% and the same question at 100%. Each call records which key paid it, so a key removed later still shows what it paid this month.
+
 <a id="rates"></a>
 ## Rates and models without a price
 

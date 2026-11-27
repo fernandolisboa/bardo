@@ -35,7 +35,7 @@ Um arquivo de configurações leva suas chaves, preferências, personas, produto
 
 **Exportar configurações…** lista o que esta cópia tem, tudo marcado menos os logins:
 
-- **Chaves de API** e **Credenciais de app**, cada uma salva pelo nome.
+- **Chaves de API** e **Credenciais de app**, cada uma salva pelo nome. As [chaves próprias](project-keys.md) de um projeto nunca entram num arquivo de configurações.
 - **Preferências e custos**: o idioma, o tema e o layout da interface, se o Bardo oferece tours, faz backup toda semana e procura atualizações, como os números dos posts sincronizam, a pontuação mínima das sugestões de corte, seus orçamentos e os preços que você mudou.
 - **Personas** (sem a aparência: uma aparência desenhada vai no pacote da própria persona) e **Canais**, cada canal com suas contas nas redes.
 - **Produtos**: o briefing de cada produto, sem as imagens e o logo.
@@ -63,7 +63,7 @@ Os posts agendados voltam como estavam no backup. Um post cujo horário chegou e
 <a id="after-restore"></a>
 ## Depois de restaurar
 
-A aba lista o que este computador ainda precisa: as chaves, logins de plano e credenciais de app que o computador do backup tinha e este não tem, e as contas cujo login não está aqui. Cada linha abre o lugar para resolver: [Chaves de API](api-keys.md), [Credenciais de app das redes](app-credentials.md) ou [Contas](network-accounts.md#connect). No mesmo computador costuma não haver nada a fazer. **Concluir** fecha a lista.
+A aba lista o que este computador ainda precisa: as chaves (as do app e as próprias de cada projeto, por projeto e provedor), logins de plano e credenciais de app que o computador do backup tinha e este não tem, e as contas cujo login não está aqui. Cada linha abre o lugar para resolver: [Chaves de API](api-keys.md), [Este projeto](project-keys.md) para a chave de um projeto, [Credenciais de app das redes](app-credentials.md) ou [Contas](network-accounts.md#connect). No mesmo computador costuma não haver nada a fazer. **Concluir** fecha a lista.
 
 <a id="moving"></a>
 ## Trocar de computador

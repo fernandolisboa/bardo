@@ -675,7 +675,7 @@ impl Bardo {
             return Err(CutSuggestionError::Busy);
         }
         let engine = self.decision_engine();
-        if self.provider_key(engine.provider()).state == KeyState::NotSet {
+        if self.work_key_state(engine.provider()) == KeyState::NotSet {
             return Err(CutSuggestionError::MissingKey(engine.provider()));
         }
         let plan = self.scene_plans.scene_plan(project)?;

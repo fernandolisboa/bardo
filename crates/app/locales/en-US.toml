@@ -15,6 +15,7 @@ appearance_tab = "Appearance"
 about_tab = "About"
 publishing_tab = "Publishing"
 backup_tab = "Backup"
+project_tab = "This project"
 
 [language]
 en-US = "English (US)"
@@ -1563,6 +1564,11 @@ channels_title = "By channel"
 videos_title = "Most expensive videos"
 unknown_channel = "Unknown channel"
 unknown_video = "Removed video"
+project_keys_title = "Projects' own keys"
+project_keys_hint = "What each project's own key paid this month, against that project's budget. It does not count against the budgets above."
+project_key_gone = "Key removed"
+deleted_project_name = "Deleted project"
+paid_by_projects = "{amount} of it paid by projects' own keys"
 
 [costs.budget]
 none = "No budget"
@@ -1610,6 +1616,7 @@ unknown = "Estimated cost unknown: no rate covers this model. Add one on the Cos
 near = "{provider}: {spent} of the {budget} budget spent this month; this takes it past 80%."
 redraw = "Drawing one scene again costs about {amount}."
 project_spent = "This video so far: {amount}"
+provider_own_key = "{provider} (this project's key)"
 
 [budget]
 reached_title = "Over budget"
@@ -3724,6 +3731,21 @@ body = "Pick another folder for new projects, or go back to the default. Project
 title = "Moving media"
 body = "Media of older videos, and of a channel moved to another project, moves into its project's folder by itself, as a job."
 
+[tour.project-keys]
+name = "This project tour"
+
+[tour.project-keys.kept]
+title = "Its own keys"
+body = "A key saved here pays for this project's work in place of the app's. It is kept in Windows Credential Manager for this project only."
+
+[tour.project-keys.card]
+title = "One card per provider"
+body = "Save, test, replace or remove the project's key. Without one, the card says the project uses the app's key."
+
+[tour.project-keys.budget]
+title = "Its budget"
+body = "What the project's own key pays counts against this budget, not the app's. Costs shows it under Projects' own keys."
+
 [tour.backup]
 name = "Backup tour"
 
@@ -3987,6 +4009,7 @@ set_up_reconnect = "Reconnect {handle} on {network}"
 set_up_open = "Open"
 nothing_to_set_up = "Keys, app credentials and sign-ins are all in place."
 done = "Done"
+set_up_project_key = "The {provider} key of {project}"
 
 [settings_file]
 not_one = "This isn't a Bardo settings file."
@@ -5254,6 +5277,8 @@ running = "Deleting…"
 name_mismatch = "Type the name exactly as shown."
 folder_not_removed = "The folder could not be removed (a file may be open). Nothing was deleted."
 not_disconnected = "An account could not be disconnected, so the records stay. Try again to finish."
+keys_not_removed = "One of the project's own keys could not be removed from Windows Credential Manager, so nothing was deleted. Try again."
+removes_keys = "Its own API keys ({n}) are removed from Windows Credential Manager."
 
 [delete.permanent_reason]
 removable_drive = "It is on a removable drive, which has no Recycle Bin."
@@ -5564,6 +5589,7 @@ import_started = "Importing {name}. It shows in this list once its job ends: fol
 relinked = "{name} uses this folder now."
 reopened = "{name} is back as a new project."
 opened_archived = "{name} is in Archived projects: unarchive it there to open it."
+keys = "Keys and budgets…"
 
 [package_import]
 title = "Import {name}"
@@ -5573,3 +5599,16 @@ contents = "{channels} channels · {videos} videos · {world} world items · {na
 templates = "Global templates it used"
 templates_hint = "Ticked ones come in as the project's own templates and win over the global ones inside it. The others stay the global ones; the texts already written keep what they were written with."
 confirm = "Import"
+
+[project_keys]
+budget_needs_key = "Save this project's own key first: its budget counts what that key pays."
+no_such_project = "This project is no longer here. Open another one."
+title = "Own keys for {name}"
+hint = "A key saved here pays for this project's work in place of the app's, and what it pays counts against this project's budget, not the app's. A provider without one here uses the key in API keys."
+info = "How a project's own key works"
+no_project_open = "Open a project to give it its own keys. Work outside a project always uses the keys in API keys."
+uses_app = "Uses the app's key"
+budget_label = "Monthly budget for this key"
+budget_amount = "{budget} a month"
+budget_none = "No budget: what this key pays is not limited."
+budget_hint = "What this project's own key pays counts against this budget, never the app's. Bardo asks before a step that would reach it."

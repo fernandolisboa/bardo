@@ -2,7 +2,7 @@
 //! the question asked when it would reach a provider's monthly budget.
 //! The estimate and the budget rules live in `bardo_app`.
 
-use bardo_app::bardo_domain::BudgetLevel;
+use bardo_app::bardo_domain::{BudgetLevel, KeyPayer};
 use bardo_app::{Bardo, ProviderEstimate, SpendEstimate, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
@@ -63,15 +63,24 @@ pub(crate) fn estimate_line(
     })
 }
 
+/// The provider's name, said as the project's own key when that is what
+/// pays: its budget is the project's, not the app's (#343).
+fn provider_label(bardo: &Bardo, provider: &ProviderEstimate) -> String {
+    let name = bardo.text(Text::ProviderName(provider.provider));
+    match provider.paid_by {
+        KeyPayer::App => name.into_owned(),
+        KeyPayer::Project(_) => {
+            bardo.text_with(Text::EstimateProviderOwnKey, &[("provider", &name)])
+        }
+    }
+}
+
 /// A budget the estimate takes past 80%, as one sentence.
 pub(crate) fn near_line(bardo: &Bardo, provider: &ProviderEstimate) -> SharedString {
     SharedString::from(bardo.text_with(
         Text::EstimateNear,
         &[
-            (
-                "provider",
-                &bardo.text(Text::ProviderName(provider.provider)),
-            ),
+            ("provider", &provider_label(bardo, provider)),
             ("spent", &bardo.money(provider.spent)),
             ("budget", &bardo.money(provider.budget.unwrap_or_default())),
         ],
@@ -82,10 +91,7 @@ pub(crate) fn over_line(bardo: &Bardo, provider: &ProviderEstimate) -> SharedStr
     SharedString::from(bardo.text_with(
         Text::BudgetReachedLine,
         &[
-            (
-                "provider",
-                &bardo.text(Text::ProviderName(provider.provider)),
-            ),
+            ("provider", &provider_label(bardo, provider)),
             ("spent", &bardo.money(provider.spent)),
             ("budget", &bardo.money(provider.budget.unwrap_or_default())),
             ("amount", &bardo.money(provider.amount.unwrap_or_default())),

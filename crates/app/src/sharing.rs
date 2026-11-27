@@ -1246,6 +1246,22 @@ mod tests {
     }
 
     #[test]
+    fn an_item_file_never_holds_its_projects_own_key() {
+        const OWN: &str = "sk-ant-api03-project-own-key-0002";
+        let h = Harness::new();
+        let mut app = h.start();
+        let (space, _) = two_projects(&app);
+        app.save_project_key(space, bardo_domain::Provider::Claude, OWN)
+            .unwrap();
+        let ana = narrator_in(&app, space, "Ana");
+        let bakery = place(&app, space, "The bakery");
+        for item in [LibraryItem::Narrator(ana.id), LibraryItem::World(bakery.id)] {
+            let text = app.item_file(item).unwrap();
+            assert!(!text.contains(OWN), "a project's key in an item file");
+        }
+    }
+
+    #[test]
     fn item_files_round_trip_every_kind() {
         let h = Harness::new();
         let app = h.start();

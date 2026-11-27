@@ -340,6 +340,18 @@ impl BackupPanel {
                                 ),
                                 SetUpOpen::Setup(SetupTarget::Key(*provider)),
                             ),
+                            SetUpAgain::ProjectKey { name, provider, .. } => (
+                                bardo.text_with(
+                                    Text::BackupSetUpProjectKey,
+                                    &[
+                                        ("provider", &bardo.text(Text::ProviderName(*provider))),
+                                        ("project", name.as_str()),
+                                    ],
+                                ),
+                                SetUpOpen::Place(GuidePlace::Settings(
+                                    bardo_app::SettingsTab::Project,
+                                )),
+                            ),
                             SetUpAgain::AppCredentials(network) => (
                                 bardo.text_with(
                                     Text::BackupSetUpCredentials,

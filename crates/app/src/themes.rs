@@ -917,7 +917,7 @@ impl Bardo {
     }
 
     fn ensure_key(&self, provider: Provider) -> Result<(), ThemeError> {
-        match self.provider_key(provider).state {
+        match self.work_key_state(provider) {
             KeyState::NotSet => Err(ThemeError::MissingKey(provider)),
             _ => Ok(()),
         }
@@ -1347,6 +1347,7 @@ mod tests {
                 places: crate::test_places(),
                 voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
                 research: Arc::clone(&self.db) as _,
+                project_keys: Arc::clone(&self.db) as _,
                 secrets: Arc::clone(&self.secrets) as _,
                 connection_secrets: Arc::new(MemorySecretStore::default()),
             };

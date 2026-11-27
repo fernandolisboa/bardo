@@ -1205,7 +1205,7 @@ impl Bardo {
         if self.scenes_busy(project.id) || self.clips_busy(project.id) {
             return Err(CaptureError::ScenesBusy);
         }
-        if self.provider_key(PROVIDER).state == KeyState::NotSet {
+        if self.work_key_state(PROVIDER) == KeyState::NotSet {
             return Err(CaptureError::MissingKey(PROVIDER));
         }
         if let Some(stake) = self.pictures_to_ask(project.id, script.text().as_str(), pictures)? {

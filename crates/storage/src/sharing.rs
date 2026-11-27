@@ -455,12 +455,14 @@ fn fingerprint_trigger(sql: &str) -> String {
 /// Takes the database back to before migration 85, for the tests that
 /// rewind further to check an older migration. Migration 86's columns go
 /// too; its table rebuild (optional channel and theme) stays, as an older
-/// database's rows all fit it.
+/// database's rows all fit it. So does migration 87 (project keys).
 #[cfg(test)]
 pub(crate) fn undo_for_tests(conn: &Connection) {
     drop_mirrors(conn).unwrap();
     conn.execute_batch(
-        "DROP TABLE video_settings;
+        "DROP TABLE project_budget; DROP TABLE project_key;
+         ALTER TABLE cost_record DROP COLUMN key_project_id;
+         DROP TABLE video_settings;
          DROP TRIGGER network_account_renders;
          DROP INDEX render_account;
          DROP INDEX video_project_loose;

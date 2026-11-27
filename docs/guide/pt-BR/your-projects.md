@@ -20,7 +20,7 @@ A barra de título mostra o projeto aberto ao lado do logo do Bardo: a cor, o no
 - **Recentes** lista os oito últimos projetos que você abriu, do mais recente, sem os favoritos.
 - **Todos** lista os demais pelo nome.
 
-Clique em um projeto para abri-lo. O Bardo lembra o projeto aberto e abre nele da próxima vez. **Mostrar pasta** abre a pasta do projeto aberto no Explorer. Um projeto cuja pasta não é encontrada aparece com **Pasta não encontrada**, e **Localizar…** ([Pasta não encontrada](storage.md#not-found)). A estrela ao lado de um projeto o coloca nos favoritos ou tira de lá. O seletor não aparece com o editor aberto: feche o editor para trocar.
+Clique em um projeto para abri-lo. O Bardo lembra o projeto aberto e abre nele da próxima vez. **Mostrar pasta** abre a pasta do projeto aberto no Explorer, e **Chaves e orçamentos…** as [chaves próprias](project-keys.md) dele. Um projeto cuja pasta não é encontrada aparece com **Pasta não encontrada**, e **Localizar…** ([Pasta não encontrada](storage.md#not-found)). A estrela ao lado de um projeto o coloca nos favoritos ou tira de lá. O seletor não aparece com o editor aberto: feche o editor para trocar.
 
 <a id="no-project"></a>
 ## Sem projeto

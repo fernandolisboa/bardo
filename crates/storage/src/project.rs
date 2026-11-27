@@ -427,6 +427,7 @@ mod tests {
             job: None,
             at: SystemTime::UNIX_EPOCH,
             origin: WorkOrigin::default(),
+            paid_by: bardo_domain::KeyPayer::App,
         };
         db.record_cost(&cost).unwrap();
 

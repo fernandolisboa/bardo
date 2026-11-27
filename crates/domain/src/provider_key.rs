@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use zeroize::Zeroize;
 
-use crate::{Metered, ProfileId};
+use crate::{Metered, ProfileId, ProjectId};
 
 /// A service Bardo calls, with the user's own API key (PRD story 1) or,
 /// for X, through the network account the user connected (#147): what
@@ -292,6 +292,32 @@ pub trait SecretStore: Send + Sync {
 
     /// Removes the key. Removing a key that is not there succeeds.
     fn delete(&self, owner: ProfileId, provider: Provider) -> Result<(), SecretStoreError>;
+
+    /// A project's own key for a provider (#343), kept apart from the
+    /// profile's.
+    fn project_key(
+        &self,
+        owner: ProfileId,
+        project: ProjectId,
+        provider: Provider,
+    ) -> Result<Option<ApiKey>, SecretStoreError>;
+
+    /// Saves a project's key, replacing any earlier one.
+    fn set_project_key(
+        &self,
+        owner: ProfileId,
+        project: ProjectId,
+        provider: Provider,
+        key: &ApiKey,
+    ) -> Result<(), SecretStoreError>;
+
+    /// Removes a project's key. Removing a key that is not there succeeds.
+    fn delete_project_key(
+        &self,
+        owner: ProfileId,
+        project: ProjectId,
+        provider: Provider,
+    ) -> Result<(), SecretStoreError>;
 }
 
 impl<T: SecretStore + ?Sized> SecretStore for Arc<T> {
@@ -314,6 +340,34 @@ impl<T: SecretStore + ?Sized> SecretStore for Arc<T> {
 
     fn delete(&self, owner: ProfileId, provider: Provider) -> Result<(), SecretStoreError> {
         (**self).delete(owner, provider)
+    }
+
+    fn project_key(
+        &self,
+        owner: ProfileId,
+        project: ProjectId,
+        provider: Provider,
+    ) -> Result<Option<ApiKey>, SecretStoreError> {
+        (**self).project_key(owner, project, provider)
+    }
+
+    fn set_project_key(
+        &self,
+        owner: ProfileId,
+        project: ProjectId,
+        provider: Provider,
+        key: &ApiKey,
+    ) -> Result<(), SecretStoreError> {
+        (**self).set_project_key(owner, project, provider, key)
+    }
+
+    fn delete_project_key(
+        &self,
+        owner: ProfileId,
+        project: ProjectId,
+        provider: Provider,
+    ) -> Result<(), SecretStoreError> {
+        (**self).delete_project_key(owner, project, provider)
     }
 }
 

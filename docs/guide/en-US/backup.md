@@ -35,7 +35,7 @@ A settings file takes your keys, preferences, personas, products and channels to
 
 **Export settings…** lists what this copy has, all ticked but the sign-ins:
 
-- **API keys** and **App credentials**, each saved one by name.
+- **API keys** and **App credentials**, each saved one by name. A project's [own keys](project-keys.md) never go in a settings file.
 - **Preferences and costs**: the interface language, theme and layout, whether Bardo offers tours, backs up every week and checks for updates, how post numbers sync, the lowest score of the cut suggestions shown, your budgets and the prices you changed.
 - **Personas** (without their looks: a drawn look travels in the persona's own package) and **Channels**, each channel with its network accounts.
 - **Products**: each product's brief, without its images and logo.
@@ -63,7 +63,7 @@ Scheduled posts come back as they were in the backup. A post whose time came whi
 <a id="after-restore"></a>
 ## After a restore
 
-The tab lists what this computer still needs: the keys, plan sign-ins and app credentials the backup's computer had and this one lacks, and the accounts whose sign-in is not here. Each line opens the place to fix it: [API keys](api-keys.md), [Network app credentials](app-credentials.md) or [Accounts](network-accounts.md#connect). On the same computer there is usually nothing to do. **Done** closes the list.
+The tab lists what this computer still needs: the keys (the app's, and each project's own, by project and provider), plan sign-ins and app credentials the backup's computer had and this one lacks, and the accounts whose sign-in is not here. Each line opens the place to fix it: [API keys](api-keys.md), [This project](project-keys.md) for a project's key, [Network app credentials](app-credentials.md) or [Accounts](network-accounts.md#connect). On the same computer there is usually nothing to do. **Done** closes the list.
 
 <a id="moving"></a>
 ## Moving to another computer

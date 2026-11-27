@@ -1940,7 +1940,7 @@ impl Bardo {
 
     /// Whether a key is saved for `provider`.
     fn has_take_key(&self, provider: Provider) -> bool {
-        self.provider_key(provider).state != KeyState::NotSet
+        self.work_key_state(provider) != KeyState::NotSet
     }
 
     /// The generator of `model`'s provider.
@@ -2379,7 +2379,7 @@ impl Bardo {
     }
 
     fn require_take_key(&self, provider: Provider) -> Result<(), CaptureError> {
-        if self.provider_key(provider).state == KeyState::NotSet {
+        if self.work_key_state(provider) == KeyState::NotSet {
             return Err(CaptureError::MissingKey(provider));
         }
         Ok(())

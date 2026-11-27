@@ -175,6 +175,10 @@ fn research_is_done(job: &Job) -> bool {
 struct SheetPayload {
     product: String,
     source: SheetRun,
+    /// The project that owns the item: its job runs for it, so its own
+    /// keys pay (#343). `None` for a global item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner_project: Option<String>,
 }
 
 /// A page the research read, as the checkpoint keeps it.
@@ -956,9 +960,13 @@ impl Bardo {
             product: id,
             sheet: self.products.sheet(id)?,
             job,
-            research: self.estimate(&self.research_calls(&product, pictures, true))?,
+            research: self.estimate_for(
+                product.owner_project,
+                &self.research_calls(&product, pictures, true),
+            )?,
             research_usual: (!partial).then_some(usual),
-            from_brief: self.estimate(&self.brief_calls(&product, pictures))?,
+            from_brief: self
+                .estimate_for(product.owner_project, &self.brief_calls(&product, pictures))?,
             has_link: !product.brief.link().is_empty(),
             left_out,
             stopping: self.product_sheet_stopping(id),
@@ -1122,15 +1130,20 @@ impl Bardo {
         if self.sheet_is_busy(id) {
             return Err(SheetError::Busy);
         }
-        if self.provider_key(Provider::Claude).state == KeyState::NotSet {
+        let owner = product.owner_project;
+        if self.key_state_for(owner, Provider::Claude) == KeyState::NotSet {
             return Err(SheetError::MissingKey(Provider::Claude));
         }
         let pictures = self.products.image_count(id)?;
         let checked = match source {
-            SheetRun::Research => {
-                self.check_budget(&self.research_calls(&product, pictures, true), consent)?
+            SheetRun::Research => self.check_budget_for(
+                owner,
+                &self.research_calls(&product, pictures, true),
+                consent,
+            )?,
+            SheetRun::Brief => {
+                self.check_budget_for(owner, &self.brief_calls(&product, pictures), consent)?
             }
-            SheetRun::Brief => self.check_budget(&self.brief_calls(&product, pictures), consent)?,
         };
         if let Err(estimate) = checked {
             return Err(SheetError::OverBudget(estimate));
@@ -1138,6 +1151,7 @@ impl Bardo {
         let payload = SheetPayload {
             product: id.to_string(),
             source,
+            owner_project: owner.map(|id| id.to_string()),
         };
         let job = Job::new(self.profile.id, JobKind::ProductResearch, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)

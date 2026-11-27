@@ -1373,14 +1373,20 @@ impl Bardo {
         if busy {
             return Err(WorldError::Busy);
         }
-        if self.provider_key(Provider::Gemini).state == crate::KeyState::NotSet {
+        // The job runs for the look's channel's project, else the item's
+        // (as the job store files it): that project's own key pays.
+        let work = look
+            .channel()
+            .and_then(|channel| self.project_of_channel(channel))
+            .or(character.owner_project);
+        if self.key_state_for(work, Provider::Gemini) == crate::KeyState::NotSet {
             return Err(WorldError::MissingKey);
         }
         let folder = self.world_book.folder(character.owner_project);
         if !self.world_book.files.reachable(&folder) {
             return Err(WorldError::FolderNotFound);
         }
-        if let Err(estimate) = self.check_budget(&[picture_call()], consent)? {
+        if let Err(estimate) = self.check_budget_for(work, &[picture_call()], consent)? {
             return Err(WorldError::OverBudget(estimate));
         }
         let prompt = picture_in_look(&character, &look)

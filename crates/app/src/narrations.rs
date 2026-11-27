@@ -792,7 +792,7 @@ impl Bardo {
             return Err(held);
         }
         let provider = persona.details.voice().provider();
-        if self.provider_key(provider).state == KeyState::NotSet {
+        if self.work_key_state(provider) == KeyState::NotSet {
             return Err(NarrationError::MissingKey(provider));
         }
         if let Some(stake) = self.pictures_to_ask(project.id, script.text().as_str(), pictures)? {

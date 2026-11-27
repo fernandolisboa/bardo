@@ -276,6 +276,8 @@ pub struct SettingsScreen {
     backup: Entity<crate::backup::BackupPanel>,
     /// The Storage tab: the base folder.
     storage: Entity<crate::storage::StoragePanel>,
+    /// The This project tab: the open project's own keys and budgets.
+    project_keys: Entity<crate::project_keys::ProjectKeysPanel>,
     /// Inside the Backup tab; the import offer opens it.
     settings_file: Entity<crate::settings_transfer::SettingsFilePanel>,
     /// Settings › About's Updates section.
@@ -452,6 +454,10 @@ impl SettingsScreen {
             let (bardo, scroll) = (bardo.clone(), scroll.clone());
             cx.new(|cx| crate::storage::StoragePanel::new(bardo, scroll, cx))
         };
+        let project_keys = {
+            let (bardo, scroll) = (bardo.clone(), scroll.clone());
+            cx.new(|cx| crate::project_keys::ProjectKeysPanel::new(bardo, scroll, window, cx))
+        };
         let mut screen = Self {
             bardo,
             tab: SettingsTab::Keys,
@@ -479,6 +485,7 @@ impl SettingsScreen {
             updates,
             privacy,
             storage,
+            project_keys,
             _subscriptions: subscriptions,
         };
         screen.relabel(window, cx);
@@ -1759,6 +1766,7 @@ impl SettingsScreen {
             SettingsTab::Appearance => self.render_appearance(cx),
             SettingsTab::Metrics => self.render_metrics(cx),
             SettingsTab::Storage => self.storage.clone().into_any_element(),
+            SettingsTab::Project => self.project_keys.clone().into_any_element(),
             SettingsTab::Backup => self.backup.clone().into_any_element(),
             SettingsTab::About => self.render_about(cx),
         }
@@ -2759,7 +2767,7 @@ fn radio(on: bool, cx: &App) -> impl IntoElement {
         })
 }
 
-fn outcome_tone(outcome: KeyCheckOutcome) -> Tone {
+pub(crate) fn outcome_tone(outcome: KeyCheckOutcome) -> Tone {
     match outcome {
         KeyCheckOutcome::Valid => Tone::Success,
         KeyCheckOutcome::LimitReached
@@ -2791,6 +2799,7 @@ impl Render for SettingsScreen {
             .child(Tab::new().label(tr(bardo, Text::SettingsAppearanceTab)))
             .child(Tab::new().label(tr(bardo, Text::MetricsSettingsTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsStorageTab)))
+            .child(Tab::new().label(tr(bardo, Text::SettingsProjectTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsBackupTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsAboutTab)))
             .on_click(cx.listener(|this, index: &usize, _, cx| {

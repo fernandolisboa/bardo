@@ -1093,6 +1093,7 @@ fn spend(
                 project: Some(project.id),
                 job: None,
                 origin: WorkOrigin::default(),
+                paid_by: bardo_app::bardo_domain::KeyPayer::App,
                 at: now - Duration::from_secs(3600),
             }
         };
@@ -1107,6 +1108,23 @@ fn spend(
     ] {
         db.record_cost(&cost)?;
     }
+    // Archives pays Claude with its own key, against its own budget
+    // (#343). Only the note is seeded: the key itself would be a secret.
+    db.save_project_key(&ProjectKey {
+        project: space.project,
+        provider: Claude,
+        saved_at: now,
+    })?;
+    db.save_project_budget(&ProjectBudget {
+        project: space.project,
+        budget: Budget {
+            provider: Claude,
+            monthly: Money::from_cents(800),
+        },
+    })?;
+    let mut own = record(Claude, "claude-fixture", Script, 655, space, probe);
+    own.paid_by = KeyPayer::Project(space.project);
+    db.record_cost(&own)?;
     for (provider, cents) in [(Gemini, 3_200), (Claude, 1_000)] {
         db.save_budget(
             profile,

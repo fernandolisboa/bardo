@@ -150,6 +150,10 @@ struct DrawPayload {
     template_number: u32,
     instructions: String,
     prompt: String,
+    /// The project that owns the item: its job runs for it, so its own
+    /// keys pay (#343). `None` for a global item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner_project: Option<String>,
 }
 
 /// Picks the persona out of a drawing job's payload.
@@ -522,7 +526,7 @@ impl Bardo {
             look,
             pending: self.stored_look(self.personas.pending_look(persona)),
             job: self.persona_look_job(persona),
-            estimate: self.estimate(&draw_calls(&rendered))?,
+            estimate: self.estimate_for(found.owner_project, &draw_calls(&rendered))?,
             template,
             assets,
         })
@@ -608,14 +612,16 @@ impl Bardo {
             return Err(LookError::Busy);
         }
         for provider in [Provider::Claude, Provider::Gemini] {
-            if self.provider_key(provider).state == KeyState::NotSet {
+            if self.key_state_for(found.owner_project, provider) == KeyState::NotSet {
                 return Err(LookError::MissingKey(provider));
             }
         }
         let template = self.current_template_in(TemplateKind::LookPrompt, found.owner_project)?;
         let mut rendered = self.render_look_prompt(&found, &description, &template)?;
         rendered.instructions = guarded(&rendered.instructions);
-        if let Err(estimate) = self.check_budget(&draw_calls(&rendered), consent)? {
+        if let Err(estimate) =
+            self.check_budget_for(found.owner_project, &draw_calls(&rendered), consent)?
+        {
             return Err(LookError::OverBudget(estimate));
         }
         let payload = DrawPayload {
@@ -625,6 +631,7 @@ impl Bardo {
             template_number: template.number,
             instructions: rendered.instructions,
             prompt: rendered.prompt,
+            owner_project: found.owner_project.map(|id| id.to_string()),
         };
         let job = Job::new(self.profile.id, JobKind::PersonaLook, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)

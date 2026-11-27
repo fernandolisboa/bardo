@@ -793,6 +793,7 @@ mod tests {
                     job: None,
                     at: SystemTime::now(),
                     origin: Default::default(),
+                    paid_by: bardo_domain::KeyPayer::App,
                 })
                 .unwrap();
         }

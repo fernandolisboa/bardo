@@ -210,18 +210,25 @@ impl RemovalPanel {
                 bardo.text(Text::ArchiveVideoHint).into_owned()
             }
             (RemovalMode::Delete, Removable::Project(_)) => {
-                let (videos, connected) = self
+                let (videos, connected, keys) = self
                     .preview
                     .as_ref()
-                    .map(|preview| (preview.videos, preview.connected))
+                    .map(|preview| (preview.videos, preview.connected, preview.keys))
                     .unwrap_or_default();
-                bardo.text_with(
+                let hint = bardo.text_with(
                     Text::DeleteProjectHint,
                     &[
                         ("videos", &videos.to_string()),
                         ("connected", &connected.to_string()),
                     ],
-                )
+                );
+                if keys == 0 {
+                    hint
+                } else {
+                    let keys =
+                        bardo.text_with(Text::DeleteRemovesKeys, &[("n", &keys.to_string())]);
+                    format!("{hint} {keys}")
+                }
             }
             (RemovalMode::Delete, Removable::Video(id)) => {
                 bardo.text(bardo.delete_video_hint(id)).into_owned()
