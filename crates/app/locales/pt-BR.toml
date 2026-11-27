@@ -3015,11 +3015,7 @@ name = "Tour dos Vídeos"
 
 [tour.projects.switcher]
 title = "Seu vídeo"
-body = "O vídeo em que você está trabalhando, com o menu que troca para outro vídeo do canal. O seletor de canal ao lado de Vídeos lista os vídeos de outro canal."
-
-[tour.projects.archive]
-title = "Arquivar ou excluir"
-body = "Arquivar… tira este vídeo da lista e o deixa só para leitura: nenhuma tarefa dele roda e nada dele é publicado, enquanto os posts já publicados continuam sincronizando. Mostrar arquivados lista os vídeos arquivados, para desarquivar um. Excluir… pede o nome, manda a pasta para a Lixeira e devolve a ideia para Temas; nada é excluído nas redes."
+body = "O vídeo em que você está trabalhando, com o menu que troca para outro vídeo do canal. O seletor de canal ao lado de Vídeos lista os vídeos de outro canal. Mostrar arquivados, Arquivar… e Excluir… ao lado guardam este vídeo ou o removem."
 
 [tour.projects.narrator]
 title = "Quem narra"
@@ -5112,6 +5108,7 @@ job_waits = "Espera: o projeto ou o vídeo está arquivado"
 scheduled_post = "Uma publicação espera o horário no Bardo. Envie agora ou cancele o agendamento na etapa Publicar do vídeo."
 held_on_network = "Uma publicação espera na rede para ficar pública no horário. Publique ou remova na rede."
 active_job = "Uma tarefa está na fila ou em andamento. Espere terminar ou cancele em Tarefas."
+media_to_move = "Vídeos de outro projeto ainda guardam a mídia na pasta deste projeto. Deixe a mudança da mídia deles terminar: a pasta do projeto deles e a deste precisam estar acessíveis."
 
 [switcher_removal]
 archive = "Arquivar projeto…"
@@ -5153,7 +5150,7 @@ confirm = "Excluir"
 running = "Excluindo…"
 name_mismatch = "Digite o nome exatamente como aparece."
 folder_not_removed = "A pasta não pôde ser removida (talvez um arquivo esteja aberto). Nada foi excluído."
-not_disconnected = "Uma conta não pôde ser desconectada. A pasta já saiu; tente de novo para terminar."
+not_disconnected = "Uma conta não pôde ser desconectada, então os registros continuam. Tente de novo para terminar."
 
 [delete.permanent_reason]
 removable_drive = "Ela está num drive removível, que não tem Lixeira."

@@ -24,13 +24,17 @@ pub enum RemovalBlock {
     HeldOnNetwork,
     /// A job for it is queued or running.
     ActiveJob,
+    /// Videos of another project still have their media in this project's
+    /// folder (their channel moved, the media move has not run yet).
+    MediaToMove,
 }
 
 impl RemovalBlock {
-    pub const ALL: [RemovalBlock; 3] = [
+    pub const ALL: [RemovalBlock; 4] = [
         RemovalBlock::ScheduledPost,
         RemovalBlock::HeldOnNetwork,
         RemovalBlock::ActiveJob,
+        RemovalBlock::MediaToMove,
     ];
 }
 

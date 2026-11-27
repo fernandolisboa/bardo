@@ -294,15 +294,33 @@ impl Bardo {
                 let for_project = project.is_some_and(|project| {
                     job.origin().project == Some(project)
                         || named(job, "owner_project") == Some(project.to_string())
-                        // A media move may be carrying this project's media.
-                        || job.kind() == JobKind::MoveMedia
                 });
+                // A media move may be carrying its media.
                 for_project
+                    || job.kind() == JobKind::MoveMedia
                     || named(job, "project").is_some_and(|id| videos.contains(&id))
                     || named(job, "channel").is_some_and(|id| channels.contains(&id))
             });
         if busy {
             blocks.push(RemovalBlock::ActiveJob);
+        }
+        // Another project's videos whose media is still in this folder
+        // would go with it (deleted) or into its Videos.zip (archived).
+        if let Some(project) = project
+            && self
+                .folder_book
+                .folders
+                .videos_to_move(self.profile.id)?
+                .iter()
+                .any(|video| {
+                    video.to != project
+                        && video
+                            .from
+                            .as_ref()
+                            .is_some_and(|from| from.project == project)
+                })
+        {
+            blocks.push(RemovalBlock::MediaToMove);
         }
         Ok(blocks)
     }
@@ -587,10 +605,16 @@ impl Bardo {
             }
             (None, false) => Discard::Recycle,
         };
+        // An account that cannot be disconnected keeps everything, so its
+        // tokens are never left behind.
         let disconnections = accounts
             .into_iter()
-            .filter_map(|account| self.disconnection(account).ok())
-            .collect();
+            .map(|account| self.disconnection(account))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                tracing::warn!("could not prepare disconnecting an account: {error}");
+                RemovalError::NotDisconnected
+            })?;
         Ok(Deletion {
             target,
             folder,
@@ -1011,7 +1035,10 @@ mod tests {
 
         let job = s.app.archive_project(space.id, true).unwrap().unwrap();
         assert_eq!(ended(&s.app, job).state(), JobState::Done);
-        assert_eq!(s.disk.archive(&archive).unwrap(), std::slice::from_ref(&video_folder));
+        assert_eq!(
+            s.disk.archive(&archive).unwrap(),
+            std::slice::from_ref(&video_folder)
+        );
         assert_eq!(s.disk.files(&video_folder), None);
         assert!(s.app.archived_projects().unwrap()[0].packed);
 
@@ -1115,6 +1142,35 @@ mod tests {
         assert!(matches!(error, RemovalError::FolderNotRemoved(_)));
         assert_eq!(error.message(), Text::DeleteFolderNotRemoved);
         assert!(s.app.projects().unwrap().iter().any(|p| p.id == space.id));
+    }
+
+    #[test]
+    fn another_projects_media_still_in_the_folder_refuses_archiving_and_deleting() {
+        let s = setup();
+        let (space, channel, video) = filled(&s, "Space");
+        let moon = project(&s.app, "Moon");
+        // The media move waits, so the video's media stays in Space's folder.
+        s.app.jobs.pause(true);
+        s.app.move_channel(channel.id, moon.id).unwrap();
+        let blocks = s.app.removal_blocks(Removable::Project(space.id)).unwrap();
+        assert!(blocks.contains(&RemovalBlock::MediaToMove), "{blocks:?}");
+        assert!(matches!(
+            s.app.archive_project(space.id, true),
+            Err(RemovalError::Blocked(_))
+        ));
+        // Nor is the video deleted while its media is on the move.
+        assert!(
+            s.app
+                .removal_blocks(Removable::Video(video.id))
+                .unwrap()
+                .contains(&RemovalBlock::ActiveJob)
+        );
+        assert!(
+            !s.app
+                .removal_blocks(Removable::Project(moon.id))
+                .unwrap()
+                .contains(&RemovalBlock::MediaToMove)
+        );
     }
 
     #[test]

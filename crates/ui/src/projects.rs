@@ -2125,24 +2125,21 @@ impl ProjectsScreen {
                 }))
         };
         header.actions.push(
-            kit::anchor(
-                TourAnchor::Control(Control::VideoRemoval),
-                h_flex()
-                    .gap_1()
-                    .child(archived_toggle)
-                    .child(archive)
-                    .child(
-                        Button::new("video-delete")
-                            .ghost()
-                            .small()
-                            .icon(IconName::Delete)
-                            .label(tr(bardo, Text::DeleteAction))
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.start_removal(RemovalMode::Delete, window, cx);
-                            })),
-                    ),
-            )
-            .into_any_element(),
+            h_flex()
+                .gap_1()
+                .child(archived_toggle)
+                .child(archive)
+                .child(
+                    Button::new("video-delete")
+                        .ghost()
+                        .small()
+                        .icon(IconName::Delete)
+                        .label(tr(bardo, Text::DeleteAction))
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.start_removal(RemovalMode::Delete, window, cx);
+                        })),
+                )
+                .into_any_element(),
         );
         header.info = guide::header_tours(
             bardo,

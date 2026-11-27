@@ -3015,11 +3015,7 @@ name = "Videos tour"
 
 [tour.projects.switcher]
 title = "Your video"
-body = "The video you are working on, with the menu that switches to another video of the channel. The channel picker beside Videos lists another channel's videos."
-
-[tour.projects.archive]
-title = "Archive or delete it"
-body = "Archive… hides this video from the list and makes it read-only: no job of it runs and nothing of it publishes, while its published posts go on syncing. Show archived lists the archived videos, to unarchive one. Delete… asks for the name, sends its folder to the Recycle Bin and gives its idea back to Themes; nothing is deleted on the networks."
+body = "The video you are working on, with the menu that switches to another video of the channel. The channel picker beside Videos lists another channel's videos. Show archived, Archive… and Delete… beside it put this video away or remove it."
 
 [tour.projects.narrator]
 title = "Who narrates it"
@@ -5112,6 +5108,7 @@ job_waits = "Waits: its project or video is archived"
 scheduled_post = "A post waits for its time in Bardo. Send it now or cancel its schedule on the video's Publish stage."
 held_on_network = "A post waits on its network to go public at its time. Make it public or remove it on the network."
 active_job = "A job is queued or running. Wait for it or cancel it in Jobs."
+media_to_move = "Videos of another project still keep their media in this project's folder. Let their media move finish: their project's folder and this one must be reachable."
 
 [switcher_removal]
 archive = "Archive project…"
@@ -5153,7 +5150,7 @@ confirm = "Delete"
 running = "Deleting…"
 name_mismatch = "Type the name exactly as shown."
 folder_not_removed = "The folder could not be removed (a file may be open). Nothing was deleted."
-not_disconnected = "An account could not be disconnected. Its folder is gone; try again to finish."
+not_disconnected = "An account could not be disconnected, so the records stay. Try again to finish."
 
 [delete.permanent_reason]
 removable_drive = "It is on a removable drive, which has no Recycle Bin."

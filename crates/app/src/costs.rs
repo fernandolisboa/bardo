@@ -1290,7 +1290,9 @@ impl Bardo {
                 None => {
                     let deleted = deletion(video.as_uuid());
                     let forgotten = deleted.as_ref().is_some_and(|d| d.name.is_none());
-                    let record = records.iter().find(|record| record.project == Some(*video));
+                    let record = records
+                        .iter()
+                        .rfind(|record| record.project == Some(*video));
                     SpendRow {
                         name: if forgotten {
                             None

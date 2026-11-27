@@ -3427,6 +3427,7 @@ impl Text {
                 bardo_domain::RemovalBlock::ScheduledPost => "removal_block.scheduled_post",
                 bardo_domain::RemovalBlock::HeldOnNetwork => "removal_block.held_on_network",
                 bardo_domain::RemovalBlock::ActiveJob => "removal_block.active_job",
+                bardo_domain::RemovalBlock::MediaToMove => "removal_block.media_to_move",
             },
             Text::PermanentReasonText(reason) => match reason {
                 bardo_domain::PermanentReason::RemovableDrive => {
