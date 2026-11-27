@@ -393,7 +393,7 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
     let mut statement = conn
         .prepare(
             "SELECT name, generated_description, description, portrait_file,
-                 portrait_generation_id, failure, described_only
+                 portrait_generation_id, failure, described_only, character_id
              FROM scene_cast WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -406,6 +406,7 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
         Option<String>,
         Option<String>,
         bool,
+        Option<String>,
     )> = statement
         .query_map([plan], |row| {
             Ok((
@@ -416,6 +417,7 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
                 row.get(4)?,
                 row.get(5)?,
                 row.get(6)?,
+                row.get(7)?,
             ))
         })
         .map_err(boxed)?
@@ -423,7 +425,16 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
         .map_err(boxed)?;
     rows.into_iter()
         .map(
-            |(name, generated, description, file, generation_id, failure, described_only)| {
+            |(
+                name,
+                generated,
+                description,
+                file,
+                generation_id,
+                failure,
+                described_only,
+                character,
+            )| {
                 Ok(CastMember::restore(CastRecord {
                     name,
                     generated_description: prompt(&generated)?,
@@ -431,7 +442,14 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
                     portrait: image(conn, (file, generation_id))?,
                     failure: failure_kind(failure)?,
                 })
-                .with_described_only(described_only))
+                .with_described_only(described_only)
+                // A value that does not read is no link: the member stays
+                // the video's own.
+                .with_character(
+                    character
+                        .and_then(|id| uuid::Uuid::parse_str(&id).ok())
+                        .map(bardo_domain::CharacterId::from),
+                ))
             },
         )
         .collect()
@@ -450,14 +468,18 @@ fn write_cast_member(
     }
     tx.execute(
         "INSERT INTO scene_cast (plan_id, position, name, generated_description, description,
-             portrait_file, portrait_generation_id, failure, described_only)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             portrait_file, portrait_generation_id, failure, described_only, character_id)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+             -- A character deleted meanwhile is no link.
+             (SELECT id FROM character WHERE id = ?10)
+         WHERE 1
          ON CONFLICT (plan_id, position) DO UPDATE SET
              description = excluded.description,
              portrait_file = excluded.portrait_file,
              portrait_generation_id = excluded.portrait_generation_id,
              failure = excluded.failure,
-             described_only = excluded.described_only",
+             described_only = excluded.described_only,
+             character_id = excluded.character_id",
         params![
             plan,
             position(index)?,
@@ -470,6 +492,7 @@ fn write_cast_member(
                 .map(|portrait| portrait.generation.id.to_string()),
             member.failure().map(|kind| kind.code()),
             member.is_described_only(),
+            member.character().map(|id| id.to_string()),
         ],
     )
     .map_err(boxed)?;
@@ -1072,6 +1095,7 @@ mod tests {
             vec![CastDraft {
                 name: "the engineer".into(),
                 description: "A woman in her thirties, short black hair.".into(),
+                character: None,
             }],
             vec![
                 SceneDraft {
@@ -1187,7 +1211,10 @@ mod tests {
             // then migrated.
             let mut conn = s.db.conn();
             conn.execute_batch(
-                "DROP TABLE deleted_work;
+                "ALTER TABLE scene_plan DROP COLUMN picks_changed;
+                 ALTER TABLE scene_cast DROP COLUMN character_id;
+                 DROP TABLE video_cast_pick; DROP TABLE reference_picture; DROP TABLE character;
+                 DROP TABLE deleted_work;
                  ALTER TABLE video_project DROP COLUMN archived_at;
                  ALTER TABLE video_project DROP COLUMN folder_project_id;
                  ALTER TABLE video_project DROP COLUMN folder_name;

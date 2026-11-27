@@ -10,6 +10,13 @@ tour: scenes
 
 Scenes cut the narration into the shots the video shows, each with an image. They live at the [Scenes](bardo:go/videos/scenes) stage of a project, and the [Clips](clips.md) stage animates them. [Show me the stage](bardo:tour/scenes).
 
+<a id="who-appears"></a>
+## Who appears
+
+Before planning, **Who appears** picks the characters of the [world](world.md) this video shows, up to three, from the project's World and the global library, each with an **instruction for this video** (only in the last scenes, for instance). The plan gets them as the **fixed cast**: their name, their appearance as written and their notes, and Claude may add extras of the video but never another character of the world. Their scenes are drawn with the character's [reference picture](world.md#pictures) for the video's look, drawn first if there is none yet. With no character picked, the plan is asked exactly as before.
+
+It also shows on [Themes](themes-ranking.md) right under **Video started**, so you can pick when you create the video. Changing who appears after the scenes were planned marks the plan for review: the stage says so until you plan again.
+
 <a id="plan"></a>
 ## Planning and drawing
 
@@ -109,6 +116,8 @@ When the same person appears in more than one scene (the chef, the detective), t
 A scene that shows someone who comes back lists them under **People in this scene**, with the portrait. **Edit look** changes the description; the portrait no longer matches it, so it goes, and the next scene drawn with that person draws a new one first. **Draw portrait again** makes a new portrait from the same look. Scenes already drawn keep their image either way, and Bardo marks them: a scene whose image was drawn with an older portrait of someone in it, or without their portrait, reads **Older face** and says so when you pick it, and the stage counts them under **Scenes showing an older face**, on the Clips stage too, so you see it before paying to animate one. **Draw them again** there draws all of them in one job, after showing what it costs; each new image waits for review beside the current one. While an image shows an older face, the next scenes are not drawn from it: only images that match the portraits hold the others together. They are not counted as missing images, so **Generate N images** leaves them alone.
 
 Bardo does not draw a scene without the portrait of everyone in it who comes back: the image would be paid for and show another face. When a portrait cannot be drawn (the provider declines it, for instance), the person says why, the scenes that show them are left undrawn and say they wait for the portrait, and the other scenes are drawn as usual; the job's failure lists the scenes that wait. A portrait whose file can no longer be read is let go the same way: the person has none again, and it is drawn like any missing portrait the next time. Once one portrait a scene needs has failed, Bardo does not buy the other portraits that scene needs in the same job. Draw the portrait again, after editing the look if the provider declined it, then draw the scenes, or retry the job, which does both. If you would rather go without a portrait for a person, **Draw without a portrait**, offered for everyone, has their scenes drawn from the description alone: the person reads **No portrait**, no portrait is drawn, sent or billed for them, their face may change from scene to scene, and the scenes that waited for their portrait no longer do. **Use a portrait** takes that choice back, and the images drawn without one then read **Older face**.
+
+**Save to World** and **Save to global library**, under a person who comes back, keep them as a [character](world.md#save) with the portrait, for other videos to pick. A person who is a character reads **From the world**.
 
 <a id="same-place"></a>
 ## The same place from scene to scene

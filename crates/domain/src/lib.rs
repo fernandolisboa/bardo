@@ -131,6 +131,7 @@ mod visual_style;
 mod voice;
 mod voice_sample;
 mod web_research;
+mod world;
 mod youtube_policy;
 
 pub use ad_angle::{
@@ -490,6 +491,11 @@ pub use voice_sample::{
     InvalidSampleText, SampleSource, SampleText, VoiceSampleStore, VoiceSampleStoreError,
 };
 pub use web_research::{PageRead, ResearchLimits, ResearchNotes, ResearchRequest, WebResearcher};
+pub use world::{
+    CastPick, Character, CharacterDetails, CharacterDraft, CharacterFieldError, CharacterId,
+    CharacterUse, Look, MAX_PICKED, PictureOrigin, PictureProvenance, ReferencePicture,
+    ReferencePictureId, WorldFiles, WorldRepository, same_name,
+};
 pub use youtube_policy::{
     Forgotten, KEEP_AT_MOST, PRIVACY_POLICY_VERSION, PrivacyConsent, REFRESH_AFTER, UPKEEP_EVERY,
     YouTubeDataStore, YouTubeRetention, authorization_current, confirmed_at, keep_since,

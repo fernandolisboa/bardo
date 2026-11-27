@@ -1198,7 +1198,14 @@ mod tests {
         for kind in TemplateKind::ALL {
             let body = default_template(kind);
             let text = format!("{}\n{}", body.instructions(), body.prompt());
-            for variable in kind.variables() {
+            // The fixed cast is appended after the prompt when a template
+            // does not place it (#337), so the defaults, and the plans made
+            // from them, stay as they were while no character is picked.
+            for variable in kind
+                .variables()
+                .iter()
+                .filter(|variable| **variable != bardo_domain::TemplateVariable::FixedCast)
+            {
                 assert!(
                     text.contains(&variable.placeholder()),
                     "{kind}: {variable:?}"

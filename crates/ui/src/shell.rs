@@ -39,6 +39,7 @@ use crate::settings::SettingsScreen;
 use crate::templates::TemplatesScreen;
 use crate::themes::ThemesScreen;
 use crate::title_bar::{self, TitleBar};
+use crate::world::{WorldScope, WorldScreen};
 
 /// A UI string in the active language.
 pub(crate) fn tr(bardo: &Bardo, text: Text) -> SharedString {
@@ -63,6 +64,10 @@ pub struct Shell {
     accounts: Entity<AccountsScreen>,
     personas: Entity<PersonasScreen>,
     products: Entity<ProductsScreen>,
+    /// The open project's world, on World.
+    world: Entity<WorldScreen>,
+    /// The global library's world, on its World tab.
+    global_world: Entity<WorldScreen>,
     research: Entity<ResearchScreen>,
     themes: Entity<ThemesScreen>,
     performance: Entity<PerformanceScreen>,
@@ -115,6 +120,9 @@ impl Shell {
         let accounts = cx.new(|cx| AccountsScreen::new(bardo.clone(), window, cx));
         let personas = cx.new(|cx| PersonasScreen::new(bardo.clone(), window, cx));
         let products = cx.new(|cx| ProductsScreen::new(bardo.clone(), window, cx));
+        let world = cx.new(|cx| WorldScreen::new(bardo.clone(), WorldScope::Project, window, cx));
+        let global_world =
+            cx.new(|cx| WorldScreen::new(bardo.clone(), WorldScope::Global, window, cx));
         let research = cx.new(|cx| ResearchScreen::new(bardo.clone(), window, cx));
         let themes = cx.new(|cx| ThemesScreen::new(bardo.clone(), window, cx));
         let performance = cx.new(|cx| PerformanceScreen::new(bardo.clone(), window, cx));
@@ -284,6 +292,8 @@ impl Shell {
             accounts,
             personas,
             products,
+            world,
+            global_world,
             research,
             themes,
             performance,
@@ -335,6 +345,10 @@ impl Shell {
             .update(cx, |projects, cx| projects.reload(window, cx));
         self.products
             .update(cx, |products, cx| products.reload(window, cx));
+        self.world.update(cx, |world, cx| world.reload(window, cx));
+        // The global world's looks are the open project's channels'.
+        self.global_world
+            .update(cx, |world, cx| world.reload(window, cx));
         self.costs
             .update(cx, |costs, cx| costs.project_switched(window, cx));
         self.jobs
@@ -397,6 +411,7 @@ impl Shell {
                 Destination::Products => self
                     .products
                     .update(cx, |products, cx| products.reload(window, cx)),
+                Destination::World => self.world.update(cx, |world, cx| world.reload(window, cx)),
                 Destination::Research => self
                     .research
                     .update(cx, |research, cx| research.reload_channels(window, cx)),
@@ -429,6 +444,9 @@ impl Shell {
     /// Re-reads the screen the global library's tab shows.
     fn reload_library(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.library_tab {
+            LibraryTab::World => self
+                .global_world
+                .update(cx, |world, cx| world.reload(window, cx)),
             LibraryTab::Narrators => self
                 .personas
                 .update(cx, |personas, cx| personas.reload(window, cx)),
@@ -683,9 +701,11 @@ impl Shell {
             Destination::Videos => self.projects.read(cx).has_content(),
             Destination::Narrators => self.personas.read(cx).has_content(),
             Destination::Products => self.products.read(cx).has_content(),
+            Destination::World => self.world.read(cx).has_content(),
             Destination::Templates => self.templates.read(cx).has_content(),
             Destination::Overview => self.overview.read(cx).has_content(),
             Destination::Library => match self.library_tab {
+                LibraryTab::World => self.global_world.read(cx).has_content(),
                 LibraryTab::Narrators => self.personas.read(cx).has_content(),
                 LibraryTab::Products => self.products.read(cx).has_content(),
                 LibraryTab::Templates => self.templates.read(cx).has_content(),
@@ -1081,6 +1101,7 @@ impl Shell {
         let screen = match self.screen {
             Destination::Overview => self.overview.clone().into_any_element(),
             Destination::Library => match self.library_tab {
+                LibraryTab::World => self.global_world.clone().into_any_element(),
                 LibraryTab::Narrators => self.personas.clone().into_any_element(),
                 LibraryTab::Products => self.products.clone().into_any_element(),
                 LibraryTab::Templates => self.templates.clone().into_any_element(),
@@ -1089,6 +1110,7 @@ impl Shell {
             Destination::Accounts => self.accounts.clone().into_any_element(),
             Destination::Narrators => self.personas.clone().into_any_element(),
             Destination::Products => self.products.clone().into_any_element(),
+            Destination::World => self.world.clone().into_any_element(),
             Destination::Research => self.research.clone().into_any_element(),
             Destination::Themes => self.themes.clone().into_any_element(),
             Destination::Performance => self.performance.clone().into_any_element(),

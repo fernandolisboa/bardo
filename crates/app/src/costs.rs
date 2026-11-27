@@ -362,12 +362,14 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         // A few words and a paragraph of prompt.
         CostPurpose::Thumbnail => tokens(600, 300),
         // A 2K image, as a scene's.
-        CostPurpose::ThumbnailImage | CostPurpose::ShotBackdrop => Metered {
-            input_tokens: 40,
-            output_tokens: 250,
-            image_tokens: 1_680,
-            ..Metered::default()
-        },
+        CostPurpose::ThumbnailImage | CostPurpose::ShotBackdrop | CostPurpose::WorldPicture => {
+            Metered {
+                input_tokens: 40,
+                output_tokens: 250,
+                image_tokens: 1_680,
+                ..Metered::default()
+            }
+        }
         // The narration's sentences in, a dozen short titles out.
         CostPurpose::Chapters => tokens(4_000, 600),
         // Claude writes a paragraph of prompt; the image provider draws it
@@ -612,6 +614,27 @@ impl CostBook {
         channel: Option<ChannelId>,
         project: Option<VideoProjectId>,
     ) {
+        self.record_in(id, call, (channel, project), None);
+    }
+
+    /// Records a call made for no channel or video but for an item a
+    /// project owns (a world picture drawn from the World screen, #337),
+    /// under that project; `None` for a global item.
+    pub(crate) fn record_for_owner(
+        &self,
+        call: PaidCall<'_>,
+        owner_project: Option<bardo_domain::ProjectId>,
+    ) {
+        self.record_in(CostRecordId::new(), call, (None, None), owner_project);
+    }
+
+    fn record_in(
+        &self,
+        id: CostRecordId,
+        call: PaidCall<'_>,
+        (channel, project): (Option<ChannelId>, Option<VideoProjectId>),
+        owner_project: Option<bardo_domain::ProjectId>,
+    ) {
         let result = self.rates().and_then(|rates| {
             self.costs.record_cost(&CostRecord {
                 id,
@@ -631,7 +654,10 @@ impl CostBook {
                 project,
                 job: call.job,
                 at: SystemTime::now(),
-                origin: Default::default(),
+                origin: bardo_domain::WorkOrigin {
+                    project: owner_project,
+                    ..Default::default()
+                },
             })
         });
         if let Err(error) = result {

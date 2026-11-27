@@ -49,6 +49,7 @@ mod timeline;
 mod tour;
 mod trash;
 mod voice_samples;
+mod world;
 mod youtube_data;
 
 use std::path::{Path, PathBuf};
@@ -88,6 +89,7 @@ pub use setup_choices::{
 };
 pub use trash::{MemoryTrash, SystemTrash};
 pub use voice_samples::{LocalVoiceSamples, MemoryVoiceSamples, default_voice_samples_dir};
+pub use world::{LocalWorldFiles, MemoryWorldFiles};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {

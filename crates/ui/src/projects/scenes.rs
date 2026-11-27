@@ -208,6 +208,28 @@ impl ProjectsScreen {
         cx.notify();
     }
 
+    /// Keeps cast member `member` as a character of the video's project,
+    /// or of the global library with `global`, with its portrait.
+    fn save_cast_to_world(
+        &mut self,
+        member: usize,
+        global: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(id) = self.project else {
+            return;
+        };
+        match self.bardo.read(cx).save_cast_to_world(id, member, global) {
+            Ok(_) => self.scenes_error = None,
+            Err(error) => self.scenes_error = Some(error.message()),
+        }
+        self.load_scenes(id, cx);
+        self.who_appears
+            .update(cx, |panel, cx| panel.show(Some(id), window, cx));
+        cx.notify();
+    }
+
     fn save_scene_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((_, index, field)) = self.editing_scene else {
             return;
@@ -254,6 +276,12 @@ impl ProjectsScreen {
         let states = scene_states(view, stage);
         let selected = self.shown_scene(&states);
         parts.toolbar = Some(self.scenes_toolbar(stage, view, &states, cx));
+        // Who appears is picked before the plan, so it leads the stage.
+        if stage == Stage::Scenes {
+            parts
+                .notices
+                .push(self.who_appears.clone().into_any_element());
+        }
         parts.notices.extend(self.scenes_notices(stage, view, cx));
         parts.collection = Some(self.scene_grid(stage, view, &states, selected, cx));
         parts.inspector = view
@@ -2447,6 +2475,13 @@ impl ProjectsScreen {
                             .font_semibold()
                             .child(SharedString::from(cast.name.clone())),
                     )
+                    .when(cast.character().is_some(), |row| {
+                        row.child(kit::status(
+                            Tone::Accent,
+                            tr(bardo, Text::CastFromWorld),
+                            cx,
+                        ))
+                    })
                     .when(cast.is_edited(), |row| {
                         row.child(kit::status(Tone::Info, tr(bardo, Text::CastEdited), cx))
                     })
@@ -2488,6 +2523,37 @@ impl ProjectsScreen {
                             Text::CastPortraitLater
                         },
                     ))
+                });
+                let in_world = cast.character().is_some();
+                let save = (open.is_none() && !busy && !in_world).then(|| {
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .items_center()
+                        .child(
+                            Button::new(("save-cast-world", member))
+                                .ghost()
+                                .xsmall()
+                                .label(tr(bardo, Text::CastSaveToWorld))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.save_cast_to_world(member, false, window, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new(("save-cast-library", member))
+                                .ghost()
+                                .xsmall()
+                                .label(tr(bardo, Text::CastSaveToLibrary))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.save_cast_to_world(member, true, window, cx)
+                                })),
+                        )
+                        .child(guide::info(
+                            bardo,
+                            ("save-cast-info", member),
+                            tr(bardo, Text::CastSaveHint),
+                            guide::refs::WORLD_SAVE,
+                        ))
                 });
                 let actions = (open.is_none() && !busy).then(|| {
                     h_flex()
@@ -2575,7 +2641,8 @@ impl ProjectsScreen {
                             .child(description)
                             .children(failure)
                             .children(later)
-                            .children(actions),
+                            .children(actions)
+                            .children(save),
                     )
                     .into_any_element()
             });
