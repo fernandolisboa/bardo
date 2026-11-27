@@ -49,6 +49,9 @@ pub enum LooseError {
     /// The channel's project is archived.
     #[error("the project is archived")]
     ProjectArchived,
+    /// The loose video itself is archived; it moves once unarchived.
+    #[error("the video is archived")]
+    VideoArchived,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -72,6 +75,7 @@ impl LooseError {
             LooseError::VideoNotFound | LooseError::NotLoose => Text::LooseVideoNotFound,
             LooseError::Busy => Text::LooseMoveBusy,
             LooseError::ProjectArchived => Text::LooseMoveArchived,
+            LooseError::VideoArchived => Text::LooseMoveVideoArchived,
             LooseError::Repository(_) => Text::LooseNotSaved,
         }
     }
@@ -300,6 +304,9 @@ impl Bardo {
         channel: ChannelId,
     ) -> Result<(), LooseError> {
         let found = self.own_loose_video(video)?;
+        if self.archived_videos().contains(&found.id) {
+            return Err(LooseError::VideoArchived);
+        }
         let channel = self
             .channels
             .get(channel)?
@@ -328,7 +335,15 @@ impl Bardo {
         if busy {
             return Err(LooseError::Busy);
         }
+        // Its files for the file targets go: the channel's accounts render
+        // anew (the rows go with the move).
+        let rendered = self.renders.renders(found.id)?;
         self.themes.move_loose(found.id, channel.id)?;
+        for render in rendered {
+            if let Err(error) = self.files.remove(found.id, &render.file) {
+                tracing::warn!("could not remove a loose video's render: {error}");
+            }
+        }
         tracing::info!("moved a loose video into a project");
         // Its media follows it into the project's folder.
         let _ = self.queue_media_move();
@@ -456,6 +471,21 @@ mod tests {
             Err(PublicationError::NoAccount)
         ));
         assert!(app.channel_accounts(video.channel).unwrap().is_empty());
+
+        // Moved, its file targets' renders and files go.
+        let files: Vec<String> = app
+            .renders(video.id)
+            .unwrap()
+            .into_iter()
+            .map(|render| render.file)
+            .collect();
+        app.move_loose_video(video.id, source.unwrap()).unwrap();
+        assert!(app.renders(video.id).unwrap().is_empty());
+        assert!(
+            files
+                .iter()
+                .all(|file| bardo_domain::ProjectFiles::read(&*h.files, video.id, file).is_err())
+        );
     }
 
     #[test]
@@ -546,6 +576,197 @@ mod tests {
             app.move_loose_video(video.id, channel),
             Err(LooseError::NotLoose)
         ));
+    }
+
+    #[test]
+    fn a_moved_video_offers_versions_by_its_own_language_not_its_channel_s() {
+        let h = Harness::new();
+        let app = h.start();
+        // Portuguese for Brazil.
+        let channel = project(&app).channel.unwrap();
+        let english = app
+            .create_channel(bardo_domain::ChannelDraft {
+                name: "Space Archives US".into(),
+                niche: "space history".into(),
+                language: ContentLanguage::English,
+                country: Country::UnitedStates,
+                ..bardo_domain::ChannelDraft::default()
+            })
+            .unwrap();
+        let video = app.start_loose_video(draft(Some(english.id))).unwrap();
+        app.move_loose_video(video.id, channel).unwrap();
+        // The video stays in English for the United States: the English
+        // channel is its own audience.
+        assert!(matches!(
+            app.make_version(video.id, english.id, BudgetConsent::Ask),
+            Err(crate::LocalizationError::SameAudience)
+        ));
+    }
+
+    #[test]
+    fn a_narrator_held_by_a_loose_video_is_in_use() {
+        let h = Harness::new();
+        let app = h.start();
+        let source = project(&app).channel;
+        let video = app.start_loose_video(draft(source)).unwrap();
+        let narrator = app
+            .own_video_settings(video.id)
+            .unwrap()
+            .unwrap()
+            .details
+            .default_persona()
+            .unwrap();
+        let uses = app.persona_usage(narrator).unwrap();
+        assert!(
+            uses.iter()
+                .any(|used| used.video.as_deref() == Some(video.title.as_str())),
+            "{uses:?}"
+        );
+    }
+
+    #[test]
+    fn an_archived_loose_video_does_not_move() {
+        let h = Harness::new();
+        let app = h.start();
+        let channel = project(&app).channel.unwrap();
+        let video = app.start_loose_video(draft(None)).unwrap();
+        app.archive_video(video.id).unwrap();
+        assert!(matches!(
+            app.move_loose_video(video.id, channel),
+            Err(LooseError::VideoArchived)
+        ));
+        assert_eq!(
+            LooseError::VideoArchived.message(),
+            Text::LooseMoveVideoArchived
+        );
+        assert!(app.themes.project(video.id).unwrap().unwrap().is_loose());
+    }
+
+    #[test]
+    fn deleting_says_whether_the_video_has_an_idea_to_give_back() {
+        let h = Harness::new();
+        let app = h.start();
+        let started = project(&app);
+        let channel = started.channel.unwrap();
+        assert_eq!(app.delete_video_hint(started.id), Text::DeleteVideoHint);
+        let video = app.start_loose_video(draft(None)).unwrap();
+        assert_eq!(app.delete_video_hint(video.id), Text::DeleteLooseVideoHint);
+        app.move_loose_video(video.id, channel).unwrap();
+        assert_eq!(app.delete_video_hint(video.id), Text::DeleteVideoNoIdeaHint);
+    }
+
+    #[test]
+    fn a_new_channel_while_no_project_is_open_is_refused_not_given_a_project() {
+        let h = Harness::new();
+        let app = h.start();
+        project(&app);
+        let projects = app.projects().unwrap().len();
+        app.open_loose_videos().unwrap();
+        let error = app
+            .create_channel(bardo_domain::ChannelDraft {
+                name: "Deep Sea Files".into(),
+                ..bardo_domain::ChannelDraft::default()
+            })
+            .unwrap_err();
+        assert!(matches!(error, crate::ChannelError::NeedsProject));
+        assert_eq!(error.form_message(), Some(Text::ChannelNeedsProject));
+        assert_eq!(app.projects().unwrap().len(), projects);
+        assert!(app.loose_open());
+    }
+
+    #[test]
+    fn a_moved_video_shows_its_own_format_on_the_overview() {
+        let h = Harness::new();
+        let app = h.start();
+        let channel = project(&app).channel.unwrap();
+        let home = app.channels.get(channel).unwrap().unwrap().details.format();
+        let other = if home == bardo_domain::VideoFormat::Long {
+            bardo_domain::VideoFormat::Short
+        } else {
+            bardo_domain::VideoFormat::Long
+        };
+        let long = app
+            .create_channel(bardo_domain::ChannelDraft {
+                name: "Space Archives Long".into(),
+                format: other,
+                ..bardo_domain::ChannelDraft::default()
+            })
+            .unwrap();
+        let video = app.start_loose_video(draft(Some(long.id))).unwrap();
+        app.move_loose_video(video.id, channel).unwrap();
+        let overview = app.overview().unwrap();
+        let shown = overview
+            .videos
+            .iter()
+            .find(|shown| shown.id == video.id)
+            .expect("the moved video is in progress");
+        assert_eq!(shown.format, other);
+    }
+
+    #[test]
+    fn a_version_of_a_moved_video_keeps_its_own_angle() {
+        let h = Harness::new();
+        let app = h.start();
+        let channel = project(&app).channel.unwrap();
+        let video = app.start_loose_video(draft(Some(channel))).unwrap();
+        h.answer(SCRIPT.to_owned());
+        done(
+            &app,
+            app.generate_script(video.id, BudgetConsent::Ask).unwrap(),
+        );
+        done(
+            &app,
+            app.generate_narration(video.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        h.answer(plan_answer());
+        done(
+            &app,
+            app.plan_scenes(video.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        done(
+            &app,
+            app.generate_scene_images(video.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        app.move_loose_video(video.id, channel).unwrap();
+        let narrator = app
+            .personas()
+            .unwrap()
+            .into_iter()
+            .find(|p| p.details.name() == "Documentary Narrator (en-US)")
+            .unwrap();
+        let english = app
+            .create_channel(bardo_domain::ChannelDraft {
+                name: "Lost Signals".into(),
+                niche: "space history".into(),
+                language: ContentLanguage::English,
+                country: Country::UnitedStates,
+                default_persona: Some(narrator.id),
+                ..bardo_domain::ChannelDraft::default()
+            })
+            .unwrap();
+        h.answer(
+            serde_json::json!({
+                "title": "The Probe That Never Came Home",
+                "sentences": [
+                    "Once upon a time, in 1969, there was a probe.",
+                    "It flew far away.",
+                    "The signal vanished in March.",
+                    "Nobody knows why.",
+                ],
+            })
+            .to_string(),
+        );
+        done(
+            &app,
+            app.make_version(video.id, english.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let version = app.versions(video.id).unwrap().made[0].project.clone();
+        let theme = app.themes.theme(version.theme.unwrap()).unwrap().unwrap();
+        assert_eq!(theme.idea().angle(), "told by the engineers who lost it");
     }
 
     #[test]

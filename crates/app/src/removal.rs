@@ -452,6 +452,17 @@ impl Bardo {
         Ok(())
     }
 
+    /// What deleting the video says: a loose video was never published, a
+    /// video with no idea (a loose one moved into a project) has none to
+    /// give back, and any other one returns its idea to approved.
+    pub fn delete_video_hint(&self, id: VideoProjectId) -> Text {
+        match self.themes.project(id) {
+            Ok(Some(video)) if video.is_loose() => Text::DeleteLooseVideoHint,
+            Ok(Some(video)) if video.theme.is_none() => Text::DeleteVideoNoIdeaHint,
+            _ => Text::DeleteVideoHint,
+        }
+    }
+
     /// The profile's archived videos.
     pub fn archived_videos(&self) -> HashSet<VideoProjectId> {
         self.folder_book

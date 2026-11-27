@@ -247,6 +247,21 @@ impl Bardo {
                 });
             }
         }
+        // Loose videos (#341): their own pick, or the narrator their
+        // settings hold.
+        for video in self.themes.loose_projects(self.profile.id)? {
+            let held = self
+                .themes
+                .video_settings(video.id)?
+                .and_then(|settings| settings.details.default_persona());
+            if video.persona == Some(persona.id) || held == Some(persona.id) {
+                uses.push(LibraryUse {
+                    project: self.text(Text::LooseSwitcherRow).into_owned(),
+                    channel: String::new(),
+                    video: Some(video.title.clone()),
+                });
+            }
+        }
         Ok(uses)
     }
 

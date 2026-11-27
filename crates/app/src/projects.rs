@@ -238,10 +238,13 @@ impl Bardo {
     }
 
     /// The project a new channel joins: the open one, or, when the profile
-    /// has none yet, a new project of the channel's name, opened.
+    /// has none yet, a new project of the channel's name, opened. While
+    /// *No project* is open over existing projects there is none to join
+    /// ([`ProjectError::NotFound`]): the user picks one first.
     pub(crate) fn project_for_new_channel(&self, name: &str) -> Result<ProjectId, ProjectError> {
         match self.open_project_id()? {
             Some(open) => Ok(open),
+            None if self.projects()?.iter().any(Project::is_active) => Err(ProjectError::NotFound),
             None => self.add_project_named(name),
         }
     }

@@ -659,11 +659,17 @@ impl LocalizationHandler {
         let source_channel_id = source
             .channel
             .ok_or_else(|| source_gone("a loose video has no versions"))?;
-        let source_channel = self
+        let mut source_channel = self
             .channels
             .get(source_channel_id)
             .map_err(unexpected)?
             .ok_or_else(|| source_gone("the project's channel was removed"))?;
+        // A video that was loose keeps its own language and country (#341).
+        if let Some(details) =
+            crate::loose::details_of(&*self.themes, &*self.channels, &source).map_err(unexpected)?
+        {
+            source_channel.details = details;
+        }
         let narration = self
             .narrations
             .narration(source.id)
@@ -741,7 +747,13 @@ impl LocalizationHandler {
                     .map_err(unexpected)?
                     .map(|theme| theme.idea().angle().to_owned())
                     .unwrap_or_default(),
-                None => String::new(),
+                // A loose video's angle lives in its own settings (#341).
+                None => self
+                    .themes
+                    .video_settings(source.id)
+                    .map_err(unexpected)?
+                    .map(|settings| settings.angle)
+                    .unwrap_or_default(),
             };
             let idea = ThemeIdea::new(&adapted.title, &angle)
                 .or_else(|_| ThemeIdea::new(&adapted.title, ""))
@@ -1189,10 +1201,14 @@ impl Bardo {
                 job_channel: None,
             });
         };
-        let own = self
+        let mut own = self
             .channels
             .get(own_channel)?
             .ok_or(LocalizationError::ProjectNotFound)?;
+        // A video that was loose keeps its own language and country (#341).
+        if let Some(details) = self.video_details(&project)? {
+            own.details = details;
+        }
         let came_from = self.came_from(project.id)?;
         let narration = self.narrations.narration(project.id)?;
         let plan = self.scene_plans.scene_plan(project.id)?;
@@ -1290,11 +1306,15 @@ impl Bardo {
             .get(channel)?
             .filter(|channel| channel.owner == self.profile.id)
             .ok_or(LocalizationError::ChannelNotFound)?;
-        let own = match project.channel {
+        let mut own = match project.channel {
             Some(channel) => self.channels.get(channel)?,
             None => None,
         }
         .ok_or(LocalizationError::ChannelNotFound)?;
+        // A video that was loose keeps its own language and country (#341).
+        if let Some(details) = self.video_details(&project)? {
+            own.details = details;
+        }
         // Versions stay inside the project: another project's channel is
         // never offered.
         if target.project != own.project {

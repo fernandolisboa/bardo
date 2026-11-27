@@ -490,8 +490,9 @@ impl ThemeRepository for Database {
     }
 
     fn move_loose(&self, id: VideoProjectId, channel: ChannelId) -> Result<(), RepositoryError> {
-        let changed = self
-            .conn()
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        let changed = tx
             .execute(
                 "UPDATE video_project SET channel_id = ?2
                  WHERE id = ?1 AND channel_id IS NULL
@@ -500,13 +501,15 @@ impl ThemeRepository for Database {
                 params![id.to_string(), channel.to_string()],
             )
             .map_err(boxed)?;
-        if changed == 1 {
-            Ok(())
-        } else {
-            Err(invalid(
+        if changed != 1 {
+            return Err(invalid(
                 "only a loose video moves to a channel of its profile",
-            ))
+            ));
         }
+        // Its renders were for file targets the channel's accounts replace.
+        tx.execute("DELETE FROM render WHERE project_id = ?1", [id.to_string()])
+            .map_err(boxed)?;
+        tx.commit().map_err(boxed)
     }
 
     fn projects(&self, channel: ChannelId) -> Result<Vec<VideoProject>, RepositoryError> {

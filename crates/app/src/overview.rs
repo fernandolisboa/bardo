@@ -346,7 +346,12 @@ impl Bardo {
                     title: video.title.clone(),
                     channel: channel.id,
                     channel_name: channel.details.name().to_owned(),
-                    format: video.format(channel.details.format()),
+                    // A video moved in from the loose ones keeps its own
+                    // settings (#341).
+                    format: video.format(
+                        crate::loose::details_of(&*self.themes, &*self.channels, &video)?
+                            .map_or(channel.details.format(), |details| details.format()),
+                    ),
                     is_ad: video.is_ad(),
                     status,
                     next,
