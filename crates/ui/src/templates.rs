@@ -411,6 +411,10 @@ impl TemplatesScreen {
                 bardo,
                 Text::TemplateKindName(self.kind),
             )))
+            .children(
+                self.no_project
+                    .then(|| kit::notice(Tone::Info, tr(bardo, Text::LibraryNoProject), cx)),
+            )
             .children(source)
             .children(base_number.map(|n| {
                 div()

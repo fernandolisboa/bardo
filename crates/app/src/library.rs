@@ -592,4 +592,36 @@ mod tests {
         );
         assert!(app.personas.get(global.id).unwrap().is_some());
     }
+
+    #[test]
+    fn a_global_item_duplicated_on_a_projects_screen_goes_to_that_project() {
+        let app = start();
+        let space = project(&app, "Space");
+        let sea = project(&app, "Sea");
+        let global = app.narrators(None).unwrap().remove(0);
+        let copy = app.duplicate_persona_into(global.id, Some(space)).unwrap();
+        assert_eq!(copy.owner_project, Some(space));
+        assert!(names(&app.narrators(Some(space)).unwrap()).contains(&copy.details.name()));
+        assert_eq!(
+            app.narrators(None).unwrap().len(),
+            4,
+            "the global ones stay"
+        );
+        assert!(matches!(
+            app.duplicate_persona_into(copy.id, Some(sea)),
+            Err(PersonaError::OtherProject)
+        ));
+        assert!(matches!(
+            app.duplicate_persona_into(copy.id, None),
+            Err(PersonaError::OtherProject)
+        ));
+
+        let product = app
+            .create_product_in(None, crate::ad_angles::testing::draft())
+            .unwrap();
+        let copy = app.duplicate_product_into(product.id, Some(space)).unwrap();
+        assert_eq!(copy.owner_project, Some(space));
+        assert!(app.duplicate_product_into(copy.id, Some(sea)).is_err());
+        assert_eq!(app.library_products(None).unwrap().len(), 1);
+    }
 }

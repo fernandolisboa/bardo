@@ -468,6 +468,9 @@ impl ProductsScreen {
             self.notice = None;
         }
         self.confirm_delete = false;
+        // A save's uses or a copy's name were asked about other text.
+        self.confirm = None;
+        self.bring = None;
         cx.notify();
     }
 
@@ -666,7 +669,9 @@ impl ProductsScreen {
         if self.dirty(cx) && !self.save(window, cx) {
             return;
         }
-        match self.bardo.read(cx).duplicate_product(id) {
+        // On a project's entry a global product's copy is the project's
+        // own, so it shows in this list.
+        match self.bardo.read(cx).duplicate_product_into(id, self.owner) {
             Ok(copy) => {
                 self.reload_list(cx);
                 self.edit(copy.id, window, cx);
@@ -744,16 +749,29 @@ impl ProductsScreen {
             return;
         };
         let name = form.typed(cx);
-        match self
-            .bardo
-            .read(cx)
+        // Edits not yet saved go to the copy, never to the global one.
+        let draft = self.dirty(cx).then(|| self.draft(cx));
+        let bardo = self.bardo.read(cx);
+        let result = bardo
             .bring_product_into_project(id, project, Some(&name))
-        {
+            .and_then(|copy| match draft {
+                Some(draft) => bardo.update_product(
+                    copy.id,
+                    ProductDraft {
+                        name: copy.brief.name().to_owned(),
+                        ..draft
+                    },
+                    true,
+                ),
+                None => Ok(copy),
+            });
+        match result {
             Ok(copy) => {
                 self.reload_list(cx);
-                if self.products.iter().any(|product| product.id == copy.id) {
-                    self.edit(copy.id, window, cx);
-                }
+                let shown = self.products.iter().any(|product| product.id == copy.id);
+                // Off the project's list, the form goes back to the global
+                // product as saved: its edits went to the copy.
+                self.edit(if shown { copy.id } else { id }, window, cx);
                 self.bring = None;
                 self.notice = Some(Notice::Brought(copy.brief.name().to_owned(), project_name));
             }
@@ -977,7 +995,19 @@ impl ProductsScreen {
                 );
                 tile.selected = self.editing == Some(id);
                 tile.title = Some(SharedString::from(product.brief.name().to_owned()));
-                tile.text = Some(tr(bardo, Text::ProductKindName(product.brief.kind())));
+                let kind = tr(bardo, Text::ProductKindName(product.brief.kind()));
+                // Shown even when archived takes the status: editing a
+                // global product changes it everywhere.
+                tile.text = Some(
+                    if self.scope == LibraryScope::Project && product.is_global() {
+                        SharedString::from(format!(
+                            "{kind} · {}",
+                            tr(bardo, Text::LibraryGlobalTag)
+                        ))
+                    } else {
+                        kind
+                    },
+                );
                 tile.status = if product.archived {
                     Some(
                         kit::status(Tone::Neutral, tr(bardo, Text::ProductArchivedTag), cx)

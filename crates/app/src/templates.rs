@@ -1227,8 +1227,9 @@ impl Bardo {
             .ok_or(TemplateError::NotFound)
     }
 
-    /// The active projects that use the global template of `kind`, by
-    /// name: every one without its own.
+    /// The projects that use the global template of `kind`, by name:
+    /// every one without its own, archived ones too (they keep using it
+    /// once brought back).
     pub fn global_template_users(&self, kind: TemplateKind) -> Result<Vec<String>, TemplateError> {
         let own = self
             .templates
@@ -1237,7 +1238,7 @@ impl Bardo {
             .projects
             .projects(self.profile.id)?
             .into_iter()
-            .filter(|project| project.is_active() && !own.contains(&project.id))
+            .filter(|project| !own.contains(&project.id))
             .map(|project| project.details.name().to_owned())
             .collect())
     }

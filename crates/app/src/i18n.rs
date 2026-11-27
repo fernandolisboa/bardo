@@ -11102,7 +11102,10 @@ mod tests {
             for (text, args) in [
                 (Text::PresetPercent, &[("n", "75")][..]),
                 (Text::PersonaDuplicated, &[("name", "Narrator (copy)")][..]),
-                (Text::PersonaUsedBy, &[("channels", "Space Archives")][..]),
+                (
+                    Text::PersonaUsedBy,
+                    &[("places", "Space › Space Archives")][..],
+                ),
                 (Text::PersonaConfirmTitle, &[("n", "2")][..]),
             ] {
                 let filled = catalog.format(text, args);

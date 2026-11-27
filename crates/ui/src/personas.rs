@@ -10,8 +10,8 @@
 //! the form to a `PersonaDraft` and results back to the screen.
 
 use bardo_app::bardo_domain::{
-    GenerationPresets, Persona, PersonaDraft, PersonaFieldError, PersonaId, Voice, VoiceCategory,
-    VoiceFlag, VoiceRef,
+    GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId, Voice,
+    VoiceCategory, VoiceFlag, VoiceRef,
 };
 use std::rc::Rc;
 use std::time::Duration;
@@ -536,17 +536,31 @@ impl PersonasScreen {
             return;
         };
         let name = form.typed(cx);
-        match self
-            .bardo
-            .read(cx)
+        // Edits not yet saved go to the copy, never to the global one.
+        let draft = self.draft(cx);
+        let edited = self.edited_persona().is_some_and(|persona| {
+            PersonaDetails::validate(draft.clone()).ok().as_ref() != Some(&persona.details)
+        });
+        let bardo = self.bardo.read(cx);
+        let result = bardo
             .bring_persona_into_project(id, project, Some(&name))
-        {
+            .and_then(|copy| {
+                if !edited {
+                    return Ok(copy);
+                }
+                let draft = PersonaDraft {
+                    name: copy.details.name().to_owned(),
+                    ..draft
+                };
+                bardo.update_persona(copy.id, draft, true)
+            });
+        match result {
             Ok(copy) => {
                 self.reload_list(cx);
                 let shown = self.personas.iter().any(|persona| persona.id == copy.id);
-                if shown {
-                    self.edit(copy.id, window, cx);
-                }
+                // Off the project's list, the form goes back to the global
+                // narrator as saved: its edits went to the copy.
+                self.edit(if shown { copy.id } else { id }, window, cx);
                 self.bring = None;
                 self.notice = Some(Notice::Brought(
                     copy.details.name().to_owned(),
@@ -579,7 +593,9 @@ impl PersonasScreen {
         let Some(id) = self.editing else {
             return;
         };
-        match self.bardo.read(cx).duplicate_persona(id) {
+        // On a project's entry a global narrator's copy is the project's
+        // own, so it shows in this list.
+        match self.bardo.read(cx).duplicate_persona_into(id, self.owner) {
             Ok(copy) => {
                 self.reload_list(cx);
                 self.edit(copy.id, window, cx);
@@ -926,8 +942,18 @@ impl PersonasScreen {
                 );
                 tile.selected = self.editing == Some(id);
                 tile.title = Some(SharedString::from(persona.details.name().to_owned()));
+                let voice = persona.details.voice().name();
+                // Shown even when a flag takes the status: editing a global
+                // narrator changes it everywhere.
                 tile.text = Some(SharedString::from(
-                    persona.details.voice().name().to_owned(),
+                    if self.scope == LibraryScope::Project && persona.is_global() {
+                        format!(
+                            "{voice} · {}",
+                            tr(self.bardo.read(cx), Text::LibraryGlobalTag)
+                        )
+                    } else {
+                        voice.to_owned()
+                    },
                 ));
                 tile.status = persona
                     .voice_flag
@@ -1616,7 +1642,7 @@ impl PersonasScreen {
                     .map(|used| library::use_line(used).trim_start_matches("• ").to_owned())
                     .collect();
                 bardo
-                    .text_with(Text::PersonaUsedBy, &[("channels", &places.join("; "))])
+                    .text_with(Text::PersonaUsedBy, &[("places", &places.join("; "))])
                     .into()
             };
             div()

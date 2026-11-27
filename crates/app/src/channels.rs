@@ -90,10 +90,7 @@ impl Bardo {
         project: Option<&str>,
         draft: ChannelDraft,
     ) -> Result<Channel, ChannelError> {
-        let draft = self.with_current_clip_model(draft);
-        let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
-        self.ensure_name_free(&details, None)?;
-        self.ensure_offered_clip_model(&details)?;
+        let details = self.new_channel_details(draft)?;
         let project = match project {
             Some(name) => self.project_named(name),
             None => self.project_for_new_channel(details.name()),
@@ -102,6 +99,32 @@ impl Bardo {
             crate::ProjectError::Repository(error) => ChannelError::Repository(error),
             other => ChannelError::Repository(RepositoryError(other.to_string().into())),
         })?;
+        self.save_new_channel(project, details)
+    }
+
+    /// A new channel in `project`, which the caller already found.
+    pub(crate) fn create_channel_at(
+        &self,
+        project: ProjectId,
+        draft: ChannelDraft,
+    ) -> Result<Channel, ChannelError> {
+        let details = self.new_channel_details(draft)?;
+        self.save_new_channel(project, details)
+    }
+
+    fn new_channel_details(&self, draft: ChannelDraft) -> Result<ChannelDetails, ChannelError> {
+        let draft = self.with_current_clip_model(draft);
+        let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
+        self.ensure_name_free(&details, None)?;
+        self.ensure_offered_clip_model(&details)?;
+        Ok(details)
+    }
+
+    fn save_new_channel(
+        &self,
+        project: ProjectId,
+        details: ChannelDetails,
+    ) -> Result<Channel, ChannelError> {
         self.ensure_own_persona(&details, project)?;
         let channel = Channel::new(self.profile.id, project, details);
         self.channels.save(&channel)?;

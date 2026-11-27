@@ -1577,7 +1577,9 @@ impl Bardo {
         let draft = entry.draft(persona).ok_or(Text::SettingsFileItemNotRead)?;
         let channel = match existing {
             Some(existing) => self.update_channel(existing.id, draft),
-            None => self.create_channel_in(Some(project), draft),
+            // The project found above, so the file's project is looked up
+            // (and made) once.
+            None => self.create_channel_at(owner, draft),
         }
         .map_err(|_| failed)?;
         let mut sign_ins_failed = Vec::new();
@@ -2114,9 +2116,20 @@ mod tests {
 
         let target = Harness::new();
         let mut other = target.start();
+        // An archived project of the same name is no match: one new
+        // project takes the channel and its narrator together.
+        let archived = other
+            .create_project(bardo_domain::ProjectDraft {
+                name: "Marca".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        other.archive_project(archived.id, false).unwrap();
+        let projects_before = other.projects().unwrap().len();
         let file = open(&other, &path);
         let all = ticked(&other.settings_to_import(&file));
         other.import_settings(&file, &all);
+        assert_eq!(other.projects().unwrap().len(), projects_before + 1);
 
         let channel = other
             .all_channels()

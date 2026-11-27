@@ -13,7 +13,7 @@ A product is something you advertise: a digital product such as an app or a cour
 <a id="library"></a>
 ## Your products
 
-On a project's **Products** entry, the list holds the project's own products and the global ones, tagged **Global**; the **Products** tab of the [Global library](global-library.md) holds the global ones. **New product** opens an empty brief, for the project on its entry or for the global library on its tab; picking a product opens it for editing. Archived products are hidden until you tick **Show archived**. An ad of a project's channel can use the project's products and the global ones.
+On a project's **Products** entry, the list holds the project's own products and the global ones its ads use, tagged **Global**; the **Products** tab of the [Global library](global-library.md) holds the global ones. **New product** opens an empty brief, for the project on its entry or for the global library on its tab; picking a product opens it for editing. Archived products are hidden until you tick **Show archived**. An ad of a project's channel can use the project's products and the global ones: to start one from a global product the project does not use yet, open that product on the Global library's tab, or **Bring into the project** a copy.
 
 A global product is used by reference: saving one that ads already use changes it for all of them, in every project, so Bardo lists those videos and asks first. To change it for this project only, **Bring into the project**: Bardo makes an independent copy that belongs to the project, with its images, logo, concept and sheet, under a name you can change (on a clash, Bardo suggests *Name (Global)*). Ads that already use the global product keep it.
 

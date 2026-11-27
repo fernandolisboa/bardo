@@ -290,14 +290,36 @@ impl Bardo {
     /// as a copy, to vary without touching the original. The copy is not
     /// archived and has the original's owner.
     pub fn duplicate_product(&self, id: ProductId) -> Result<Product, ProductError> {
+        let owner = self.own_product(id)?.owner_project;
+        self.duplicate_product_into(id, owner)
+    }
+
+    /// As `duplicate_product`, with the copy owned by `owner`: the
+    /// original's owner, or a project when the original is global (a
+    /// global product duplicated on a project's screen stays in sight).
+    pub fn duplicate_product_into(
+        &self,
+        id: ProductId,
+        owner: Option<ProjectId>,
+    ) -> Result<Product, ProductError> {
         let original = self.own_product(id)?;
-        let taken = self.products_of(original.owner_project)?;
+        if owner != original.owner_project {
+            if !original.is_global() {
+                return Err(ProductError::NotGlobal);
+            }
+            if let Some(project) = owner
+                && !self.own_project_exists(project)?
+            {
+                return Err(ProductError::ProjectNotFound);
+            }
+        }
+        let taken = self.products_of(owner)?;
         let name = original
             .brief
             .copy_name(&self.text(Text::ProductCopySuffix), |name| {
                 taken.iter().any(|other| other.brief.same_name(name))
             });
-        self.copy_product(&original, name, original.owner_project)
+        self.copy_product(&original, name, owner)
     }
 
     /// Makes an independent copy of a global product, owned by `project`,

@@ -363,14 +363,37 @@ impl Bardo {
     }
 
     /// A new persona with the same voice, tone, style and presets, named
-    /// as a copy, to vary without touching the original.
+    /// as a copy, to vary without touching the original. The copy has the
+    /// original's owner.
     pub fn duplicate_persona(&self, id: PersonaId) -> Result<Persona, PersonaError> {
+        let owner = self.own_persona(id)?.owner_project;
+        self.duplicate_persona_into(id, owner)
+    }
+
+    /// As `duplicate_persona`, with the copy owned by `owner`: the
+    /// original's owner, or a project when the original is global (a
+    /// global narrator duplicated on a project's screen stays in sight).
+    pub fn duplicate_persona_into(
+        &self,
+        id: PersonaId,
+        owner: Option<ProjectId>,
+    ) -> Result<Persona, PersonaError> {
         let original = self.own_persona(id)?;
+        if owner != original.owner_project {
+            if !original.is_global() {
+                return Err(PersonaError::OtherProject);
+            }
+            if let Some(project) = owner
+                && !self.own_project_exists(project)?
+            {
+                return Err(PersonaError::ProjectNotFound);
+            }
+        }
         let taken: Vec<Persona> = self
             .personas
             .list(self.profile.id)?
             .into_iter()
-            .filter(|other| other.owner_project == original.owner_project)
+            .filter(|other| other.owner_project == owner)
             .collect();
         let name = original
             .details
@@ -385,7 +408,7 @@ impl Bardo {
         let copy = Persona {
             // Same voice, same flag.
             voice_flag: original.voice_flag,
-            ..Persona::new(self.profile.id, details).owned_by(original.owner_project)
+            ..Persona::new(self.profile.id, details).owned_by(owner)
         };
         self.personas.save(&copy)?;
         self.copy_persona_look(&original, &copy);

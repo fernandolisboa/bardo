@@ -1302,8 +1302,8 @@ save = "Salvar alterações"
 duplicate = "Duplicar"
 saved = "Narrador salvo."
 duplicated = "{name} criado. Edite à vontade; o original continua como estava."
-used_by = "Narrador padrão de: {channels}"
-unused = "Nenhum canal usa este narrador como padrão ainda."
+used_by = "Usado em: {places}"
+unused = "Nenhum canal ou vídeo usa este narrador ainda."
 copy_suffix = "cópia"
 imported_suffix = "importada"
 export = "Exportar para arquivo…"
@@ -3225,7 +3225,7 @@ name = "Tour de Produtos"
 
 [tour.products.library]
 title = "Seus produtos"
-body = "Um produto é o que um anúncio vende: um app, um curso, um objeto, um serviço ou só uma ideia. Esta lista tem os produtos do projeto e os globais, marcados como Global. Escolha um para editar, ou clique em Novo produto."
+body = "Um produto é o que um anúncio vende: um app, um curso, um objeto, um serviço ou só uma ideia. Esta lista tem os produtos do projeto e os globais que os anúncios dele usam, marcados como Global. Escolha um para editar, ou clique em Novo produto."
 
 [tour.products.brief]
 title = "O briefing"
