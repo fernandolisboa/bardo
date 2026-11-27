@@ -31,3 +31,4 @@ The schema has more than a hundred tables and grows with every slice. A hand-kep
 - Rewriting UUIDs inside free text means a UUID typed by the user into a field that happens to equal a package row's id would be rewritten. That is accepted: ids are random and never shown.
 - Costs stay with the profile that spent them: an imported project starts with no spending, and a restored deleted project keeps its spending under its old name in Costs.
 - A package is not a backup: it holds one project and never keys. Backups (ADR-0010) stay the way to move a whole profile.
+- Opening a deleted project's folder is undone on any error, but not on a crash between renaming its files and committing its records: the folder then names a project that never came. The window is short and accepted; the files are still there to recover by hand.

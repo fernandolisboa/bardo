@@ -674,15 +674,27 @@ struct Bringing<'a> {
     archived: bool,
 }
 
+/// Drops every trigger of the database: the records being readied need
+/// none, and a package's own could undo what is checked.
+fn drop_triggers(conn: &Connection) -> rusqlite::Result<()> {
+    let names: Vec<String> = conn
+        .prepare("SELECT name FROM main.sqlite_master WHERE type = 'trigger'")?
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for name in names {
+        conn.execute(&format!("DROP TRIGGER main.{}", quoted(&name)), [])?;
+    }
+    Ok(())
+}
+
 /// Columns naming a file or a folder inside a project's folder: joined to
 /// it later, so a package's own values must stay inside.
 fn names_a_file(table: &str, column: &str) -> bool {
+    // `capture.file_name` is the name the user's recording had: shown,
+    // never joined to a folder.
     table != "export"
         && table != "user_profile"
-        && (column == "file"
-            || column.ends_with("_file")
-            || column == "file_name"
-            || column == "folder_name")
+        && (column == "file" || column.ends_with("_file") || column == "folder_name")
 }
 
 /// Whether `name` is a relative path that stays under its folder on
@@ -691,7 +703,9 @@ fn stays_inside(name: &str) -> bool {
     name.is_empty()
         || !name.starts_with('/')
             && !name.starts_with('\\')
-            && name.split(['/', '\\']).all(fine_part)
+            && name
+                .split(['/', '\\'])
+                .all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains(':'))
 }
 
 /// Treats a package as anything a file can hold: one project; nothing of
@@ -757,7 +771,9 @@ fn prepare(live: &Database, path: &Path, bringing: &Bringing<'_>) -> Result<Plan
     }
     sharing::drop_mirrors(&conn).map_err(database_error)?;
     migrations::run(&mut conn).map_err(|error| PackageError::Damaged(error.to_string()))?;
-    sharing::drop_mirrors(&conn).map_err(database_error)?;
+    // No trigger of the package's fires on the changes made here: every
+    // one goes before anything is checked.
+    drop_triggers(&conn).map_err(database_error)?;
     conn.pragma_update(None, "foreign_keys", "OFF")
         .map_err(database_error)?;
     let own = tables(&conn, "main").map_err(database_error)?;
@@ -1133,11 +1149,12 @@ fn bring_in(
             }
         }
     })();
-    // Left attached, the next import could not attach its own.
-    let detached = conn
-        .execute_batch("DETACH DATABASE pkg")
-        .map_err(database_error);
-    result.and(detached)
+    // Left attached, the next import could not attach its own; but a
+    // commit made stands, so it is only said.
+    if let Err(error) = conn.execute_batch("DETACH DATABASE pkg") {
+        tracing::warn!("could not detach an imported package's records: {error}");
+    }
+    result
 }
 
 /// A scratch copy of a records file, removed when dropped.
@@ -1578,10 +1595,17 @@ impl ProjectPackages for LocalPackages {
         // agrees with them; anything that fails puts it all back.
         let manifest_path = request.folder.join(PROJECT_MANIFEST);
         let old_manifest = fs::read(&manifest_path).ok();
+        let packed = request.folder.join(PACKED_VIDEOS);
+        let repacked = request.folder.join(format!("{PACKED_VIDEOS}.partial"));
         let mut renamed = Vec::new();
         let brought = (|| {
             for dir in [VIDEOS_DIR, WORLD_DIR] {
                 rename_ids_in(&request.folder.join(dir), &plan, &mut renamed)?;
+            }
+            // Compressed media: its files' names follow inside a new copy
+            // of the archive, swapped in once the records are.
+            if packed.is_file() {
+                rename_ids_in_zip(&packed, &repacked, &plan)?;
             }
             write_manifest(
                 &request.folder,
@@ -1594,7 +1618,14 @@ impl ProjectPackages for LocalPackages {
             )?;
             bring_in(&self.db, &scratch.0, &plan, &mut || true)
         })();
+        if brought.is_ok()
+            && repacked.is_file()
+            && let Err(error) = fs::rename(&repacked, &packed)
+        {
+            tracing::warn!("could not swap in an opened folder's renamed archive: {error}");
+        }
         if let Err(error) = brought {
+            let _ = fs::remove_file(&repacked);
             for (old, new) in renamed.iter().rev() {
                 let _ = fs::rename(new, old);
             }
@@ -1620,6 +1651,26 @@ impl ProjectPackages for LocalPackages {
             renamed_channels: plan.renamed_channels,
         })
     }
+}
+
+/// Copies the archive at `from` to `to`, each entry renamed where its
+/// name carries an id that changed; the bytes are copied as they are.
+fn rename_ids_in_zip(from: &Path, to: &Path, plan: &Plan) -> Result<(), PackageError> {
+    let mut archive = zip::ZipArchive::new(BufReader::new(File::open(from)?)).map_err(zip_error)?;
+    let mut out = zip::ZipWriter::new(BufWriter::new(File::create(to)?));
+    for index in 0..archive.len() {
+        let entry = archive.by_index_raw(index).map_err(zip_error)?;
+        let name = entry.name().map_err(zip_error)?.into_owned();
+        let renamed = plan.rewrite(&name).unwrap_or(name);
+        out.raw_copy_file_rename(entry, renamed)
+            .map_err(zip_error)?;
+    }
+    out.finish()
+        .map_err(zip_error)?
+        .into_inner()
+        .map_err(|error| error.into_error())?
+        .sync_all()?;
+    Ok(())
 }
 
 /// Renames every file under `dir` whose name carries an id that changed,

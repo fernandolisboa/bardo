@@ -271,7 +271,9 @@ fn a_deleted_project_with_packed_media_comes_back_archived() {
     let (bakery, _) = filled(&app, "Bakery");
     let folder = app.project_folder(bakery.id).unwrap();
     // As *Compress media* leaves it.
-    std::fs::write(folder.join(bardo_domain::PACKED_VIDEOS), b"PK").unwrap();
+    zip::ZipWriter::new(std::fs::File::create(folder.join(bardo_domain::PACKED_VIDEOS)).unwrap())
+        .finish()
+        .unwrap();
     app.deletion(Removable::Project(bakery.id), "Bakery", false)
         .unwrap()
         .run()

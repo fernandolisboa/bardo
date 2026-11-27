@@ -938,3 +938,92 @@ fn another_projects_item_never_travels() {
         0
     );
 }
+
+#[test]
+fn a_compressed_deleted_project_comes_back_archived_with_its_archive_renamed() {
+    let source = source();
+    let folder = source.folder("Packed");
+    fs::create_dir_all(&folder).unwrap();
+    let old = source.seeded.video;
+    {
+        let mut zip = zip::ZipWriter::new(File::create(folder.join(PACKED_VIDEOS)).unwrap());
+        zip.start_file(
+            format!("Bakery-1/peaks-capture-{old}.json"),
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        zip.write_all(b"{}").unwrap();
+        zip.finish().unwrap();
+    }
+    let packages = LocalPackages::new(Arc::clone(&source.db));
+    packages
+        .write_records(source.seeded.project, &folder)
+        .unwrap();
+    sql(
+        &source.db,
+        "DELETE FROM channel WHERE id = ?1",
+        &[&source.seeded.channel.id.to_string()],
+    );
+    sql(
+        &source.db,
+        "DELETE FROM project WHERE id = ?1",
+        &[&source.seeded.project.to_string()],
+    );
+    let project = ProjectId::new();
+    packages
+        .import_folder(&FolderImport {
+            folder: folder.clone(),
+            owner: source.owner,
+            project,
+            name: "Bakery".into(),
+            data_home: "Bardo".into(),
+        })
+        .unwrap();
+    let state: String = source
+        .db
+        .conn()
+        .query_row(
+            "SELECT state FROM project WHERE id = ?1",
+            [project.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "archived");
+    let new_video: String = source
+        .db
+        .conn()
+        .query_row(
+            "SELECT id FROM video_project WHERE folder_project_id = ?1",
+            [project.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        entries(&folder.join(PACKED_VIDEOS)),
+        [format!("Bakery-1/peaks-capture-{new_video}.json")]
+    );
+    assert!(!folder.join(format!("{PACKED_VIDEOS}.partial")).exists());
+}
+
+#[test]
+fn a_packages_triggers_never_fire_here() {
+    let source = source();
+    let (package, _) = source.export();
+    let sneaky = tampered(
+        &source,
+        &package,
+        "CREATE TRIGGER sneaky AFTER UPDATE OF folder_project_id ON video_project BEGIN
+             UPDATE video_project SET folder_name = '../../Escaped';
+         END;",
+    );
+    let (db, imported) = import_into_clean(&source, sneaky);
+    imported.unwrap();
+    let folder: String = db
+        .conn()
+        .query_row("SELECT folder_name FROM video_project", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(!folder.contains(".."), "{folder}");
+    assert!(!source.dir.path().join("Escaped").exists());
+}
