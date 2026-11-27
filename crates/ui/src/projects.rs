@@ -1981,6 +1981,17 @@ impl ProjectsScreen {
             );
         }
         header.meta = Some(SharedString::from(meta));
+        // Its folder in Explorer: where its media is (#335).
+        let folder = bardo.video_folder(project.id);
+        header.actions.push(
+            Button::new("video-show-folder")
+                .ghost()
+                .small()
+                .icon(IconName::FolderOpen)
+                .label(tr(bardo, Text::ShowFolder))
+                .on_click(move |_, _, cx| cx.open_with_system(&folder))
+                .into_any_element(),
+        );
         header.info = guide::header_tours(
             bardo,
             (Destination::Videos, self.has_content()),

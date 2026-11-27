@@ -81,6 +81,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0077_ad_post_review.sql"),
     include_str!("../migrations/0078_ad_export.sql"),
     include_str!("../migrations/0079_project.sql"),
+    include_str!("../migrations/0080_project_folders.sql"),
 ];
 
 /// The schema version this build migrates every database to (SQLite's

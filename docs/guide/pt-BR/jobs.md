@@ -13,7 +13,7 @@ Trabalho longo roda como **tarefa**: pesquisa, roteiro, narração, imagens, cli
 <a id="panel"></a>
 ## O painel Tarefas
 
-**Tarefas** na navegação abre um painel ao lado da tela em que você está (por cima do lado direito dela, numa janela estreita), e fecha de novo; a linha ao lado diz quantas tarefas estão rodando ou esperando. O painel agrupa as tarefas em **Em execução**, **Na fila**, **Com falha** e **Encerradas**, cada cartão com o que a tarefa faz e onde ela está. Uma tarefa que espera a hora dela, como um post agendado, diz quando sai.
+**Tarefas** na navegação abre um painel ao lado da tela em que você está (por cima do lado direito dela, numa janela estreita), e fecha de novo; a linha ao lado diz quantas tarefas estão rodando ou esperando. O painel agrupa as tarefas em **Em execução**, **Na fila**, **Com falha** e **Encerradas**, cada cartão com o que a tarefa faz e onde ela está. Uma tarefa que espera a hora dela, como um post agendado, diz quando sai. Uma tarefa de um projeto cuja pasta não é encontrada espera, e avisa, até você localizá-la ([Pasta não encontrada](storage.md#not-found)).
 
 <a id="filter"></a>
 ## Tarefas por projeto

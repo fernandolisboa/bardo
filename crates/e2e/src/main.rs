@@ -98,7 +98,6 @@ fn start() -> anyhow::Result<Bardo> {
     let db_path = bardo_storage::default_database_path()?;
     let db = Database::open(&db_path)
         .with_context(|| format!("opening the database at {}", db_path.display()))?;
-    let files = bardo_storage::LocalProjectFiles::new(bardo_storage::default_projects_dir()?);
     let exports = bardo_storage::LocalExportFiles::new(bardo_storage::default_exports_dir());
     let voice_samples =
         bardo_storage::LocalVoiceSamples::new(bardo_storage::default_voice_samples_dir()?);
@@ -106,7 +105,6 @@ fn start() -> anyhow::Result<Bardo> {
         db,
         bardo_storage::platform_secret_store()?,
         bardo_storage::platform_connection_secrets()?,
-        Box::new(files),
         Box::new(exports),
         Box::new(voice_samples),
         paths,

@@ -18,6 +18,7 @@ tour: appearance
 - **Publishing**: whether scheduled Reels go out while Bardo is closed. See [Publishing while Bardo is closed](background-agent.md).
 - **Appearance**: the layout, the theme, the interface language and the guided tours, below.
 - **Metrics**: when your posts' numbers sync by themselves. See [Syncing metrics](metrics-sync.md).
+- **Storage**: the base folder, where new projects get their folder. See [Storage](storage.md).
 - **Backup**: backing up your work, the weekly automatic backups and restoring. See [Backup and restore](backup.md).
 - **About**: Bardo's version, updates, the FFmpeg it ships, the third-party notices and the diagnostics export. See [About Bardo](about.md).
 

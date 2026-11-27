@@ -274,6 +274,8 @@ pub struct SettingsScreen {
     scroll: ScrollHandle,
     /// The Backup tab, which polls the job queue on its own.
     backup: Entity<crate::backup::BackupPanel>,
+    /// The Storage tab: the base folder.
+    storage: Entity<crate::storage::StoragePanel>,
     /// Inside the Backup tab; the import offer opens it.
     settings_file: Entity<crate::settings_transfer::SettingsFilePanel>,
     /// Settings › About's Updates section.
@@ -446,6 +448,10 @@ impl SettingsScreen {
             let (bardo, scroll) = (bardo.clone(), scroll.clone());
             cx.new(|cx| crate::privacy::PrivacyPanel::new(bardo, scroll, cx))
         };
+        let storage = {
+            let (bardo, scroll) = (bardo.clone(), scroll.clone());
+            cx.new(|cx| crate::storage::StoragePanel::new(bardo, scroll, cx))
+        };
         let mut screen = Self {
             bardo,
             tab: SettingsTab::Keys,
@@ -472,6 +478,7 @@ impl SettingsScreen {
             settings_file,
             updates,
             privacy,
+            storage,
             _subscriptions: subscriptions,
         };
         screen.relabel(window, cx);
@@ -1751,6 +1758,7 @@ impl SettingsScreen {
             SettingsTab::Publishing => self.render_publishing(cx),
             SettingsTab::Appearance => self.render_appearance(cx),
             SettingsTab::Metrics => self.render_metrics(cx),
+            SettingsTab::Storage => self.storage.clone().into_any_element(),
             SettingsTab::Backup => self.backup.clone().into_any_element(),
             SettingsTab::About => self.render_about(cx),
         }
@@ -2782,6 +2790,7 @@ impl Render for SettingsScreen {
             .child(Tab::new().label(tr(bardo, Text::SettingsPublishingTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsAppearanceTab)))
             .child(Tab::new().label(tr(bardo, Text::MetricsSettingsTab)))
+            .child(Tab::new().label(tr(bardo, Text::SettingsStorageTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsBackupTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsAboutTab)))
             .on_click(cx.listener(|this, index: &usize, _, cx| {

@@ -6,6 +6,7 @@ tagline = "Create and run faceless channels, with AI assisting every step."
 details = "Details"
 
 [settings]
+storage_tab = "Storage"
 networks_tab = "Networks"
 ui_language = "Interface language"
 title = "Settings"
@@ -315,6 +316,7 @@ start = "Start test job"
 start_failing = "Start failing test job"
 
 [job]
+waits_for_folder = "Waits for its project's folder"
 retry_scheduled = "Attempt {attempt} of {max} failed. Retrying automatically."
 failed_after = "Stopped after {attempts} attempts."
 cancel = "Cancel"
@@ -322,6 +324,7 @@ retry = "Retry"
 waits_until = "Waits until {when}"
 
 [job.kind]
+move_media = "Media move"
 placement_export = "Export for ads"
 render = "Final render"
 countdown = "Test countdown"
@@ -3675,6 +3678,21 @@ body = "The open-source libraries Bardo is built with, and their licenses."
 title = "Diagnostics"
 body = "When something goes wrong, export a diagnostic file here and attach it to an issue. Keys, tokens and account names are masked, and nothing is sent anywhere."
 
+[tour.storage]
+name = "Storage tour"
+
+[tour.storage.base_folder]
+title = "Base folder"
+body = "New projects get their folder here, with a folder per video inside. When OneDrive syncs your Documents folder, Bardo uses your user folder and says why."
+
+[tour.storage.change]
+title = "Change it"
+body = "Pick another folder for new projects, or go back to the default. Projects you already have keep their folders."
+
+[tour.storage.move]
+title = "Moving media"
+body = "Media of older videos, and of a channel moved to another project, moves into its project's folder by itself, as a job."
+
 [tour.backup]
 name = "Backup tour"
 
@@ -4904,6 +4922,9 @@ channels_many = "{n} channels"
 never_opened = "Not opened yet"
 
 [project_form]
+folder = "Folder"
+folder_choose = "Choose…"
+folder_hint = "Bardo keeps this project's videos and pictures here. Renaming the project never moves it."
 title = "New project"
 hint = "A project holds the channels of one brand, with their ideas and videos. You work in one project at a time."
 name = "Name"
@@ -4913,6 +4934,8 @@ create = "Create project"
 cancel = "Cancel"
 
 [project_error]
+folder_too_deep = "This place is too deep for the project's folder: choose one with a shorter path."
+folder_not_made = "Couldn't make the project's folder there. Choose another place."
 name_required = "Give the project a name."
 name_too_long = "Use at most 100 characters."
 name_taken = "You already have a project with this name."
@@ -5044,3 +5067,29 @@ body = "The narrators that speak your videos, the products your ads show and the
 [tour.library.projects]
 title = "Global for now"
 body = "Every project uses these same items today. A later version lets a project keep its own, with the global library shared by all."
+
+[project_folder]
+not_found = "Folder not found"
+not_found_hint = "Bardo can't find this project's folder at {folder}. Its jobs wait until you locate it: nothing is drawn again meanwhile."
+locate = "Locate…"
+locate_prompt = "Locate the project's folder"
+show = "Show folder"
+
+[locate_error]
+not_a_project_folder = "This isn't a project folder: it has no bardo-project.json."
+other_project = "This folder belongs to another project."
+other_copy = "This folder belongs to another copy of Bardo or another profile."
+not_found = "This project no longer exists."
+not_saved = "Couldn't save the folder. Try again."
+
+[storage]
+base_folder = "Base folder"
+base_folder_hint = "New projects get their folder here. Projects you already have keep theirs."
+change = "Change…"
+prompt = "Choose the base folder"
+use_default = "Use the default"
+is_default = "Default"
+avoided_sync = "Your Documents folder is synced by OneDrive, so Bardo uses your user folder instead: syncing gigabytes of clips while they are written fails and fills your cloud storage."
+synced = "This folder is synced by OneDrive: syncing gigabytes of clips while they are written fails and fills your cloud storage."
+not_saved = "Couldn't save the base folder. Try again."
+move_hint = "Media of videos made before project folders, and of channels moved to another project, moves into its project's folder by itself. Follow it in Jobs."

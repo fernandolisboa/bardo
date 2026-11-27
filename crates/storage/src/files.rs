@@ -1,13 +1,14 @@
-//! Project folders on disk: `<root>/<project id>/<file name>`. The root is
-//! `%LOCALAPPDATA%\Bardo\projects` on Windows: media is large and belongs
-//! to this machine, so it stays out of the roaming profile.
+//! Video folders on disk. A video's media lives in its project's folder,
+//! `<project folder>\Videos\<slug>-<short id>` (ADR-0047), as the
+//! database says; until it is moved there, in the old projects folder,
+//! `<root>\<video id>` (`%LOCALAPPDATA%\Bardo\projects` on Windows).
 
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use bardo_domain::{ProjectFileError, ProjectFiles, VideoProjectId};
+use bardo_domain::{ProjectFileError, ProjectFiles, VideoFolders, VideoProjectId};
 
 use crate::StorageError;
 
@@ -17,23 +18,54 @@ pub fn default_projects_dir() -> Result<PathBuf, StorageError> {
     Ok(crate::data_home().local()?.join("projects"))
 }
 
-/// Project folders under one root directory.
-#[derive(Debug, Clone)]
+/// Video folders: each where the database says, else under one root.
+#[derive(Clone)]
 pub struct LocalProjectFiles {
     root: PathBuf,
+    folders: Option<Arc<dyn VideoFolders>>,
+}
+
+impl std::fmt::Debug for LocalProjectFiles {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalProjectFiles")
+            .field("root", &self.root)
+            .finish_non_exhaustive()
+    }
 }
 
 impl LocalProjectFiles {
+    /// Every video's folder under `root`, as before project folders.
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            folders: None,
+        }
     }
 
+    /// Each video's folder where `folders` says, else under `root`.
+    pub fn with_folders(root: impl Into<PathBuf>, folders: Arc<dyn VideoFolders>) -> Self {
+        Self {
+            root: root.into(),
+            folders: Some(folders),
+        }
+    }
+
+    /// The old projects folder.
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    fn folder(&self, project: VideoProjectId) -> PathBuf {
+    /// Where a video's media is in the old projects folder.
+    pub fn old_folder(&self, project: VideoProjectId) -> PathBuf {
         self.root.join(project.to_string())
+    }
+
+    /// Where a video's media is now.
+    pub fn folder(&self, project: VideoProjectId) -> PathBuf {
+        self.folders
+            .as_ref()
+            .and_then(|folders| folders.video_folder_path(project))
+            .unwrap_or_else(|| self.old_folder(project))
     }
 }
 
@@ -258,6 +290,48 @@ impl ProjectFiles for MemoryProjectFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct OneMoved(VideoProjectId, PathBuf);
+
+    impl VideoFolders for OneMoved {
+        fn video_folder_path(&self, video: VideoProjectId) -> Option<PathBuf> {
+            (video == self.0).then(|| self.1.clone())
+        }
+    }
+
+    #[test]
+    fn a_moved_video_is_read_from_its_project_folder_and_the_rest_from_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let moved = VideoProjectId::new();
+        let other = VideoProjectId::new();
+        let folder = dir
+            .path()
+            .join("Space")
+            .join("Videos")
+            .join("Apollo-01234567");
+        let files = LocalProjectFiles::with_folders(
+            dir.path().join("projects"),
+            Arc::new(OneMoved(moved, folder.clone())),
+        );
+        files.write(moved, "script.json", b"moved").unwrap();
+        files.write(other, "script.json", b"old").unwrap();
+        assert_eq!(std::fs::read(folder.join("script.json")).unwrap(), b"moved");
+        assert_eq!(
+            std::fs::read(
+                dir.path()
+                    .join("projects")
+                    .join(other.to_string())
+                    .join("script.json")
+            )
+            .unwrap(),
+            b"old"
+        );
+        assert_eq!(files.path(moved, "a.mp4"), folder.join("a.mp4"));
+        assert_eq!(
+            files.old_folder(moved),
+            dir.path().join("projects").join(moved.to_string())
+        );
+    }
 
     #[test]
     fn files_live_in_a_folder_per_project() {

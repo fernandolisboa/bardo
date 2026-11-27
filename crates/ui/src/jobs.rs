@@ -316,6 +316,14 @@ impl JobsPanel {
                     ))
                     .into_any_element(),
             ),
+            // A job held back until its project's folder is found (#335).
+            (JobState::Queued, None) if bardo.waits_for_folder(job) => Some(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(tr(bardo, Text::JobWaitsForFolder))
+                    .into_any_element(),
+            ),
             // A job that waits for its time (a scheduled post) says when.
             (JobState::Queued, None) => job.run_at().map(|at| {
                 div()

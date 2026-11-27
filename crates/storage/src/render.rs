@@ -474,7 +474,10 @@ mod tests {
             // As the database was before migration 49 (and the ones after).
             let mut conn = db.conn();
             conn.execute_batch(
-                "DROP INDEX channel_project; ALTER TABLE channel DROP COLUMN owner_project_id;
+                "ALTER TABLE video_project DROP COLUMN folder_project_id;
+                 ALTER TABLE video_project DROP COLUMN folder_name;
+                 ALTER TABLE user_profile DROP COLUMN base_folder;
+                 DROP INDEX channel_project; ALTER TABLE channel DROP COLUMN owner_project_id;
                  DROP TABLE project;
                  DROP INDEX job_owner_project; ALTER TABLE job DROP COLUMN owner_project_id;
                  ALTER TABLE job DROP COLUMN project_name; ALTER TABLE job DROP COLUMN channel_name;

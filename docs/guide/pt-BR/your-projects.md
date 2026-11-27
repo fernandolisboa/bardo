@@ -20,17 +20,17 @@ A barra de título mostra o projeto aberto ao lado do logo do Bardo: a cor, o no
 - **Recentes** lista os oito últimos projetos que você abriu, do mais recente, sem os favoritos.
 - **Todos** lista os demais pelo nome.
 
-Clique em um projeto para abri-lo. O Bardo lembra o projeto aberto e abre nele da próxima vez. A estrela ao lado de um projeto o coloca nos favoritos ou tira de lá. O seletor não aparece com o editor aberto: feche o editor para trocar.
+Clique em um projeto para abri-lo. O Bardo lembra o projeto aberto e abre nele da próxima vez. **Mostrar pasta** abre a pasta do projeto aberto no Explorer. Um projeto cuja pasta não é encontrada aparece com **Pasta não encontrada**, e **Localizar…** ([Pasta não encontrada](storage.md#not-found)). A estrela ao lado de um projeto o coloca nos favoritos ou tira de lá. O seletor não aparece com o editor aberto: feche o editor para trocar.
 
 <a id="new"></a>
 ## Um projeto novo
 
-**Novo projeto…**, no fim do seletor, pede um nome e uma cor. Os nomes não se repetem entre os seus projetos, com maiúsculas ou não. O projeto novo abre sem canal, e todas as telas pedem um: crie o primeiro canal dele em [Canais](channels.md).
+**Novo projeto…**, no fim do seletor, pede um nome, uma cor e uma pasta: a pasta base por padrão, ou outro lugar em **Escolher…**. O formulário mostra a pasta que vai criar ([A pasta de um projeto](storage.md#project-folder)). Os nomes não se repetem entre os seus projetos, com maiúsculas ou não. O projeto novo abre sem canal, e todas as telas pedem um: crie o primeiro canal dele em [Canais](channels.md).
 
 <a id="move"></a>
 ## Mover um canal
 
-Um canal muda de projeto em [Canais](channels.md#project), com **Mover para outro projeto…**. Ele leva junto as ideias, os vídeos, as contas nas redes e a mídia. O Bardo recusa enquanto houver algo pendente, e diz o quê:
+Um canal muda de projeto em [Canais](channels.md#project), com **Mover para outro projeto…**. Ele leva junto as ideias, os vídeos, as contas nas redes e a mídia: a mídia vai para a pasta do novo projeto numa tarefa ([Mudança de mídia](storage.md#moving-media)). O Bardo recusa enquanto houver algo pendente, e diz o quê:
 
 - uma publicação esperando o horário no Bardo ([agendamento](uploading.md)),
 - uma publicação esperando na rede para ficar pública mais tarde,

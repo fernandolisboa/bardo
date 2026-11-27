@@ -232,6 +232,8 @@ pub enum SettingsTab {
     Publishing,
     Appearance,
     Metrics,
+    /// Where media lives: the base folder new projects' folders go in.
+    Storage,
     /// Backing up and restoring Bardo's data.
     Backup,
     /// Bardo's version, the FFmpeg it ships and the third-party notices.
@@ -239,12 +241,13 @@ pub enum SettingsTab {
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 7] = [
+    pub const ALL: [SettingsTab; 8] = [
         SettingsTab::Keys,
         SettingsTab::Networks,
         SettingsTab::Publishing,
         SettingsTab::Appearance,
         SettingsTab::Metrics,
+        SettingsTab::Storage,
         SettingsTab::Backup,
         SettingsTab::About,
     ];
@@ -257,6 +260,7 @@ impl SettingsTab {
             SettingsTab::Publishing => "publishing",
             SettingsTab::Appearance => "appearance",
             SettingsTab::Metrics => "metrics",
+            SettingsTab::Storage => "storage",
             SettingsTab::Backup => "backup",
             SettingsTab::About => "about",
         }

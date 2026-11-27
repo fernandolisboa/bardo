@@ -9,7 +9,10 @@ use bardo_app::{Bardo, Control, Destination, NextStep, OverviewView, Stage, Text
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Entity, EventEmitter, SharedString, Window, div};
+use gpui_kit::{
+    AnyElement, App, ClickEvent, Entity, EventEmitter, PathPromptOptions, SharedString, Task,
+    Window, div,
+};
 
 use crate::appearance::look;
 use crate::kit::{self, Tone};
@@ -30,6 +33,10 @@ pub struct OverviewScreen {
     bardo: Entity<Bardo>,
     view: Option<OverviewView>,
     load_failed: bool,
+    /// Why the open project's folder was not located.
+    locate_error: Option<Text>,
+    /// The folder dialog of *Locate…* in flight.
+    locating: Option<Task<()>>,
 }
 
 impl EventEmitter<OpenVideo> for OverviewScreen {}
@@ -41,9 +48,87 @@ impl OverviewScreen {
             bardo,
             view: None,
             load_failed: false,
+            locate_error: None,
+            locating: None,
         };
         screen.reload(cx);
         screen
+    }
+
+    /// Asks for the open project's folder, found again after it moved
+    /// (#335).
+    fn locate(
+        &mut self,
+        project: bardo_app::bardo_domain::ProjectId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let asked = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(tr(self.bardo.read(cx), Text::LocateFolderPrompt)),
+        });
+        self.locate_error = None;
+        self.locating = Some(cx.spawn_in(window, async move |this, cx| {
+            let picked = match asked.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next().map(Ok),
+                Ok(Ok(None)) | Err(_) => None,
+                Ok(Err(_)) => Some(Err(())),
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.locating = None;
+                match picked {
+                    Some(Ok(folder)) => {
+                        let located = this.bardo.update(cx, |bardo, cx| {
+                            let located = bardo.locate_project_folder(project, &folder);
+                            cx.notify();
+                            located
+                        });
+                        this.locate_error = located.err().map(|error| error.message());
+                    }
+                    Some(Err(())) => this.locate_error = Some(Text::FileDialogFailed),
+                    None => {}
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    /// The open project's folder cannot be found: what that holds back,
+    /// and *Locate…*.
+    fn folder_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let bardo = self.bardo.read(cx);
+        let project = bardo.open_project().ok().flatten()?;
+        if !bardo.unreachable_projects().contains(&project.id) {
+            return None;
+        }
+        let folder = project.folder.as_ref()?.display().to_string();
+        let id = project.id;
+        Some(
+            v_flex()
+                .gap_2()
+                .child(kit::notice(
+                    Tone::Warning,
+                    bardo.text_with(Text::FolderNotFoundHint, &[("folder", &folder)]),
+                    cx,
+                ))
+                .child(
+                    h_flex().child(
+                        Button::new("overview-locate")
+                            .small()
+                            .label(tr(bardo, Text::LocateFolder))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.locate(id, window, cx);
+                            })),
+                    ),
+                )
+                .children(
+                    self.locate_error
+                        .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Re-reads the open project: its videos moved on elsewhere.
@@ -318,11 +403,13 @@ impl Render for OverviewScreen {
             ),
         };
         let has_content = self.has_content();
+        let folder_notice = self.folder_notice(cx);
         let bardo = self.bardo.read(cx);
         let mut header = Header::place(bardo, Destination::Overview, cx);
         header.meta = Some(tr(bardo, Text::OverviewHint));
         header.info = guide::header_info(bardo, Destination::Overview, has_content, None, cx);
         let mut parts = ScreenParts::new(header);
+        parts.notices.extend(folder_notice);
         parts.content = content;
         parts.aside = aside;
         layout::screen(parts, cx)

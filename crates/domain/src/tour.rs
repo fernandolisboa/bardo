@@ -83,10 +83,12 @@ pub enum TourId {
     /// The tour of Settings › Backup: backing up, automatic backups and
     /// restoring.
     Backup,
+    /// Settings › Storage: the base folder new projects' folders go in.
+    Storage,
 }
 
 impl TourId {
-    pub const ALL: [TourId; 34] = [
+    pub const ALL: [TourId; 35] = [
         TourId::Welcome,
         TourId::Overview,
         TourId::Library,
@@ -121,6 +123,7 @@ impl TourId {
         TourId::BackgroundAgent,
         TourId::About,
         TourId::Backup,
+        TourId::Storage,
     ];
 
     pub fn code(self) -> &'static str {
@@ -159,6 +162,7 @@ impl TourId {
             TourId::BackgroundAgent => "background-agent",
             TourId::About => "about",
             TourId::Backup => "backup",
+            TourId::Storage => "storage",
         }
     }
 

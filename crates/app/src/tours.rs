@@ -391,6 +391,12 @@ pub enum Control {
     BackupRestore,
     /// Settings › Backup: export and import a settings file.
     BackupSettingsFile,
+    /// Settings › Storage: the base folder and why it is where it is.
+    StorageBaseFolder,
+    /// Settings › Storage: Change… and Use the default.
+    StorageChange,
+    /// Settings › Storage: how existing media moves into project folders.
+    StorageMove,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -1599,9 +1605,34 @@ pub const BACKUP: Tour = {
     }
 };
 
+pub const STORAGE: Tour = {
+    const AT: TourPlace = TourPlace::Settings(SettingsTab::Storage);
+    const PAGE: &str = "storage";
+    const TAB: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::Storage,
+        version: 1,
+        place: Some(AT),
+        steps: &[
+            TourStep::at("base_folder", control(Control::StorageBaseFolder))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "base-folder"),
+            TourStep::at("change", control(Control::StorageChange))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "base-folder"),
+            TourStep::at("move", control(Control::StorageMove))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "moving-media"),
+        ],
+    }
+};
+
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 34] = [
+    pub const ALL: [&'static Tour; 35] = [
         &WELCOME,
         &OVERVIEW,
         &LIBRARY,
@@ -1636,6 +1667,7 @@ impl Tour {
         &BACKGROUND_AGENT,
         &ABOUT,
         &BACKUP,
+        &STORAGE,
     ];
 
     pub fn get(id: TourId) -> &'static Tour {
@@ -1674,6 +1706,7 @@ impl Tour {
             TourId::BackgroundAgent => &BACKGROUND_AGENT,
             TourId::About => &ABOUT,
             TourId::Backup => &BACKUP,
+            TourId::Storage => &STORAGE,
         }
     }
 
@@ -2732,6 +2765,7 @@ mod tests {
             (SettingsTab::Publishing, TourId::BackgroundAgent),
             (SettingsTab::About, TourId::About),
             (SettingsTab::Backup, TourId::Backup),
+            (SettingsTab::Storage, TourId::Storage),
         ];
         for (tab, tour) in tabs {
             assert_eq!(Tour::of(TourPlace::Settings(tab)).map(|t| t.id), Some(tour));

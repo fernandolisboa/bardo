@@ -26,6 +26,13 @@ pub enum ProjectError {
     NotFound,
     #[error("channel not found")]
     ChannelNotFound,
+    /// The project's folder there would leave no room under the Windows
+    /// path limit for its deepest file.
+    #[error("the folder is too deep")]
+    FolderTooDeep,
+    /// The project's folder could not be made there.
+    #[error("the folder could not be made")]
+    FolderNotMade,
     /// The channel cannot leave its project now; each reason once.
     #[error("the channel cannot move: {0:?}")]
     MoveBlocked(Vec<MoveBlock>),
@@ -50,6 +57,8 @@ impl ProjectError {
             ProjectError::NameTaken => Text::ProjectNameTaken,
             ProjectError::NotFound => Text::ProjectNotFoundAny,
             ProjectError::ChannelNotFound => Text::ChannelNotFound,
+            ProjectError::FolderTooDeep => Text::ProjectFolderTooDeep,
+            ProjectError::FolderNotMade => Text::ProjectFolderNotMade,
             ProjectError::MoveBlocked(_) => Text::MoveChannelBlocked,
             ProjectError::Repository(_) => Text::ProjectNotSaved,
         }
@@ -185,9 +194,20 @@ impl Bardo {
         ProjectColor::next_after(&taken)
     }
 
-    /// Creates a project and opens it. It has no channel yet: the screens
-    /// ask for one.
+    /// Creates a project, with its folder under the base folder, and opens
+    /// it. It has no channel yet: the screens ask for one.
     pub fn create_project(&self, draft: ProjectDraft) -> Result<Project, ProjectError> {
+        self.create_project_in(draft, ProjectId::new(), None)
+    }
+
+    /// `create_project` with the id the form showed the folder for, and its
+    /// folder in `place` (the base folder when `None`).
+    pub fn create_project_in(
+        &self,
+        draft: ProjectDraft,
+        id: ProjectId,
+        place: Option<&std::path::Path>,
+    ) -> Result<Project, ProjectError> {
         let details = ProjectDetails::validate(draft).map_err(ProjectError::Invalid)?;
         if self
             .projects()?
@@ -196,7 +216,9 @@ impl Bardo {
         {
             return Err(ProjectError::NameTaken);
         }
-        let project = Project::new(self.profile.id, details, SystemTime::now());
+        let mut project = Project::new(self.profile.id, details, SystemTime::now());
+        project.id = id;
+        self.make_project_folder(&mut project, place)?;
         self.projects.save_project(&project)?;
         self.switch_project(project.id)
     }
@@ -247,7 +269,10 @@ impl Bardo {
             color: self.next_project_color(),
         })
         .map_err(ProjectError::Invalid)?;
-        let project = Project::new(self.profile.id, details, SystemTime::now());
+        let mut project = Project::new(self.profile.id, details, SystemTime::now());
+        // Made for a channel or an import: without its folder now, it gets
+        // one at the next start.
+        let _ = self.make_project_folder(&mut project, None);
         self.projects.save_project(&project)?;
         if self.open_project_id()?.is_none() {
             self.projects.mark_opened(project.id, SystemTime::now())?;
@@ -367,7 +392,10 @@ impl Bardo {
         if !blocks.is_empty() {
             return Err(ProjectError::MoveBlocked(blocks));
         }
-        Ok(self.projects.move_channel(channel, to)?)
+        self.projects.move_channel(channel, to)?;
+        // Its videos' media follows it into the project's folder.
+        let _ = self.queue_media_move();
+        Ok(())
     }
 
     fn profile_channel(&self, id: ChannelId) -> Result<Channel, ProjectError> {

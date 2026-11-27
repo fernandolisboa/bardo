@@ -160,11 +160,19 @@ pub fn seed_showcase(bardo: &mut Bardo) -> anyhow::Result<Value> {
     products(&db, profile, &space, &ffmpeg, now)?;
     spend(&db, profile, &space, &sea, &probe, &ship, now)?;
     jobs(&db, profile, now)?;
+    // The projects get their folders and the media moves into them, as
+    // when Bardo opens on data from before project folders.
+    if let Some(moving) = bardo.prepare_folders() {
+        let moved = crate::wait_for(bardo, moving)?;
+        if moved["state"] != "done" {
+            bail!("the media did not move into the project folders: {moved}");
+        }
+    }
 
     Ok(json!({
         "profile": profile.to_string(),
         "project": probe.id.to_string(),
-        "project_folder": projects_dir.join(probe.id.to_string()),
+        "project_folder": bardo.video_folder(probe.id),
         "channels": [space.details.name(), sea.details.name()],
     }))
 }

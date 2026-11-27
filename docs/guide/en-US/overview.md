@@ -47,4 +47,4 @@ Some videos wait for nothing you can do:
 <a id="project"></a>
 ## The project
 
-Beside the videos, Overview lists the project's channels with their language and country, what the project's work spent this month (the same amount [Costs](costs.md#projects) shows for the project), and the narrators its channels use by default.
+Beside the videos, Overview lists the project's channels with their language and country, what the project's work spent this month (the same amount [Costs](costs.md#projects) shows for the project), and the narrators its channels use by default. When the project's folder cannot be found, Overview says so above everything, with **Locate…** ([Folder not found](storage.md#not-found)).

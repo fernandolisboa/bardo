@@ -9,7 +9,8 @@
 //! `switch_project`, `create_project`); this file draws them and tells
 //! the shell when the open project changed, so the screens re-read it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use bardo_app::bardo_domain::{Project, ProjectColor, ProjectDraft, ProjectId};
 use bardo_app::{Bardo, Control, Text, TourAnchor};
@@ -19,7 +20,8 @@ use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, EventEmitter, SharedString, Subscription, Window, div, px,
+    AnyElement, App, ClickEvent, Entity, EventEmitter, PathPromptOptions, SharedString,
+    Subscription, Task, Window, div, px,
 };
 
 use crate::appearance::look;
@@ -35,8 +37,13 @@ pub struct ProjectSwitched;
 
 /// The new project form, while it is open in the popover.
 struct NewProject {
+    /// The id the project will have, so its folder's name is shown as it
+    /// will be made.
+    id: ProjectId,
     name: Entity<InputState>,
     color: ProjectColor,
+    /// Where its folder goes; the base folder when `None`.
+    place: Option<PathBuf>,
     error: Option<Text>,
     _subscription: Subscription,
 }
@@ -47,8 +54,10 @@ pub struct ProjectSwitcher {
     search: Entity<InputState>,
     query: String,
     form: Option<NewProject>,
-    /// What went wrong with the last switch, star or move.
+    /// What went wrong with the last switch, star, move or locate.
     problem: Option<Text>,
+    /// A folder dialog in flight.
+    picking: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -89,6 +98,7 @@ impl ProjectSwitcher {
             query: String::new(),
             form: None,
             problem: None,
+            picking: None,
             _subscriptions: subscriptions,
         }
     }
@@ -105,6 +115,8 @@ impl ProjectSwitcher {
         self.form = None;
         self.problem = None;
         if open {
+            // A drive plugged in or out since: the list says so.
+            self.bardo.read(cx).check_folders();
             self.query.clear();
             let placeholder = tr(self.bardo.read(cx), Text::SwitcherSearch);
             self.search.update(cx, |search, cx| {
@@ -181,12 +193,74 @@ impl ProjectSwitcher {
         );
         name.update(cx, |name, cx| name.focus(window, cx));
         self.form = Some(NewProject {
+            id: ProjectId::new(),
             name,
             color,
+            place: None,
             error: None,
             _subscription: subscription,
         });
         cx.notify();
+    }
+
+    /// Asks for a folder, then hands it to `chosen`.
+    fn ask_folder(
+        &mut self,
+        prompt: Text,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        chosen: impl FnOnce(&mut Self, PathBuf, &mut Context<Self>) + 'static,
+    ) {
+        let asked = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(tr(self.bardo.read(cx), prompt)),
+        });
+        self.picking = Some(cx.spawn_in(window, async move |this, cx| {
+            let picked = match asked.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next().map(Ok),
+                Ok(Ok(None)) | Err(_) => None,
+                Ok(Err(_)) => Some(Err(())),
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.picking = None;
+                match picked {
+                    Some(Ok(folder)) => chosen(this, folder, cx),
+                    Some(Err(())) => this.problem = Some(Text::FileDialogFailed),
+                    None => {}
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Picks where the new project's folder goes.
+    fn choose_place(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ask_folder(Text::ProjectFolderChoose, window, cx, |this, place, _| {
+            if let Some(form) = &mut this.form {
+                form.place = Some(place);
+                form.error = None;
+            }
+        });
+    }
+
+    /// Points a project whose folder cannot be found at its folder.
+    fn locate(&mut self, id: ProjectId, window: &mut Window, cx: &mut Context<Self>) {
+        self.problem = None;
+        self.ask_folder(
+            Text::LocateFolderPrompt,
+            window,
+            cx,
+            move |this, folder, cx| {
+                let located = this.bardo.update(cx, |bardo, cx| {
+                    let located = bardo.locate_project_folder(id, &folder);
+                    cx.notify();
+                    located
+                });
+                this.problem = located.err().map(|error| error.message());
+            },
+        );
     }
 
     fn pick_color(&mut self, color: ProjectColor, cx: &mut Context<Self>) {
@@ -211,7 +285,12 @@ impl ProjectSwitcher {
             name: form.name.read(cx).value().to_string(),
             color: form.color,
         };
-        match self.bardo.read(cx).create_project(draft) {
+        let (id, place) = (form.id, form.place.clone());
+        match self
+            .bardo
+            .read(cx)
+            .create_project_in(draft, id, place.as_deref())
+        {
             Ok(_) => {
                 self.set_open(false, window, cx);
                 cx.emit(ProjectSwitched);
@@ -275,6 +354,7 @@ impl ProjectSwitcher {
 
     /// One project row: its color, name, channels and when it was opened;
     /// a star on favorites and recent ones, and a way up on favorites.
+    #[allow(clippy::too_many_arguments)]
     fn row(
         &self,
         project: &Project,
@@ -282,6 +362,7 @@ impl ProjectSwitcher {
         open: Option<ProjectId>,
         favorite_at: Option<usize>,
         starrable: bool,
+        unreachable: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let t = look(cx).tokens;
@@ -323,6 +404,15 @@ impl ProjectSwitcher {
             Some(_) => None,
             None => Some(tr(bardo, Text::ProjectNeverOpened)),
         };
+        let lost = unreachable.then(|| {
+            h_flex()
+                .gap_1()
+                .items_center()
+                .text_xs()
+                .text_color(t.warning)
+                .child(Icon::new(IconName::TriangleAlert).size(px(12.)))
+                .child(tr(bardo, Text::FolderNotFound))
+        });
         h_flex()
             .id(SharedString::from(format!("project-row-{key}")))
             .px_2()
@@ -354,7 +444,8 @@ impl ProjectSwitcher {
                             }
                             None => channel_count_text(bardo, count),
                         }),
-                    )),
+                    ))
+                    .children(lost),
             )
             .children(up)
             .children(star)
@@ -407,6 +498,8 @@ impl ProjectSwitcher {
             *counts.entry(channel.project).or_default() += 1;
         }
         let count = |id: ProjectId| counts.get(&id).copied().unwrap_or(0);
+        let unreachable: HashSet<ProjectId> = bardo.unreachable_projects();
+        let lost = |id: ProjectId| unreachable.contains(&id);
         let favorites: Vec<AnyElement> = list
             .favorites
             .iter()
@@ -414,18 +507,46 @@ impl ProjectSwitcher {
             // Reordering only makes sense on the whole list.
             .map(|(at, project)| {
                 let at = self.query.trim().is_empty().then_some(at);
-                self.row(project, count(project.id), open, at, true, cx)
+                self.row(
+                    project,
+                    count(project.id),
+                    open,
+                    at,
+                    true,
+                    lost(project.id),
+                    cx,
+                )
             })
             .collect();
         let recent: Vec<AnyElement> = list
             .recent
             .iter()
-            .map(|project| self.row(project, count(project.id), open, None, true, cx))
+            .map(|project| {
+                self.row(
+                    project,
+                    count(project.id),
+                    open,
+                    None,
+                    true,
+                    lost(project.id),
+                    cx,
+                )
+            })
             .collect();
         let all: Vec<AnyElement> = list
             .all
             .iter()
-            .map(|project| self.row(project, count(project.id), open, None, true, cx))
+            .map(|project| {
+                self.row(
+                    project,
+                    count(project.id),
+                    open,
+                    None,
+                    true,
+                    lost(project.id),
+                    cx,
+                )
+            })
             .collect();
         let bardo = self.bardo.read(cx);
         let empty = if none_at_all {
@@ -439,6 +560,50 @@ impl ProjectSwitcher {
             .problem
             .map(|problem| kit::notice(kit::Tone::Danger, tr(bardo, problem), cx));
         let new_label = tr(bardo, Text::SwitcherNewProject);
+        let folder = open.and_then(|id| Some((id, bardo.project_folder(id)?)));
+        let folder_part = folder.map(|(id, folder)| {
+            let missing = unreachable.contains(&id);
+            let show = folder.clone();
+            v_flex()
+                .gap_2()
+                .when(missing, |part| {
+                    part.child(kit::notice(
+                        kit::Tone::Warning,
+                        bardo.text_with(
+                            Text::FolderNotFoundHint,
+                            &[("folder", &folder.display().to_string())],
+                        ),
+                        cx,
+                    ))
+                })
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .when(missing, |row| {
+                            row.child(
+                                Button::new("project-locate")
+                                    .small()
+                                    .label(tr(bardo, Text::LocateFolder))
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.locate(id, window, cx);
+                                        },
+                                    )),
+                            )
+                        })
+                        .when(!missing, |row| {
+                            row.child(
+                                Button::new("project-show-folder")
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::FolderOpen)
+                                    .label(tr(bardo, Text::ShowFolder))
+                                    .on_click(move |_, _, cx| cx.open_with_system(&show)),
+                            )
+                        }),
+                )
+        });
         v_flex()
             .gap_2()
             .child(Input::new(&self.search).small().cleanable(true))
@@ -462,6 +627,7 @@ impl ProjectSwitcher {
             )
             .children(problem)
             .child(div().h(t.border_width).bg(t.border))
+            .children(folder_part)
             .child(
                 Button::new("project-new")
                     .ghost()
@@ -517,6 +683,53 @@ impl ProjectSwitcher {
                 .child(tr(bardo, error))
                 .into_any_element()
         });
+        let typed = form.name.read(cx).value().to_string();
+        let folder = bardo.new_project_folder(
+            if typed.trim().is_empty() {
+                "…"
+            } else {
+                typed.trim()
+            },
+            form.id,
+            form.place.as_deref(),
+        );
+        let folder_field = kit::field(
+            tr(bardo, Text::ProjectFolderLabel),
+            None,
+            v_flex()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_xs()
+                                .text_color(t.text2)
+                                .truncate()
+                                .child(SharedString::from(folder.display().to_string())),
+                        )
+                        .child(
+                            Button::new("project-new-folder")
+                                .ghost()
+                                .xsmall()
+                                .label(tr(bardo, Text::ProjectFolderChoose))
+                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                    this.choose_place(window, cx);
+                                })),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(t.text2)
+                        .child(tr(bardo, Text::ProjectFolderHint)),
+                )
+                .into_any_element(),
+            None,
+        );
         v_flex()
             .gap_3()
             .child(kit::section_heading(tr(bardo, Text::NewProjectTitle)))
@@ -542,6 +755,7 @@ impl ProjectSwitcher {
                     .into_any_element(),
                 None,
             ))
+            .child(folder_field)
             .child(
                 h_flex()
                     .gap_2()

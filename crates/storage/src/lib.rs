@@ -19,6 +19,7 @@ mod end_card;
 mod export;
 mod export_files;
 mod files;
+mod folders;
 mod installers;
 mod job;
 mod localization;
@@ -31,6 +32,7 @@ mod product;
 mod product_sheet;
 mod profile;
 mod project;
+mod project_folders;
 mod publication;
 mod render;
 mod research;
@@ -71,6 +73,7 @@ pub use installers::{
     updates_dir,
 };
 pub use migrations::{BrokenReferences, MigrationError, SCHEMA_VERSION};
+pub use project_folders::{LocalProjectFolders, MemoryProjectFolders, folder_places};
 #[cfg(windows)]
 pub use secrets::CredentialManager;
 pub use secrets::{
@@ -155,6 +158,11 @@ impl Database {
             .path()
             .filter(|path| !path.is_empty())
             .map(PathBuf::from)
+    }
+
+    /// The connection this handle and its other runners share.
+    pub(crate) fn connection_handle(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
     }
 
     pub(crate) fn runner(&self) -> &str {

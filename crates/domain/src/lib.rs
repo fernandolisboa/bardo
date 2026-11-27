@@ -65,6 +65,7 @@ mod due;
 mod edit;
 mod end_card;
 mod files;
+mod folders;
 mod format;
 mod framing;
 mod generation;
@@ -232,6 +233,13 @@ pub use end_card::{
     MAX_CARD_SECOND_LINE, card_fingerprint, card_room, end_card_end,
 };
 pub use files::{ProjectFileError, ProjectFiles};
+pub use folders::{
+    DefaultBase, FolderMove, FolderMoveError, FolderPlaces, FolderRepository, GLOBAL_DIR,
+    MAX_PROJECT_FOLDER_CHARS, MAX_VIDEO_SLUG_CHARS, PROJECT_MANIFEST, ProjectFolders,
+    ProjectManifest, VIDEOS_DIR, VideoFolder, VideoFolders, VideoToMove, WORLD_DIR,
+    default_base_folder, is_synced, leaves_room, project_folder_name, safe_folder_name, short_id,
+    video_folder_name,
+};
 pub use format::{AD_TAIL, UnknownVideoFormat, UnknownVideoLength, VideoFormat, VideoLength};
 pub use framing::{
     CROP_STEPS, CropPosition, CropRect, FrameShape, Framing, PictureSize, UnknownFrameShape,
