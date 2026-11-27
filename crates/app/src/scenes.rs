@@ -1556,12 +1556,23 @@ impl SceneHandler {
         job: JobId,
         failed: &mut Vec<JobFailure>,
     ) -> Result<(), JobFailure> {
+        let look = self.world.look_for(project, style);
+        // Another job drawing this character in this look is waited for, so
+        // its picture is lent below rather than paid for twice.
+        let character = self.saved_plan(project, plan_id)?.and_then(|plan| {
+            plan.cast_member(member)
+                .ok()
+                .and_then(|cast| cast.character())
+        });
+        let _hold = match (&look, character) {
+            (Some(look), Some(character)) => Some(self.world.desk.hold(character, look)),
+            _ => None,
+        };
         let Some(mut plan) = self.saved_plan(project, plan_id)? else {
             return Ok(());
         };
         // A picked character with a picture for the video's look takes it,
         // for free (#337).
-        let look = self.world.look_for(project, style);
         if let Some(look) = &look {
             match self
                 .world
