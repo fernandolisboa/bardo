@@ -258,7 +258,14 @@ impl WorldBook {
             // original's folder now, or the portrait is drawn (and kept by
             // the original); the copy's row is never let go.
             Err(_) if self.original_of(character).is_some() => {
-                self.follow_into(character);
+                if self.follow_into(character) == crate::PictureFollowing::WaitingForFolder {
+                    // Nothing paid is drawn again while the original's
+                    // folder is away.
+                    return Err(JobFailure::new(
+                        JobFailureKind::Files,
+                        "the original's world folder cannot be reached".to_owned(),
+                    ));
+                }
                 match self.files.read(&folder, &picture.file) {
                     Ok(bytes) => bytes,
                     Err(_) => return Ok(None),
@@ -553,19 +560,22 @@ impl WorldBook {
         }
     }
 
-    /// Sends the item's new pictures to every linked copy of it.
-    pub(crate) fn follow_pictures(&self, original: WorldItemId) {
+    /// Sends the item's new pictures to every linked copy of it; `false`
+    /// when some could not be copied yet.
+    pub(crate) fn follow_pictures(&self, original: WorldItemId) -> bool {
         let Ok(copies) = self
             .sharing
             .linked_copies(bardo_domain::LibraryItem::World(original))
         else {
-            return;
+            return false;
         };
+        let mut all = true;
         for copy in copies {
             if let bardo_domain::LibraryItem::World(copy) = copy {
-                self.follow_into(copy);
+                all &= self.follow_into(copy) == crate::PictureFollowing::Current;
             }
         }
+        all
     }
 
     /// Copies the item's kept pictures' files from `from`'s world folder to
@@ -1302,6 +1312,11 @@ impl Bardo {
             .collect();
         if !busy.is_empty() {
             return Err(WorldError::InUse(busy));
+        }
+        // Its linked copies become independent: they keep its pictures,
+        // so the files reach them before they go.
+        if !self.world_book.follow_pictures(id) {
+            return Err(WorldError::FolderNotFound);
         }
         let pictures = self.world_book.world.pictures(id)?;
         self.world_book.world.delete_character(id)?;

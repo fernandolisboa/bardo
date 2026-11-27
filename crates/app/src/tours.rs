@@ -1034,7 +1034,7 @@ pub const PRODUCTS: Tour = {
                 .learn(PAGE, "owner"),
             on(AT, "actions", control(Control::ProductActions))
                 .missing(FORM)
-                .learn(PAGE, "sharing"),
+                .learn(PAGE, "archive"),
             on(AT, "pictures", control(Control::ProductPictures))
                 .missing(FORM)
                 .learn(PAGE, "pictures"),

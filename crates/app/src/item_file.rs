@@ -23,7 +23,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    LibraryItem, Look, PictureOrigin, PictureProvenance, ProductDraft, ProductImage,
+    LibraryItem, LibraryKind, Look, PictureOrigin, PictureProvenance, ProductDraft, ProductImage,
     ProductImageKind, ProductKind, ProductLogo, ProductOwnership, ProductPicture, ProjectId,
     Provider, ReferencePicture, ReferencePictureId, TemplateBody, TemplateKind, WorldItemDraft,
     WorldKind,
@@ -74,6 +74,31 @@ impl ItemFileError {
 struct Header {
     format: String,
     version: u64,
+    #[serde(default)]
+    kind: Option<String>,
+}
+
+/// Whether the file's text holds an item a screen of `kind` shows: a
+/// narrator package for Narrators, any world item for World. Text that is
+/// no item file passes, for `open` to say why.
+pub(crate) fn holds(text: &str, kind: LibraryKind) -> bool {
+    let Ok(header) = serde_json::from_str::<Header>(text) else {
+        return true;
+    };
+    let held = if header.format == crate::persona_package::FORMAT {
+        "narrator"
+    } else {
+        match header.kind.as_deref() {
+            Some(held) => held,
+            None => return true,
+        }
+    };
+    held == match kind {
+        LibraryKind::Narrator => "narrator",
+        LibraryKind::Product => "product",
+        LibraryKind::World(_) => "world",
+        LibraryKind::Template => "template",
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -292,12 +317,12 @@ pub(crate) fn read_file(path: &Path) -> Result<String, SharingError> {
 }
 
 /// A name free in the owner: `name`, else `name (imported)`, numbered.
-fn free_name(app: &Bardo, name: &str, taken: impl Fn(&str) -> bool) -> String {
+fn free_name(app: &Bardo, name: &str, max: usize, taken: impl Fn(&str) -> bool) -> String {
     if !taken(name) {
         return name.to_owned();
     }
     let suffix = app.text(Text::PersonaImportedSuffix);
-    crate::sharing::suggested_name(name, &suffix, taken)
+    crate::sharing::suggested_name(name, &suffix, max, taken)
 }
 
 /// Opens the file's text as an independent copy owned by `into`.
@@ -339,6 +364,7 @@ pub(crate) fn open(
             app,
             envelope.template.ok_or(ItemFileError::NotAnItemFile)?,
             into,
+            confirmed,
         ),
         _ => Err(ItemFileError::NotAnItemFile.into()),
     }
@@ -400,9 +426,12 @@ fn open_product(
         .filter(|other| other.owner_project == into)
         .map(|other| other.brief.name().to_lowercase())
         .collect();
-    let name = free_name(app, product.name.trim(), |name| {
-        taken.contains(&name.to_lowercase())
-    });
+    let name = free_name(
+        app,
+        product.name.trim(),
+        bardo_domain::ProductBrief::MAX_NAME_CHARS,
+        |name| taken.contains(&name.to_lowercase()),
+    );
     let draft = ProductDraft {
         name,
         kind: ProductKind::from_code(&product.kind).ok_or(ItemFileError::Invalid)?,
@@ -469,9 +498,12 @@ fn open_world(
         .filter(|other| other.kind == kind)
         .map(|other| other.details.name().to_lowercase())
         .collect();
-    let name = free_name(app, world.name.trim(), |name| {
-        taken.contains(&name.to_lowercase())
-    });
+    let name = free_name(
+        app,
+        world.name.trim(),
+        bardo_domain::WorldItemDetails::MAX_NAME_CHARS,
+        |name| taken.contains(&name.to_lowercase()),
+    );
     let created = app
         .create_world_item(
             into,
@@ -522,10 +554,25 @@ fn open_template(
     app: &Bardo,
     template: TemplateV1,
     into: Option<ProjectId>,
+    confirmed: bool,
 ) -> Result<LibraryItem, SharingError> {
     let kind: TemplateKind = template.kind.parse().map_err(|_| ItemFileError::Invalid)?;
     TemplateBody::new(kind, &template.instructions, &template.prompt)
         .map_err(|_| ItemFileError::Invalid)?;
+    match into {
+        // A new global version changes every project that uses it: the
+        // user sees them first.
+        None if !confirmed => {
+            let users = app
+                .global_template_users(kind)
+                .map_err(|_| SharingError::NotFound)?;
+            if !users.is_empty() {
+                return Err(SharingError::UsedByProjects(users));
+            }
+        }
+        Some(project) => app.refuse_linked(LibraryItem::template(project, kind))?,
+        None => {}
+    }
     if let Some(project) = into
         && app
             .templates
@@ -538,6 +585,7 @@ fn open_template(
     app.save_template_in(kind, into, (&template.instructions, &template.prompt), true)
         .map_err(|error| match error {
             crate::TemplateError::Repository(error) => SharingError::Repository(error),
+            crate::TemplateError::Linked => SharingError::Linked,
             _ => ItemFileError::Invalid.into(),
         })?;
     Ok(LibraryItem::Template {

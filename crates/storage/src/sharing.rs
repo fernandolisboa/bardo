@@ -263,11 +263,19 @@ impl Part {
             .collect::<Vec<_>>()
             .join(", ");
         let mut sql = String::new();
+        // A copy may hold a row of its own already (a cache written for
+        // it): the original's row takes its place, never fails beside it.
         sql.push_str(&format!(
             "CREATE TRIGGER {TRIGGER_PREFIX}{table}_insert AFTER INSERT ON {table} \
-             WHEN {filter} AND {any} BEGIN {insert}; END;\n",
+             WHEN {filter} AND {any} BEGIN \
+             UPDATE {table} SET {set} WHERE {parent} IN ({copies}) AND {matches}; \
+             {insert} AND NOT EXISTS (SELECT 1 FROM {table} x \
+             WHERE x.{parent} = c.id AND {matches_x}); END;\n",
             filter = self.filter_on("NEW"),
             any = any_copy("NEW"),
+            copies = self.copies("NEW"),
+            matches = self.matches(table, "NEW"),
+            matches_x = self.matches("x", "NEW"),
         ));
         // The original's own row is still there: deleting the original
         // itself makes its copies independent first, content intact.
@@ -586,9 +594,24 @@ fn copy_rows(
             params![copy, original],
         )
         .map_err(boxed)?;
+        // Only a linked copy's rows name the rows they follow.
+        if !linked && matches!(part.key, Key::Id) {
+            tx.execute(
+                &format!(
+                    "UPDATE {t} SET copied_from = NULL WHERE {parent} = ?1",
+                    t = part.table,
+                    parent = part.parent,
+                ),
+                [copy],
+            )
+            .map_err(boxed)?;
+        }
     }
     Ok(())
 }
+
+/// A column of text that may be NULL.
+type Text = Option<String>;
 
 impl Database {
     fn template_sharing(
@@ -596,7 +619,7 @@ impl Database {
         project: ProjectId,
         kind: TemplateKind,
     ) -> Result<Sharing, RepositoryError> {
-        let row: Option<(bool, Option<String>, Option<String>, Option<String>)> = conn
+        let row: Option<(bool, Text, Text, Text)> = conn
             .query_row(
                 "SELECT s.shareable, s.linked_from, s.follows_project,
                      (SELECT p.name FROM project p WHERE p.id = s.linked_from)
@@ -633,13 +656,7 @@ impl Database {
         table: &ItemTable,
         id: &str,
     ) -> Result<Sharing, RepositoryError> {
-        let row: Option<(
-            bool,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-        )> = conn
+        let row: Option<(bool, Text, Text, Text, Text)> = conn
             .query_row(
                 &format!(
                     "SELECT t.shareable, t.linked_from, t.follows_name, t.follows_project,
@@ -959,6 +976,23 @@ impl SharingRepository for Database {
                         params![into, kind.code(), from, follows],
                     )
                     .map_err(boxed)?;
+                    // A linked copy is never followed in turn: whoever
+                    // followed this project's template is on its own now.
+                    tx.execute(
+                        "UPDATE template_share SET linked_from = NULL
+                         WHERE linked_from = ?1 AND kind = ?2",
+                        params![into, kind.code()],
+                    )
+                    .map_err(boxed)?;
+                } else if let Some(into) = into_text.as_deref() {
+                    // An independent copy is the project's own: it follows
+                    // nothing from now on.
+                    tx.execute(
+                        "UPDATE template_share SET linked_from = NULL, follows_project = NULL
+                         WHERE owner_project_id = ?1 AND kind = ?2",
+                        params![into, kind.code()],
+                    )
+                    .map_err(boxed)?;
                 }
                 add_template_version(
                     &tx,
@@ -1164,6 +1198,16 @@ impl SharingRepository for Database {
                     )
                     .map_err(boxed)?;
                 }
+                if table.table == "character" {
+                    // A global object belongs only to a global character.
+                    tx.execute(
+                        "UPDATE character SET belongs_to = NULL
+                         WHERE id = ?1 AND belongs_to IN
+                             (SELECT id FROM character WHERE owner_project_id IS NOT NULL)",
+                        [&id],
+                    )
+                    .map_err(boxed)?;
+                }
                 tx.execute(
                     &format!(
                         "UPDATE {t} SET owner_project_id = NULL, name = ?2, shareable = 0,
@@ -1238,13 +1282,13 @@ mod tests {
     use std::time::Duration;
 
     use bardo_domain::{
-        Channel, ChannelDetails, ChannelDraft, ChannelRepository, GenerationPresets, LookImage,
-        Persona, PersonaDetails, PersonaDraft, PersonaLook, PersonaRepository, PictureOrigin,
-        PictureProvenance, Product, ProductBrief, ProductDraft, ProductImage, ProductImageKind,
-        ProductKind, ProductOwnership, ProductPicture, ProductRepository, ProfileRepository,
-        Provider, ReferencePicture, ReferencePictureId, TemplateBody, TemplateRepository,
-        TemplateVersion, UiLanguage, UserProfile, VoiceRef, WorldItem, WorldItemDetails,
-        WorldItemDraft, WorldKind, WorldRepository,
+        Channel, ChannelDetails, ChannelDraft, ChannelRepository, GenerationPresets,
+        LookFaceMeasure, LookImage, Persona, PersonaDetails, PersonaDraft, PersonaLook,
+        PersonaRepository, PictureOrigin, PictureProvenance, Product, ProductBrief, ProductDraft,
+        ProductImage, ProductImageKind, ProductKind, ProductOwnership, ProductPicture,
+        ProductRepository, ProfileRepository, Provider, ReferencePicture, ReferencePictureId,
+        TemplateBody, TemplateRepository, TemplateVersion, UiLanguage, UserProfile, VoiceRef,
+        WorldItem, WorldItemDetails, WorldItemDraft, WorldKind, WorldRepository,
     };
 
     use super::*;
@@ -1732,6 +1776,89 @@ mod tests {
         assert_eq!(s.db.sharing(copy).unwrap(), Sharing::default());
         // Generations keep pointing at the version they used.
         assert!(s.db.template_version(second.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_row_the_copy_wrote_for_itself_gives_way_to_the_originals() {
+        let s = setup();
+        let (original, copy) = linked_narrator(&s);
+        let measure = |image: &str| LookFaceMeasure {
+            image: image.into(),
+            face_height: Some(0.25),
+        };
+        // A take measured the copy's look first, then the original's.
+        PersonaRepository::save_look_face(&s.db, copy, &measure("copy")).unwrap();
+        PersonaRepository::save_look_face(&s.db, original.id, &measure("original")).unwrap();
+        assert_eq!(
+            PersonaRepository::look_face(&s.db, copy)
+                .unwrap()
+                .unwrap()
+                .image,
+            "original"
+        );
+    }
+
+    #[test]
+    fn a_template_link_is_never_followed_in_turn_and_an_independent_copy_unlinks() {
+        let s = setup();
+        let third = crate::project::test_project(&s.db, s.owner);
+        let kind = TemplateKind::Script;
+        let body =
+            |prompt: &str| TemplateBody::new(kind, "Write in {{language}}.", prompt).unwrap();
+        for (project, prompt) in [(s.space, "{{theme_title}} a"), (s.sea, "{{theme_title}} b")] {
+            let mut first = TemplateVersion::first(s.owner, body(prompt), at(1));
+            first.owner_project = Some(project);
+            s.db.add_template_version(&first).unwrap();
+        }
+        let (space, sea) = (
+            LibraryItem::template(s.space, kind),
+            LibraryItem::template(s.sea, kind),
+        );
+        s.db.set_shareable(sea, true).unwrap();
+        s.db.copy_item(sea, Some(third), "", CopyKind::Linked, at(2))
+            .unwrap();
+        // Sea now follows Space: whoever followed Sea is on its own.
+        s.db.set_shareable(space, true).unwrap();
+        s.db.copy_item(space, Some(s.sea), "", CopyKind::Linked, at(3))
+            .unwrap();
+        let third_sharing = s.db.sharing(LibraryItem::template(third, kind)).unwrap();
+        assert!(!third_sharing.is_linked());
+        assert!(third_sharing.lost().is_some());
+        assert!(s.db.sharing(sea).unwrap().is_linked());
+
+        // An independent copy into Sea makes its template its own.
+        s.db.copy_item(space, Some(s.sea), "", CopyKind::Independent, at(4))
+            .unwrap();
+        assert!(!s.db.sharing(sea).unwrap().is_linked());
+    }
+
+    #[test]
+    fn a_global_object_belongs_to_no_projects_character() {
+        let s = setup();
+        let item = |kind: WorldKind, name: &str| {
+            WorldItem::new(
+                s.owner,
+                Some(s.space),
+                kind,
+                WorldItemDetails::validate(WorldItemDraft {
+                    name: name.into(),
+                    appearance: "Plain.".into(),
+                    ..WorldItemDraft::default()
+                })
+                .unwrap(),
+                at(3),
+            )
+        };
+        let knight = item(WorldKind::Character, "Knight");
+        s.db.save_character(&knight).unwrap();
+        let mut sword = item(WorldKind::Object, "Sword");
+        sword.belongs_to = Some(knight.id);
+        s.db.save_character(&sword).unwrap();
+        s.db.make_global(LibraryItem::World(sword.id), "Sword", at(4))
+            .unwrap();
+        let global = s.db.character(sword.id).unwrap().unwrap();
+        assert_eq!(global.owner_project, None);
+        assert_eq!(global.belongs_to, None);
     }
 
     #[test]

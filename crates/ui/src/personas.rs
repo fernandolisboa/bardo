@@ -1654,6 +1654,7 @@ impl PersonasScreen {
             .map(|uses| self.render_confirm(uses, cx));
         let bring = self.render_bring(cx);
         let linked = self.sharing.read(cx).is_linked();
+        let has_sharing = self.sharing.read(cx).has_content();
         let global_note = self
             .edited_persona()
             .filter(|persona| self.scope == LibraryScope::Project && persona.is_global())
@@ -1792,7 +1793,7 @@ impl PersonasScreen {
                     scroll,
                 ))
                 .children(confirm)
-                .when(self.editing.is_some(), |form| {
+                .when(has_sharing, |form| {
                     form.child(kit::anchor_in(
                         TourAnchor::Control(Control::LibrarySharing),
                         self.sharing.clone(),

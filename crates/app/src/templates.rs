@@ -1137,7 +1137,11 @@ impl Bardo {
                 .templates
                 .template_versions(self.profile.id, None, kind)?;
         }
-        let next = versions.last().and_then(|current| {
+        // A linked copy takes its original's versions, upgrades included.
+        let linked = project.is_some_and(|project| {
+            self.is_linked_copy(bardo_domain::LibraryItem::template(project, kind))
+        });
+        let next = versions.last().filter(|_| !linked).and_then(|current| {
             current.revise(upgraded(kind, &current.body, &versions)?, SystemTime::now())
         });
         if let Some(next) = next {

@@ -593,6 +593,19 @@ impl Bardo {
             return Err(RemovalError::NameMismatch);
         }
         self.unblocked(target)?;
+        if let Removable::Project(id) = target {
+            // Its world items' linked copies elsewhere become independent:
+            // the pictures reach them before the folder goes.
+            for item in self
+                .world_book
+                .world
+                .characters(self.profile.id, Some(id))?
+            {
+                if !self.world_book.follow_pictures(item.id) {
+                    return Err(RemovalError::FolderNotFound);
+                }
+            }
+        }
         let folder = self.folder_to_discard(target)?;
         let discard = match (&folder, permanent) {
             (_, true) => Discard::Permanent,

@@ -1337,6 +1337,7 @@ impl ProductsScreen {
                         .xsmall()
                         .outline()
                         .label(label)
+                        .disabled(self.sharing.read(cx).is_linked())
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.confirm_remove = Some(Removing::Image(id));
                             cx.notify();
@@ -1349,6 +1350,7 @@ impl ProductsScreen {
         let kinds = ButtonGroup::new(("product-image-kind", ix))
             .xsmall()
             .outline()
+            .disabled(self.sharing.read(cx).is_linked())
             .children(ProductImageKind::ALL.map(|kind| {
                 Button::new(("product-image-kind", ix * 10 + kind as usize))
                     .label(tr(bardo, Text::ProductImageKindName(kind)))
@@ -1502,7 +1504,9 @@ impl ProductsScreen {
                             .small()
                             .outline()
                             .label(tr(bardo, Text::AddProductImage))
-                            .disabled(full || self.dialog.is_some())
+                            .disabled(
+                                full || self.dialog.is_some() || self.sharing.read(cx).is_linked(),
+                            )
                             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                 this.importing = Some((Importing::Image, false));
                                 this.picture_notice = None;
@@ -1610,7 +1614,9 @@ impl ProductsScreen {
                                 .small()
                                 .outline()
                                 .label(tr(bardo, add))
-                                .disabled(self.dialog.is_some())
+                                .disabled(
+                                    self.dialog.is_some() || self.sharing.read(cx).is_linked(),
+                                )
                                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                     this.importing = Some((Importing::Logo, false));
                                     this.picture_notice = None;
@@ -1623,7 +1629,10 @@ impl ProductsScreen {
                                     .small()
                                     .ghost()
                                     .label(tr(bardo, Text::RemoveProductLogo))
-                                    .disabled(self.confirm_remove == Some(Removing::Logo))
+                                    .disabled(
+                                        self.confirm_remove == Some(Removing::Logo)
+                                            || self.sharing.read(cx).is_linked(),
+                                    )
                                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                         this.confirm_remove = Some(Removing::Logo);
                                         cx.notify();
@@ -1802,6 +1811,7 @@ impl ProductsScreen {
         let delete = self.confirm_delete.then(|| self.render_delete(cx));
         let library_parts = self.render_library(cx);
         let linked = self.sharing.read(cx).is_linked();
+        let has_sharing = self.sharing.read(cx).has_content();
         let global_note = self
             .edited_product()
             .filter(|product| self.scope == LibraryScope::Project && product.is_global())
@@ -2024,7 +2034,7 @@ impl ProductsScreen {
                         actions,
                         scroll,
                     ))
-                    .when(self.editing.is_some(), |form| {
+                    .when(has_sharing, |form| {
                         form.child(kit::anchor_in(
                             TourAnchor::Control(Control::LibrarySharing),
                             self.sharing.clone(),

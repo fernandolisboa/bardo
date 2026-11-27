@@ -1177,7 +1177,10 @@ impl WorldScreen {
             bardo,
             Text::WorldPictureOrigin(view.picture.provenance.origin),
         );
-        let actions: AnyElement = if !kept {
+        let actions: AnyElement = if self.sharing.read(cx).is_linked() {
+            // A linked copy's pictures are its original's.
+            div().into_any_element()
+        } else if !kept {
             h_flex()
                 .flex_wrap()
                 .gap_1()
@@ -1299,8 +1302,8 @@ impl WorldScreen {
         let bardo = self.bardo.read(cx);
         let drawing = card.drawing;
         // A picture is drawn from the saved appearance, so edits are saved
-        // first.
-        let dirty = self.dirty(cx);
+        // first; a linked copy's come from its original.
+        let dirty = self.dirty(cx) || self.sharing.read(cx).is_linked();
         v_flex()
             .gap_2()
             .child(
@@ -1617,6 +1620,7 @@ impl WorldScreen {
         let [name_error, appearance_error, notes_error] =
             [NAME_ERRORS, APPEARANCE_ERRORS, NOTES_ERRORS].map(|fields| self.error_for(fields, cx));
         let linked = self.sharing.read(cx).is_linked();
+        let has_sharing = self.sharing.read(cx).has_content();
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let scroll = Some(&self.form_scroll);
@@ -1770,7 +1774,7 @@ impl WorldScreen {
                         actions,
                         scroll,
                     ))
-                    .when(self.editing.is_some(), |form| {
+                    .when(has_sharing, |form| {
                         form.child(kit::anchor_in(
                             TourAnchor::Control(Control::LibrarySharing),
                             self.sharing.clone(),

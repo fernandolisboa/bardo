@@ -154,8 +154,26 @@ impl TemplatesScreen {
     fn shared_changed(&mut self, event: SharingEvent, window: &mut Window, cx: &mut Context<Self>) {
         if let SharingEvent::Show(LibraryItem::Template { kind, .. }) = event {
             self.kind = kind;
+            self.reload(window, cx);
+            return;
         }
+        // Marking, unlinking or making it global keeps unsaved text.
+        let typed = (
+            self.instructions.read(cx).value().to_string(),
+            self.prompt.read(cx).value().to_string(),
+        );
+        let edited = self
+            .versions
+            .iter()
+            .find(|version| Some(version.id) == self.base)
+            .is_some_and(|base| {
+                (base.body.instructions(), base.body.prompt())
+                    != (typed.0.as_str(), typed.1.as_str())
+            });
         self.reload(window, cx);
+        if edited {
+            self.fill(typed.0, typed.1, window, cx);
+        }
     }
 
     /// Whether the template has versions to show: the screen offers its
@@ -395,7 +413,7 @@ impl TemplatesScreen {
         let source = self.render_source(cx);
         let confirm = self.render_confirm(cx);
         let linked = self.sharing.read(cx).is_linked();
-        let shared = (self.source == TemplateSource::Project && self.owner.is_some()).then(|| {
+        let shared = self.sharing.read(cx).has_content().then(|| {
             kit::anchor_in(
                 TourAnchor::Control(Control::LibrarySharing),
                 self.sharing.clone(),

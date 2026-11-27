@@ -1038,6 +1038,9 @@ impl Bardo {
         change: impl FnOnce(&mut bardo_domain::Claim, SystemTime) -> Result<(), ClaimError>,
     ) -> Result<ProductSheet, SheetError> {
         self.sheet_product(id)?;
+        if self.is_linked_copy(bardo_domain::LibraryItem::Product(id)) {
+            return Err(SheetError::Linked);
+        }
         if self.sheet_is_busy(id) {
             return Err(SheetError::Busy);
         }

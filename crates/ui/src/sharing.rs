@@ -72,6 +72,9 @@ pub struct SharingPanel {
     notice: Option<(Tone, SharedString)>,
     dialog: Option<Task<()>>,
     follow: Option<Task<()>>,
+    /// The notice outlives the next change of item: the panel's own
+    /// action (Make global) moved the item out of the list.
+    keep_notice: bool,
 }
 
 impl EventEmitter<SharingEvent> for SharingPanel {}
@@ -87,6 +90,7 @@ impl SharingPanel {
             notice: None,
             dialog: None,
             follow: None,
+            keep_notice: false,
         }
     }
 
@@ -94,10 +98,19 @@ impl SharingPanel {
     pub fn show(&mut self, item: Option<(LibraryItem, String)>, cx: &mut Context<Self>) {
         if self.item.as_ref().map(|(item, _)| *item) != item.as_ref().map(|(item, _)| *item) {
             self.form = None;
-            self.notice = None;
+            if !self.keep_notice {
+                self.notice = None;
+            }
+            self.keep_notice = false;
         }
         self.item = item;
         self.refresh(cx);
+    }
+
+    /// Whether the panel has anything to show: an item, or what became
+    /// of the one that left.
+    pub fn has_content(&self) -> bool {
+        self.state.is_some() || self.notice.is_some()
     }
 
     /// Whether the shown item is a linked copy: its screen keeps it
@@ -110,6 +123,10 @@ impl SharingPanel {
 
     /// Reads the shown item's sharing again.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        let was_waiting = self
+            .state
+            .as_ref()
+            .is_some_and(|state| state.pictures != PictureFollowing::Current);
         self.state = self
             .item
             .as_ref()
@@ -118,6 +135,10 @@ impl SharingPanel {
             .state
             .as_ref()
             .is_some_and(|state| state.pictures != PictureFollowing::Current);
+        if was_waiting && !waiting {
+            // The pictures arrived: the screen shows them.
+            cx.emit(SharingEvent::Changed);
+        }
         if waiting && self.follow.is_none() {
             self.follow = Some(cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(FOLLOW_EVERY).await;
@@ -255,6 +276,7 @@ impl SharingPanel {
                     Tone::Success,
                     tr(self.bardo.read(cx), Text::SharingMadeGlobal),
                 ));
+                self.keep_notice = true;
                 self.refresh(cx);
                 cx.emit(SharingEvent::Changed);
             }
@@ -551,7 +573,7 @@ impl SharingPanel {
                 .when(!users.is_empty(), |well| {
                     well.child(kit::notice(
                         Tone::Warning,
-                        tr(bardo, Text::TemplateGlobalUsedBy),
+                        tr(bardo, Text::SharingGlobalUsedBy),
                         cx,
                     ))
                     .children(users.iter().map(|user| {
@@ -619,7 +641,14 @@ fn project_name(bardo: &Bardo, id: ProjectId) -> String {
 impl Render for SharingPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(state) = self.state.clone() else {
-            return div().into_any_element();
+            // The item left (made global): what happened stays in view.
+            return match self.notice.clone() {
+                Some((tone, text)) => kit::card(cx)
+                    .p_4()
+                    .child(kit::notice(tone, text, cx))
+                    .into_any_element(),
+                None => div().into_any_element(),
+            };
         };
         let following = self.render_following(&state, cx);
         let export = self.render_export(cx);
@@ -726,9 +755,10 @@ pub struct ImportPanel {
     clash: Option<Clash>,
     error: Option<Text>,
     notice: Option<SharedString>,
-    /// A file holding product pictures, waiting for the user to confirm
-    /// they may use them.
-    pending: Option<PathBuf>,
+    /// A file waiting for the user's confirmation: of the use of a
+    /// product's pictures (`None`), or of the projects a new global
+    /// template version changes.
+    pending: Option<(PathBuf, Option<Vec<String>>)>,
     confirmed: bool,
     dialog: Option<Task<()>>,
 }
@@ -764,11 +794,7 @@ impl ImportPanel {
         cx: &mut Context<Self>,
     ) {
         if (self.into, self.project_scope) != (into, project_scope) {
-            self.open = false;
-            self.clash = None;
-            self.error = None;
-            self.notice = None;
-            self.pending = None;
+            self.reset();
         }
         self.into = into;
         self.project_scope = project_scope;
@@ -779,10 +805,19 @@ impl ImportPanel {
     pub fn set_kind(&mut self, kind: LibraryKind, cx: &mut Context<Self>) {
         if self.kind != kind {
             self.kind = kind;
-            self.open = false;
-            self.clash = None;
+            self.reset();
             cx.notify();
         }
+    }
+
+    /// Forgets what was in progress or said.
+    fn reset(&mut self) {
+        self.open = false;
+        self.clash = None;
+        self.error = None;
+        self.notice = None;
+        self.pending = None;
+        self.confirmed = false;
     }
 
     fn usable(&self) -> bool {
@@ -794,8 +829,8 @@ impl ImportPanel {
         self.clash = None;
         self.error = None;
         self.notice = None;
-        if self.open {
-            match self.bardo.read(cx).importable_items(self.kind) {
+        if let (true, Some(into)) = (self.open, self.into) {
+            match self.bardo.read(cx).importable_items_for(self.kind, into) {
                 Ok(rows) => self.rows = rows,
                 Err(error) => {
                     self.rows.clear();
@@ -811,16 +846,19 @@ impl ImportPanel {
             return;
         };
         let item = shared.item;
+        let Some(into) = self.into else {
+            return;
+        };
         let name = self
             .clash
             .as_ref()
             .filter(|clash| clash.row == row)
             .map(|clash| clash.name.read(cx).value().trim().to_owned());
         let bardo = self.bardo.read(cx);
-        match bardo.import_item(item, copy, name.as_deref()) {
+        match bardo.import_item_into(item, into, copy, name.as_deref()) {
             Ok(copied) => {
                 let label = if shared.name.is_empty() {
-                    shared.project_name.clone()
+                    row_title(bardo, shared)
                 } else {
                     name.unwrap_or_else(|| shared.name.clone())
                 };
@@ -865,6 +903,7 @@ impl ImportPanel {
                     Ok(Ok(Some(paths))) => {
                         if let Some(path) = paths.into_iter().next() {
                             this.confirmed = false;
+                            this.pending = None;
                             this.open_file(path, cx);
                         }
                     }
@@ -878,14 +917,19 @@ impl ImportPanel {
 
     fn open_file(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         let bardo = self.bardo.read(cx);
-        match bardo.open_item_file(&path, self.into, self.confirmed) {
+        match bardo.open_item_file_as(&path, self.kind, self.into, self.confirmed) {
             Ok(item) => {
                 self.pending = None;
+                self.confirmed = false;
                 self.notice = Some(tr(bardo, Text::SharingOpened));
                 cx.emit(SharingEvent::Show(item));
             }
             Err(SharingError::NotConfirmed) => {
-                self.pending = Some(path);
+                self.pending = Some((path, None));
+                self.error = None;
+            }
+            Err(SharingError::UsedByProjects(users)) => {
+                self.pending = Some((path, Some(users)));
                 self.error = None;
             }
             Err(error) => {
@@ -909,8 +953,9 @@ impl ImportPanel {
             } else {
                 row.project_name.clone()
             };
+            // A template is named by its kind, its project below.
             let title = if row.name.is_empty() {
-                project.clone()
+                row_title(bardo, row)
             } else {
                 row.name.clone()
             };
@@ -943,14 +988,12 @@ impl ImportPanel {
                                 .min_w_0()
                                 .flex_1()
                                 .child(div().font_semibold().child(SharedString::from(title)))
-                                .when(!row.name.is_empty(), |column| {
-                                    column.child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(muted)
-                                            .child(SharedString::from(project)),
-                                    )
-                                }),
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(muted)
+                                        .child(SharedString::from(project)),
+                                ),
                         )
                         .child(button(CopyKind::Linked, Text::SharingImportLinked))
                         .child(button(
@@ -989,6 +1032,14 @@ impl ImportPanel {
     }
 }
 
+/// A row's title: the item's name, or a template's kind.
+fn row_title(bardo: &Bardo, row: &ShareableItem) -> String {
+    match row.item {
+        LibraryItem::Template { kind, .. } => bardo.text(Text::TemplateKindName(kind)).into_owned(),
+        _ => row.name.clone(),
+    }
+}
+
 fn copy_code(copy: CopyKind) -> &'static str {
     match copy {
         CopyKind::Linked => "linked",
@@ -1005,40 +1056,60 @@ impl Render for ImportPanel {
         let bardo = self.bardo.read(cx);
         let danger = look(cx).tokens.danger;
         let id = self.id;
-        let pending = self.pending.is_some().then(|| {
-            v_flex()
-                .gap_2()
-                .child(kit::notice(
-                    Tone::Warning,
-                    tr(bardo, Text::SharingConfirmPictures),
-                    cx,
-                ))
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .flex_wrap()
-                        .child(
-                            Checkbox::new(ElementId::Name(format!("{id}-confirm-pictures").into()))
+        let pending = self.pending.as_ref().map(|(_, users)| {
+            let open = Button::new(ElementId::Name(format!("{id}-open-confirmed").into()))
+                .small()
+                .label(tr(bardo, Text::SharingOpenFile))
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    if let Some((path, users)) = this.pending.clone() {
+                        // The projects were shown: opening goes ahead.
+                        if users.is_some() {
+                            this.confirmed = true;
+                        }
+                        this.open_file(path, cx);
+                    }
+                }));
+            match users {
+                None => v_flex()
+                    .gap_2()
+                    .child(kit::notice(
+                        Tone::Warning,
+                        tr(bardo, Text::SharingConfirmPictures),
+                        cx,
+                    ))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .flex_wrap()
+                            .child(
+                                Checkbox::new(ElementId::Name(
+                                    format!("{id}-confirm-pictures").into(),
+                                ))
                                 .checked(self.confirmed)
                                 .label(tr(bardo, Text::SharingConfirmPicturesCheck))
-                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                    this.confirmed = *checked;
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new(ElementId::Name(format!("{id}-open-confirmed").into()))
-                                .small()
-                                .primary()
-                                .label(tr(bardo, Text::SharingOpenFile))
-                                .disabled(!self.confirmed)
-                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                    if let Some(path) = this.pending.clone() {
-                                        this.open_file(path, cx);
-                                    }
-                                })),
-                        ),
-                )
+                                .on_click(cx.listener(
+                                    |this, checked: &bool, _, cx| {
+                                        this.confirmed = *checked;
+                                        cx.notify();
+                                    },
+                                )),
+                            )
+                            .child(open.primary().disabled(!self.confirmed)),
+                    ),
+                Some(users) => v_flex()
+                    .gap_2()
+                    .child(kit::notice(
+                        Tone::Warning,
+                        tr(bardo, Text::SharingGlobalUsedBy),
+                        cx,
+                    ))
+                    .children(users.iter().map(|user| {
+                        div()
+                            .text_sm()
+                            .child(SharedString::from(format!("• {user}")))
+                    }))
+                    .child(h_flex().child(open.warning())),
+            }
         });
         let error = self
             .error

@@ -69,6 +69,9 @@ pub enum SharingError {
     /// them.
     #[error("the pictures' use was not confirmed")]
     NotConfirmed,
+    /// The file holds another kind of item than the screen shows.
+    #[error("the file holds another kind of item")]
+    WrongKind,
     #[error(transparent)]
     File(#[from] crate::item_file::ItemFileError),
     #[error("could not read the file: {0}")]
@@ -91,9 +94,10 @@ impl SharingError {
             SharingError::SameProject => Text::SharingSameProject,
             SharingError::NameClash { .. } => Text::SharingNameClash,
             SharingError::InvalidName => Text::SharingInvalidName,
-            SharingError::UsedByProjects(_) => Text::TemplateGlobalUsedBy,
+            SharingError::UsedByProjects(_) => Text::SharingGlobalUsedBy,
             SharingError::FolderUnreachable => Text::SharingFolderUnreachable,
             SharingError::NotConfirmed => Text::SharingConfirmPictures,
+            SharingError::WrongKind => Text::SharingWrongKind,
             SharingError::File(error) => error.message(),
             SharingError::Unreadable(_) => Text::SharingFileUnreadable,
             SharingError::WriteFailed(_) => Text::SharingFileNotWritten,
@@ -132,16 +136,39 @@ pub(crate) struct ItemFacts {
 }
 
 /// A copy's name for `name` from `source`: `<name> (<source>)`, then
-/// numbered until it is free.
-pub(crate) fn suggested_name(name: &str, source: &str, taken: impl Fn(&str) -> bool) -> String {
-    let first = format!("{name} ({source})");
-    if !taken(&first) {
-        return first;
-    }
-    (2..)
-        .map(|n| format!("{name} ({source}) {n}"))
+/// `<name> (<source> 2)` and on until it is free, cut to `max` characters.
+pub(crate) fn suggested_name(
+    name: &str,
+    source: &str,
+    max: usize,
+    taken: impl Fn(&str) -> bool,
+) -> String {
+    // A long source leaves room for at least half of the name.
+    let source: String = source.chars().take(max / 2).collect();
+    let source = source.trim_end();
+    (1..)
+        .map(|n| {
+            let tag = if n == 1 {
+                format!(" ({source})")
+            } else {
+                format!(" ({source} {n})")
+            };
+            let room = max.saturating_sub(tag.chars().count());
+            let base: String = name.chars().take(room).collect();
+            format!("{}{tag}", base.trim_end())
+        })
         .find(|candidate| !taken(candidate))
         .expect("a free name")
+}
+
+/// The longest name an item of `kind` may have.
+pub(crate) fn max_name_chars(kind: LibraryKind) -> usize {
+    match kind {
+        LibraryKind::Narrator => bardo_domain::PersonaDetails::MAX_NAME_CHARS,
+        LibraryKind::Product => bardo_domain::ProductBrief::MAX_NAME_CHARS,
+        LibraryKind::World(_) => bardo_domain::WorldItemDetails::MAX_NAME_CHARS,
+        LibraryKind::Template => usize::MAX,
+    }
 }
 
 impl Bardo {
@@ -286,7 +313,8 @@ impl Bardo {
                 Some(project) => self.project_name(project),
                 None => self.text(Text::LibraryGlobalSource).into_owned(),
             };
-            let suggestion = suggested_name(&facts.name, &source, |candidate| {
+            let max = max_name_chars(facts.kind);
+            let suggestion = suggested_name(&facts.name, &source, max, |candidate| {
                 self.name_taken(into, facts.kind, candidate).unwrap_or(true)
             });
             return Err(SharingError::NameClash { suggestion });
@@ -356,6 +384,11 @@ impl Bardo {
         }
         if shareable {
             self.refuse_linked(item)?;
+        } else if let LibraryItem::World(id) = item
+            && !self.world_book.follow_pictures(id)
+        {
+            // Copies turned independent keep only what reached them.
+            return Err(SharingError::FolderUnreachable);
         }
         self.world_book.sharing.set_shareable(item, shareable)?;
         tracing::info!(shareable, "marked a library item");
@@ -365,13 +398,24 @@ impl Bardo {
     /// The shareable items of `kind` that the open project may import:
     /// every other project's, archived projects' too.
     pub fn importable_items(&self, kind: LibraryKind) -> Result<Vec<ShareableItem>, SharingError> {
-        let open = self.open_project_id()?;
+        let open = self
+            .open_project_id()?
+            .ok_or(SharingError::ProjectNotFound)?;
+        self.importable_items_for(kind, open)
+    }
+
+    /// The shareable items of `kind` that `project` may import.
+    pub fn importable_items_for(
+        &self,
+        kind: LibraryKind,
+        project: ProjectId,
+    ) -> Result<Vec<ShareableItem>, SharingError> {
         Ok(self
             .world_book
             .sharing
             .shareable_items(self.profile.id, kind)?
             .into_iter()
-            .filter(|item| Some(item.project) != open)
+            .filter(|item| item.project != project)
             .collect())
     }
 
@@ -387,17 +431,31 @@ impl Bardo {
         let open = self
             .open_project_id()?
             .ok_or(SharingError::ProjectNotFound)?;
+        self.import_item_into(item, open, copy, name)
+    }
+
+    /// [`Bardo::import_item`] into `into`, the project the screen shows.
+    pub fn import_item_into(
+        &self,
+        item: LibraryItem,
+        into: ProjectId,
+        copy: CopyKind,
+        name: Option<&str>,
+    ) -> Result<LibraryItem, SharingError> {
+        if !self.own_project_exists(into)? {
+            return Err(SharingError::ProjectNotFound);
+        }
         let facts = self.item_facts(item)?;
         if facts.owner.is_none() {
             return Err(SharingError::NotShareable);
         }
-        if facts.owner == Some(open) {
+        if facts.owner == Some(into) {
             return Err(SharingError::SameProject);
         }
         if !self.world_book.sharing.sharing(item)?.shareable {
             return Err(SharingError::NotShareable);
         }
-        self.copy_into(item, &facts, Some(open), copy, name)
+        self.copy_into(item, &facts, Some(into), copy, name)
     }
 
     /// Copies a project's item into another project as an independent copy.
@@ -414,7 +472,12 @@ impl Bardo {
         if facts.owner == Some(to) {
             return Err(SharingError::SameProject);
         }
-        if !self.own_project_exists(to)? {
+        self.refuse_linked(item)?;
+        // An archived project is read-only: only an import source.
+        let active = self.projects.project(to)?.is_some_and(|found| {
+            found.owner == self.profile.id && found.state == bardo_domain::ProjectState::Active
+        });
+        if !active {
             return Err(SharingError::ProjectNotFound);
         }
         self.copy_into(item, &facts, Some(to), CopyKind::Independent, name)
@@ -432,8 +495,13 @@ impl Bardo {
         if let LibraryItem::World(_) = item {
             // The pictures are copied right after; a folder that cannot be
             // reached would leave the copy without them.
-            let folder = self.world_book.folder(into);
-            if !self.world_book.files.reachable(&folder) {
+            let (source, target) = (
+                self.world_book.folder(facts.owner),
+                self.world_book.folder(into),
+            );
+            if !self.world_book.files.reachable(&source)
+                || !self.world_book.files.reachable(&target)
+            {
                 return Err(SharingError::FolderUnreachable);
             }
         }
@@ -454,9 +522,12 @@ impl Bardo {
         if !self.world_book.sharing.sharing(item)?.is_linked() {
             return Err(SharingError::NotLinked);
         }
-        if let LibraryItem::World(id) = item {
-            // Its pictures are its own from now on: the last ones arrive.
-            self.world_book.follow_into(id);
+        if let LibraryItem::World(id) = item
+            && self.world_book.follow_into(id) != PictureFollowing::Current
+        {
+            // Its pictures are its own from now on: the last ones arrive
+            // first, or it stays linked.
+            return Err(SharingError::FolderUnreachable);
         }
         self.world_book.sharing.unlink(item)?;
         tracing::info!("unlinked a library item");
@@ -547,10 +618,16 @@ impl Bardo {
     /// Writes the item's file to `path`, which the user chose.
     pub fn save_item_file(&self, item: LibraryItem, path: &Path) -> Result<(), SharingError> {
         let text = self.item_file(item)?;
-        std::fs::write(path, text).map_err(|error| {
-            tracing::warn!(%error, "could not write an item file");
-            SharingError::WriteFailed(error.to_string())
-        })?;
+        // Written beside it, then put in place: a failed write never
+        // leaves a cut file, nor spoils one that was there.
+        let partial = path.with_extension("bardo-item-partial");
+        std::fs::write(&partial, text)
+            .and_then(|()| std::fs::rename(&partial, path))
+            .map_err(|error| {
+                let _ = std::fs::remove_file(&partial);
+                tracing::warn!(%error, "could not write an item file");
+                SharingError::WriteFailed(error.to_string())
+            })?;
         tracing::info!("saved an item file");
         Ok(())
     }
@@ -565,6 +642,22 @@ impl Bardo {
         confirmed: bool,
     ) -> Result<LibraryItem, SharingError> {
         let text = crate::item_file::read_file(path)?;
+        self.open_item_text(&text, into, confirmed)
+    }
+
+    /// [`Bardo::open_item_file`] from the screen of `kind`: a file that
+    /// holds another kind of item is refused (`WrongKind`).
+    pub fn open_item_file_as(
+        &self,
+        path: &Path,
+        kind: LibraryKind,
+        into: Option<ProjectId>,
+        confirmed: bool,
+    ) -> Result<LibraryItem, SharingError> {
+        let text = crate::item_file::read_file(path)?;
+        if !crate::item_file::holds(&text, kind) {
+            return Err(SharingError::WrongKind);
+        }
         self.open_item_text(&text, into, confirmed)
     }
 
@@ -706,11 +799,15 @@ mod tests {
 
     #[test]
     fn a_suggested_name_names_its_source_then_counts() {
-        assert_eq!(suggested_name("Ana", "Space", |_| false), "Ana (Space)");
+        assert_eq!(suggested_name("Ana", "Space", 80, |_| false), "Ana (Space)");
         assert_eq!(
-            suggested_name("Ana", "Space", |name| name == "Ana (Space)"),
-            "Ana (Space) 2"
+            suggested_name("Ana", "Space", 80, |name| name == "Ana (Space)"),
+            "Ana (Space 2)"
         );
+        let long = "N".repeat(80);
+        let suggested = suggested_name(&long, &"P".repeat(100), 80, |_| false);
+        assert_eq!(suggested.chars().count(), 80);
+        assert!(suggested.starts_with("NNNN") && suggested.ends_with("P)"));
     }
 
     #[test]
@@ -843,6 +940,19 @@ mod tests {
             app.item_sharing(LibraryItem::World(copy)).unwrap().pictures,
             PictureFollowing::WaitingForFolder
         );
+        // Turned independent now, it would lose the picture for good.
+        assert!(matches!(
+            app.unlink_item(LibraryItem::World(copy)),
+            Err(SharingError::FolderUnreachable)
+        ));
+        assert!(matches!(
+            app.set_item_shareable(item, false),
+            Err(SharingError::FolderUnreachable)
+        ));
+        assert!(matches!(
+            app.delete_world_item(harbour.id),
+            Err(WorldError::FolderNotFound)
+        ));
         h.world_files.plug(&sea_folder);
         app.follow_world_pictures();
         assert_eq!(kept_file(&app, copy), Some(png(3)));
@@ -1003,6 +1113,25 @@ mod tests {
             app.remove_product_logo(lamp_copy),
             Err(ProductError::Linked)
         ));
+        assert!(matches!(
+            app.confirm_claim(lamp_copy, bardo_domain::ClaimId::new()),
+            Err(crate::SheetError::Linked)
+        ));
+        assert!(matches!(
+            app.remove_look_asset(copy, Provider::BytePlus),
+            Err(crate::LookError::Linked)
+        ));
+        // A linked copy is exported by its original only.
+        let desert = project(&app, "Desert");
+        assert!(matches!(
+            app.export_item(LibraryItem::Product(lamp_copy), desert, None),
+            Err(SharingError::Linked)
+        ));
+        app.archive_project(desert, false).unwrap();
+        assert!(matches!(
+            app.export_item(LibraryItem::Product(lamp.id), desert, None),
+            Err(SharingError::ProjectNotFound)
+        ));
     }
 
     #[test]
@@ -1083,6 +1212,37 @@ mod tests {
         // Its own template again, numbered after the retired versions.
         let again = app.make_project_template(kind, space).unwrap();
         assert_eq!(again.number, 3);
+    }
+
+    #[test]
+    fn an_item_file_opens_on_its_own_screen_and_a_global_template_asks_first() {
+        let h = Harness::new();
+        let app = h.start();
+        let (space, sea) = two_projects(&app);
+        let ana = narrator_in(&app, space, "Ana");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ana.bardo-item");
+        app.save_item_file(LibraryItem::Narrator(ana.id), &path)
+            .unwrap();
+        assert!(matches!(
+            app.open_item_file_as(&path, LibraryKind::Product, Some(sea), false),
+            Err(SharingError::WrongKind)
+        ));
+        assert!(matches!(
+            app.open_item_file_as(&path, LibraryKind::Narrator, Some(sea), false),
+            Ok(LibraryItem::Narrator(_))
+        ));
+
+        let kind = TemplateKind::Script;
+        app.make_project_template(kind, space).unwrap();
+        project(&app, "Desert");
+        let text = app.item_file(LibraryItem::template(space, kind)).unwrap();
+        let Err(SharingError::UsedByProjects(users)) = app.open_item_text(&text, None, false)
+        else {
+            panic!("asks before changing the global template");
+        };
+        assert!(users.contains(&"Desert".to_owned()));
+        app.open_item_text(&text, None, true).unwrap();
     }
 
     #[test]
@@ -1167,7 +1327,7 @@ mod tests {
         app.save_template_in(kind, Some(space), (&changed, current.body.prompt()), true)
             .unwrap();
         let text = app.item_file(LibraryItem::template(space, kind)).unwrap();
-        app.open_item_text(&text, None, false).unwrap();
+        app.open_item_text(&text, None, true).unwrap();
         assert_eq!(
             app.current_template_in(kind, None)
                 .unwrap()

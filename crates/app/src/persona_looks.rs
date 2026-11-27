@@ -567,7 +567,7 @@ impl Bardo {
         kind: LookAssetKind,
         input: &str,
     ) -> Result<LookAsset, LookError> {
-        self.look_persona(persona)?;
+        self.look_to_change(persona)?;
         if !self.asset_providers().contains(&provider) {
             return Err(LookError::NoAssetLibrary(provider));
         }
@@ -587,7 +587,7 @@ impl Bardo {
         persona: PersonaId,
         provider: Provider,
     ) -> Result<(), LookError> {
-        self.look_persona(persona)?;
+        self.look_to_change(persona)?;
         Ok(self.personas.save_look_asset(persona, provider, None)?)
     }
 

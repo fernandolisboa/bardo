@@ -130,4 +130,4 @@ Os ângulos de anúncio aparecem aqui e não em [Temas](themes-ranking.md), e um
 <a id="sharing"></a>
 ## Compartilhar com outros projetos
 
-Abaixo das ações, **Compartilhamento** marca um produto como **Compartilhável** para seus outros projetos, exporta uma cópia para um deles, torna o produto global ou o salva em arquivo com as imagens e o logo; **Importar de outro projeto** e **Abrir arquivo de item…**, no topo, trazem um para cá. Uma cópia vinculada segue toda mudança do original, inclusive a ficha e a imagem de conceito guardada, e não pode ser editada aqui. Veja [Compartilhar entre projetos](global-library.md#sharing).
+Abaixo das ações, **Compartilhamento** marca um produto como **Compartilhável** para seus outros projetos, exporta uma cópia para um deles, torna o produto global ou o salva em arquivo com as imagens e o logo; **Importar de outro projeto** e **Abrir arquivo de item…**, no topo, trazem um para cá. Uma cópia vinculada segue toda mudança do original, inclusive a ficha e a imagem de conceito mantida, e não pode ser editada aqui. Veja [Compartilhar entre projetos](global-library.md#sharing).
