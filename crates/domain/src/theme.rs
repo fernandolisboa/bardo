@@ -348,7 +348,17 @@ impl Theme {
     pub fn approve(&mut self, now: SystemTime) -> Result<VideoProject, ThemeNotSuggested> {
         self.ensure_suggested()?;
         self.status = ThemeStatus::Approved;
-        Ok(VideoProject {
+        Ok(self.video(now))
+    }
+
+    /// A new video of an approved theme whose video the user deleted
+    /// (#336); `None` for a theme that is not approved.
+    pub fn start_again(&self, now: SystemTime) -> Option<VideoProject> {
+        (self.status == ThemeStatus::Approved).then(|| self.video(now))
+    }
+
+    fn video(&self, now: SystemTime) -> VideoProject {
+        VideoProject {
             id: VideoProjectId::new(),
             owner: self.owner,
             channel: self.channel,
@@ -363,7 +373,7 @@ impl Theme {
             length: None,
             style: None,
             product: None,
-        })
+        }
     }
 }
 

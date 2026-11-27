@@ -34,6 +34,7 @@ mod product_sheet;
 mod products;
 mod project_switcher;
 mod projects;
+mod removal;
 mod research;
 mod settings;
 mod settings_transfer;

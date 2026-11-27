@@ -363,6 +363,32 @@ pub trait ProjectFolders: Send + Sync {
         to: &Path,
         progress: &mut dyn FnMut(u64, u64) -> bool,
     ) -> Result<FolderMove, FolderMoveError>;
+
+    /// The bytes of every file under `path` (a folder or a file); 0 when
+    /// it is not there.
+    fn size(&self, path: &Path) -> std::io::Result<u64>;
+
+    /// Packs every folder in `videos` into the zip file `archive` (issue
+    /// #336), reads it back to check each file whole, and only then
+    /// removes the folders packed. `progress` gets the bytes done and the
+    /// total, and stops it when it returns false: nothing is removed and
+    /// the partial archive goes. An archive already there is replaced.
+    fn pack(
+        &self,
+        videos: &Path,
+        archive: &Path,
+        progress: &mut dyn FnMut(u64, u64) -> bool,
+    ) -> Result<(), FolderMoveError>;
+
+    /// Unpacks the zip file `archive` into `videos`, checks each file
+    /// against the archive, and only then removes the archive. A run cut
+    /// short starts over; files it left are written again.
+    fn unpack(
+        &self,
+        archive: &Path,
+        videos: &Path,
+        progress: &mut dyn FnMut(u64, u64) -> bool,
+    ) -> Result<(), FolderMoveError>;
 }
 
 #[cfg(test)]

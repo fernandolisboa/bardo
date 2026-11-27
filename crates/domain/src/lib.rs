@@ -102,6 +102,7 @@ mod provider_key;
 mod publication;
 mod redaction;
 mod reel;
+mod removal;
 mod render;
 mod repository;
 mod research;
@@ -379,6 +380,10 @@ pub use reel::{
     Container, LIMIT_RECHECK, Mp4Layout, NextTry, PublishingLimit, REEL_FPS, REEL_MAX_BYTES,
     REEL_MAX_DURATION, REEL_MAX_WIDTH, REEL_MIN_DURATION, ReelFile, ReelSpecProblem, check_reel,
     format_cover_time, mp4_layout, parse_cover_time,
+};
+pub use removal::{
+    DeletedKind, DeletedWork, Discard, Disposal, PACKED_VIDEOS, PermanentReason, RemovalBlock,
+    RemovalRepository, Trash, confirms_name,
 };
 pub use render::{
     CutFacts, Gate, GateLevel, LOUDNESS_GAIN_WARNING, LOUDNESS_TOLERANCE, MeasuredLoudness, Render,

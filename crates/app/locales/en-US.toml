@@ -325,6 +325,8 @@ waits_until = "Waits until {when}"
 
 [job.kind]
 move_media = "Media move"
+pack_media = "Media compression"
+unpack_media = "Media unpacking"
 placement_export = "Export for ads"
 render = "Final render"
 countdown = "Test countdown"
@@ -2834,6 +2836,7 @@ failed = "{network} didn't take the change. Try again."
 not_allowed = "{network} takes no publish time for this video: only a private video that was never public can be scheduled. Change it on {network}."
 
 [date_time]
+date = "{month} {day}, {year}"
 format = "{weekday}, {month} {day}, {year}, {time}"
 time = "{hour12}:{minute} {period}"
 am = "AM"
@@ -3013,6 +3016,10 @@ name = "Videos tour"
 [tour.projects.switcher]
 title = "Your video"
 body = "The video you are working on, with the menu that switches to another video of the channel. The channel picker beside Videos lists another channel's videos."
+
+[tour.projects.archive]
+title = "Archive or delete it"
+body = "Archive… hides this video from the list and makes it read-only: no job of it runs and nothing of it publishes, while its published posts go on syncing. Show archived lists the archived videos, to unarchive one. Delete… asks for the name, sends its folder to the Recycle Bin and gives its idea back to Themes; nothing is deleted on the networks."
 
 [tour.projects.narrator]
 title = "Who narrates it"
@@ -5093,3 +5100,82 @@ avoided_sync = "Your Documents folder is synced by OneDrive, so Bardo uses your 
 synced = "This folder is synced by OneDrive: syncing gigabytes of clips while they are written fails and fills your cloud storage."
 not_saved = "Couldn't save the base folder. Try again."
 move_hint = "Media of videos made before project folders, and of channels moved to another project, moves into its project's folder by itself. Follow it in Jobs."
+
+[removal]
+not_found = "That project or video is gone."
+blocked = "Clear these first:"
+wrong_state = "It changed meanwhile. Look again."
+not_saved = "Could not save. Try again."
+job_waits = "Waits: its project or video is archived"
+
+[removal_block]
+scheduled_post = "A post waits for its time in Bardo. Send it now or cancel its schedule on the video's Publish stage."
+held_on_network = "A post waits on its network to go public at its time. Make it public or remove it on the network."
+active_job = "A job is queued or running. Wait for it or cancel it in Jobs."
+
+[switcher_removal]
+archive = "Archive project…"
+delete = "Delete project…"
+archived = "Archived projects ({n})"
+back = "Back"
+
+[archive]
+project_title = "Archive {name}"
+project_hint = "It leaves the switcher and becomes read-only: no job runs and nothing publishes. Its published posts go on syncing their metrics and its accounts stay connected. Bring it back from Archived projects."
+compress = "Compress media"
+compress_hint = "Packs its videos' folders into Videos.zip in the project folder, checked before they are removed. Unarchiving unpacks them first. The World folder is never packed."
+confirm = "Archive"
+video_title = "Archive {name}"
+video_hint = "It leaves the Videos list and becomes read-only: no job runs and nothing publishes. Its published posts go on syncing. Show archived videos to bring it back."
+
+[archived]
+title = "Archived projects"
+empty = "No archived projects."
+hint = "Read-only and out of the way. Unarchive one to work on it again; a star it had comes back."
+packed = "Media compressed"
+busy = "Packing or unpacking its media…"
+unarchive = "Unarchive"
+unpacking = "Unpacking its media first. It comes back when that job ends."
+
+[delete]
+action = "Delete…"
+project_title = "Delete {name}"
+video_title = "Delete {name}"
+project_hint = "Removes the project from Bardo with its channels, ideas and {videos} videos, and disconnects its network accounts ({connected} connected). Nothing is deleted on the networks, and its costs keep its name."
+video_hint = "Removes the video from Bardo. Its idea goes back to approved, with no video, and can start another. Nothing is deleted on the networks, and its costs keep its name."
+folder_recycle = "Its folder ({size}) goes to the Recycle Bin: {folder}"
+folder_permanent = "Its folder ({size}) will be deleted permanently, not sent to the Recycle Bin: {folder}. {reason}"
+no_folder = "Its folder was not found, so only its records go."
+type_name = "Type {name} to confirm"
+permanently = "Delete permanently"
+permanently_hint = "Skips the Recycle Bin: the folder can't be restored."
+confirm = "Delete"
+running = "Deleting…"
+name_mismatch = "Type the name exactly as shown."
+folder_not_removed = "The folder could not be removed (a file may be open). Nothing was deleted."
+not_disconnected = "An account could not be disconnected. Its folder is gone; try again to finish."
+
+[delete.permanent_reason]
+removable_drive = "It is on a removable drive, which has no Recycle Bin."
+network_drive = "It is on a network drive, which has no Recycle Bin."
+larger_than_bin = "It is larger than this drive's Recycle Bin holds."
+bin_off = "This drive's Recycle Bin is turned off."
+
+[videos_removal]
+show_archived = "Show archived"
+archived_empty = "No archived videos in this channel."
+archive = "Archive…"
+archived_tag = "Archived"
+archived_notice = "This video is archived: it is read-only, no job of it runs and nothing of it publishes. Unarchive it to work on it again."
+
+[costs_deleted]
+projects = "Deleted projects"
+deleted_on = "{name} (deleted on {date})"
+project_forgotten = "Deleted project #{id}"
+video_forgotten = "Deleted video #{id}"
+forget = "Forget the name"
+forget_hint = "Shows it by its number from now on. Its amounts stay as they are."
+
+[themes_restart]
+start = "Start a video"
+no_video = "Its video was deleted."

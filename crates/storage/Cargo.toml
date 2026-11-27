@@ -20,8 +20,13 @@ toml.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 zip.workspace = true
+# A deleted project's or video's folder goes to the Recycle Bin (#336).
+trash = "5"
 
 [target.'cfg(windows)'.dependencies]
+# Whether a folder's drive is removable, and how much its bin holds (#336).
+sysinfo = { version = "0.31", default-features = false, features = ["disk"] }
+windows-registry = "0.6"
 keyring-core = "1"
 windows-native-keyring-store = { version = "1", default-features = false }
 

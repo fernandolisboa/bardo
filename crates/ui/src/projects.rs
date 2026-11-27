@@ -24,10 +24,10 @@ use bardo_app::bardo_domain::{
 use bardo_app::{
     Bardo, BudgetConsent, ChaptersView, Control, Destination, ExportSummary, ExportView,
     MusicPromptView, MusicTrackPlayer, MusicTracksView, NarrationClaims, NarrationError,
-    NarrationPlayer, NarrationView, PicturesConsent, ProductionView, Recording, RenderReview,
-    RenderSummary, ScenesView, ScriptError, ScriptView, SpendEstimate, Stage, StageState,
-    StageStatus, Text, ThumbnailView, TourAnchor, UploadChoices, UploadReview, opening_stage,
-    project_stages,
+    NarrationPlayer, NarrationView, PicturesConsent, ProductionView, Recording, Removable,
+    RenderReview, RenderSummary, ScenesView, ScriptError, ScriptView, SpendEstimate, Stage,
+    StageState, StageStatus, Text, ThumbnailView, TourAnchor, UploadChoices, UploadReview,
+    opening_stage, project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
@@ -37,7 +37,7 @@ use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
-    ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex,
+    ActiveTheme as _, IconName, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -48,6 +48,7 @@ use gpui_kit::{
 use crate::appearance::look;
 use crate::kit::{self, Tone};
 use crate::parts::{Header, ScreenParts, Stages};
+use crate::removal::{RemovalEvent, RemovalMode, RemovalPanel};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 use crate::{guide, layout};
@@ -147,6 +148,12 @@ pub struct ProjectsScreen {
     projects: Vec<VideoProject>,
     /// The listed projects that are concepts (#280), read as they load.
     concepts: std::collections::HashSet<VideoProjectId>,
+    /// The channel's archived videos (#336).
+    archived: std::collections::HashSet<VideoProjectId>,
+    /// The list shows the archived videos instead of the others.
+    show_archived: bool,
+    /// The archive or delete dialog of the open video, while open.
+    removal: Option<(Entity<RemovalPanel>, Subscription)>,
     project: Option<VideoProjectId>,
     /// The stage on screen.
     stage: Stage,
@@ -587,6 +594,9 @@ impl ProjectsScreen {
             channel: None,
             projects: Vec::new(),
             concepts: Default::default(),
+            archived: Default::default(),
+            show_archived: false,
+            removal: None,
             project: None,
             stage: Stage::Script,
             selected_scene: None,
@@ -789,6 +799,12 @@ impl ProjectsScreen {
         else {
             return;
         };
+        // An archived video is listed with the archived ones.
+        let archived = self.bardo.read(cx).archived_videos().contains(&project);
+        if archived != self.show_archived {
+            self.show_archived = archived;
+            self.channel = None;
+        }
         if self.channel != Some(channel) {
             self.channel = Some(channel);
             self.channel_select.update(cx, |select, cx| {
@@ -811,13 +827,22 @@ impl ProjectsScreen {
         let Some(channel) = self.channel else {
             return;
         };
+        let archived = self.bardo.read(cx).archived_videos();
+        let show_archived = self.show_archived;
         match self.bardo.read(cx).video_projects(channel) {
-            Ok(projects) => self.projects = projects,
+            // The list shows the archived videos, or the others (#336).
+            Ok(projects) => {
+                self.projects = projects
+                    .into_iter()
+                    .filter(|project| archived.contains(&project.id) == show_archived)
+                    .collect();
+            }
             Err(_) => {
                 self.projects.clear();
                 self.error = Some(Text::ProjectsNotLoaded);
             }
         }
+        self.archived = archived;
         let bardo = self.bardo.read(cx);
         self.concepts = self
             .projects
@@ -840,6 +865,7 @@ impl ProjectsScreen {
         cx: &mut Context<Self>,
     ) {
         self.project = id;
+        self.removal = None;
         self.loaded = None;
         self.page_scroll.set_offset(point(px(0.), px(0.)));
         // The cap box is filled again from the next project's own cap.
@@ -1853,6 +1879,82 @@ impl ProjectsScreen {
         cx.notify();
     }
 
+    /// Shows the archived videos, or the others, and opens the first.
+    fn toggle_archived(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_archived = !self.show_archived;
+        self.project = None;
+        self.load_projects(cx);
+        let first = self.projects.first().map(|project| project.id);
+        self.select_project(first, window, cx);
+    }
+
+    /// Opens the archive or delete dialog of the open video.
+    fn start_removal(&mut self, mode: RemovalMode, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.view.as_ref().map(|view| &view.project) else {
+            return;
+        };
+        let (id, name) = (project.id, project.title.clone());
+        let bardo = self.bardo.clone();
+        let panel =
+            cx.new(|cx| RemovalPanel::new(bardo, Removable::Video(id), mode, name, window, cx));
+        let subscription = cx.subscribe_in(
+            &panel,
+            window,
+            |this, _, event: &RemovalEvent, window, cx| {
+                this.removal = None;
+                if let RemovalEvent::Done(_) = event {
+                    // Gone from this list: the next one opens.
+                    this.load_projects(cx);
+                    let next = this
+                        .project
+                        .filter(|id| this.projects.iter().any(|p| p.id == *id));
+                    let next = next.or_else(|| this.projects.first().map(|project| project.id));
+                    this.select_project(next, window, cx);
+                }
+                cx.notify();
+            },
+        );
+        self.removal = Some((panel, subscription));
+        cx.notify();
+    }
+
+    fn unarchive(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        let unarchived = self.bardo.update(cx, |bardo, cx| {
+            let unarchived = bardo.unarchive_video(id);
+            cx.notify();
+            unarchived
+        });
+        match unarchived {
+            Ok(()) => {
+                self.load_projects(cx);
+                let first = self.projects.first().map(|project| project.id);
+                self.select_project(first, window, cx);
+            }
+            Err(error) => {
+                self.error = Some(error.message());
+                cx.notify();
+            }
+        }
+    }
+
+    /// *Show archived*, beside the channel.
+    fn archived_toggle(&self, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        Button::new("videos-show-archived")
+            .ghost()
+            .small()
+            .icon(IconName::Inbox)
+            .label(tr(bardo, Text::VideosShowArchived))
+            .selected(self.show_archived)
+            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                this.toggle_archived(window, cx);
+            }))
+            .into_any_element()
+    }
+
     /// The header: Projects › channel, the project and its switcher, its
     /// line, and who narrates it.
     fn header(&self, cx: &mut Context<Self>) -> Header {
@@ -1861,9 +1963,11 @@ impl ProjectsScreen {
         // no group captions, so the stage below still shows (#330).
         let compact = crate::layout::room(cx).window < COMPACT_BAR_BELOW;
         let mode = self.render_mode(compact, cx);
+        let archived_toggle = self.archived_toggle(cx);
         let bardo = self.bardo.read(cx);
         let Some(project) = self.view.as_ref().map(|view| &view.project) else {
             let mut header = Header::new(tr(bardo, Text::DestinationName(Destination::Videos)));
+            header.actions.push(archived_toggle);
             header.trail = vec![
                 div()
                     .w(px(200.))
@@ -1878,6 +1982,7 @@ impl ProjectsScreen {
         };
         let current = project.id;
         let concept = self.concepts.contains(&current);
+        let archived = self.archived.contains(&current);
         let projects: Vec<(VideoProjectId, SharedString)> = self
             .projects
             .iter()
@@ -1931,6 +2036,13 @@ impl ProjectsScreen {
                             .truncate()
                             .child(SharedString::from(project.title.clone())),
                     )
+                    .when(archived, |row| {
+                        row.child(div().flex_none().child(kit::status(
+                            Tone::Neutral,
+                            tr(bardo, Text::ArchivedTag),
+                            cx,
+                        )))
+                    })
                     .when(concept, |row| {
                         let hint = tr(bardo, Text::ConceptBadgeHint);
                         row.child(
@@ -1991,6 +2103,46 @@ impl ProjectsScreen {
                 .label(tr(bardo, Text::ShowFolder))
                 .on_click(move |_, _, cx| cx.open_with_system(&folder))
                 .into_any_element(),
+        );
+        // Show archived, archive or bring it back, and delete it (#336).
+        let archive = if archived {
+            Button::new("video-unarchive")
+                .ghost()
+                .small()
+                .icon(IconName::Undo)
+                .label(tr(bardo, Text::Unarchive))
+                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.unarchive(window, cx);
+                }))
+        } else {
+            Button::new("video-archive")
+                .ghost()
+                .small()
+                .icon(IconName::Inbox)
+                .label(tr(bardo, Text::ArchiveVideoAction))
+                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.start_removal(RemovalMode::Archive, window, cx);
+                }))
+        };
+        header.actions.push(
+            kit::anchor(
+                TourAnchor::Control(Control::VideoRemoval),
+                h_flex()
+                    .gap_1()
+                    .child(archived_toggle)
+                    .child(archive)
+                    .child(
+                        Button::new("video-delete")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Delete)
+                            .label(tr(bardo, Text::DeleteAction))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.start_removal(RemovalMode::Delete, window, cx);
+                            })),
+                    ),
+            )
+            .into_any_element(),
         );
         header.info = guide::header_tours(
             bardo,
@@ -3351,9 +3503,17 @@ impl Render for ProjectsScreen {
                 Some(error) => parts
                     .notices
                     .push(kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element()),
-                None if self.project.is_none() => parts
-                    .content
-                    .push(muted(cx, tr(bardo, Text::ProjectsEmpty))),
+                None if self.project.is_none() => parts.content.push(muted(
+                    cx,
+                    tr(
+                        bardo,
+                        if self.show_archived {
+                            Text::VideosArchivedEmpty
+                        } else {
+                            Text::ProjectsEmpty
+                        },
+                    ),
+                )),
                 None => {}
             }
             return layout::screen(parts, cx);
@@ -3396,6 +3556,20 @@ impl Render for ProjectsScreen {
                 }))
                 .collect();
         parts.notices.splice(0..0, general);
+        // An archived video says it is read-only; the dialog leads (#336).
+        if self.project.is_some_and(|id| self.archived.contains(&id)) {
+            parts.notices.insert(
+                0,
+                kit::notice(Tone::Info, tr(bardo, Text::VideoArchivedNotice), cx)
+                    .into_any_element(),
+            );
+        }
+        if let Some((panel, _)) = &self.removal {
+            parts.notices.insert(
+                0,
+                kit::card(cx).p_4().child(panel.clone()).into_any_element(),
+            );
+        }
         layout::screen(parts, cx)
     }
 }

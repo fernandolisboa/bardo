@@ -305,6 +305,8 @@ impl Bardo {
         let channels = self.channels()?;
         let mut videos = Vec::new();
         let mut ideas = IdeasWaiting::default();
+        // An archived video is put away: it is not in progress (#336).
+        let archived = self.archived_videos();
         for channel in &channels {
             let projects = self.themes.projects(channel.id)?;
             let started: HashSet<_> = projects.iter().map(|video| video.theme).collect();
@@ -319,6 +321,9 @@ impl Bardo {
                 }
             }
             for video in projects {
+                if archived.contains(&video.id) {
+                    continue;
+                }
                 // A video already posted is left out before its stages are
                 // read: those are the costly part.
                 let posts = Posts::of(&self.publications.publications(video.id)?);

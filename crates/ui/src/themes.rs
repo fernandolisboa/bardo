@@ -80,6 +80,9 @@ pub struct ThemesScreen {
     error: Option<Text>,
     /// The title of the project the last approval started.
     started: Option<String>,
+    /// Approved ideas whose video was deleted, which may start another
+    /// (#336).
+    without_video: std::collections::HashSet<ThemeId>,
     /// A run held back at a budget: whether it only ranks, and what it
     /// would cost.
     budget_ask: Option<(bool, SpendEstimate)>,
@@ -148,6 +151,7 @@ impl ThemesScreen {
             angle,
             error: None,
             started: None,
+            without_video: Default::default(),
             budget_ask: None,
             revision,
             _poll: poll,
@@ -227,6 +231,11 @@ impl ThemesScreen {
                     self.editing = None;
                 }
                 self.view = Some(view);
+                self.without_video = self
+                    .bardo
+                    .read(cx)
+                    .themes_without_video(id)
+                    .unwrap_or_default();
             }
             Err(_) => {
                 self.view = None;
@@ -357,6 +366,19 @@ impl ThemesScreen {
 
     fn approve(&mut self, id: ThemeId, cx: &mut Context<Self>) {
         match self.bardo.read(cx).approve_theme(id) {
+            Ok(project) => {
+                self.error = None;
+                self.started = Some(project.title);
+            }
+            Err(error) => self.error = Some(error.message()),
+        }
+        self.load(cx);
+        cx.notify();
+    }
+
+    /// Starts another video from an approved idea whose video was deleted.
+    fn start_again(&mut self, id: ThemeId, cx: &mut Context<Self>) {
+        match self.bardo.read(cx).restart_theme(id) {
             Ok(project) => {
                 self.error = None;
                 self.started = Some(project.title);
@@ -758,6 +780,29 @@ impl ThemesScreen {
         let body: AnyElement =
             match editing {
                 Some(editing) => self.render_editor(editing, cx),
+                // Its video was deleted: it may start another (#336).
+                None if approved && self.without_video.contains(&idea.id) => {
+                    let id = idea.id;
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            Button::new(("start-theme-again", ix))
+                                .primary()
+                                .small()
+                                .label(tr(bardo, Text::ThemeStartAgain))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    this.start_again(id, cx)
+                                })),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(tr(bardo, Text::ThemeNoVideo)),
+                        )
+                        .into_any_element()
+                }
                 None if approved => div().into_any_element(),
                 None => {
                     let id = idea.id;

@@ -50,6 +50,11 @@ Priority weighs fit 40%, trend 35% and the room competition leaves 25%. Past per
 
 Nothing is approved for you: an idea becomes a video only when you approve it.
 
+<a id="restart"></a>
+## When its video was deleted
+
+An approved idea whose video you [deleted](projects.md#archive) stays approved, marked **Its video was deleted**, with **Start a video**: it starts a new video project from the idea, as approving did.
+
 <a id="projects"></a>
 ## Projects started here
 

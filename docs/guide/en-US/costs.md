@@ -55,3 +55,8 @@ A generation that would call a model without a price asks before it starts and n
 ## Spend by project
 
 **By project** shows what each [project](your-projects.md) spent this month, with its color; calls made for no project, like a persona's voice sample, count as **Not for a project**. The **Project** filter under it picks whose channels and videos **By channel** and **Most expensive videos** show. It starts on the open project; the figures at the top and the budgets stay the whole profile's, since providers bill the profile. A cost keeps the names of the project, channel and video it was for, as they were when it was paid.
+
+<a id="deleted"></a>
+## Deleted projects and videos
+
+A project or video you [deleted](your-projects.md#delete) keeps its costs, under the name it had: **<name> (deleted on <date>)**. Deleted projects are grouped in one line, **Deleted projects**, that opens to list them; a deleted video shows among **Most expensive videos**. **Forget the name** shows it as **Deleted project #<number>** (or **Deleted video #<number>**) from then on. The amounts never change, so the month's total is the same before and after a deletion.

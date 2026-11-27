@@ -345,6 +345,30 @@ mod tests {
     }
 
     #[test]
+    fn a_post_bardo_will_publish_later_keeps_its_video_and_project_from_archive_and_delete() {
+        let mut s = ready();
+        schedule(&s, SystemTime::now() + 2 * DAY);
+        let video = crate::Removable::Video(s.project.id);
+        let project = crate::Removable::Project(s.app.open_project().unwrap().unwrap().id);
+        for target in [video, project] {
+            let blocks = s.app.removal_blocks(target).unwrap();
+            assert!(
+                blocks.contains(&bardo_domain::RemovalBlock::ScheduledPost),
+                "{blocks:?}"
+            );
+        }
+        assert!(matches!(
+            s.app.archive_video(s.project.id),
+            Err(crate::RemovalError::Blocked(_))
+        ));
+        let title = s.project.title.clone();
+        assert!(matches!(
+            s.app.deletion(video, &title, false),
+            Err(crate::RemovalError::Blocked(_))
+        ));
+    }
+
+    #[test]
     fn a_scheduled_reel_is_prepared_ahead_and_published_at_its_due_time() {
         let s = ready();
         let (job, due) = schedule_in(&s, Duration::from_millis(1500));

@@ -50,6 +50,11 @@ A prioridade pesa o encaixe em 40%, a tendência em 35% e o espaço que a concor
 
 O Bardo não aprova nada no seu lugar: uma ideia só vira vídeo quando você a aprova.
 
+<a id="restart"></a>
+## Quando o vídeo dela foi excluído
+
+Uma ideia aprovada cujo vídeo você [excluiu](projects.md#archive) continua aprovada, marcada com **O vídeo dela foi excluído**, e com **Começar um vídeo**: ele começa um novo projeto de vídeo a partir da ideia, como aprovar fez.
+
 <a id="projects"></a>
 ## Projetos começados aqui
 

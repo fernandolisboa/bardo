@@ -325,6 +325,8 @@ waits_until = "Aguarda até {when}"
 
 [job.kind]
 move_media = "Mudança de mídia"
+pack_media = "Compactação de mídia"
+unpack_media = "Descompactação de mídia"
 placement_export = "Exportação para anúncios"
 render = "Render final"
 countdown = "Contagem de teste"
@@ -2834,6 +2836,7 @@ failed = "O {network} não aceitou a mudança. Tente de novo."
 not_allowed = "O {network} não aceita horário de publicação para este vídeo: só um vídeo privado que nunca foi público pode ser agendado. Mude no {network}."
 
 [date_time]
+date = "{day} de {month} de {year}"
 format = "{weekday}, {day} de {month} de {year}, {time}"
 time = "{hour}:{minute}"
 am = "AM"
@@ -3013,6 +3016,10 @@ name = "Tour dos Vídeos"
 [tour.projects.switcher]
 title = "Seu vídeo"
 body = "O vídeo em que você está trabalhando, com o menu que troca para outro vídeo do canal. O seletor de canal ao lado de Vídeos lista os vídeos de outro canal."
+
+[tour.projects.archive]
+title = "Arquivar ou excluir"
+body = "Arquivar… tira este vídeo da lista e o deixa só para leitura: nenhuma tarefa dele roda e nada dele é publicado, enquanto os posts já publicados continuam sincronizando. Mostrar arquivados lista os vídeos arquivados, para desarquivar um. Excluir… pede o nome, manda a pasta para a Lixeira e devolve a ideia para Temas; nada é excluído nas redes."
 
 [tour.projects.narrator]
 title = "Quem narra"
@@ -5093,3 +5100,82 @@ avoided_sync = "Sua pasta Documentos é sincronizada pelo OneDrive, então o Bar
 synced = "Esta pasta é sincronizada pelo OneDrive: sincronizar gigabytes de clipes enquanto são gravados falha e enche seu armazenamento na nuvem."
 not_saved = "Não deu para salvar a pasta base. Tente de novo."
 move_hint = "A mídia de vídeos feitos antes das pastas de projeto, e de canais movidos para outro projeto, vai sozinha para a pasta do projeto. Acompanhe em Tarefas."
+
+[removal]
+not_found = "Esse projeto ou vídeo não existe mais."
+blocked = "Resolva isto antes:"
+wrong_state = "Isso mudou enquanto isso. Olhe de novo."
+not_saved = "Não foi possível salvar. Tente de novo."
+job_waits = "Espera: o projeto ou o vídeo está arquivado"
+
+[removal_block]
+scheduled_post = "Uma publicação espera o horário no Bardo. Envie agora ou cancele o agendamento na etapa Publicar do vídeo."
+held_on_network = "Uma publicação espera na rede para ficar pública no horário. Publique ou remova na rede."
+active_job = "Uma tarefa está na fila ou em andamento. Espere terminar ou cancele em Tarefas."
+
+[switcher_removal]
+archive = "Arquivar projeto…"
+delete = "Excluir projeto…"
+archived = "Projetos arquivados ({n})"
+back = "Voltar"
+
+[archive]
+project_title = "Arquivar {name}"
+project_hint = "Ele sai do seletor e fica só para leitura: nenhuma tarefa roda e nada é publicado. As publicações dele continuam sincronizando as métricas e as contas continuam conectadas. Traga de volta em Projetos arquivados."
+compress = "Compactar mídia"
+compress_hint = "Junta as pastas dos vídeos em Videos.zip na pasta do projeto, conferido antes de removê-las. Desarquivar descompacta primeiro. A pasta World nunca é compactada."
+confirm = "Arquivar"
+video_title = "Arquivar {name}"
+video_hint = "Ele sai da lista de Vídeos e fica só para leitura: nenhuma tarefa roda e nada é publicado. As publicações dele continuam sincronizando. Mostre os vídeos arquivados para trazer de volta."
+
+[archived]
+title = "Projetos arquivados"
+empty = "Nenhum projeto arquivado."
+hint = "Só para leitura e fora do caminho. Desarquive um para voltar a trabalhar nele; a estrela que ele tinha volta."
+packed = "Mídia compactada"
+busy = "Compactando ou descompactando a mídia…"
+unarchive = "Desarquivar"
+unpacking = "Descompactando a mídia primeiro. Ele volta quando essa tarefa terminar."
+
+[delete]
+action = "Excluir…"
+project_title = "Excluir {name}"
+video_title = "Excluir {name}"
+project_hint = "Remove o projeto do Bardo com os canais, ideias e {videos} vídeos dele, e desconecta as contas das redes ({connected} conectadas). Nada é excluído nas redes, e os custos guardam o nome dele."
+video_hint = "Remove o vídeo do Bardo. A ideia volta a aprovada, sem vídeo, e pode começar outro. Nada é excluído nas redes, e os custos guardam o nome dele."
+folder_recycle = "A pasta ({size}) vai para a Lixeira: {folder}"
+folder_permanent = "A pasta ({size}) será excluída de vez, sem passar pela Lixeira: {folder}. {reason}"
+no_folder = "A pasta não foi encontrada, então só os registros saem."
+type_name = "Digite {name} para confirmar"
+permanently = "Excluir de vez"
+permanently_hint = "Pula a Lixeira: a pasta não pode ser restaurada."
+confirm = "Excluir"
+running = "Excluindo…"
+name_mismatch = "Digite o nome exatamente como aparece."
+folder_not_removed = "A pasta não pôde ser removida (talvez um arquivo esteja aberto). Nada foi excluído."
+not_disconnected = "Uma conta não pôde ser desconectada. A pasta já saiu; tente de novo para terminar."
+
+[delete.permanent_reason]
+removable_drive = "Ela está num drive removível, que não tem Lixeira."
+network_drive = "Ela está num drive de rede, que não tem Lixeira."
+larger_than_bin = "Ela é maior do que a Lixeira deste drive comporta."
+bin_off = "A Lixeira deste drive está desativada."
+
+[videos_removal]
+show_archived = "Mostrar arquivados"
+archived_empty = "Nenhum vídeo arquivado neste canal."
+archive = "Arquivar…"
+archived_tag = "Arquivado"
+archived_notice = "Este vídeo está arquivado: fica só para leitura, nenhuma tarefa dele roda e nada dele é publicado. Desarquive-o para voltar a trabalhar nele."
+
+[costs_deleted]
+projects = "Projetos excluídos"
+deleted_on = "{name} (excluído em {date})"
+project_forgotten = "Projeto excluído nº {id}"
+video_forgotten = "Vídeo excluído nº {id}"
+forget = "Esquecer o nome"
+forget_hint = "Mostra pelo número daqui em diante. Os valores continuam como estão."
+
+[themes_restart]
+start = "Começar um vídeo"
+no_video = "O vídeo dela foi excluído."

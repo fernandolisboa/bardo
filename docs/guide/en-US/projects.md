@@ -15,6 +15,19 @@ A video project is one video on its way from an approved idea to a published pos
 
 The project's name heads the screen, with a menu beside it that lists the channel's other projects; pick one to switch. An ad project is marked **Ad** in that menu, and the line under its name starts with **Ad for** and the product it advertises. An ad whose product was an *idea* when the project started is a concept: it is marked **Concept** in that menu and beside its name, and keeps that mark even if the product changes kind later ([A concept image for an idea](products.md#concept)). The channel picker next to **Videos** lists another channel's projects. **Show folder** opens the video's folder in Explorer, where its narration, images, clips and renders are ([A project's folder](storage.md#project-folder)).
 
+<a id="archive"></a>
+## Archive or delete a video
+
+Beside **Show folder**, **Archive…** puts the open video away: it leaves the list and becomes read-only, so no job of it runs and nothing of it publishes, while its published posts go on syncing their metrics ([Metrics sync](metrics-sync.md)). **Show archived** lists the channel's archived videos instead, each marked **Archived**; **Unarchive** brings the open one back.
+
+**Delete…** asks you to type the video's name. Its records leave Bardo and its folder goes to the Recycle Bin, unless the dialog says it will be deleted permanently: a folder on a removable or network drive, or larger than that drive's Recycle Bin holds, skips the bin. **Delete permanently** skips it on purpose. Its idea goes back to approved on [Themes](themes-ranking.md#restart), and may start another video. Nothing is deleted on the networks, its first week leaves the channel's past performance, and [Costs](costs.md#deleted) keeps its name.
+
+Neither is possible while something is pending, and the dialog lists what to clear first:
+
+- a post waiting in Bardo for its time ([schedule](uploading.md)),
+- a post waiting on its network to go public later,
+- a job for the video, queued or running ([Jobs](jobs.md)).
+
 <a id="settings"></a>
 ## The video's settings
 

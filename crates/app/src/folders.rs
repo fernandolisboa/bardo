@@ -26,8 +26,9 @@ use std::time::{Duration, SystemTime};
 use bardo_domain::{
     ChannelId, ChannelRepository, FolderMoveError, FolderPlaces, FolderRepository, Job, JobFailure,
     JobFailureKind, JobId, JobKind, JobRepository, PROJECT_MANIFEST, Progress, Project,
-    ProjectFolders, ProjectId, ProjectManifest, ProjectRepository, RUNNER_ALIVE, RepositoryError,
-    RunnerRole, VIDEOS_DIR, VideoProjectId, leaves_room, project_folder_name,
+    ProjectFolders, ProjectId, ProjectManifest, ProjectRepository, RUNNER_ALIVE, RemovalRepository,
+    RepositoryError, RunnerRole, Trash, VIDEOS_DIR, VideoProjectId, leaves_room,
+    project_folder_name,
 };
 
 use crate::jobs::{JobContext, JobGate, JobHandler};
@@ -37,13 +38,75 @@ use crate::{AppError, Bardo, Text};
 /// How long the move's hold on the database lasts without being renewed.
 pub const MOVE_HOLD: Duration = Duration::from_secs(2 * 60);
 
-/// Which projects' folders cannot be reached, and what that holds back.
+/// A set of projects, and the videos and channels that come with them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Held {
+    projects: HashSet<ProjectId>,
+    /// Videos whose media or channel is in one of those projects.
+    videos: HashSet<VideoProjectId>,
+    channels: HashSet<ChannelId>,
+}
+
+impl Held {
+    /// Whether `job` is for one of these projects, by its origin or by the
+    /// video or channel its payload names.
+    fn holds(&self, job: &Job) -> bool {
+        if self.projects.is_empty() && self.videos.is_empty() {
+            return false;
+        }
+        if job
+            .origin()
+            .project
+            .is_some_and(|project| self.projects.contains(&project))
+        {
+            return true;
+        }
+        let Ok(payload) = serde_json::from_str::<serde_json::Value>(job.payload()) else {
+            return false;
+        };
+        let named = |key: &str| {
+            payload
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .and_then(|id| uuid::Uuid::parse_str(id).ok())
+        };
+        named("project").is_some_and(|id| self.videos.contains(&VideoProjectId::from(id)))
+            || named("channel").is_some_and(|id| self.channels.contains(&ChannelId::from(id)))
+            || named("owner_project").is_some_and(|id| self.projects.contains(&ProjectId::from(id)))
+    }
+}
+
+/// What holds jobs back: projects whose folder cannot be reached, and
+/// archived projects and videos (issue #336).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Unreachable {
     projects: HashSet<ProjectId>,
     /// Videos whose media or channel is in one of those projects.
     videos: HashSet<VideoProjectId>,
     channels: HashSet<ChannelId>,
+    /// Archived projects, with their videos and channels, and archived
+    /// videos.
+    archived: Held,
+}
+
+impl Unreachable {
+    fn unreachable(&self) -> Held {
+        Held {
+            projects: self.projects.clone(),
+            videos: self.videos.clone(),
+            channels: self.channels.clone(),
+        }
+    }
+}
+
+/// Whether a job of `kind` waits while its project or video is archived:
+/// every one but the metrics sync (published posts go on being read) and
+/// the jobs that pack and unpack an archived project's media.
+pub(crate) fn waits_while_archived(kind: JobKind) -> bool {
+    !matches!(
+        kind,
+        JobKind::MetricsSync | JobKind::PackMedia | JobKind::UnpackMedia
+    )
 }
 
 /// Whether each project's folder can be reached, read again every tick of
@@ -54,6 +117,7 @@ pub(crate) struct FolderWatch {
     projects: Arc<dyn ProjectRepository>,
     channels: Arc<dyn ChannelRepository>,
     folders: Arc<dyn FolderRepository>,
+    removals: Arc<dyn RemovalRepository>,
     disk: Arc<dyn ProjectFolders>,
     state: RwLock<Unreachable>,
 }
@@ -92,6 +156,27 @@ impl FolderWatch {
                 .collect();
         }
         unreachable.projects = projects;
+        let archived: HashSet<ProjectId> = self
+            .projects
+            .projects(self.owner)?
+            .iter()
+            .filter(|project| !project.is_active())
+            .map(|project| project.id)
+            .collect();
+        let mut videos = self.removals.archived_videos(self.owner)?;
+        if !archived.is_empty() {
+            let ids: Vec<ProjectId> = archived.iter().copied().collect();
+            videos.extend(self.folders.videos_in(&ids)?);
+            unreachable.archived.channels = self
+                .channels
+                .list(self.owner)?
+                .into_iter()
+                .filter(|channel| archived.contains(&channel.project))
+                .map(|channel| channel.id)
+                .collect();
+        }
+        unreachable.archived.projects = archived;
+        unreachable.archived.videos = videos;
         let mut state = self.state.write().unwrap_or_else(|p| p.into_inner());
         let changed = *state != unreachable;
         *state = unreachable;
@@ -107,6 +192,18 @@ impl FolderWatch {
     }
 }
 
+impl FolderWatch {
+    /// Whether `job` waits for a project folder that cannot be reached.
+    pub(crate) fn waits_for_folder(&self, job: &Job) -> bool {
+        self.read().unreachable().holds(job)
+    }
+
+    /// Whether `job` waits because its project or video is archived.
+    pub(crate) fn waits_archived(&self, job: &Job) -> bool {
+        waits_while_archived(job.kind()) && self.read().archived.holds(job)
+    }
+}
+
 impl JobGate for FolderWatch {
     fn refresh(&self) {
         if let Err(error) = self.check() {
@@ -115,28 +212,7 @@ impl JobGate for FolderWatch {
     }
 
     fn waits(&self, job: &Job) -> bool {
-        let state = self.read();
-        if state.projects.is_empty() {
-            return false;
-        }
-        if job
-            .origin()
-            .project
-            .is_some_and(|project| state.projects.contains(&project))
-        {
-            return true;
-        }
-        let Ok(payload) = serde_json::from_str::<serde_json::Value>(job.payload()) else {
-            return false;
-        };
-        let named = |key: &str| {
-            payload
-                .get(key)
-                .and_then(serde_json::Value::as_str)
-                .and_then(|id| uuid::Uuid::parse_str(id).ok())
-        };
-        named("project").is_some_and(|id| state.videos.contains(&VideoProjectId::from(id)))
-            || named("channel").is_some_and(|id| state.channels.contains(&ChannelId::from(id)))
+        self.waits_for_folder(job) || self.waits_archived(job)
     }
 }
 
@@ -146,9 +222,14 @@ pub(crate) struct FolderBook {
     pub(crate) disk: Arc<dyn ProjectFolders>,
     pub(crate) places: FolderPlaces,
     pub(crate) watch: Arc<FolderWatch>,
+    /// Archived videos and deletions (issue #336).
+    pub(crate) removals: Arc<dyn RemovalRepository>,
+    /// Where a deleted folder goes.
+    pub(crate) trash: Arc<dyn Trash>,
 }
 
 impl FolderBook {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         owner: bardo_domain::ProfileId,
         folders: Arc<dyn FolderRepository>,
@@ -156,6 +237,8 @@ impl FolderBook {
         places: FolderPlaces,
         projects: Arc<dyn ProjectRepository>,
         channels: Arc<dyn ChannelRepository>,
+        removals: Arc<dyn RemovalRepository>,
+        trash: Arc<dyn Trash>,
     ) -> Self {
         let watch = Arc::new(FolderWatch {
             owner,
@@ -163,6 +246,7 @@ impl FolderBook {
             projects,
             channels,
             folders: Arc::clone(&folders),
+            removals: Arc::clone(&removals),
             disk: Arc::clone(&disk),
             state: RwLock::default(),
         });
@@ -172,6 +256,8 @@ impl FolderBook {
             disk,
             places,
             watch,
+            removals,
+            trash,
         }
     }
 }
@@ -401,7 +487,13 @@ impl Bardo {
 
     /// Whether `job` waits for its project's folder.
     pub fn waits_for_folder(&self, job: &Job) -> bool {
-        job.state() == bardo_domain::JobState::Queued && self.folder_book.watch.waits(job)
+        job.state() == bardo_domain::JobState::Queued
+            && self.folder_book.watch.waits_for_folder(job)
+    }
+
+    /// Whether `job` waits because its project or video is archived.
+    pub fn waits_archived(&self, job: &Job) -> bool {
+        job.state() == bardo_domain::JobState::Queued && self.folder_book.watch.waits_archived(job)
     }
 
     /// The project's folder, for *Show folder*.
@@ -718,6 +810,28 @@ mod tests {
 
         fn exists(&self, path: &Path) -> bool {
             self.inner.exists(path)
+        }
+
+        fn size(&self, path: &Path) -> std::io::Result<u64> {
+            self.inner.size(path)
+        }
+
+        fn pack(
+            &self,
+            videos: &Path,
+            archive: &Path,
+            progress: &mut dyn FnMut(u64, u64) -> bool,
+        ) -> Result<(), FolderMoveError> {
+            self.inner.pack(videos, archive, progress)
+        }
+
+        fn unpack(
+            &self,
+            archive: &Path,
+            videos: &Path,
+            progress: &mut dyn FnMut(u64, u64) -> bool,
+        ) -> Result<(), FolderMoveError> {
+            self.inner.unpack(archive, videos, progress)
         }
 
         fn move_folder(

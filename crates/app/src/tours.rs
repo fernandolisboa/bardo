@@ -326,6 +326,9 @@ pub enum Control {
     JobsFilter,
     /// The title bar's project switcher, on every screen.
     OpenProject,
+    /// Videos: Show archived, Archive… (or Unarchive) and Delete… of the
+    /// open video.
+    VideoRemoval,
     /// Overview: the videos in progress.
     OverviewVideos,
     /// Overview: the first video's next step and its Continue.
@@ -702,12 +705,15 @@ pub const PROJECTS: Tour = {
     const HEADER: WhenMissing = WhenMissing::LightPart(TourAnchor::Header);
     Tour {
         id: TourId::Projects,
-        version: 5,
+        version: 6,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "switcher", control(Control::ProjectSwitcher))
                 .missing(HEADER)
                 .learn(PAGE, "switch"),
+            on(AT, "archive", control(Control::VideoRemoval))
+                .missing(HEADER)
+                .learn(PAGE, "archive"),
             on(AT, "narrator", control(Control::ProjectNarrator))
                 .missing(HEADER)
                 .learn(PAGE, "narrator"),

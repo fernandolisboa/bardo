@@ -34,6 +34,7 @@ mod profile;
 mod project;
 mod project_folders;
 mod publication;
+mod removal;
 mod render;
 mod research;
 mod scene;
@@ -46,6 +47,7 @@ mod theme;
 mod thumbnail;
 mod timeline;
 mod tour;
+mod trash;
 mod voice_samples;
 mod youtube_data;
 
@@ -84,6 +86,7 @@ pub use setup_choices::{
     SETUP_CHOICES_FILE, SetupChoices, SetupChoicesError, default_setup_choices_path,
     take_setup_choices,
 };
+pub use trash::{MemoryTrash, SystemTrash};
 pub use voice_samples::{LocalVoiceSamples, MemoryVoiceSamples, default_voice_samples_dir};
 
 #[derive(Debug, thiserror::Error)]

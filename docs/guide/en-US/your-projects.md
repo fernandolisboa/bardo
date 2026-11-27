@@ -27,6 +27,28 @@ Click a project to open it. Bardo remembers the open project, and opens on it th
 
 **New project…** at the bottom of the switcher asks for a name, a color and a folder: the base folder by default, or another place with **Choose…**. The form shows the folder it will make ([A project's folder](storage.md#project-folder)). Names are unique among your projects, whatever their case. The new project opens with no channel, and every screen asks for one: create its first channel on [Channels](channels.md).
 
+<a id="archive"></a>
+## Archiving a project
+
+**Archive project…** in the switcher puts the open project away: it leaves the switcher, Recent and Favorites, and becomes read-only, so no job of it runs and nothing of it publishes. Its published posts go on syncing their metrics, and its network accounts stay connected. Another project opens in its place.
+
+**Compress media** packs its videos' folders into **Videos.zip** in the project folder, as a job ([Jobs](jobs.md)); Bardo reads the archive back to check it before it removes the folders. The **World** folder is never packed.
+
+**Archived projects** at the bottom of the switcher lists them, marked **Media compressed** when they are. **Unarchive** brings one back, with its star if it had one; a compressed one is unpacked first, and comes back when that job ends.
+
+<a id="delete"></a>
+## Deleting a project
+
+**Delete project…** in the switcher (or the bin beside an archived project) asks you to type the project's name. It removes the project with its channels, ideas and videos, disconnects its network accounts as **Disconnect** does ([Network accounts](network-accounts.md)), and sends its folder to the Recycle Bin. The dialog says beforehand when the folder will be deleted permanently instead: on a removable or network drive, when the drive's Recycle Bin is off, or when the folder is larger than that bin holds. **Delete permanently** skips the bin on purpose. A folder Bardo cannot reach is left alone, and only the records go.
+
+Nothing is deleted on the networks, and [Costs](costs.md#deleted) keeps the project's spending under its name until you forget it.
+
+Archiving and deleting are refused while something is pending, and the dialog lists what to clear first:
+
+- a post waiting in Bardo for its time ([schedule](uploading.md)),
+- a post waiting on its network to go public later,
+- a job for the project, one of its channels or videos, queued or running ([Jobs](jobs.md)).
+
 <a id="move"></a>
 ## Moving a channel
 

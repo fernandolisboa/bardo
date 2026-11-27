@@ -375,6 +375,32 @@ mod tests {
     }
 
     #[test]
+    fn a_post_held_on_the_network_keeps_its_video_and_project_from_archive_and_delete() {
+        let mut s = scheduled(tomorrow());
+        let project = s.app.open_project().unwrap().unwrap();
+        for target in [
+            crate::Removable::Video(s.project.id),
+            crate::Removable::Project(project.id),
+        ] {
+            assert_eq!(
+                s.app.removal_blocks(target).unwrap(),
+                [bardo_domain::RemovalBlock::HeldOnNetwork]
+            );
+        }
+        assert!(matches!(
+            s.app.archive_project(project.id, false),
+            Err(crate::RemovalError::Blocked(blocks))
+                if blocks == [bardo_domain::RemovalBlock::HeldOnNetwork]
+        ));
+        let name = project.name().to_owned();
+        assert!(matches!(
+            s.app
+                .deletion(crate::Removable::Project(project.id), &name, false),
+            Err(crate::RemovalError::Blocked(_))
+        ));
+    }
+
+    #[test]
     fn a_scheduled_upload_goes_up_private_with_its_time_and_waits_for_it() {
         let at = tomorrow();
         let s = scheduled(at);

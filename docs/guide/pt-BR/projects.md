@@ -15,6 +15,19 @@ Um projeto de vídeo é um vídeo no caminho entre uma ideia aprovada e uma publ
 
 O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos do canal; escolha um para trocar. Um projeto de anúncio aparece marcado como **Anúncio** nesse menu, e a linha sob o nome dele começa com **Anúncio de** e o produto que ele anuncia. Um anúncio cujo produto era uma *ideia* quando o projeto começou é um conceito: ele aparece marcado como **Conceito** nesse menu e ao lado do nome, e continua com essa marca mesmo que o produto mude de tipo depois ([Uma imagem de conceito para uma ideia](products.md#concept)). O seletor de canal ao lado de **Vídeos** lista os projetos de outro canal. **Mostrar pasta** abre a pasta do vídeo no Explorer, onde ficam a narração, as imagens, os clipes e os renders ([A pasta de um projeto](storage.md#project-folder)).
 
+<a id="archive"></a>
+## Arquivar ou excluir um vídeo
+
+Ao lado de **Mostrar pasta**, **Arquivar…** guarda o vídeo aberto: ele sai da lista e fica só para leitura, então nenhuma tarefa dele roda e nada dele é publicado, enquanto as publicações dele continuam sincronizando as métricas ([Sincronização de métricas](metrics-sync.md)). **Mostrar arquivados** lista no lugar os vídeos arquivados do canal, cada um marcado como **Arquivado**; **Desarquivar** traz o aberto de volta.
+
+**Excluir…** pede que você digite o nome do vídeo. Os registros dele saem do Bardo e a pasta vai para a Lixeira, a menos que o diálogo diga que ela será excluída de vez: uma pasta num drive removível ou de rede, ou maior do que a Lixeira desse drive comporta, pula a Lixeira. **Excluir de vez** pula a Lixeira de propósito. A ideia dele volta a aprovada em [Temas](themes-ranking.md#restart) e pode começar outro vídeo. Nada é excluído nas redes, a primeira semana dele sai do desempenho passado do canal, e [Custos](costs.md#deleted) guarda o nome dele.
+
+Nenhum dos dois é possível enquanto algo está pendente, e o diálogo lista o que resolver antes:
+
+- uma publicação esperando o horário no Bardo ([agendamento](uploading.md)),
+- uma publicação esperando na rede para ficar pública mais tarde,
+- uma tarefa do vídeo, na fila ou em andamento ([Tarefas](jobs.md)).
+
 <a id="settings"></a>
 ## As configurações do vídeo
 
