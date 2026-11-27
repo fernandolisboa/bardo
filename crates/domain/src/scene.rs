@@ -18,10 +18,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    AspectRatio, BackdropId, CharacterId, ClipModelRef, ComposedShot, Generation, GenerationId,
-    JobFailureKind, KindChange, Narration, NarrationId, ProductImageId, ProductPictures, ProfileId,
+    AspectRatio, BackdropId, ClipModelRef, ComposedShot, Generation, GenerationId, JobFailureKind,
+    KindChange, Narration, NarrationId, ProductImageId, ProductPictures, ProfileId,
     RepositoryError, SceneKind, SceneKindError, ShotBackdropDrawing, ShotLook, StretchLimit,
-    StyleChoice, VideoProjectId, spoken_words,
+    StyleChoice, VideoProjectId, WorldItemId, spoken_words,
 };
 
 uuid_id!(
@@ -168,7 +168,7 @@ pub struct CastDraft {
     /// The world's character this member is (#337): one the video picked,
     /// with its fixed appearance as the description. `None` for an extra
     /// the planner made up.
-    pub character: Option<CharacterId>,
+    pub character: Option<WorldItemId>,
 }
 
 /// A recurring character of the video: the planner names them once with a
@@ -193,7 +193,7 @@ pub struct CastMember {
     /// The world's character this member is (#337), whose reference
     /// picture for the video's look is their portrait. `None` for an extra
     /// of this video only.
-    character: Option<CharacterId>,
+    character: Option<WorldItemId>,
 }
 
 /// Every stored field of a cast member, for adapters that rebuild one.
@@ -227,13 +227,13 @@ impl CastMember {
     }
 
     /// The member as the world's `character`, as an adapter rebuilds it.
-    pub fn with_character(mut self, character: Option<CharacterId>) -> Self {
+    pub fn with_character(mut self, character: Option<WorldItemId>) -> Self {
         self.character = character;
         self
     }
 
     /// The world's character this member is, if any.
-    pub fn character(&self) -> Option<CharacterId> {
+    pub fn character(&self) -> Option<WorldItemId> {
         self.character
     }
 
@@ -437,26 +437,60 @@ pub fn scene_image_prompt(
             text.push_str(looks.trim());
         }
     }
+    let product_refs = usize::from(setting.product.is_some());
     if let Some(place) = setting.place {
         text.push_str("\n\n");
         text.push_str(&place.setting());
+        if setting.place_picture {
+            text.push_str(&format!(
+                "\nReference {}: this place itself. Keep its architecture, objects, colors and \
+                 materials as in this reference, in the light and time of day this prompt says. \
+                 Draw a new shot, framed as this prompt says; do not repeat the reference's \
+                 composition.",
+                with.len() + product_refs + 1
+            ));
+        }
+    }
+    let place_refs = usize::from(setting.place.is_some() && setting.place_picture);
+    let mut object_refs = 0;
+    for object in setting.objects.iter().filter(|object| object.referenced) {
+        object_refs += 1;
+        text.push_str(&format!(
+            "\n\nReference {}: {}, {}. It must look exactly as in this reference: its shape, \
+             colors, materials and markings. Do not copy the reference's framing or background.",
+            with.len() + product_refs + place_refs + object_refs,
+            object.name,
+            object.description
+        ));
+    }
+    let described: Vec<&SceneObject<'_>> = setting
+        .objects
+        .iter()
+        .filter(|object| !object.referenced)
+        .collect();
+    if !described.is_empty() {
+        text.push_str("\n\nThe objects in this scene look like this:");
+        for object in described {
+            text.push_str(&format!("\n{}: {}", object.name, object.description));
+        }
     }
     if let Some(style) = setting.style.line() {
         text.push_str("\n\n");
         text.push_str(&style);
     }
     if !setting.shots.is_empty() {
-        text.push_str(if with.is_empty() && setting.product.is_none() {
-            "\n\nThe reference images are other shots of the same video, so that this image \
+        text.push_str(
+            if with.is_empty() && product_refs + place_refs + object_refs == 0 {
+                "\n\nThe reference images are other shots of the same video, so that this image \
              belongs with them."
-        } else {
-            "\n\nThe reference images after those are other shots of the same video, so that \
+            } else {
+                "\n\nThe reference images after those are other shots of the same video, so that \
              this image belongs with them."
-        });
+            },
+        );
     }
-    let product = usize::from(setting.product.is_some());
     for (offset, shot) in setting.shots.iter().enumerate() {
-        let number = with.len() + product + offset + 1;
+        let number = with.len() + product_refs + place_refs + object_refs + offset + 1;
         text.push_str(&format!("\nReference {number}: "));
         text.push_str(match shot {
             OtherShot::SamePlace => {
@@ -493,10 +527,13 @@ pub const MAX_PLACES: usize = 8;
 
 /// One of the video's recurring places (#258) as the planner proposed it:
 /// what the scene prompts call it and its fixed description.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlaceDraft {
     pub name: String,
     pub description: String,
+    /// The world's place this is (#338): one the video picked, with its
+    /// fixed description. `None` for a place the planner made up.
+    pub item: Option<WorldItemId>,
 }
 
 /// A recurring place of the video: the planner names it once with one
@@ -510,6 +547,10 @@ pub struct Place {
     /// The description as planned. The user's edits change `description`.
     generated_description: ScenePrompt,
     description: ScenePrompt,
+    /// The world's place this is (#338), whose picture for the video's
+    /// look goes with every scene drawn here. `None` for a place of this
+    /// video only.
+    item: Option<WorldItemId>,
 }
 
 /// Every stored field of a place, for adapters that rebuild one.
@@ -526,7 +567,24 @@ impl Place {
             name: record.name,
             generated_description: record.generated_description,
             description: record.description,
+            item: None,
         }
+    }
+
+    /// The place as the world's `item`, as an adapter rebuilds it.
+    pub fn with_item(mut self, item: Option<WorldItemId>) -> Self {
+        self.item = item;
+        self
+    }
+
+    /// The world's place this is, if any.
+    pub fn item(&self) -> Option<WorldItemId> {
+        self.item
+    }
+
+    /// Makes the place this video's own. Returns whether it followed one.
+    pub fn unlink(&mut self) -> bool {
+        self.item.take().is_some()
     }
 
     /// A planned place, or `None` when the name or the description is not
@@ -543,6 +601,7 @@ impl Place {
             name: name.trim().to_owned(),
             generated_description: description.clone(),
             description,
+            item: draft.item,
         })
     }
 
@@ -642,7 +701,25 @@ pub struct SceneSetting<'a> {
     /// the reference right after the people's, and this is how the
     /// product looks.
     pub product: Option<&'a str>,
+    /// The world place's picture goes with the request (#338), right
+    /// after the product's.
+    pub place_picture: bool,
+    /// The world objects the scene shows (#338): those with a picture
+    /// sent follow the place's, in this order; the others are described.
+    pub objects: &'a [SceneObject<'a>],
 }
+
+/// A world object a scene shows, as its image request tells of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SceneObject<'a> {
+    pub name: &'a str,
+    pub description: &'a str,
+    /// Its picture goes with the request.
+    pub referenced: bool,
+}
+
+/// The most world objects one scene shows.
+pub const MAX_SCENE_OBJECTS: usize = 3;
 
 /// What a product in use scene's image request says of the product's
 /// reference (#279), before how it looks.
@@ -731,6 +808,9 @@ pub struct Scene {
     /// The recurring place it happens in, as an index into the plan's
     /// places; `None` for a place seen once or a plan made before #258.
     place: Option<usize>,
+    /// The world objects it shows (#338), each once, at most
+    /// [`MAX_SCENE_OBJECTS`].
+    objects: Vec<WorldItemId>,
     /// The portraits `image` was drawn with; `None` for an image from
     /// before they were recorded (#269).
     image_portraits: Option<PortraitsUsed>,
@@ -826,6 +906,7 @@ impl Scene {
             cast: Vec::new(),
             planned_motion: None,
             place: None,
+            objects: Vec::new(),
             image_portraits: None,
             pending_portraits: None,
             kind: SceneKind::Drawn,
@@ -855,6 +936,24 @@ impl Scene {
     pub fn with_place(mut self, place: Option<usize>) -> Self {
         self.place = place;
         self
+    }
+
+    /// The scene showing the world's `objects`, as an adapter rebuilds it:
+    /// each once, at most [`MAX_SCENE_OBJECTS`].
+    pub fn with_objects(mut self, objects: Vec<WorldItemId>) -> Self {
+        let mut kept: Vec<WorldItemId> = Vec::new();
+        for object in objects {
+            if !kept.contains(&object) && kept.len() < MAX_SCENE_OBJECTS {
+                kept.push(object);
+            }
+        }
+        self.objects = kept;
+        self
+    }
+
+    /// The world objects it shows.
+    pub fn objects(&self) -> &[WorldItemId] {
+        &self.objects
     }
 
     /// The scene with the portraits its image and the image waiting for
@@ -889,6 +988,7 @@ impl Scene {
             cast: Vec::new(),
             planned_motion: None,
             place: None,
+            objects: Vec::new(),
             image_portraits: None,
             pending_portraits: None,
             kind: SceneKind::Drawn,
@@ -1418,6 +1518,8 @@ pub struct SceneDraft {
     /// For a product shot or an end card: which of the product's images
     /// it shows, by its position from 0.
     pub product_image: Option<usize>,
+    /// The world objects it shows (#338), from those the video picked.
+    pub objects: Vec<WorldItemId>,
 }
 
 /// A whole plan as the planner proposed it.
@@ -1504,6 +1606,7 @@ struct PlannedStart {
     place: Option<usize>,
     kind: String,
     product_image: Option<usize>,
+    objects: Vec<WorldItemId>,
 }
 
 /// What a scene of an ad's plan is, from what the planner asked for: a
@@ -1576,6 +1679,7 @@ impl ScenePlan {
                     place: draft.place,
                     kind: draft.kind,
                     product_image: draft.product_image,
+                    objects: draft.objects,
                 });
             }
         }
@@ -1596,15 +1700,22 @@ impl ScenePlan {
             .filter_map(|(index, draft)| Some((index, Place::planned(draft)?)))
             .collect();
         somewhere.retain(|(index, _)| starts.iter().any(|start| start.place == Some(*index)));
-        // Past the limit, the places with the most scenes stay, and a
-        // scene of another keeps its description in its own prompt.
+        // Past the limit, the world's places the video picked stay, then
+        // the places with the most scenes, and a scene of another keeps its
+        // description in its own prompt.
         let mut crowded: Vec<usize> = somewhere.iter().map(|(index, _)| *index).collect();
         crowded.sort_by_key(|index| {
-            std::cmp::Reverse(
-                starts
-                    .iter()
-                    .filter(|start| start.place == Some(*index))
-                    .count(),
+            let picked = somewhere
+                .iter()
+                .any(|(at, place)| at == index && place.item.is_some());
+            (
+                !picked,
+                std::cmp::Reverse(
+                    starts
+                        .iter()
+                        .filter(|start| start.place == Some(*index))
+                        .count(),
+                ),
             )
         });
         crowded.truncate(MAX_PLACES);
@@ -1673,6 +1784,10 @@ impl ScenePlan {
                 .with_cast(start.cast.clone())
                 .with_planned_motion(start.motion.clone())
                 .with_place(start.place)
+                .with_objects(match kind {
+                    SceneKind::Drawn | SceneKind::ProductInUse => start.objects.clone(),
+                    _ => Vec::new(),
+                })
                 .with_kind(kind, product_image, None)
             })
             .collect();
@@ -2771,6 +2886,7 @@ mod tests {
             place: None,
             kind: String::new(),
             product_image: None,
+            ..Default::default()
         }
     }
 
@@ -2821,7 +2937,7 @@ mod tests {
         let mut cast: Vec<_> = (0..MAX_CAST)
             .map(|i| member(&format!("extra {i}"), "A person."))
             .collect();
-        let ana = CharacterId::new();
+        let ana = WorldItemId::new();
         cast.push(CastDraft {
             character: Some(ana),
             ..member("Ana", "A baker in her sixties.")
@@ -3223,6 +3339,7 @@ mod tests {
         PlaceDraft {
             name: name.into(),
             description: description.into(),
+            ..Default::default()
         }
     }
 
@@ -3286,6 +3403,7 @@ mod tests {
                 shots: &[],
                 style,
                 product: None,
+                ..Default::default()
             },
         );
         plan.scene_mut(index, SystemTime::UNIX_EPOCH)
@@ -3990,6 +4108,7 @@ mod tests {
             shots: &[OtherShot::Before],
             style: manga,
             product: None,
+            ..Default::default()
         };
         let prompt = scene_image_prompt("The chef plates a dish.", &shown, &[true], setting);
         let line = manga.line().unwrap();
@@ -4012,6 +4131,115 @@ mod tests {
         );
         assert_eq!(plain, prompt.replace(&format!("\n\n{line}"), ""));
         assert!(StyleChoice::FromNotes.drew(&plain));
+    }
+
+    #[test]
+    fn world_pictures_follow_the_portraits_and_come_before_the_other_shots() {
+        let n = narration(STORY, 0);
+        let rosa = WorldItemId::new();
+        let lamp = WorldItemId::new();
+        let plan = ScenePlan::from_draft(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            PlanDraft {
+                product: None,
+                cast: vec![member("the chef", "A man in his fifties.")],
+                places: vec![PlaceDraft {
+                    item: Some(rosa),
+                    ..somewhere("the kitchen", "A small tiled kitchen at night.")
+                }],
+                scenes: vec![SceneDraft {
+                    cast: vec![0],
+                    objects: vec![lamp, lamp, WorldItemId::new(), WorldItemId::new(), lamp],
+                    ..placed(0, "The chef plates a dish in the kitchen.", Some(0))
+                }],
+            },
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(plan.places()[0].item(), Some(rosa));
+        assert_eq!(
+            plan.scenes[0].objects().len(),
+            MAX_SCENE_OBJECTS,
+            "each once"
+        );
+        assert_eq!(plan.scenes[0].objects()[0], lamp);
+        let shown: Vec<&CastMember> = plan.cast().iter().collect();
+        let objects = [
+            SceneObject {
+                name: "the brass lamp",
+                description: "A dented brass oil lamp",
+                referenced: true,
+            },
+            SceneObject {
+                name: "the map",
+                description: "A torn paper map",
+                referenced: false,
+            },
+        ];
+        let prompt = scene_image_prompt(
+            "The chef plates a dish.",
+            &shown,
+            &[true],
+            SceneSetting {
+                place: plan.place(0).ok(),
+                shots: &[OtherShot::Before],
+                place_picture: true,
+                objects: &objects,
+                ..Default::default()
+            },
+        );
+        assert!(prompt.contains("Reference 1: the chef"));
+        assert!(prompt.contains("Reference 2: this place itself"));
+        assert!(prompt.contains("Reference 3: the brass lamp, A dented brass oil lamp"));
+        assert!(
+            prompt.contains("The objects in this scene look like this:\nthe map: A torn paper map")
+        );
+        assert!(
+            prompt.contains("Reference 4: the shot right before"),
+            "{prompt}"
+        );
+    }
+
+    #[test]
+    fn a_picked_place_stays_past_the_limit_of_places() {
+        let picked = WorldItemId::new();
+        let mut places: Vec<PlaceDraft> = (0..=MAX_PLACES)
+            .map(|at| somewhere(&format!("room {at}"), "A plain room."))
+            .collect();
+        places[MAX_PLACES].item = Some(picked);
+        // Every place but the picked one has two scenes; it has one.
+        let mut scenes = Vec::new();
+        let mut sentence = 0;
+        for at in 0..=MAX_PLACES {
+            let count = if at == MAX_PLACES { 1 } else { 2 };
+            for _ in 0..count {
+                scenes.push(placed(sentence, &format!("In room {at}."), Some(at)));
+                sentence += 1;
+            }
+        }
+        let long = (0..sentence)
+            .map(|at| format!("Sentence number {at} is here."))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let n = narration(&long, 0);
+        let plan = ScenePlan::from_draft(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            PlanDraft {
+                places,
+                scenes,
+                ..PlanDraft::default()
+            },
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(plan.places().len(), MAX_PLACES);
+        assert!(
+            plan.places()
+                .iter()
+                .any(|place| place.item() == Some(picked))
+        );
     }
 
     #[test]

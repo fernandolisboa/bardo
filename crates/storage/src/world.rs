@@ -1,5 +1,7 @@
-//! The world's characters, their reference pictures and what each video
-//! picked (issue #337), and the world's picture files on disk.
+//! The world's characters, places and objects (issues #337, #338), their
+//! reference pictures and what each video picked, and the world's picture
+//! files on disk. Every item is a row of `character`, whose `kind` says
+//! which.
 
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -7,9 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use bardo_domain::{
-    CastPick, ChannelId, Character, CharacterDetails, CharacterDraft, CharacterId, CharacterUse,
-    JobId, Look, PictureOrigin, PictureProvenance, ProfileId, ProjectId, Provider,
-    ReferencePicture, ReferencePictureId, RepositoryError, VideoProjectId, WorldFiles,
+    ChannelId, JobId, Look, PictureOrigin, PictureProvenance, ProfileId, ProjectId, Provider,
+    ReferencePicture, ReferencePictureId, RepositoryError, VideoProjectId, WorldFiles, WorldItem,
+    WorldItemDetails, WorldItemDraft, WorldItemId, WorldItemUse, WorldKind, WorldPick,
     WorldRepository,
 };
 use rusqlite::{Row, params};
@@ -30,7 +32,7 @@ fn uuid(text: &str) -> Result<Uuid, RepositoryError> {
 }
 
 const SELECT_CHARACTER: &str = "SELECT id, profile_id, owner_project_id, name, appearance,
-        always_note, never_note, archived_at, created_at
+        always_note, never_note, archived_at, created_at, kind, belongs_to
     FROM character";
 
 struct CharacterRow {
@@ -43,6 +45,8 @@ struct CharacterRow {
     never: String,
     archived_at: Option<i64>,
     created_at: i64,
+    kind: String,
+    belongs_to: Option<String>,
 }
 
 impl CharacterRow {
@@ -57,19 +61,21 @@ impl CharacterRow {
             never: row.get(6)?,
             archived_at: row.get(7)?,
             created_at: row.get(8)?,
+            kind: row.get(9)?,
+            belongs_to: row.get(10)?,
         })
     }
 
-    fn into_character(self) -> Result<Character, RepositoryError> {
-        let details = CharacterDetails::validate(CharacterDraft {
+    fn into_character(self) -> Result<WorldItem, RepositoryError> {
+        let details = WorldItemDetails::validate(WorldItemDraft {
             name: self.name,
             appearance: self.appearance,
             always: self.always,
             never: self.never,
         })
         .map_err(|error| invalid(format!("character {}: {error:?}", self.id)))?;
-        Ok(Character {
-            id: CharacterId::from(uuid(&self.id)?),
+        Ok(WorldItem {
+            id: WorldItemId::from(uuid(&self.id)?),
             owner: ProfileId::from(uuid(&self.owner)?),
             owner_project: self
                 .project
@@ -77,6 +83,14 @@ impl CharacterRow {
                 .map(uuid)
                 .transpose()?
                 .map(ProjectId::from),
+            kind: WorldKind::from_code(&self.kind)
+                .ok_or_else(|| invalid(format!("item {}: kind {}", self.id, self.kind)))?,
+            belongs_to: self
+                .belongs_to
+                .as_deref()
+                .map(uuid)
+                .transpose()?
+                .map(WorldItemId::from),
             details,
             archived_at: self.archived_at.map(from_unix_millis),
             created_at: from_unix_millis(self.created_at),
@@ -85,8 +99,11 @@ impl CharacterRow {
 }
 
 const SELECT_PICTURE: &str = "SELECT id, character_id, look, look_channel, look_notes, file,
-        provider, model, prompt, origin, generated_at, job_id, kept
+        provider, model, prompt, origin, generated_at, job_id, kept, confirmed_at
     FROM reference_picture";
+
+/// How an imported picture's missing provider is stored.
+const NO_PROVIDER: &str = "none";
 
 #[allow(clippy::type_complexity)]
 fn picture(
@@ -105,6 +122,7 @@ fn picture(
     i64,
     Option<String>,
     bool,
+    Option<i64>,
 )> {
     Ok((
         row.get(0)?,
@@ -120,6 +138,7 @@ fn picture(
         row.get(10)?,
         row.get(11)?,
         row.get(12)?,
+        row.get(13)?,
     ))
 }
 
@@ -128,7 +147,7 @@ impl WorldRepository for Database {
         &self,
         owner: ProfileId,
         project: Option<ProjectId>,
-    ) -> Result<Vec<Character>, RepositoryError> {
+    ) -> Result<Vec<WorldItem>, RepositoryError> {
         let conn = self.conn();
         let mut statement = conn
             .prepare(&format!(
@@ -148,7 +167,7 @@ impl WorldRepository for Database {
         rows.into_iter().map(CharacterRow::into_character).collect()
     }
 
-    fn character(&self, id: CharacterId) -> Result<Option<Character>, RepositoryError> {
+    fn character(&self, id: WorldItemId) -> Result<Option<WorldItem>, RepositoryError> {
         let conn = self.conn();
         let mut statement = conn
             .prepare(&format!("{SELECT_CHARACTER} WHERE id = ?1"))
@@ -163,19 +182,20 @@ impl WorldRepository for Database {
             .transpose()
     }
 
-    fn save_character(&self, character: &Character) -> Result<(), RepositoryError> {
+    fn save_character(&self, character: &WorldItem) -> Result<(), RepositoryError> {
         let details = &character.details;
         self.conn()
             .execute(
                 "INSERT INTO character (id, profile_id, owner_project_id, name, appearance,
-                     always_note, never_note, archived_at, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                     always_note, never_note, archived_at, created_at, kind, belongs_to)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT (id) DO UPDATE SET
                      name = excluded.name,
                      appearance = excluded.appearance,
                      always_note = excluded.always_note,
                      never_note = excluded.never_note,
-                     archived_at = excluded.archived_at",
+                     archived_at = excluded.archived_at,
+                     belongs_to = excluded.belongs_to",
                 params![
                     character.id.to_string(),
                     character.owner.to_string(),
@@ -186,13 +206,15 @@ impl WorldRepository for Database {
                     details.never(),
                     character.archived_at.map(to_unix_millis),
                     to_unix_millis(character.created_at),
+                    character.kind.code(),
+                    character.belongs_to.map(|id| id.to_string()),
                 ],
             )
             .map_err(boxed)?;
         Ok(())
     }
 
-    fn delete_character(&self, id: CharacterId) -> Result<(), RepositoryError> {
+    fn delete_character(&self, id: WorldItemId) -> Result<(), RepositoryError> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(boxed)?;
         // Plans keep the member, as the video's own.
@@ -201,13 +223,45 @@ impl WorldRepository for Database {
             [id.to_string()],
         )
         .map_err(boxed)?;
+        tx.execute(
+            "UPDATE scene_place SET item_id = NULL WHERE item_id = ?1",
+            [id.to_string()],
+        )
+        .map_err(boxed)?;
+        // Scenes that showed the object no longer name it.
+        let showing: Vec<(String, i64, String)> = {
+            let mut statement = tx
+                .prepare(
+                    "SELECT plan_id, position, objects FROM scene
+                     WHERE instr(objects, ?1) > 0",
+                )
+                .map_err(boxed)?;
+            statement
+                .query_map([id.to_string()], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .map_err(boxed)?
+                .collect::<Result<_, _>>()
+                .map_err(boxed)?
+        };
+        for (plan, position, objects) in showing {
+            let kept: Vec<&str> = objects
+                .split(',')
+                .filter(|other| other.trim() != id.to_string())
+                .collect();
+            tx.execute(
+                "UPDATE scene SET objects = ?3 WHERE plan_id = ?1 AND position = ?2",
+                params![plan, position, kept.join(",")],
+            )
+            .map_err(boxed)?;
+        }
         // Its pictures and picks go with it (ON DELETE CASCADE).
         tx.execute("DELETE FROM character WHERE id = ?1", [id.to_string()])
             .map_err(boxed)?;
         tx.commit().map_err(boxed)
     }
 
-    fn pictures(&self, character: CharacterId) -> Result<Vec<ReferencePicture>, RepositoryError> {
+    fn pictures(&self, character: WorldItemId) -> Result<Vec<ReferencePicture>, RepositoryError> {
         let conn = self.conn();
         let mut statement = conn
             .prepare(&format!(
@@ -234,6 +288,7 @@ impl WorldRepository for Database {
             generated_at,
             job,
             kept,
+            confirmed_at,
         ) in rows
         {
             // A look of a newer Bardo is no reference here.
@@ -247,16 +302,20 @@ impl WorldRepository for Database {
             };
             pictures.push(ReferencePicture {
                 id: ReferencePictureId::from(uuid(&id)?),
-                character: CharacterId::from(uuid(&character)?),
+                item: WorldItemId::from(uuid(&character)?),
                 look,
                 file,
                 provenance: PictureProvenance {
-                    provider: provider.parse::<Provider>().map_err(boxed)?,
+                    provider: match provider.as_str() {
+                        NO_PROVIDER => None,
+                        code => Some(code.parse::<Provider>().map_err(boxed)?),
+                    },
                     model,
                     prompt,
                     generated_at: from_unix_millis(generated_at),
                     job: job.as_deref().map(uuid).transpose()?.map(JobId::from),
                     origin: PictureOrigin::from_code(&origin),
+                    confirmed_at: confirmed_at.map(from_unix_millis),
                 },
                 kept,
             });
@@ -273,7 +332,7 @@ impl WorldRepository for Database {
              WHERE character_id = ?1 AND look = ?2 AND IFNULL(look_channel, '') = ?3
                  AND IFNULL(look_notes, '') = ?4 AND kept = ?5 AND id <> ?6",
             params![
-                picture.character.to_string(),
+                picture.item.to_string(),
                 picture.look.code(),
                 picture
                     .look
@@ -288,23 +347,27 @@ impl WorldRepository for Database {
         .map_err(boxed)?;
         tx.execute(
             "INSERT INTO reference_picture (id, character_id, look, look_channel, look_notes,
-                 file, provider, model, prompt, origin, generated_at, job_id, kept)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                 file, provider, model, prompt, origin, generated_at, job_id, kept, confirmed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT (id) DO UPDATE SET kept = excluded.kept",
             params![
                 picture.id.to_string(),
-                picture.character.to_string(),
+                picture.item.to_string(),
                 picture.look.code(),
                 picture.look.channel().map(|id| id.to_string()),
                 picture.look.notes(),
                 picture.file,
-                picture.provenance.provider.code(),
+                picture
+                    .provenance
+                    .provider
+                    .map_or(NO_PROVIDER, Provider::code),
                 picture.provenance.model,
                 picture.provenance.prompt,
                 picture.provenance.origin.code(),
                 to_unix_millis(picture.provenance.generated_at),
                 picture.provenance.job.map(|id| id.to_string()),
                 picture.kept,
+                picture.provenance.confirmed_at.map(to_unix_millis),
             ],
         )
         .map_err(boxed)?;
@@ -321,7 +384,7 @@ impl WorldRepository for Database {
         Ok(())
     }
 
-    fn picks(&self, video: VideoProjectId) -> Result<Vec<CastPick>, RepositoryError> {
+    fn picks(&self, video: VideoProjectId) -> Result<Vec<WorldPick>, RepositoryError> {
         let conn = self.conn();
         let mut statement = conn
             .prepare(
@@ -338,8 +401,8 @@ impl WorldRepository for Database {
             .map_err(boxed)?;
         rows.into_iter()
             .map(|(character, instruction)| {
-                Ok(CastPick {
-                    character: CharacterId::from(uuid(&character)?),
+                Ok(WorldPick {
+                    item: WorldItemId::from(uuid(&character)?),
                     instruction,
                 })
             })
@@ -349,7 +412,7 @@ impl WorldRepository for Database {
     fn set_picks(
         &self,
         video: VideoProjectId,
-        picks: &[CastPick],
+        picks: &[WorldPick],
         review: bool,
     ) -> Result<(), RepositoryError> {
         let mut conn = self.conn();
@@ -366,7 +429,7 @@ impl WorldRepository for Database {
                  VALUES (?1, ?2, ?3, ?4)",
                 params![
                     video.to_string(),
-                    pick.character.to_string(),
+                    pick.item.to_string(),
                     position,
                     pick.instruction,
                 ],
@@ -399,7 +462,7 @@ impl WorldRepository for Database {
         Ok(changed.unwrap_or(false))
     }
 
-    fn character_uses(&self, character: CharacterId) -> Result<Vec<CharacterUse>, RepositoryError> {
+    fn character_uses(&self, character: WorldItemId) -> Result<Vec<WorldItemUse>, RepositoryError> {
         let conn = self.conn();
         let mut statement = conn
             .prepare(
@@ -408,6 +471,12 @@ impl WorldRepository for Database {
                     OR v.id IN (SELECT p.project_id FROM scene_plan p
                                 JOIN scene_cast c ON c.plan_id = p.id
                                 WHERE c.character_id = ?1)
+                    OR v.id IN (SELECT p.project_id FROM scene_plan p
+                                JOIN scene_place l ON l.plan_id = p.id
+                                WHERE l.item_id = ?1)
+                    OR v.id IN (SELECT p.project_id FROM scene_plan p
+                                JOIN scene s ON s.plan_id = p.id
+                                WHERE instr(s.objects, ?1) > 0)
                  ORDER BY v.title COLLATE NOCASE",
             )
             .map_err(boxed)?;
@@ -424,7 +493,7 @@ impl WorldRepository for Database {
             .map_err(boxed)?;
         rows.into_iter()
             .map(|(video, title, archived)| {
-                Ok(CharacterUse {
+                Ok(WorldItemUse {
                     video: VideoProjectId::from(uuid(&video)?),
                     title,
                     archived,
@@ -490,6 +559,8 @@ impl WorldFiles for LocalWorldFiles {
 pub struct MemoryWorldFiles {
     files: Mutex<HashMap<PathBuf, Vec<u8>>>,
     unreachable: Mutex<Vec<PathBuf>>,
+    /// Folders that can be reached but refuse writes, as a full disk.
+    refusing: Mutex<Vec<PathBuf>>,
 }
 
 impl MemoryWorldFiles {
@@ -517,6 +588,15 @@ impl MemoryWorldFiles {
             .push(folder.to_path_buf());
     }
 
+    /// Makes `folder` refuse writes while it stays reachable, as a full
+    /// disk or a denied permission.
+    pub fn refuse_writes(&self, folder: &Path) {
+        self.refusing
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push(folder.to_path_buf());
+    }
+
     fn is_unplugged(&self, folder: &Path) -> bool {
         self.unreachable
             .lock()
@@ -530,6 +610,15 @@ impl WorldFiles for MemoryWorldFiles {
     fn write(&self, folder: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
         if self.is_unplugged(folder) {
             return Err(std::io::ErrorKind::NotFound.into());
+        }
+        if self
+            .refusing
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .any(|full| folder.starts_with(full))
+        {
+            return Err(std::io::ErrorKind::PermissionDenied.into());
         }
         self.files()
             .insert(folder.join(plain(name)?), bytes.to_vec());
@@ -613,15 +702,16 @@ mod tests {
         }
     }
 
-    fn character(w: &World, project: Option<ProjectId>, name: &str) -> Character {
-        let character = Character::new(
+    fn character(w: &World, project: Option<ProjectId>, name: &str) -> WorldItem {
+        let character = WorldItem::new(
             w.owner,
             project,
-            CharacterDetails::validate(CharacterDraft {
+            WorldKind::Character,
+            WorldItemDetails::validate(WorldItemDraft {
                 name: name.into(),
                 appearance: "A baker in her sixties.".into(),
                 never: "smiles".into(),
-                ..CharacterDraft::default()
+                ..WorldItemDraft::default()
             })
             .unwrap(),
             time(3),
@@ -630,19 +720,20 @@ mod tests {
         character
     }
 
-    fn picture(character: CharacterId, look: Look, kept: bool) -> ReferencePicture {
+    fn picture(character: WorldItemId, look: Look, kept: bool) -> ReferencePicture {
         ReferencePicture {
             id: ReferencePictureId::new(),
-            character,
+            item: character,
             look,
             file: format!("portrait-{}.png", Uuid::new_v4()),
             provenance: PictureProvenance {
-                provider: Provider::Gemini,
+                provider: Some(Provider::Gemini),
                 model: "gemini-image".into(),
                 prompt: "A reference portrait".into(),
                 generated_at: time(4),
                 job: Some(JobId::new()),
                 origin: PictureOrigin::Video,
+                confirmed_at: None,
             },
             kept,
         }
@@ -659,18 +750,72 @@ mod tests {
         );
         assert_eq!(w.db.characters(w.owner, None).unwrap(), [global]);
         assert_eq!(w.db.character(ana.id).unwrap(), Some(ana));
-        let clash = Character::new(
+        let clash = WorldItem::new(
             w.owner,
             Some(w.project),
-            CharacterDetails::validate(CharacterDraft {
+            WorldKind::Character,
+            WorldItemDetails::validate(WorldItemDraft {
                 name: "ANA".into(),
                 appearance: "Someone else.".into(),
-                ..CharacterDraft::default()
+                ..WorldItemDraft::default()
             })
             .unwrap(),
             time(5),
         );
         assert!(w.db.save_character(&clash).is_err(), "unique per owner");
+        // Another kind may take the name.
+        let place = WorldItem {
+            kind: WorldKind::Place,
+            ..WorldItem::new(
+                w.owner,
+                Some(w.project),
+                WorldKind::Place,
+                clash.details,
+                time(5),
+            )
+        };
+        w.db.save_character(&place).unwrap();
+        assert_eq!(w.db.character(place.id).unwrap(), Some(place));
+    }
+
+    #[test]
+    fn an_object_belongs_to_a_character_until_it_is_deleted() {
+        let w = world();
+        let ana = character(&w, Some(w.project), "Ana");
+        let mut van = WorldItem::new(
+            w.owner,
+            Some(w.project),
+            WorldKind::Object,
+            WorldItemDetails::validate(WorldItemDraft {
+                name: "The red van".into(),
+                appearance: "A rusty red delivery van.".into(),
+                ..WorldItemDraft::default()
+            })
+            .unwrap(),
+            time(5),
+        );
+        van.belongs_to = Some(ana.id);
+        w.db.save_character(&van).unwrap();
+        assert_eq!(
+            w.db.character(van.id).unwrap().unwrap().belongs_to,
+            Some(ana.id)
+        );
+        w.db.delete_character(ana.id).unwrap();
+        let left = w.db.character(van.id).unwrap().unwrap();
+        assert_eq!(left.belongs_to, None, "it belongs to nobody");
+        assert_eq!(left.kind, WorldKind::Object);
+    }
+
+    #[test]
+    fn an_imported_picture_has_no_provider_and_keeps_its_confirmation() {
+        let w = world();
+        let ana = character(&w, Some(w.project), "Ana");
+        let mut imported = picture(ana.id, Look::Style(VisualStyle::ClayStopMotion), true);
+        imported.provenance.provider = None;
+        imported.provenance.origin = PictureOrigin::Imported;
+        imported.provenance.confirmed_at = Some(time(6));
+        w.db.save_picture(&imported).unwrap();
+        assert_eq!(w.db.pictures(ana.id).unwrap(), [imported]);
     }
 
     #[test]
@@ -708,8 +853,8 @@ mod tests {
     fn picks_mark_the_plan_for_review_and_name_their_uses() {
         let w = world();
         let ana = character(&w, Some(w.project), "Ana");
-        let pick = CastPick {
-            character: ana.id,
+        let pick = WorldPick {
+            item: ana.id,
             instruction: "opens the bakery".into(),
         };
         w.db.set_picks(w.video, std::slice::from_ref(&pick), true)
@@ -733,8 +878,8 @@ mod tests {
         w.db.save_picture(&drawn).unwrap();
         w.db.set_picks(
             w.video,
-            &[CastPick {
-                character: ana.id,
+            &[WorldPick {
+                item: ana.id,
                 instruction: String::new(),
             }],
             false,

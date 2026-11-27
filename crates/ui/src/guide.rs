@@ -189,6 +189,8 @@ pub mod refs {
     pub const WORLD_PICTURES: GuideRef = at("world", "pictures");
     pub const WORLD_ARCHIVE: GuideRef = at("world", "archive");
     pub const WORLD_SAVE: GuideRef = at("world", "save");
+    pub const WORLD_BELONGINGS: GuideRef = at("world", "belongings");
+    pub const SCENES_PLACE_WORLD: GuideRef = at("world", "save-place");
     pub const SCENES_WHO_APPEARS: GuideRef = at("scenes", "who-appears");
     pub const PRODUCTS_LIBRARY: GuideRef = at("products", "library");
     pub const PRODUCTS_BRIEF: GuideRef = at("products", "brief");

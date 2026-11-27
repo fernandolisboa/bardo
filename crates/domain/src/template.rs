@@ -131,6 +131,8 @@ impl TemplateKind {
                 TemplateVariable::NarrationSentences,
                 TemplateVariable::FrameShape,
                 TemplateVariable::FixedCast,
+                TemplateVariable::FixedPlaces,
+                TemplateVariable::FixedObjects,
             ],
             TemplateKind::MusicPrompt => &[
                 TemplateVariable::ChannelName,
@@ -241,6 +243,8 @@ impl TemplateKind {
                 TemplateVariable::NarrationSentences,
                 TemplateVariable::FrameShape,
                 TemplateVariable::FixedCast,
+                TemplateVariable::FixedPlaces,
+                TemplateVariable::FixedObjects,
             ],
             TemplateKind::ConceptPrompt => {
                 &[TemplateVariable::Product, TemplateVariable::ProductAudience]
@@ -392,10 +396,16 @@ pub enum TemplateVariable {
     /// cast the scene planner must use as given: each one's name, fixed
     /// appearance, always and never notes and the video's instruction.
     FixedCast,
+    /// The places the video picked from the world (#338): each one's name,
+    /// fixed description, notes and the video's instruction.
+    FixedPlaces,
+    /// The objects the video picked from the world (#338), numbered as a
+    /// scene's `objects` names them, with the character each belongs to.
+    FixedObjects,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 45] = [
+    pub const ALL: [TemplateVariable; 47] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -441,6 +451,8 @@ impl TemplateVariable {
         TemplateVariable::SceneKinds,
         TemplateVariable::Link,
         TemplateVariable::FixedCast,
+        TemplateVariable::FixedPlaces,
+        TemplateVariable::FixedObjects,
     ];
 
     /// The name written between the braces.
@@ -491,6 +503,8 @@ impl TemplateVariable {
             TemplateVariable::SceneKinds => "scene_kinds",
             TemplateVariable::Link => "link",
             TemplateVariable::FixedCast => "fixed_cast",
+            TemplateVariable::FixedPlaces => "fixed_places",
+            TemplateVariable::FixedObjects => "fixed_objects",
         }
     }
 

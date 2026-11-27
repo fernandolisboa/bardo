@@ -54,10 +54,10 @@ use bardo_domain::{
     NoPendingImage, NoSuchCastMember, NoSuchPlace, NoSuchScene, OtherShot, OtherText, PlaceDraft,
     PlanDraft, PortraitsUsed, ProductId, ProductRepository, ProfileId, Progress, ProjectFiles,
     Provider, ReferenceImage, RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError,
-    SceneImage, SceneKindError, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePlanSize,
-    ScenePrompt, SceneSetting, SecretStore, ShotComposer, StyleChoice, TemplateKind, TemplateUsed,
-    TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator,
-    TextRequest, VideoProject, VideoProjectId, scene_image_prompt, sentences,
+    SceneImage, SceneKindError, SceneObject, ScenePlan, ScenePlanId, ScenePlanRepository,
+    ScenePlanSize, ScenePrompt, SceneSetting, SecretStore, ShotComposer, StyleChoice, TemplateKind,
+    TemplateUsed, TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort, TextFormat,
+    TextGenerator, TextRequest, VideoProject, VideoProjectId, scene_image_prompt, sentences,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
@@ -280,6 +280,10 @@ pub struct ScenesView {
     /// The composed scenes that wait for their picture in the video's
     /// frame: Bardo makes those for free.
     pub missing_shots: Vec<usize>,
+    /// The pictures of the world's places and objects (#338) that drawing
+    /// the scenes without an image pays for: those with none for the
+    /// video's look yet.
+    pub missing_world_pictures: usize,
 }
 
 /// Claude's call that plans the scenes of a narration of `size`. What the
@@ -324,7 +328,9 @@ impl ScenesView {
     pub fn missing_images(&self) -> usize {
         self.plan.as_ref().map_or(0, |plan| {
             let missing = plan.missing_images();
-            missing.len() + plan.missing_portraits(&missing, self.style).len()
+            missing.len()
+                + plan.missing_portraits(&missing, self.style).len()
+                + self.missing_world_pictures
         })
     }
 
@@ -392,7 +398,12 @@ pub(crate) const PLAN_SCHEMA: &str = r#"{
           },
           "prompt": {"type": "string"},
           "cast": {"type": "array", "items": {"type": "integer"}},
-          "motion": {"type": "string"}
+          "motion": {"type": "string"},
+          "objects": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "The numbers of the fixed objects this scene shows (from 1). Leave it out, or empty, when it shows none."
+          }
         },
         "required": ["first_sentence", "place", "prompt", "cast", "motion"],
         "additionalProperties": false
@@ -433,6 +444,9 @@ struct PlannedScene {
     /// What the scene is, in an ad's plan (#278).
     #[serde(default)]
     kind: String,
+    /// The fixed objects it shows (#338), by their number from 1.
+    #[serde(default)]
+    objects: Vec<i64>,
     /// The product image a product shot or an end card shows, by its
     /// position; negative for none. Read as any JSON value: one that is no
     /// position (a fraction, a huge number, text) shows the first image
@@ -461,9 +475,18 @@ struct PlanPayload {
     /// that character, with its appearance.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     fixed: Vec<FixedMember>,
+    /// The places the video picked (#338), as the request named them: a
+    /// place of that name is that world place, with its description.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    fixed_places: Vec<FixedMember>,
+    /// The objects the video picked (#338), in the order the request
+    /// numbered them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    fixed_objects: Vec<String>,
 }
 
-/// A character of the fixed cast, as the plan's request named it.
+/// A character of the fixed cast, or a fixed place, as the plan's request
+/// named it: its world item, name and appearance (a place's description).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct FixedMember {
     character: String,
@@ -913,7 +936,7 @@ impl SceneHandler {
                             description: fixed.appearance.clone(),
                             character: uuid::Uuid::parse_str(&fixed.character)
                                 .ok()
-                                .map(bardo_domain::CharacterId::from),
+                                .map(bardo_domain::WorldItemId::from),
                         }
                     }
                     None => CastDraft {
@@ -924,13 +947,41 @@ impl SceneHandler {
                 }
             })
             .collect();
+        // A place named as a picked place is that world place, likewise.
+        let mut placed: Vec<&str> = Vec::new();
         let places = planned
             .places
             .into_iter()
-            .map(|place| PlaceDraft {
-                name: place.name,
-                description: place.description,
+            .map(|place| {
+                let fixed = payload.fixed_places.iter().find(|fixed| {
+                    fixed.is(&place.name) && !placed.contains(&fixed.character.as_str())
+                });
+                match fixed {
+                    Some(fixed) => {
+                        placed.push(&fixed.character);
+                        PlaceDraft {
+                            name: fixed.name.clone(),
+                            description: fixed.appearance.clone(),
+                            item: uuid::Uuid::parse_str(&fixed.character)
+                                .ok()
+                                .map(bardo_domain::WorldItemId::from),
+                        }
+                    }
+                    None => PlaceDraft {
+                        name: place.name,
+                        description: place.description,
+                        item: None,
+                    },
+                }
             })
+            .collect();
+        // Objects by their number in the request; one it did not list is
+        // no object of this video.
+        let objects: Vec<bardo_domain::WorldItemId> = payload
+            .fixed_objects
+            .iter()
+            .filter_map(|id| uuid::Uuid::parse_str(id).ok())
+            .map(bardo_domain::WorldItemId::from)
             .collect();
         let scenes = planned
             .scenes
@@ -951,6 +1002,12 @@ impl SceneHandler {
                         .product_image
                         .and_then(|image| image.as_u64())
                         .and_then(|image| usize::try_from(image).ok()),
+                    objects: scene
+                        .objects
+                        .into_iter()
+                        .filter_map(|number| usize::try_from(number).ok()?.checked_sub(1))
+                        .filter_map(|at| objects.get(at).copied())
+                        .collect(),
                 })
             })
             .collect();
@@ -1133,6 +1190,11 @@ impl SceneHandler {
         // Portraits this run drew or tried: one that fails is not tried
         // again for every scene its member is in.
         let mut tried: Vec<usize> = Vec::new();
+        // The world's places and objects this run lent, drew or tried
+        // (#338), with the video's file of each: never fetched or paid for
+        // again for the next scene, even when the world could not keep it.
+        let mut world_files: std::collections::HashMap<bardo_domain::WorldItemId, Option<String>> =
+            std::collections::HashMap::new();
         let mut done = 0;
         let mut state: ImagesState = match cx.as_ref().and_then(|cx| cx.external_handle()) {
             Some(saved) => parse(saved)?,
@@ -1397,6 +1459,52 @@ impl SceneHandler {
                     }
                 }
             };
+            // Then the world's place and objects it shows (#338), each with
+            // its picture for the video's look: lent, or drawn now and kept
+            // in the world. One without a picture is described.
+            let look = self.world.look_for(project, style);
+            let place_item = plan
+                .scene_place(index)
+                .and_then(|place| plan.place(place).ok())
+                .and_then(|place| place.item());
+            let mut place_picture = false;
+            let mut shown_objects: Vec<(bardo_domain::WorldItem, bool)> = Vec::new();
+            if let Some(look) = &look {
+                for item in place_item
+                    .into_iter()
+                    .chain(scene.objects().iter().copied())
+                {
+                    let Some(found) = self.world.world.character(item).map_err(unexpected)? else {
+                        continue;
+                    };
+                    let file = match world_files.get(&item) {
+                        Some(file) => file.clone(),
+                        None => {
+                            if cx.as_ref().is_some_and(|cx| cx.should_stop()) {
+                                return Ok(());
+                            }
+                            let file = self.world_picture(key, project, (&found, look), job)?;
+                            world_files.insert(item, file.clone());
+                            file
+                        }
+                    };
+                    let added = file.is_some_and(|file| {
+                        references.add(self.files.as_ref(), self.media.as_ref(), project, &file)
+                    });
+                    match Some(item) == place_item && found.kind == bardo_domain::WorldKind::Place {
+                        true => place_picture = added,
+                        false => shown_objects.push((found, added)),
+                    }
+                }
+            }
+            let objects: Vec<SceneObject<'_>> = shown_objects
+                .iter()
+                .map(|(item, referenced)| SceneObject {
+                    name: item.name(),
+                    description: item.details.appearance(),
+                    referenced: *referenced,
+                })
+                .collect();
             // Then the other scenes it belongs with; one whose image will
             // not read is left out.
             let shots: Vec<OtherShot> = plan
@@ -1421,9 +1529,14 @@ impl SceneHandler {
                 shots: &shots,
                 style,
                 product: looks.as_deref(),
+                place_picture,
+                objects: &objects,
             };
             let with_product = looks.is_some();
             let references = references.images;
+            if cx.as_ref().is_some_and(|cx| cx.should_stop()) {
+                return Ok(());
+            }
             let prompt = scene_image_prompt(scene.prompt().as_str(), &shown, &referenced, setting);
             let request = ImageRequest {
                 prompt: prompt.clone(),
@@ -1541,6 +1654,149 @@ impl SceneHandler {
                 .map_or(JobFailureKind::PortraitMissing, |first| first.kind),
             format!("{undrawn} of {total} images were not drawn. {details}"),
         ))
+    }
+
+    /// The world place's or object's picture for `look` (#338), copied into
+    /// the video's folder: its kept one, or one drawn now (paid under the
+    /// video) and kept in the world, so the next video in the look takes
+    /// it for free. Returns the file, if any. A failure about the picture
+    /// is logged and the scene is drawn from the item's description, as
+    /// a drawn scene (it fails nothing); any other failure stops the job.
+    fn world_picture(
+        &self,
+        key: &ApiKey,
+        project: VideoProjectId,
+        (item, look): (&bardo_domain::WorldItem, &bardo_domain::Look),
+        job: JobId,
+    ) -> Result<Option<String>, JobFailure> {
+        // Another job drawing it now is waited for, then lent.
+        let _hold = self.world.desk.hold(item.id, look);
+        let folder = self.world.folder(item.owner_project);
+        if let Some(picture) = self.world.usable(item, look).map_err(unexpected)? {
+            return match self.world.files.read(&folder, &picture.file) {
+                Ok(bytes) => Ok(Some(self.world_copy(project, &picture, &bytes)?)),
+                Err(_) if !self.world.files.reachable(&folder) => {
+                    tracing::warn!("the world folder cannot be reached: a scene is described");
+                    Ok(None)
+                }
+                Err(error) => {
+                    // Gone or held: drawn without it this time. A file that
+                    // is gone is let go, so the next run draws it again.
+                    tracing::warn!("a world picture would not read: {error}");
+                    if error.kind() == std::io::ErrorKind::NotFound {
+                        self.world
+                            .world
+                            .remove_picture(picture.id)
+                            .map_err(unexpected)?;
+                    }
+                    Ok(None)
+                }
+            };
+        }
+        // Nothing paid is drawn that could not be kept.
+        if !self.world.files.reachable(&folder) {
+            tracing::warn!("the world folder cannot be reached: a scene is described");
+            return Ok(None);
+        }
+        let Some(prompt) = crate::world::picture_in_look(item, look) else {
+            return Ok(None);
+        };
+        let request = ImageRequest {
+            prompt: prompt.clone(),
+            shape: item.kind.picture_shape(),
+            references: Vec::new(),
+        };
+        let generated = {
+            let _paying = self
+                .costs
+                .paying_for_project(job, &images_call(1), project)?;
+            self.images.generate(key, &request)
+        };
+        let image = match generated {
+            Ok(image) => image,
+            Err(failure) => {
+                self.costs
+                    .record_failed_for_project(&failure, &images_call(1), Some(job), project);
+                let kind = JobFailureKind::from(failure.kind);
+                let failure = JobFailure::new(
+                    kind,
+                    format!("Gemini, picture of {}: {}", item.name(), failure.detail),
+                );
+                if !is_about_the_scene(kind) {
+                    return Err(failure);
+                }
+                tracing::warn!(?kind, "a world picture was not drawn: a scene is described");
+                return Ok(None);
+            }
+        };
+        self.costs.record_for_project(
+            PaidCall {
+                provider: Provider::Gemini,
+                model: &image.model,
+                purpose: CostPurpose::WorldPicture,
+                usage: image.usage,
+                job: Some(job),
+                reported: None,
+            },
+            project,
+        );
+        // Read again: an item whose appearance changed meanwhile is not
+        // what this picture shows.
+        let now = self.world.world.character(item.id).map_err(unexpected)?;
+        if !now.is_some_and(|now| now.details.appearance() == item.details.appearance()) {
+            return Ok(None);
+        }
+        let kept = self
+            .world
+            .keep_drawn(
+                item,
+                look.clone(),
+                &image.bytes,
+                image.format.extension(),
+                bardo_domain::PictureProvenance {
+                    provider: Some(Provider::Gemini),
+                    model: image.model.clone(),
+                    prompt,
+                    generated_at: SystemTime::now(),
+                    job: Some(job),
+                    origin: bardo_domain::PictureOrigin::Video,
+                    confirmed_at: None,
+                },
+            )
+            .map_err(unexpected)?;
+        let file = match kept {
+            Some(picture) => self.world_copy(project, &picture, &image.bytes)?,
+            // Not kept (the folder failed): the video still uses it.
+            None => {
+                let file = format!("world-{}.{}", GenerationId::new(), image.format.extension());
+                self.files
+                    .write(project, &file, &image.bytes)
+                    .map_err(unexpected)?;
+                file
+            }
+        };
+        Ok(Some(file))
+    }
+
+    /// `picture`'s copy in the video's folder, where image requests read
+    /// their references from; written once.
+    fn world_copy(
+        &self,
+        project: VideoProjectId,
+        picture: &bardo_domain::ReferencePicture,
+        bytes: &[u8],
+    ) -> Result<String, JobFailure> {
+        let extension = std::path::Path::new(&picture.file)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("png");
+        let file = format!("world-{}.{extension}", picture.id);
+        if self.files.read(project, &file).is_err() {
+            self.files
+                .write(project, &file, bytes)
+                .map_err(unexpected)?;
+        }
+        Ok(file)
     }
 
     /// Draws cast member `member`'s portrait in `style` and puts it in
@@ -1908,16 +2164,24 @@ impl Bardo {
         };
         let kinds = self.scene_kinds(project.id)?;
         let style = self.video_style(&project)?;
+        let look = self.world_book.look_of(&project, style);
+        let world_missing = |plan: &ScenePlan, scenes: &[usize]| {
+            self.world_book.missing_pictures(plan, scenes, &look)
+        };
+        let missing_world_pictures = plan
+            .as_ref()
+            .map_or(0, |plan| world_missing(plan, &plan.missing_images()));
         let missing = plan.as_ref().map_or(0, |plan| {
             let missing = plan.missing_images();
-            missing.len() + plan.missing_portraits(&missing, style).len()
+            missing.len() + plan.missing_portraits(&missing, style).len() + missing_world_pictures
         });
         let restyled = plan
             .as_ref()
             .map_or_else(Vec::new, |plan| plan.in_another_style(style));
         let restyle_estimate = match (&plan, restyled.len()) {
             (Some(plan), scenes @ 1..) => {
-                let portraits = plan.missing_portraits(&restyled, style).len();
+                let portraits =
+                    plan.missing_portraits(&restyled, style).len() + world_missing(plan, &restyled);
                 Some(self.estimate(&[images_call(scenes + portraits)])?)
             }
             _ => None,
@@ -1927,7 +2191,8 @@ impl Bardo {
             .map_or_else(Vec::new, ScenePlan::with_old_portraits);
         let old_portraits_estimate = match (&plan, old_portraits.len()) {
             (Some(plan), scenes @ 1..) => {
-                let portraits = plan.missing_portraits(&old_portraits, style).len();
+                let portraits = plan.missing_portraits(&old_portraits, style).len()
+                    + world_missing(plan, &old_portraits);
                 Some(self.estimate(&[images_call(scenes + portraits)])?)
             }
             _ => None,
@@ -1956,7 +2221,8 @@ impl Bardo {
             image_estimates: match &plan {
                 Some(plan) => (0..plan.scenes().len())
                     .map(|index| {
-                        let portraits = plan.missing_portraits(&[index], style).len();
+                        let portraits = plan.missing_portraits(&[index], style).len()
+                            + world_missing(plan, &[index]);
                         self.estimate(&[images_call(1 + portraits)])
                     })
                     .collect::<Result<_, _>>()?,
@@ -1974,6 +2240,7 @@ impl Bardo {
             restyle_estimate,
             old_portraits,
             old_portraits_estimate,
+            missing_world_pictures,
             kinds,
             missing_shots,
         })
@@ -2031,11 +2298,35 @@ impl Bardo {
                 None => crate::ad_scenes::unset_values(),
             });
         }
-        // The characters the video picked (#337): what the planner may
-        // use as given, and nothing else of the world.
-        let fixed = self.fixed_cast(project)?;
-        let fixed_lines = crate::world::fixed_cast_lines(&fixed);
-        values.insert(TemplateVariable::FixedCast, fixed_lines.clone());
+        // What the video picked of the world (#337, #338): what the planner
+        // may use as given, and nothing else of the world.
+        let fixed = self.fixed_world(project)?;
+        let world_lines = [
+            (
+                TemplateVariable::FixedCast,
+                "fixed_cast",
+                "The fixed cast",
+                crate::world::fixed_cast_lines(&fixed),
+                fixed.cast.is_empty(),
+            ),
+            (
+                TemplateVariable::FixedPlaces,
+                "fixed_places",
+                "The fixed places",
+                crate::world::fixed_places_lines(&fixed),
+                fixed.places.is_empty(),
+            ),
+            (
+                TemplateVariable::FixedObjects,
+                "fixed_objects",
+                "The fixed objects",
+                crate::world::fixed_objects_lines(&fixed),
+                fixed.objects.is_empty(),
+            ),
+        ];
+        for (variable, _, _, lines, _) in &world_lines {
+            values.insert(*variable, lines.clone());
+        }
         let rendered = template.body.render(&values).map_err(|missing| {
             // Every variable of the template has a value above.
             SceneError::Repository(RepositoryError(Box::new(missing)))
@@ -2044,13 +2335,15 @@ impl Bardo {
             Some(ad) => (ad.request(&template.body, rendered), Some(ad)),
             None => (rendered, None),
         };
-        // A template that does not place them still gets the picked
-        // characters; with none picked the request is as it always was.
-        if !fixed.is_empty() && !template.body.uses(TemplateVariable::FixedCast) {
-            rendered.prompt = format!(
-                "{}\n\nThe fixed cast:\n<fixed_cast>\n{fixed_lines}\n</fixed_cast>",
-                rendered.prompt.trim_end()
-            );
+        // A template that does not place them still gets what was picked;
+        // with nothing picked the request is as it always was.
+        for (variable, tag, title, lines, none) in &world_lines {
+            if !none && !template.body.uses(*variable) {
+                rendered.prompt = format!(
+                    "{}\n\n{title}:\n<{tag}>\n{lines}\n</{tag}>",
+                    rendered.prompt.trim_end()
+                );
+            }
         }
         Ok((rendered, ad))
     }
@@ -2112,14 +2405,18 @@ impl Bardo {
             )),
             None => None,
         };
-        let fixed = self
-            .fixed_cast(&project)?
-            .into_iter()
-            .map(|(character, _)| FixedMember {
-                character: character.id.to_string(),
-                name: character.name().to_owned(),
-                appearance: character.details.appearance().to_owned(),
-            })
+        let world = self.fixed_world(&project)?;
+        let member = |(item, _): &(bardo_domain::WorldItem, String)| FixedMember {
+            character: item.id.to_string(),
+            name: item.name().to_owned(),
+            appearance: item.details.appearance().to_owned(),
+        };
+        let fixed = world.cast.iter().map(member).collect();
+        let fixed_places = world.places.iter().map(member).collect();
+        let fixed_objects = world
+            .objects
+            .iter()
+            .map(|(item, _)| item.id.to_string())
             .collect();
         let payload = to_json(&PlanPayload {
             project: project.id.to_string(),
@@ -2130,6 +2427,8 @@ impl Bardo {
             prompt: rendered.prompt,
             ad,
             fixed,
+            fixed_places,
+            fixed_objects,
         });
         // The same plan was asked for and answered, and is not the
         // project's plan (its job was cancelled as the answer arrived, or
@@ -2280,12 +2579,16 @@ impl Bardo {
             })
             .map(|(_, &index)| index)
             .collect();
+        let style = StyleChoice::from_code(&payload.style);
         let first = plan
-            .missing_portraits(&scenes, StyleChoice::from_code(&payload.style))
+            .missing_portraits(&scenes, style)
             .into_iter()
             .filter(|member| !portraits.contains(member))
             .count();
-        let images = portraits.len() + first + scenes.len();
+        let world = self.world_book.look_for(project, style).map_or(0, |look| {
+            self.world_book.missing_pictures(&plan, &scenes, &look)
+        });
+        let images = portraits.len() + first + world + scenes.len();
         (images > 0).then(|| (project, vec![images_call(images)]))
     }
 
@@ -2378,9 +2681,11 @@ impl Bardo {
             .into_iter()
             .filter(|member| !portraits.contains(member))
             .count();
+        let look = self.world_book.look_of(&project, style);
+        let world = self.world_book.missing_pictures(plan, &scenes, &look);
         self.scenes_budget(
             plan.project,
-            images_call(portraits.len() + first + scenes.len()),
+            images_call(portraits.len() + first + world + scenes.len()),
             consent,
         )?;
         let had = scenes
@@ -2588,10 +2893,11 @@ impl Bardo {
         // A job drawing the scenes would draw some in the old place.
         self.scenes_idle(plan.project)?;
         let description = ScenePrompt::new(description).map_err(SceneError::Invalid)?;
-        if plan
-            .place_mut(place, SystemTime::now())?
-            .edit_description(description)
-        {
+        let edited = plan.place_mut(place, SystemTime::now())?;
+        if edited.edit_description(description) {
+            // The user's description is no longer the world place's (#338):
+            // the place becomes the video's own, as an edited cast member.
+            edited.unlink();
             self.scene_plans.save_place(&plan, place)?;
         }
         Ok(plan)
@@ -3239,6 +3545,8 @@ pub(crate) mod tests {
             prompt: "Every sentence.".into(),
             ad: None,
             fixed: Vec::new(),
+            fixed_places: Vec::new(),
+            fixed_objects: Vec::new(),
         };
         let job = Job::new(app.profile.id, JobKind::ScenePlan, to_json(&payload));
         let job = wait_done(&app, app.jobs.enqueue(job).unwrap());

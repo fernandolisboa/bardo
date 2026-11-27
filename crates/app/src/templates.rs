@@ -1201,11 +1201,14 @@ mod tests {
             // The fixed cast is appended after the prompt when a template
             // does not place it (#337), so the defaults, and the plans made
             // from them, stay as they were while no character is picked.
-            for variable in kind
-                .variables()
-                .iter()
-                .filter(|variable| **variable != bardo_domain::TemplateVariable::FixedCast)
-            {
+            for variable in kind.variables().iter().filter(|variable| {
+                !matches!(
+                    variable,
+                    bardo_domain::TemplateVariable::FixedCast
+                        | bardo_domain::TemplateVariable::FixedPlaces
+                        | bardo_domain::TemplateVariable::FixedObjects
+                )
+            }) {
                 assert!(
                     text.contains(&variable.placeholder()),
                     "{kind}: {variable:?}"

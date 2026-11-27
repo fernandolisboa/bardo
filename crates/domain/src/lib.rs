@@ -401,12 +401,12 @@ pub use runner::{
 };
 pub use scene::{
     CastDraft, CastMember, CastRecord, MAX_CAST, MAX_CAST_NAME_CHARS, MAX_PLACES,
-    MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes, NoSuchCastMember, NoSuchPlace,
-    NoSuchScene, OtherShot, OtherText, PRODUCT_MOTION_RULE, PRODUCT_REFERENCE_RULE, PaidPictures,
-    Place, PlaceDraft, PlaceRecord, PlanDraft, PortraitsUsed, ProductCheckError, ProductChecks,
-    Scene, SceneClip, SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId,
-    ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, SceneSetting, Sentence,
-    scene_image_prompt, sentences,
+    MAX_SCENE_OBJECTS, MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes,
+    NoSuchCastMember, NoSuchPlace, NoSuchScene, OtherShot, OtherText, PRODUCT_MOTION_RULE,
+    PRODUCT_REFERENCE_RULE, PaidPictures, Place, PlaceDraft, PlaceRecord, PlanDraft, PortraitsUsed,
+    ProductCheckError, ProductChecks, Scene, SceneClip, SceneDraft, SceneFieldError, SceneImage,
+    SceneObject, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt,
+    SceneRecord, SceneSetting, Sentence, scene_image_prompt, sentences,
 };
 pub use scene_kind::{ComposedShot, KindChange, ProductPictures, SceneKind, SceneKindError};
 pub use scene_plan_size::ScenePlanSize;
@@ -492,9 +492,10 @@ pub use voice_sample::{
 };
 pub use web_research::{PageRead, ResearchLimits, ResearchNotes, ResearchRequest, WebResearcher};
 pub use world::{
-    CastPick, Character, CharacterDetails, CharacterDraft, CharacterFieldError, CharacterId,
-    CharacterUse, Look, MAX_PICKED, PictureOrigin, PictureProvenance, ReferencePicture,
-    ReferencePictureId, WorldFiles, WorldRepository, same_name,
+    Look, MAX_OBJECTS, MAX_PICKED, MAX_PICKED_PLACES, PictureOrigin, PictureProvenance,
+    ReferencePicture, ReferencePictureId, WorldFiles, WorldItem, WorldItemDetails, WorldItemDraft,
+    WorldItemFieldError, WorldItemId, WorldItemUse, WorldKind, WorldPick, WorldRepository,
+    same_name,
 };
 pub use youtube_policy::{
     Forgotten, KEEP_AT_MOST, PRIVACY_POLICY_VERSION, PrivacyConsent, REFRESH_AFTER, UPKEEP_EVERY,

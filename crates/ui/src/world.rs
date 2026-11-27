@@ -1,21 +1,23 @@
-//! World screen (#337): the characters that come back across videos as a
-//! collection, and the picked one's name, appearance, notes and reference
-//! pictures as its inspector. The same screen shows the open project's
-//! world on World and the global library's on its World tab. Drawing a
-//! picture is paid and shows its estimate first; everything else is free.
+//! World screen (#337, #338): the characters, places and objects that come
+//! back across videos, one tab each, as a collection, and the picked one's
+//! name, appearance, notes, owner or belongings and reference pictures as
+//! its inspector. The same screen shows the open project's world on World
+//! and the global library's on its World tab. Drawing a picture is paid
+//! and shows its estimate first; importing one (a place's or an object's)
+//! asks the user to confirm they may use it; everything else is free.
 //! Rules, storage and the drawing job live in `bardo_app`; this file maps
-//! the form to a `CharacterDraft` and results back to the screen.
+//! the form to a `WorldItemDraft` and results back to the screen.
 
 use std::rc::Rc;
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    CharacterDetails, CharacterDraft, CharacterFieldError, CharacterId, Look, ProjectId,
-    ReferencePictureId, StyleChoice,
+    Look, ProjectId, ReferencePictureId, StyleChoice, WorldItemDetails, WorldItemDraft,
+    WorldItemFieldError, WorldItemId, WorldKind,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, CharacterCard, Control, Destination, PictureView, SpendEstimate, Text,
-    TourAnchor, WorldError,
+    Bardo, BudgetConsent, Control, Destination, PictureView, SpendEstimate, Text, TourAnchor,
+    WorldError, WorldItemCard,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -23,13 +25,14 @@ use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, Textar
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, ObjectFit, ScrollHandle, SharedString, Subscription, Task,
-    Window, div, img, px,
+    AnyElement, App, ClickEvent, Entity, ObjectFit, PathPromptOptions, ScrollHandle, SharedString,
+    Subscription, Task, Window, div, img, px,
 };
 
 use crate::kit::{self, Tone};
@@ -38,15 +41,15 @@ use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 use crate::{guide, layout};
 
-const NAME_ERRORS: &[CharacterFieldError] = &[
-    CharacterFieldError::NameRequired,
-    CharacterFieldError::NameTooLong,
+const NAME_ERRORS: &[WorldItemFieldError] = &[
+    WorldItemFieldError::NameRequired,
+    WorldItemFieldError::NameTooLong,
 ];
-const APPEARANCE_ERRORS: &[CharacterFieldError] = &[
-    CharacterFieldError::AppearanceRequired,
-    CharacterFieldError::AppearanceTooLong,
+const APPEARANCE_ERRORS: &[WorldItemFieldError] = &[
+    WorldItemFieldError::AppearanceRequired,
+    WorldItemFieldError::AppearanceTooLong,
 ];
-const NOTES_ERRORS: &[CharacterFieldError] = &[CharacterFieldError::NotesTooLong];
+const NOTES_ERRORS: &[WorldItemFieldError] = &[WorldItemFieldError::NotesTooLong];
 
 /// The side of a picture's thumbnail.
 const THUMBNAIL: f32 = 132.;
@@ -77,6 +80,7 @@ enum Notice {
 #[derive(Clone)]
 enum PictureNotice {
     Started,
+    Imported,
     Kept,
     Discarded,
     Removed,
@@ -104,6 +108,94 @@ impl SearchableListItem for LookChoice {
 
 type LookSelect = Entity<SelectState<SearchableVec<LookChoice>>>;
 
+/// One character an object may belong to, or nobody (`None`).
+#[derive(Clone)]
+struct OwnerChoice {
+    value: Option<WorldItemId>,
+    title: SharedString,
+}
+
+impl SearchableListItem for OwnerChoice {
+    type Value = Option<WorldItemId>;
+
+    fn title(&self) -> SharedString {
+        self.title.clone()
+    }
+
+    fn value(&self) -> &Option<WorldItemId> {
+        &self.value
+    }
+}
+
+type OwnerSelect = Entity<SelectState<SearchableVec<OwnerChoice>>>;
+
+/// The texts that name a kind of world item on the screen.
+struct KindTexts {
+    tab: Text,
+    new: Text,
+    empty: Text,
+    new_title: Text,
+    edit_title: Text,
+    form_hint: Text,
+    name_placeholder: Text,
+    appearance: Text,
+    appearance_placeholder: Text,
+    appearance_hint: Text,
+    always_placeholder: Text,
+    never_placeholder: Text,
+    create: Text,
+}
+
+fn kind_texts(kind: WorldKind) -> KindTexts {
+    match kind {
+        WorldKind::Character => KindTexts {
+            tab: Text::WorldTabCharacters,
+            new: Text::WorldNew,
+            empty: Text::WorldEmpty,
+            new_title: Text::CharacterNewTitle,
+            edit_title: Text::CharacterEditTitle,
+            form_hint: Text::CharacterFormHint,
+            name_placeholder: Text::CharacterNamePlaceholder,
+            appearance: Text::CharacterAppearance,
+            appearance_placeholder: Text::CharacterAppearancePlaceholder,
+            appearance_hint: Text::CharacterAppearanceHint,
+            always_placeholder: Text::CharacterAlwaysPlaceholder,
+            never_placeholder: Text::CharacterNeverPlaceholder,
+            create: Text::CharacterCreate,
+        },
+        WorldKind::Place => KindTexts {
+            tab: Text::WorldTabPlaces,
+            new: Text::WorldNewPlace,
+            empty: Text::WorldEmptyPlaces,
+            new_title: Text::PlaceNewTitle,
+            edit_title: Text::PlaceEditTitle,
+            form_hint: Text::PlaceFormHint,
+            name_placeholder: Text::PlaceNamePlaceholder,
+            appearance: Text::PlaceAppearance,
+            appearance_placeholder: Text::PlaceAppearancePlaceholder,
+            appearance_hint: Text::PlaceAppearanceHint,
+            always_placeholder: Text::PlaceAlwaysPlaceholder,
+            never_placeholder: Text::PlaceNeverPlaceholder,
+            create: Text::PlaceCreate,
+        },
+        WorldKind::Object => KindTexts {
+            tab: Text::WorldTabObjects,
+            new: Text::WorldNewObject,
+            empty: Text::WorldEmptyObjects,
+            new_title: Text::ObjectNewTitle,
+            edit_title: Text::ObjectEditTitle,
+            form_hint: Text::ObjectFormHint,
+            name_placeholder: Text::ObjectNamePlaceholder,
+            appearance: Text::CharacterAppearance,
+            appearance_placeholder: Text::ObjectAppearancePlaceholder,
+            appearance_hint: Text::ObjectAppearanceHint,
+            always_placeholder: Text::ObjectAlwaysPlaceholder,
+            never_placeholder: Text::ObjectNeverPlaceholder,
+            create: Text::ObjectCreate,
+        },
+    }
+}
+
 pub struct WorldScreen {
     bardo: Entity<Bardo>,
     scope: WorldScope,
@@ -112,19 +204,21 @@ pub struct WorldScreen {
     owner: Option<ProjectId>,
     /// World with no open project: nothing to show.
     no_project: bool,
-    cards: Vec<CharacterCard>,
+    /// The tab: which kind of item the list shows and the form creates.
+    kind: WorldKind,
+    cards: Vec<WorldItemCard>,
     load_failed: bool,
     show_archived: bool,
     form_scroll: ScrollHandle,
     /// The character being edited; `None` while creating one.
-    editing: Option<CharacterId>,
+    editing: Option<WorldItemId>,
     name: Entity<InputState>,
     appearance: Entity<TextareaState>,
     always: Entity<TextareaState>,
     never: Entity<TextareaState>,
     /// The saved fields the form was filled from; `None` for a new one.
-    filled: Option<CharacterDetails>,
-    field_errors: Vec<CharacterFieldError>,
+    filled: Option<WorldItemDetails>,
+    field_errors: Vec<WorldItemFieldError>,
     notice: Option<Notice>,
     confirm_delete: bool,
     /// A new appearance waits for the user to accept what it drops: the
@@ -138,6 +232,16 @@ pub struct WorldScreen {
     ask: Option<SpendEstimate>,
     picture_notice: Option<PictureNotice>,
     confirm_remove: Option<ReferencePictureId>,
+    /// The characters an object may belong to, as the picker lists them.
+    owners: Vec<(Option<WorldItemId>, SharedString)>,
+    belongs: OwnerSelect,
+    /// The names of the edited character's belongings.
+    belongings: Vec<String>,
+    /// The import card is open, with whether the user confirmed they may
+    /// use the picture.
+    importing: Option<bool>,
+    /// The file dialog of an import is open.
+    dialog: Option<Task<()>>,
     revision: u64,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -155,6 +259,9 @@ impl WorldScreen {
         let always = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 6));
         let never = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 6));
         let look = cx.new(|cx| {
+            SelectState::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(true)
+        });
+        let belongs = cx.new(|cx| {
             SelectState::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(true)
         });
         let subscriptions = vec![
@@ -177,6 +284,14 @@ impl WorldScreen {
                     cx.notify();
                 },
             ),
+            cx.subscribe(
+                &belongs,
+                |this, _, event: &SelectEvent<SearchableVec<OwnerChoice>>, cx| {
+                    if let SelectEvent::Confirm(Some(owner)) = event {
+                        this.set_belongs_to(*owner, cx);
+                    }
+                },
+            ),
             cx.observe_in(&bardo, window, |this, _, window, cx| {
                 this.relabel(window, cx)
             }),
@@ -195,6 +310,7 @@ impl WorldScreen {
             scope,
             owner: None,
             no_project: false,
+            kind: WorldKind::Character,
             cards: Vec::new(),
             load_failed: false,
             show_archived: false,
@@ -215,6 +331,11 @@ impl WorldScreen {
             ask: None,
             picture_notice: None,
             confirm_remove: None,
+            owners: Vec::new(),
+            belongs,
+            belongings: Vec::new(),
+            importing: None,
+            dialog: None,
             revision,
             _poll: poll,
             _subscriptions: subscriptions,
@@ -222,8 +343,9 @@ impl WorldScreen {
         screen.resolve_owner(cx);
         screen.reload_list(cx);
         screen.relabel(window, cx);
-        if let Some(first) = screen.first_listed() {
-            screen.edit(first, window, cx);
+        match screen.first_listed() {
+            Some(first) => screen.edit(first, window, cx),
+            None => screen.refresh_owners(window, cx),
         }
         screen
     }
@@ -252,7 +374,7 @@ impl WorldScreen {
                 self.edit(id, window, cx)
             }
             (Some(_), None) => self.start_new(window, cx),
-            _ => {}
+            _ => self.refresh_owners(window, cx),
         }
         cx.notify();
     }
@@ -297,51 +419,52 @@ impl WorldScreen {
             return;
         }
         self.revision = revision;
-        let before: Vec<(CharacterId, bool, usize)> = self.signature();
+        let before: Vec<(WorldItemId, bool, usize)> = self.signature();
         self.reload_list(cx);
         if self.signature() != before {
             cx.notify();
         }
     }
 
-    fn signature(&self) -> Vec<(CharacterId, bool, usize)> {
+    fn signature(&self) -> Vec<(WorldItemId, bool, usize)> {
         self.cards
             .iter()
             .map(|card| (card.character.id, card.drawing, card.pictures.len()))
             .collect()
     }
 
-    fn card(&self, id: CharacterId) -> Option<&CharacterCard> {
+    fn card(&self, id: WorldItemId) -> Option<&WorldItemCard> {
         self.cards.iter().find(|card| card.character.id == id)
     }
 
-    fn editing_card(&self) -> Option<&CharacterCard> {
+    fn editing_card(&self) -> Option<&WorldItemCard> {
         self.editing.and_then(|id| self.card(id))
     }
 
     /// The characters the list shows: archived ones only when asked for,
     /// and always the one being edited.
-    fn listed(&self) -> impl Iterator<Item = &CharacterCard> {
+    fn listed(&self) -> impl Iterator<Item = &WorldItemCard> {
         self.cards.iter().filter(|card| {
-            self.show_archived
-                || !card.character.is_archived()
-                || self.editing == Some(card.character.id)
+            card.character.kind == self.kind
+                && (self.show_archived
+                    || !card.character.is_archived()
+                    || self.editing == Some(card.character.id))
         })
     }
 
-    fn first_listed(&self) -> Option<CharacterId> {
+    fn first_listed(&self) -> Option<WorldItemId> {
         self.listed().next().map(|card| card.character.id)
     }
 
     fn archived_count(&self) -> usize {
         self.cards
             .iter()
-            .filter(|card| card.character.is_archived())
+            .filter(|card| card.character.kind == self.kind && card.character.is_archived())
             .count()
     }
 
-    /// Whether there are characters to show: the screen offers its tour
-    /// only then.
+    /// Whether there are items to show: the screen offers its tour only
+    /// then.
     pub fn has_content(&self) -> bool {
         !self.load_failed && !self.cards.is_empty()
     }
@@ -357,7 +480,7 @@ impl WorldScreen {
 
     fn edited(
         &mut self,
-        fields: &[CharacterFieldError],
+        fields: &[WorldItemFieldError],
         event: &InputEvent,
         cx: &mut Context<Self>,
     ) {
@@ -404,12 +527,13 @@ impl WorldScreen {
                 (look, name)
             })
             .collect();
-        let inputs = [(&self.name, Text::CharacterNamePlaceholder)]
+        let texts = kind_texts(self.kind);
+        let inputs = [(&self.name, texts.name_placeholder)]
             .map(|(input, text)| (input.clone(), tr(bardo, text)));
         let areas = [
-            (&self.appearance, Text::CharacterAppearancePlaceholder),
-            (&self.always, Text::CharacterAlwaysPlaceholder),
-            (&self.never, Text::CharacterNeverPlaceholder),
+            (&self.appearance, texts.appearance_placeholder),
+            (&self.always, texts.always_placeholder),
+            (&self.never, texts.never_placeholder),
         ]
         .map(|(area, text)| (area.clone(), tr(bardo, text)));
         for (input, text) in inputs {
@@ -446,7 +570,98 @@ impl WorldScreen {
         cx.notify();
     }
 
-    fn fill(&mut self, draft: &CharacterDraft, window: &mut Window, cx: &mut Context<Self>) {
+    /// The characters an object of this world may belong to: this
+    /// world's, then (in a project) the global library's; an archived one
+    /// only when it is the edited object's owner. Read when the list or
+    /// the edited item changes, not on every notify.
+    fn refresh_owners(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bardo = self.bardo.read(cx);
+        let mut owners: Vec<(Option<WorldItemId>, SharedString)> =
+            vec![(None, tr(bardo, Text::ObjectBelongsToNobody))];
+        let global = match self.owner {
+            Some(_) => bardo.world(None, false).unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let editing_global = self
+            .editing_card()
+            .is_some_and(|card| card.character.owner_project.is_none());
+        for card in self.cards.iter().chain(global.iter()) {
+            let character = &card.character;
+            let current = self
+                .editing_card()
+                .is_some_and(|card| card.character.belongs_to == Some(character.id));
+            if character.kind != WorldKind::Character || (character.is_archived() && !current) {
+                continue;
+            }
+            // A global object belongs only to a global character.
+            if editing_global && character.owner_project.is_some() {
+                continue;
+            }
+            let name = match (self.owner, character.owner_project) {
+                (Some(_), None) => format!(
+                    "{} ({})",
+                    character.name(),
+                    bardo.text(Text::WorldOwnerGlobal)
+                ),
+                _ => character.name().to_owned(),
+            };
+            owners.push((Some(character.id), name.into()));
+        }
+        let selected = self
+            .editing_card()
+            .and_then(|card| card.character.belongs_to);
+        if owners != self.owners {
+            let items = SearchableVec::new(
+                owners
+                    .iter()
+                    .map(|(value, title)| OwnerChoice {
+                        value: *value,
+                        title: title.clone(),
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            self.belongs
+                .update(cx, |select, cx| select.set_items(items, window, cx));
+            self.owners = owners;
+        }
+        self.belongs.update(cx, |select, cx| {
+            select.set_selected_value(&selected, window, cx)
+        });
+    }
+
+    /// Makes the edited object belong to `owner`, at once.
+    fn set_belongs_to(&mut self, owner: Option<WorldItemId>, cx: &mut Context<Self>) {
+        let Some(card) = self.editing_card() else {
+            return;
+        };
+        if card.character.kind != WorldKind::Object || card.character.belongs_to == owner {
+            return;
+        }
+        let id = card.character.id;
+        match self.bardo.read(cx).set_belongs_to(id, owner) {
+            Ok(_) => {
+                self.reload_list(cx);
+                self.notice = Some(Notice::Saved);
+            }
+            Err(error) => self.show_error(&error, cx),
+        }
+        cx.notify();
+    }
+
+    /// Shows the tab of `kind`, with its first item or a new one.
+    fn switch_kind(&mut self, kind: WorldKind, window: &mut Window, cx: &mut Context<Self>) {
+        if self.kind == kind {
+            return;
+        }
+        self.kind = kind;
+        self.relabel(window, cx);
+        match self.first_listed() {
+            Some(first) => self.edit(first, window, cx),
+            None => self.start_new(window, cx),
+        }
+    }
+
+    fn fill(&mut self, draft: &WorldItemDraft, window: &mut Window, cx: &mut Context<Self>) {
         let name = draft.name.clone();
         self.name
             .update(cx, |input, cx| input.set_value(name, window, cx));
@@ -460,8 +675,8 @@ impl WorldScreen {
         }
     }
 
-    fn draft(&self, cx: &App) -> CharacterDraft {
-        CharacterDraft {
+    fn draft(&self, cx: &App) -> WorldItemDraft {
+        WorldItemDraft {
             name: self.name.read(cx).value().to_string(),
             appearance: self.appearance.read(cx).value().to_string(),
             always: self.always.read(cx).value().to_string(),
@@ -471,7 +686,7 @@ impl WorldScreen {
 
     /// Whether the form differs from the saved fields it was filled from.
     fn dirty(&self, cx: &App) -> bool {
-        match (&self.filled, CharacterDetails::validate(self.draft(cx))) {
+        match (&self.filled, WorldItemDetails::validate(self.draft(cx))) {
             (Some(filled), Ok(now)) => *filled != now,
             _ => true,
         }
@@ -485,25 +700,49 @@ impl WorldScreen {
         self.ask = None;
         self.picture_notice = None;
         self.confirm_remove = None;
+        self.importing = None;
     }
 
     fn start_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.editing = None;
         self.filled = None;
+        self.belongings.clear();
         self.reset_feedback();
-        self.fill(&CharacterDraft::default(), window, cx);
+        self.fill(&WorldItemDraft::default(), window, cx);
+        self.refresh_owners(window, cx);
         cx.notify();
     }
 
-    fn edit(&mut self, id: CharacterId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(details) = self.card(id).map(|card| card.character.details.clone()) else {
+    fn edit(&mut self, id: WorldItemId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(character) = self.card(id).map(|card| card.character.clone()) else {
             return;
         };
-        self.filled = Some(details.clone());
+        if character.kind != self.kind {
+            self.kind = character.kind;
+            self.relabel(window, cx);
+        }
+        self.filled = Some(character.details.clone());
         self.editing = Some(id);
         self.reset_feedback();
-        self.fill(&CharacterDraft::from(&details), window, cx);
+        self.fill(&WorldItemDraft::from(&character.details), window, cx);
+        self.read_belongings(cx);
+        self.refresh_owners(window, cx);
         cx.notify();
+    }
+
+    /// Reads the names of the edited character's belongings.
+    fn read_belongings(&mut self, cx: &App) {
+        self.belongings = match self.editing_card() {
+            Some(card) if card.character.kind == WorldKind::Character => self
+                .bardo
+                .read(cx)
+                .belongings(card.character.id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|item| item.name().to_owned())
+                .collect(),
+            _ => Vec::new(),
+        };
     }
 
     fn show_error(&mut self, error: &WorldError, cx: &App) {
@@ -540,9 +779,9 @@ impl WorldScreen {
         let draft = self.draft(cx);
         let bardo = self.bardo.read(cx);
         let result = match self.editing {
-            Some(id) => bardo.edit_character(id, draft, confirmed),
+            Some(id) => bardo.edit_world_item(id, draft, confirmed),
             None if self.no_project => return false,
-            None => bardo.create_character(self.owner, draft),
+            None => bardo.create_world_item(self.owner, self.kind, draft),
         };
         let saved = match result {
             Ok(saved) => {
@@ -551,7 +790,7 @@ impl WorldScreen {
                 self.field_errors.clear();
                 self.confirm_delete = false;
                 self.confirm_drops = None;
-                self.fill(&CharacterDraft::from(&saved.details), window, cx);
+                self.fill(&WorldItemDraft::from(&saved.details), window, cx);
                 self.filled = Some(saved.details);
                 self.notice = Some(Notice::Saved);
                 true
@@ -572,7 +811,7 @@ impl WorldScreen {
         if self.dirty(cx) && !self.save(false, window, cx) {
             return;
         }
-        match self.bardo.read(cx).duplicate_character(id) {
+        match self.bardo.read(cx).duplicate_world_item(id) {
             Ok(copy) => {
                 self.reload_list(cx);
                 self.edit(copy.id, window, cx);
@@ -587,7 +826,7 @@ impl WorldScreen {
         let Some(id) = self.editing else {
             return;
         };
-        match self.bardo.read(cx).archive_character(id, archived) {
+        match self.bardo.read(cx).archive_world_item(id, archived) {
             Ok(()) => {
                 self.reload_list(cx);
                 self.confirm_delete = false;
@@ -610,7 +849,7 @@ impl WorldScreen {
             .card(id)
             .map(|card| card.character.name().to_owned())
             .unwrap_or_default();
-        match self.bardo.read(cx).delete_character(id) {
+        match self.bardo.read(cx).delete_world_item(id) {
             Ok(()) => {
                 self.reload_list(cx);
                 match self.first_listed() {
@@ -679,6 +918,113 @@ impl WorldScreen {
         cx.notify();
     }
 
+    /// Asks for the picture the import card is about, then imports it as
+    /// the kept picture for the chosen look.
+    fn choose_picture(&mut self, cx: &mut Context<Self>) {
+        let (Some(id), Some(true)) = (self.editing, self.importing) else {
+            return;
+        };
+        let Some(look) = self.look.read(cx).selected_value().cloned() else {
+            return;
+        };
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(tr(self.bardo.read(cx), Text::WorldImportDialog)),
+        });
+        self.picture_notice = None;
+        self.dialog = Some(cx.spawn(async move |this, cx| {
+            let chosen = chosen.await;
+            let _ = this.update(cx, |this, cx| {
+                this.dialog = None;
+                // Only for the item and the ticked card it was opened from.
+                if this.editing != Some(id) || this.importing != Some(true) {
+                    cx.notify();
+                    return;
+                }
+                if let Ok(Ok(Some(paths))) = chosen
+                    && let Some(path) = paths.first()
+                {
+                    match this
+                        .bardo
+                        .read(cx)
+                        .import_world_picture(id, look, path, true)
+                    {
+                        Ok(_) => {
+                            this.importing = None;
+                            this.picture_notice = Some(PictureNotice::Imported);
+                        }
+                        Err(error) => this.picture_failed(&error),
+                    }
+                    this.reload_list(cx);
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    /// The card that asks the user to confirm they may use the picture
+    /// before choosing its file.
+    fn render_import(&self, confirmed: bool, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        kit::card(cx)
+            .p_3()
+            .gap_2()
+            .border_color(theme.warning)
+            .child(
+                div()
+                    .font_semibold()
+                    .child(tr(bardo, Text::WorldImportTitle)),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child(tr(bardo, Text::WorldImportHint)),
+            )
+            .child(
+                Checkbox::new("world-import-confirm")
+                    .min_w_0()
+                    .checked(confirmed)
+                    .label(tr(bardo, Text::WorldImportConfirm))
+                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                        if this.importing.is_some() {
+                            this.importing = Some(*checked);
+                        }
+                        cx.notify();
+                    })),
+            )
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(
+                        Button::new("choose-world-picture")
+                            .small()
+                            .primary()
+                            .label(tr(bardo, Text::WorldImportChoose))
+                            .disabled(!confirmed || self.dialog.is_some())
+                            .on_click(
+                                cx.listener(|this, _: &ClickEvent, _, cx| this.choose_picture(cx)),
+                            ),
+                    )
+                    .child(
+                        Button::new("cancel-world-import")
+                            .small()
+                            .ghost()
+                            .label(tr(bardo, Text::CharacterCancel))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.importing = None;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn collection(&self, cx: &mut Context<Self>) -> Collection {
         let mut collection = Collection::new(CollectionKind::List, "character-list");
         let bardo = self.bardo.read(cx);
@@ -721,7 +1067,7 @@ impl WorldScreen {
             let text = if self.no_project {
                 Text::WorldNoProject
             } else {
-                Text::WorldEmpty
+                kind_texts(self.kind).empty
             };
             div()
                 .text_sm()
@@ -736,13 +1082,13 @@ impl WorldScreen {
         collection
     }
 
-    fn error_for(&self, fields: &[CharacterFieldError], cx: &App) -> Option<AnyElement> {
+    fn error_for(&self, fields: &[WorldItemFieldError], cx: &App) -> Option<AnyElement> {
         let error = self.field_errors.iter().find(|e| fields.contains(e))?;
         Some(
             div()
                 .text_xs()
                 .text_color(cx.theme().danger)
-                .child(tr(self.bardo.read(cx), Text::CharacterFieldError(*error)))
+                .child(tr(self.bardo.read(cx), Text::WorldItemFieldError(*error)))
                 .into_any_element(),
         )
     }
@@ -866,7 +1212,7 @@ impl WorldScreen {
             .into_any_element()
     }
 
-    fn render_draw(&self, card: &CharacterCard, cx: &mut Context<Self>) -> AnyElement {
+    fn render_draw(&self, card: &WorldItemCard, cx: &mut Context<Self>) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let ask = self.ask.as_ref().map(|estimate| {
             budget_question(
@@ -881,6 +1227,10 @@ impl WorldScreen {
                 }),
             )
         });
+        let import = self
+            .importing
+            .map(|confirmed| self.render_import(confirmed, cx));
+        let bardo = self.bardo.read(cx);
         let drawing = card.drawing;
         // A picture is drawn from the saved appearance, so edits are saved
         // first.
@@ -909,7 +1259,22 @@ impl WorldScreen {
                             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                 this.draw(BudgetConsent::Ask, cx)
                             })),
-                    ),
+                    )
+                    .when(card.character.kind.imports(), |row| {
+                        row.child(
+                            Button::new("import-world-picture")
+                                .outline()
+                                .label(tr(bardo, Text::WorldPictureImport))
+                                .disabled(
+                                    dirty || self.importing.is_some() || self.looks.is_empty(),
+                                )
+                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                    this.importing = Some(false);
+                                    this.picture_notice = None;
+                                    cx.notify();
+                                })),
+                        )
+                    }),
             )
             .when(drawing, |col| {
                 col.child(
@@ -926,6 +1291,7 @@ impl WorldScreen {
                     .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx)),
             )
             .children(ask)
+            .children(import)
             .into_any_element()
     }
 
@@ -933,6 +1299,7 @@ impl WorldScreen {
         let bardo = self.bardo.read(cx);
         let (tone, text) = match self.picture_notice.as_ref()? {
             PictureNotice::Started => (Tone::Info, Text::WorldPictureStarted),
+            PictureNotice::Imported => (Tone::Success, Text::WorldImported),
             PictureNotice::Kept => (Tone::Success, Text::WorldPictureKept),
             PictureNotice::Discarded => (Tone::Neutral, Text::WorldPictureDiscarded),
             PictureNotice::Removed => (Tone::Neutral, Text::WorldPictureRemoved),
@@ -994,6 +1361,55 @@ impl WorldScreen {
             )
             .child(body)
             .into_any_element()
+    }
+
+    /// A character's belongings, read only: an object chooses its owner.
+    fn render_belongings(&self, cx: &App) -> Option<AnyElement> {
+        let card = self.editing_card()?;
+        if card.character.kind != WorldKind::Character {
+            return None;
+        }
+        let bardo = self.bardo.read(cx);
+        let text: SharedString = match self.belongings.is_empty() {
+            true => tr(bardo, Text::CharacterBelongingsNone),
+            false => self.belongings.join(", ").into(),
+        };
+        Some(
+            v_flex()
+                .gap_0p5()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_medium()
+                        .child(tr(bardo, Text::CharacterBelongings)),
+                )
+                .child(Self::muted(text, cx))
+                .into_any_element(),
+        )
+    }
+
+    /// The character an object belongs to, saved as soon as it is chosen.
+    fn render_belongs_to(&self, cx: &App) -> Option<AnyElement> {
+        if self.kind != WorldKind::Object {
+            return None;
+        }
+        let bardo = self.bardo.read(cx);
+        Some(
+            kit::field(
+                tr(bardo, Text::ObjectBelongsTo),
+                Some(guide::info(
+                    bardo,
+                    "object-belongs-to-info",
+                    tr(bardo, Text::ObjectBelongsToHint),
+                    guide::refs::WORLD_BELONGINGS,
+                )),
+                Select::new(&self.belongs)
+                    .disabled(self.editing.is_none())
+                    .into_any_element(),
+                None,
+            )
+            .into_any_element(),
+        )
     }
 
     fn render_uses(&self, cx: &App) -> Option<AnyElement> {
@@ -1124,6 +1540,9 @@ impl WorldScreen {
         }
         let pictures = self.render_pictures(cx);
         let uses = self.render_uses(cx);
+        let belongings = self.render_belongings(cx);
+        let belongs_to = self.render_belongs_to(cx);
+        let texts = kind_texts(self.kind);
         let delete = self.confirm_delete.then(|| self.render_delete(cx));
         let drops = self
             .confirm_drops
@@ -1138,8 +1557,8 @@ impl WorldScreen {
             .editing_card()
             .is_some_and(|card| card.character.is_archived());
         let (title, action) = match self.editing {
-            Some(_) => (Text::CharacterEditTitle, Text::CharacterSave),
-            None => (Text::CharacterNewTitle, Text::CharacterCreate),
+            Some(_) => (texts.edit_title, Text::CharacterSave),
+            None => (texts.new_title, texts.create),
         };
         let notice = self.notice.as_ref().map(|notice| {
             let (tone, text): (Tone, SharedString) = match notice {
@@ -1229,7 +1648,7 @@ impl WorldScreen {
                             div()
                                 .text_sm()
                                 .text_color(theme.muted_foreground)
-                                .child(tr(bardo, Text::CharacterFormHint)),
+                                .child(tr(bardo, texts.form_hint)),
                         ),
                     )
                     .child(
@@ -1243,11 +1662,11 @@ impl WorldScreen {
                                     name_error,
                                 ))
                                 .child(kit::field(
-                                    tr(bardo, Text::CharacterAppearance),
+                                    tr(bardo, texts.appearance),
                                     Some(guide::info(
                                         bardo,
                                         "character-appearance-info",
-                                        tr(bardo, Text::CharacterAppearanceHint),
+                                        tr(bardo, texts.appearance_hint),
                                         guide::refs::WORLD_APPEARANCE,
                                     )),
                                     Textarea::new(&self.appearance).into_any_element(),
@@ -1269,6 +1688,8 @@ impl WorldScreen {
                                     Textarea::new(&self.never).into_any_element(),
                                     notes_error,
                                 ))
+                                .children(belongs_to)
+                                .children(belongings)
                                 .children(uses),
                             scroll,
                         )),
@@ -1311,7 +1732,32 @@ impl Render for WorldScreen {
             Some(info),
             cx,
         );
-        let mut actions = Vec::new();
+        let kind = self.kind;
+        let mut actions = vec![
+            kit::anchor(
+                TourAnchor::Control(Control::WorldKinds),
+                WorldKind::ALL
+                    .into_iter()
+                    .fold(
+                        TabBar::new("world-kind")
+                            .segmented()
+                            .small()
+                            .selected_index(
+                                WorldKind::ALL
+                                    .iter()
+                                    .position(|k| *k == kind)
+                                    .unwrap_or_default(),
+                            ),
+                        |bar, kind| bar.child(Tab::new().label(tr(bardo, kind_texts(kind).tab))),
+                    )
+                    .on_click(cx.listener(|this, index: &usize, window, cx| {
+                        if let Some(kind) = WorldKind::ALL.get(*index) {
+                            this.switch_kind(*kind, window, cx);
+                        }
+                    })),
+            )
+            .into_any_element(),
+        ];
         if archived > 0 {
             actions.push(
                 Checkbox::new("show-archived-characters")
@@ -1332,7 +1778,7 @@ impl Render for WorldScreen {
             Button::new("new-character")
                 .small()
                 .primary()
-                .label(tr(bardo, Text::WorldNew))
+                .label(tr(bardo, kind_texts(kind).new))
                 .disabled(self.no_project)
                 .on_click(
                     cx.listener(|this, _: &ClickEvent, window, cx| this.start_new(window, cx)),

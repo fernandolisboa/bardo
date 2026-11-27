@@ -25,14 +25,14 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, CastMember, CastPick, CastRecord, ChannelRepository, Character, CharacterDetails,
-    CharacterDraft, CharacterFieldError, CharacterId, CharacterUse, CostPurpose, FolderPlaces,
-    FolderRepository, GLOBAL_DIR, Generation, GenerationId, ImageGenerator, ImageRequest,
-    ImageShape, Job, JobFailure, JobFailureKind, JobId, JobKind, Look, MAX_PICKED, PictureOrigin,
-    PictureProvenance, ProfileId, ProjectFiles, ProjectId, ProjectRepository, Provider,
-    ReferencePicture, ReferencePictureId, RepositoryError, SceneImage, ScenePlan, ScenePrompt,
-    SecretStore, StyleChoice, TokenUsage, VideoProject, VideoProjectId, WORLD_DIR, WorldFiles,
-    WorldRepository, same_name,
+    ApiKey, CastMember, CastRecord, ChannelRepository, CostPurpose, FolderPlaces, FolderRepository,
+    GLOBAL_DIR, Generation, GenerationId, ImageGenerator, ImageRequest, Job, JobFailure,
+    JobFailureKind, JobId, JobKind, Look, PictureOrigin, PictureProvenance, ProfileId,
+    ProjectFiles, ProjectId, ProjectRepository, Provider, ReferencePicture, ReferencePictureId,
+    RepositoryError, SceneImage, ScenePlan, ScenePrompt, SecretStore, StyleChoice, TokenUsage,
+    VideoProject, VideoProjectId, WORLD_DIR, WorldFiles, WorldItem, WorldItemDetails,
+    WorldItemDraft, WorldItemFieldError, WorldItemId, WorldItemUse, WorldKind, WorldPick,
+    WorldRepository,
 };
 use serde::{Deserialize, Serialize};
 
@@ -65,14 +65,14 @@ pub(crate) struct WorldBook {
 /// draws nothing.
 #[derive(Default)]
 pub(crate) struct PortraitDesk {
-    drawing: Mutex<HashSet<(CharacterId, Look)>>,
+    drawing: Mutex<HashSet<(WorldItemId, Look)>>,
     free: Condvar,
 }
 
 impl PortraitDesk {
     /// Waits until nobody draws `character` in `look`, then holds it until
     /// the hold is dropped.
-    pub(crate) fn hold(&self, character: CharacterId, look: &Look) -> PortraitHold<'_> {
+    pub(crate) fn hold(&self, character: WorldItemId, look: &Look) -> PortraitHold<'_> {
         let key = (character, look.clone());
         let mut drawing = self.drawing.lock().unwrap_or_else(PoisonError::into_inner);
         while drawing.contains(&key) {
@@ -89,7 +89,7 @@ impl PortraitDesk {
 /// A portrait one job draws; dropping it lets the next one look.
 pub(crate) struct PortraitHold<'a> {
     desk: &'a PortraitDesk,
-    key: (CharacterId, Look),
+    key: (WorldItemId, Look),
 }
 
 impl Drop for PortraitHold<'_> {
@@ -194,7 +194,7 @@ impl WorldBook {
     /// The character's kept picture for `look`.
     pub(crate) fn kept(
         &self,
-        character: CharacterId,
+        character: WorldItemId,
         look: &Look,
     ) -> Result<Option<ReferencePicture>, RepositoryError> {
         Ok(self
@@ -279,7 +279,8 @@ impl WorldBook {
                 id: generation,
                 owner: plan.owner,
                 project: plan.project,
-                provider: picture.provenance.provider,
+                // A character's picture is always drawn.
+                provider: picture.provenance.provider.unwrap_or(Provider::Gemini),
                 model: picture.provenance.model.clone(),
                 template: plan.generation.template,
                 instructions: format!("Reference picture {} from the world", picture.id),
@@ -297,11 +298,98 @@ impl WorldBook {
         Ok(Some(replaced))
     }
 
+    /// The item's kept picture for `look` that still shows it as it reads.
+    pub(crate) fn usable(
+        &self,
+        item: &WorldItem,
+        look: &Look,
+    ) -> Result<Option<ReferencePicture>, RepositoryError> {
+        Ok(self
+            .kept(item.id, look)?
+            .filter(|picture| drawn_from(picture, item.details.appearance())))
+    }
+
+    /// The world places and objects that drawing `scenes` of `plan` in
+    /// `look` shows (#338), each once, in the order they first appear.
+    pub(crate) fn shown_items(&self, plan: &ScenePlan, scenes: &[usize]) -> Vec<WorldItemId> {
+        let mut items: Vec<WorldItemId> = Vec::new();
+        for &index in scenes {
+            let Ok(scene) = plan.scene(index) else {
+                continue;
+            };
+            if scene.is_composed() {
+                continue;
+            }
+            let place = plan
+                .scene_place(index)
+                .and_then(|place| plan.place(place).ok())
+                .and_then(|place| place.item());
+            for item in place.into_iter().chain(scene.objects().iter().copied()) {
+                if !items.contains(&item) {
+                    items.push(item);
+                }
+            }
+        }
+        items
+    }
+
+    /// How many world pictures drawing `scenes` of `plan` in `look` pays
+    /// for (#338): the places and objects they show with no picture for the
+    /// look yet.
+    pub(crate) fn missing_pictures(
+        &self,
+        plan: &ScenePlan,
+        scenes: &[usize],
+        look: &Look,
+    ) -> usize {
+        self.shown_items(plan, scenes)
+            .into_iter()
+            .filter(|item| {
+                matches!(
+                    self.world.character(*item),
+                    Ok(Some(found)) if self.usable(&found, look).ok().flatten().is_none()
+                )
+            })
+            .count()
+    }
+
+    /// Keeps a picture a video drew for a place or an object as its
+    /// picture for `look`, unless one is kept there meanwhile.
+    pub(crate) fn keep_drawn(
+        &self,
+        item: &WorldItem,
+        look: Look,
+        bytes: &[u8],
+        extension: &str,
+        provenance: PictureProvenance,
+    ) -> Result<Option<ReferencePicture>, RepositoryError> {
+        if self.usable(item, &look)?.is_some() {
+            return Ok(None);
+        }
+        let id = ReferencePictureId::new();
+        let file = format!("world-{id}.{extension}");
+        let folder = self.folder(item.owner_project);
+        if let Err(error) = self.files.write(&folder, &file, bytes) {
+            tracing::warn!("could not keep a picture in the world: {error}");
+            return Ok(None);
+        }
+        let picture = ReferencePicture {
+            id,
+            item: item.id,
+            look,
+            file,
+            provenance,
+            kept: true,
+        };
+        self.save_replacing(item.owner_project, &picture)?;
+        Ok(Some(picture))
+    }
+
     /// Keeps a portrait a video drew (or the user saved) for the
     /// character as its picture for `look`, unless it has one there.
     pub(crate) fn keep_portrait(
         &self,
-        (character, appearance): (CharacterId, &str),
+        (character, appearance): (WorldItemId, &str),
         look: Look,
         bytes: &[u8],
         drawn: &Generation,
@@ -328,16 +416,17 @@ impl WorldBook {
             found.owner_project,
             &ReferencePicture {
                 id,
-                character,
+                item: character,
                 look,
                 file,
                 provenance: PictureProvenance {
-                    provider: drawn.provider,
+                    provider: Some(drawn.provider),
                     model: drawn.model.clone(),
                     prompt: drawn.prompt.clone(),
                     generated_at: drawn.generated_at,
                     job: drawn.job,
                     origin,
+                    confirmed_at: None,
                 },
                 kept: true,
             },
@@ -353,7 +442,7 @@ impl WorldBook {
     ) -> Result<(), RepositoryError> {
         let replaced: Vec<ReferencePicture> = self
             .world
-            .pictures(picture.character)?
+            .pictures(picture.item)?
             .into_iter()
             .filter(|other| {
                 other.id != picture.id
@@ -396,9 +485,34 @@ pub(crate) fn portrait_in_look(cast: &CastMember, look: &Look) -> String {
     }
 }
 
-/// Whether `picture` was drawn from `appearance`: its prompt holds it.
+/// The prompt `item`'s reference picture is drawn from in `look`: a
+/// character's portrait, a place's or an object's picture, with a look
+/// from a channel's notes adding the notes. `None` for an appearance past
+/// what a cast member holds.
+pub(crate) fn picture_in_look(item: &WorldItem, look: &Look) -> Option<String> {
+    let prompt = match item.kind {
+        WorldKind::Character => return as_cast(item).map(|cast| portrait_in_look(&cast, look)),
+        WorldKind::Place | WorldKind::Object => item.picture_prompt(look.style()),
+    };
+    Some(match look.notes() {
+        Some(notes) if !notes.trim().is_empty() => {
+            format!(
+                "{prompt}\n\nDraw it in the look of the video, from its aesthetic notes: {notes}"
+            )
+        }
+        _ => prompt,
+    })
+}
+
+/// Whether `picture` shows the item as `appearance` reads: a drawing's
+/// prompt holds it, and an imported picture shows it as it is (a new
+/// appearance drops it).
 fn drawn_from(picture: &ReferencePicture, appearance: &str) -> bool {
-    picture.provenance.prompt.contains(appearance)
+    // A duplicate's copy of an imported picture is `Copied` but keeps the
+    // confirmation, which only an import has.
+    picture.provenance.origin == PictureOrigin::Imported
+        || picture.provenance.confirmed_at.is_some()
+        || picture.provenance.prompt.contains(appearance)
 }
 
 /// The name of a world picture's file, keeping the drawing's extension.
@@ -408,11 +522,11 @@ fn picture_file(id: ReferencePictureId, drawn: &str) -> String {
         .and_then(|extension| extension.to_str())
         .filter(|extension| extension.chars().all(|c| c.is_ascii_alphanumeric()))
         .unwrap_or("png");
-    format!("character-{id}.{extension}")
+    format!("world-{id}.{extension}")
 }
 
 /// A character as a cast member, for its portrait's prompt.
-fn as_cast(character: &Character) -> Option<CastMember> {
+fn as_cast(character: &WorldItem) -> Option<CastMember> {
     let description = ScenePrompt::new(character.details.appearance()).ok()?;
     Some(CastMember::restore(CastRecord {
         name: character.name().to_owned(),
@@ -428,7 +542,7 @@ pub enum WorldError {
     #[error("not found")]
     NotFound,
     #[error("field: {0:?}")]
-    Field(CharacterFieldError),
+    Field(WorldItemFieldError),
     /// Another item of the same owner has the name.
     #[error("the name is taken")]
     NameTaken,
@@ -442,7 +556,16 @@ pub enum WorldError {
         looks: Vec<Look>,
         videos: Vec<String>,
     },
-    /// More characters than a video keeps.
+    /// The user did not confirm they may use an imported picture.
+    #[error("not confirmed")]
+    NotConfirmed,
+    /// The imported file will not read.
+    #[error("unreadable")]
+    ImportUnreadable,
+    /// The imported file is not a picture Bardo takes.
+    #[error("import: {0:?}")]
+    Import(bardo_domain::ProductImageError),
+    /// More of a kind than a video keeps.
     #[error("too many picked")]
     TooManyPicked,
     /// An instruction past its length.
@@ -483,7 +606,7 @@ impl WorldError {
     pub fn message(&self) -> Text {
         match self {
             WorldError::NotFound => Text::WorldNotFound,
-            WorldError::Field(error) => Text::CharacterFieldError(*error),
+            WorldError::Field(error) => Text::WorldItemFieldError(*error),
             WorldError::NameTaken => Text::WorldNameTaken,
             WorldError::InUse(_) => Text::CharacterInUse,
             WorldError::DropsPictures { .. } => Text::CharacterDropsPictures,
@@ -496,6 +619,9 @@ impl WorldError {
             WorldError::MissingKey => Text::WorldPictureMissingKey,
             WorldError::FolderNotFound => Text::FolderNotFound,
             WorldError::OverBudget(_) => Text::WorldPictureOverBudget,
+            WorldError::NotConfirmed => Text::WorldImportNotConfirmed,
+            WorldError::ImportUnreadable => Text::WorldImportUnreadable,
+            WorldError::Import(error) => Text::ProductImageReason(*error),
             WorldError::Repository(_) => Text::WorldNotSaved,
         }
     }
@@ -511,12 +637,12 @@ pub struct PictureView {
 
 /// A character as the World screen shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CharacterCard {
-    pub character: Character,
+pub struct WorldItemCard {
+    pub character: WorldItem,
     /// Kept pictures, then the ones waiting for review.
     pub pictures: Vec<PictureView>,
     /// The videos that picked it or show it.
-    pub uses: Vec<CharacterUse>,
+    pub uses: Vec<WorldItemUse>,
     /// A picture of it is being drawn.
     pub drawing: bool,
 }
@@ -524,13 +650,57 @@ pub struct CharacterCard {
 /// What a video's *Who appears* shows.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WhoAppears {
-    /// The characters picked, in order, with their instruction.
-    pub picked: Vec<(Character, String)>,
-    /// The active characters of the video's project, then the global
+    /// The characters, places and objects picked, in order, with their
+    /// instruction.
+    pub picked: Vec<(WorldItem, String)>,
+    /// The active items of the video's project, then the global
     /// library's, that may be picked.
-    pub available: Vec<Character>,
+    pub available: Vec<WorldItem>,
     /// The plan was made before the last change.
     pub changed_after_plan: bool,
+}
+
+impl WhoAppears {
+    /// The picked items of `kind`, in order.
+    pub fn picked_of(&self, kind: WorldKind) -> Vec<&(WorldItem, String)> {
+        self.picked
+            .iter()
+            .filter(|(item, _)| item.kind == kind)
+            .collect()
+    }
+
+    /// The items of `kind` that may be picked and are not.
+    pub fn unpicked_of(&self, kind: WorldKind) -> Vec<&WorldItem> {
+        self.available
+            .iter()
+            .filter(|item| item.kind == kind && !self.is_picked(item.id))
+            .collect()
+    }
+
+    pub fn is_picked(&self, id: WorldItemId) -> bool {
+        self.picked.iter().any(|(item, _)| item.id == id)
+    }
+
+    /// The belongings of the picked characters that are not picked: what
+    /// picking a character offers (#338), never picked by itself.
+    pub fn offered_belongings(&self) -> Vec<&WorldItem> {
+        self.available
+            .iter()
+            .filter(|item| {
+                item.belongs_to.is_some_and(|owner| self.is_picked(owner))
+                    && !self.is_picked(item.id)
+            })
+            .collect()
+    }
+}
+
+/// What the scene planner gets of *Who appears* (#337, #338): the picked
+/// characters, places and objects, each with the video's instruction.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct FixedWorld {
+    pub(crate) cast: Vec<(WorldItem, String)>,
+    pub(crate) places: Vec<(WorldItem, String)>,
+    pub(crate) objects: Vec<(WorldItem, String)>,
 }
 
 /// The world job's payload: the character, the look and the prompt.
@@ -589,7 +759,7 @@ impl JobHandler for WorldPictureHandler {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
         let job = cx.id();
         let payload: PicturePayload = parse(payload)?;
-        let character: CharacterId = id(&payload.character)?;
+        let character: WorldItemId = id(&payload.character)?;
         let look = payload
             .look()
             .ok_or_else(|| unexpected(format!("unknown look {}", payload.style)))?;
@@ -621,7 +791,7 @@ impl JobHandler for WorldPictureHandler {
         }
         let request = ImageRequest {
             prompt: payload.prompt.clone(),
-            shape: ImageShape::Portrait,
+            shape: found.kind.picture_shape(),
             references: Vec::new(),
         };
         let call = picture_call();
@@ -651,7 +821,7 @@ impl JobHandler for WorldPictureHandler {
             _ => return Ok(()),
         }
         let id = ReferencePictureId::new();
-        let file = format!("character-{id}.{}", image.format.extension());
+        let file = format!("world-{id}.{}", image.format.extension());
         self.book
             .files
             .write(&folder, &file, &image.bytes)
@@ -661,16 +831,17 @@ impl JobHandler for WorldPictureHandler {
                 found.owner_project,
                 &ReferencePicture {
                     id,
-                    character,
+                    item: character,
                     look,
                     file,
                     provenance: PictureProvenance {
-                        provider: Provider::Gemini,
+                        provider: Some(Provider::Gemini),
                         model: image.model,
                         prompt: payload.prompt,
                         generated_at: SystemTime::now(),
                         job: Some(job),
                         origin: PictureOrigin::World,
+                        confirmed_at: None,
                     },
                     kept: false,
                 },
@@ -687,7 +858,7 @@ impl Bardo {
         &self,
         owner: Option<ProjectId>,
         archived: bool,
-    ) -> Result<Vec<CharacterCard>, WorldError> {
+    ) -> Result<Vec<WorldItemCard>, WorldError> {
         let drawing: Vec<String> = self
             .jobs()
             .into_iter()
@@ -713,7 +884,7 @@ impl Bardo {
                     })
                     .collect();
                 pictures.sort_by_key(|view| !view.picture.kept);
-                Ok(CharacterCard {
+                Ok(WorldItemCard {
                     uses: self.world_book.world.character_uses(character.id)?,
                     drawing: drawing.contains(&character.id.to_string()),
                     character,
@@ -724,7 +895,7 @@ impl Bardo {
     }
 
     /// The character, when it is the profile's.
-    fn own_character(&self, id: CharacterId) -> Result<Character, WorldError> {
+    fn own_item(&self, id: WorldItemId) -> Result<WorldItem, WorldError> {
         self.world_book
             .world
             .character(id)?
@@ -732,40 +903,44 @@ impl Bardo {
             .ok_or(WorldError::NotFound)
     }
 
-    /// Fails when another character of `owner` has the name.
+    /// Fails when another item of `owner` and `kind` has the name.
     fn name_free(
         &self,
-        owner: Option<ProjectId>,
+        (owner, kind): (Option<ProjectId>, WorldKind),
         name: &str,
-        except: Option<CharacterId>,
+        except: Option<WorldItemId>,
     ) -> Result<(), WorldError> {
         let taken = self
             .world_book
             .world
             .characters(self.profile.id, owner)?
             .into_iter()
-            .any(|other| Some(other.id) != except && other.details.same_name(name));
+            .any(|other| {
+                Some(other.id) != except && other.kind == kind && other.details.same_name(name)
+            });
         match taken {
             true => Err(WorldError::NameTaken),
             false => Ok(()),
         }
     }
 
-    /// Adds a character to `owner`'s world (`None`: the global library).
-    pub fn create_character(
+    /// Adds a character, place or object to `owner`'s world (`None`: the
+    /// global library).
+    pub fn create_world_item(
         &self,
         owner: Option<ProjectId>,
-        draft: CharacterDraft,
-    ) -> Result<Character, WorldError> {
+        kind: WorldKind,
+        draft: WorldItemDraft,
+    ) -> Result<WorldItem, WorldError> {
         if let Some(project) = owner {
             self.projects
                 .project(project)?
                 .filter(|found| found.owner == self.profile.id)
                 .ok_or(WorldError::NotFound)?;
         }
-        let details = CharacterDetails::validate(draft).map_err(WorldError::Field)?;
-        self.name_free(owner, details.name(), None)?;
-        let character = Character::new(self.profile.id, owner, details, SystemTime::now());
+        let details = WorldItemDetails::validate(draft).map_err(WorldError::Field)?;
+        self.name_free((owner, kind), details.name(), None)?;
+        let character = WorldItem::new(self.profile.id, owner, kind, details, SystemTime::now());
         self.world_book.world.save_character(&character)?;
         Ok(character)
     }
@@ -774,15 +949,19 @@ impl Bardo {
     /// pictures in every look and the portraits of the videos that show
     /// it: without `confirmed`, it says which first
     /// (`WorldError::DropsPictures`). Its name and notes keep them.
-    pub fn edit_character(
+    pub fn edit_world_item(
         &self,
-        id: CharacterId,
-        draft: CharacterDraft,
+        id: WorldItemId,
+        draft: WorldItemDraft,
         confirmed: bool,
-    ) -> Result<Character, WorldError> {
-        let mut character = self.own_character(id)?;
-        let details = CharacterDetails::validate(draft).map_err(WorldError::Field)?;
-        self.name_free(character.owner_project, details.name(), Some(id))?;
+    ) -> Result<WorldItem, WorldError> {
+        let mut character = self.own_item(id)?;
+        let details = WorldItemDetails::validate(draft).map_err(WorldError::Field)?;
+        self.name_free(
+            (character.owner_project, character.kind),
+            details.name(),
+            Some(id),
+        )?;
         let new_look = details.appearance() != character.details.appearance();
         if new_look {
             let busy = self
@@ -830,9 +1009,9 @@ impl Bardo {
     /// Gives the videos that show `character` (and are not archived) its
     /// new appearance: each one's portrait goes, so the scenes drawn with
     /// it read *old portrait* and the next one is drawn again.
-    fn follow_new_look(&self, character: &Character) -> Result<(), WorldError> {
+    fn follow_new_look(&self, character: &WorldItem) -> Result<(), WorldError> {
         let appearance = ScenePrompt::new(character.details.appearance())
-            .map_err(|_| WorldError::Field(CharacterFieldError::AppearanceTooLong))?;
+            .map_err(|_| WorldError::Field(WorldItemFieldError::AppearanceTooLong))?;
         for used in self.world_book.world.character_uses(character.id)? {
             if used.archived {
                 continue;
@@ -840,6 +1019,21 @@ impl Bardo {
             let Some(mut plan) = self.scene_plans.scene_plan(used.video)? else {
                 continue;
             };
+            // A world place's description is the plan's place's (#338).
+            let places: Vec<usize> = plan
+                .places()
+                .iter()
+                .enumerate()
+                .filter(|(_, place)| place.item() == Some(character.id))
+                .map(|(index, _)| index)
+                .collect();
+            for place in places {
+                if let Ok(linked) = plan.place_mut(place, SystemTime::now())
+                    && linked.edit_description(appearance.clone())
+                {
+                    self.scene_plans.save_place(&plan, place)?;
+                }
+            }
             let members: Vec<usize> = plan
                 .cast()
                 .iter()
@@ -865,8 +1059,8 @@ impl Bardo {
 
     /// A copy of the character in the same world, under a free name, with
     /// copies of its kept pictures.
-    pub fn duplicate_character(&self, id: CharacterId) -> Result<Character, WorldError> {
-        let original = self.own_character(id)?;
+    pub fn duplicate_world_item(&self, id: WorldItemId) -> Result<WorldItem, WorldError> {
+        let original = self.own_item(id)?;
         let others = self
             .world_book
             .world
@@ -874,21 +1068,27 @@ impl Bardo {
         let name = (2..)
             .map(|n| {
                 let suffix = format!(" ({n})");
-                let room = CharacterDetails::MAX_NAME_CHARS - suffix.chars().count();
+                let room = WorldItemDetails::MAX_NAME_CHARS - suffix.chars().count();
                 let base: String = original.name().chars().take(room).collect();
                 format!("{}{suffix}", base.trim_end())
             })
-            .find(|name| !others.iter().any(|other| other.details.same_name(name)))
+            .find(|name| {
+                !others
+                    .iter()
+                    .any(|other| other.kind == original.kind && other.details.same_name(name))
+            })
             .unwrap_or_default();
-        let mut draft = CharacterDraft::from(&original.details);
+        let mut draft = WorldItemDraft::from(&original.details);
         draft.name = name;
-        let details = CharacterDetails::validate(draft).map_err(WorldError::Field)?;
-        let copy = Character::new(
+        let details = WorldItemDetails::validate(draft).map_err(WorldError::Field)?;
+        let mut copy = WorldItem::new(
             self.profile.id,
             original.owner_project,
+            original.kind,
             details,
             SystemTime::now(),
         );
+        copy.belongs_to = original.belongs_to;
         self.world_book.world.save_character(&copy)?;
         let folder = self.world_book.folder(original.owner_project);
         for picture in self.world_book.world.pictures(id)? {
@@ -905,7 +1105,7 @@ impl Bardo {
             }
             self.world_book.world.save_picture(&ReferencePicture {
                 id,
-                character: copy.id,
+                item: copy.id,
                 file,
                 provenance: PictureProvenance {
                     origin: PictureOrigin::Copied,
@@ -919,8 +1119,8 @@ impl Bardo {
 
     /// Archives the character (hidden from *Who appears*, kept with its
     /// pictures), or brings it back.
-    pub fn archive_character(&self, id: CharacterId, archived: bool) -> Result<(), WorldError> {
-        let mut character = self.own_character(id)?;
+    pub fn archive_world_item(&self, id: WorldItemId, archived: bool) -> Result<(), WorldError> {
+        let mut character = self.own_item(id)?;
         character.archived_at = archived.then(SystemTime::now);
         Ok(self.world_book.world.save_character(&character)?)
     }
@@ -928,8 +1128,8 @@ impl Bardo {
     /// Deletes the character with its pictures. Refused while a video that
     /// is not archived picked it or shows it; archived videos keep their
     /// cast member as their own.
-    pub fn delete_character(&self, id: CharacterId) -> Result<(), WorldError> {
-        let character = self.own_character(id)?;
+    pub fn delete_world_item(&self, id: WorldItemId) -> Result<(), WorldError> {
+        let character = self.own_item(id)?;
         let busy: Vec<String> = self
             .world_book
             .world
@@ -981,11 +1181,11 @@ impl Bardo {
     /// for review. Past Gemini's budget it needs `consent`.
     pub fn draw_world_picture(
         &self,
-        id: CharacterId,
+        id: WorldItemId,
         look: Look,
         consent: BudgetConsent,
     ) -> Result<JobId, WorldError> {
-        let character = self.own_character(id)?;
+        let character = self.own_item(id)?;
         let busy = self.jobs().into_iter().any(|job| {
             job.kind() == JobKind::WorldPicture
                 && job.state().is_active()
@@ -1005,9 +1205,8 @@ impl Bardo {
         if let Err(estimate) = self.check_budget(&[picture_call()], consent)? {
             return Err(WorldError::OverBudget(estimate));
         }
-        let prompt = as_cast(&character)
-            .map(|cast| portrait_in_look(&cast, &look))
-            .ok_or(WorldError::Field(CharacterFieldError::AppearanceTooLong))?;
+        let prompt = picture_in_look(&character, &look)
+            .ok_or(WorldError::Field(WorldItemFieldError::AppearanceTooLong))?;
         let payload = PicturePayload {
             character: id.to_string(),
             owner_project: character.owner_project.map(|id| id.to_string()),
@@ -1025,10 +1224,10 @@ impl Bardo {
     /// now on, in place of the one kept before.
     pub fn keep_world_picture(
         &self,
-        character: CharacterId,
+        character: WorldItemId,
         picture: ReferencePictureId,
     ) -> Result<(), WorldError> {
-        let found = self.own_character(character)?;
+        let found = self.own_item(character)?;
         let pictures = self.world_book.world.pictures(character)?;
         let mut waiting = pictures
             .iter()
@@ -1058,10 +1257,10 @@ impl Bardo {
     /// video of its look draws a new one).
     pub fn discard_world_picture(
         &self,
-        character: CharacterId,
+        character: WorldItemId,
         picture: ReferencePictureId,
     ) -> Result<(), WorldError> {
-        let found = self.own_character(character)?;
+        let found = self.own_item(character)?;
         let picture = self
             .world_book
             .world
@@ -1099,7 +1298,7 @@ impl Bardo {
         available.extend(self.world_book.world.characters(self.profile.id, None)?);
         let mut picked = Vec::new();
         for pick in self.world_book.world.picks(video)? {
-            if let Some(character) = available.iter().find(|c| c.id == pick.character) {
+            if let Some(character) = available.iter().find(|c| c.id == pick.item) {
                 picked.push((character.clone(), pick.instruction));
             }
         }
@@ -1111,13 +1310,13 @@ impl Bardo {
         })
     }
 
-    /// Sets who appears in the video. Each character is the video's
-    /// project's or global, at most `MAX_PICKED`, each instruction within
-    /// its length. A change after planning marks the plan for review.
+    /// Sets who and what appears in the video. Each item is the video's
+    /// project's or global, at most [`WorldKind::max_picked`] of a kind,
+    /// each instruction within its length. A change after planning marks the plan for review.
     pub fn set_who_appears(
         &self,
         video: VideoProjectId,
-        picks: Vec<CastPick>,
+        picks: Vec<WorldPick>,
     ) -> Result<(), WorldError> {
         let found = self
             .themes
@@ -1125,32 +1324,42 @@ impl Bardo {
             .filter(|found| found.owner == self.profile.id)
             .ok_or(WorldError::NotFound)?;
         let owner = self.video_owner(&found)?;
-        let mut picks: Vec<CastPick> = picks
+        let mut picks: Vec<WorldPick> = picks
             .into_iter()
-            .map(|pick| CastPick {
+            .map(|pick| WorldPick {
                 instruction: pick.instruction.trim().to_owned(),
                 ..pick
             })
             .collect();
-        let mut seen: Vec<CharacterId> = Vec::new();
+        let mut seen: Vec<WorldItemId> = Vec::new();
         picks.retain(|pick| {
-            let first = !seen.contains(&pick.character);
-            seen.push(pick.character);
+            let first = !seen.contains(&pick.item);
+            seen.push(pick.item);
             first
         });
-        if picks.len() > MAX_PICKED {
-            return Err(WorldError::TooManyPicked);
-        }
+        let before = self.world_book.world.picks(video)?;
+        let mut kinds: Vec<WorldKind> = Vec::new();
         for pick in &picks {
-            if pick.instruction.chars().count() > CastPick::MAX_INSTRUCTION_CHARS {
+            if pick.instruction.chars().count() > WorldPick::MAX_INSTRUCTION_CHARS {
                 return Err(WorldError::InstructionTooLong);
             }
-            let character = self.own_character(pick.character)?;
+            let character = self.own_item(pick.item)?;
             if character.owner_project.is_some() && character.owner_project != owner {
                 return Err(WorldError::OtherProject);
             }
+            // An archived item stays where it was picked, and is never
+            // picked anew.
+            if character.is_archived() && !before.iter().any(|old| old.item == pick.item) {
+                return Err(WorldError::NotFound);
+            }
+            kinds.push(character.kind);
         }
-        let before = self.world_book.world.picks(video)?;
+        if WorldKind::ALL
+            .into_iter()
+            .any(|kind| kinds.iter().filter(|picked| **picked == kind).count() > kind.max_picked())
+        {
+            return Err(WorldError::TooManyPicked);
+        }
         if before == picks {
             return Ok(());
         }
@@ -1166,7 +1375,7 @@ impl Bardo {
         video: VideoProjectId,
         member: usize,
         global: bool,
-    ) -> Result<Character, WorldError> {
+    ) -> Result<WorldItem, WorldError> {
         let found = self
             .themes
             .project(video)?
@@ -1196,16 +1405,17 @@ impl Bardo {
             .name
             .trim_start_matches(|c: char| !c.is_alphanumeric())
             .to_owned();
-        let character = self.create_character(
+        let character = self.create_world_item(
             owner,
-            CharacterDraft {
+            WorldKind::Character,
+            WorldItemDraft {
                 name: if name.is_empty() {
                     cast.name.clone()
                 } else {
                     name
                 },
                 appearance: cast.description().as_str().to_owned(),
-                ..CharacterDraft::default()
+                ..WorldItemDraft::default()
             },
         )?;
         let style = self.video_style(&found)?;
@@ -1227,15 +1437,189 @@ impl Bardo {
         }
         // The video now shows the character: it is picked, so planning
         // again keeps it, while there is room. The plan already has it.
+        self.pick_saved(video, &character)?;
+        Ok(character)
+    }
+
+    /// Picks an item just saved from the video's plan, while its kind has
+    /// room: planning again keeps it. The plan already has it.
+    fn pick_saved(&self, video: VideoProjectId, item: &WorldItem) -> Result<(), WorldError> {
         let mut picks = self.world_book.world.picks(video)?;
-        if picks.len() < MAX_PICKED {
-            picks.push(CastPick {
-                character: character.id,
+        let mut same = 0;
+        for pick in &picks {
+            if self
+                .world_book
+                .world
+                .character(pick.item)?
+                .is_some_and(|other| other.kind == item.kind)
+            {
+                same += 1;
+            }
+        }
+        if same < item.kind.max_picked() {
+            picks.push(WorldPick {
+                item: item.id,
                 instruction: String::new(),
             });
             self.world_book.world.set_picks(video, &picks, false)?;
         }
-        Ok(character)
+        Ok(())
+    }
+
+    /// Saves place `place` of the video's plan to the world of the video's
+    /// project, or to the global library's with `global`, and makes the
+    /// plan's place that world place (#338). A plan's place has no picture
+    /// of its own: the place's first picture is drawn when a video needs
+    /// it.
+    pub fn save_place_to_world(
+        &self,
+        video: VideoProjectId,
+        place: usize,
+        global: bool,
+    ) -> Result<WorldItem, WorldError> {
+        let found = self
+            .themes
+            .project(video)?
+            .filter(|found| found.owner == self.profile.id)
+            .ok_or(WorldError::NotFound)?;
+        let owner = match global {
+            true => None,
+            false => Some(self.video_owner(&found)?.ok_or(WorldError::NotFound)?),
+        };
+        let mut plan = self
+            .scene_plans
+            .scene_plan(video)?
+            .ok_or(WorldError::NotFound)?;
+        let saved = plan.place(place).map_err(|_| WorldError::NotFound)?.clone();
+        if saved.item().is_some() {
+            return Err(WorldError::NameTaken);
+        }
+        if self.scenes_idle(video).is_err() {
+            return Err(WorldError::VideoBusy);
+        }
+        let item = self.create_world_item(
+            owner,
+            WorldKind::Place,
+            WorldItemDraft {
+                name: saved.name.clone(),
+                appearance: saved.description().as_str().to_owned(),
+                ..WorldItemDraft::default()
+            },
+        )?;
+        if let Ok(linked) = plan.place_mut(place, SystemTime::now()) {
+            *linked = linked.clone().with_item(Some(item.id));
+            self.scene_plans.save_place(&plan, place)?;
+        }
+        self.pick_saved(video, &item)?;
+        Ok(item)
+    }
+
+    /// Makes `object` belong to `character`, or to nobody (#338). The
+    /// character is of the object's owner or of the global library; a
+    /// global object belongs only to a global character.
+    pub fn set_belongs_to(
+        &self,
+        object: WorldItemId,
+        character: Option<WorldItemId>,
+    ) -> Result<WorldItem, WorldError> {
+        let mut found = self.own_item(object)?;
+        if found.kind != WorldKind::Object {
+            return Err(WorldError::NotFound);
+        }
+        if let Some(character) = character {
+            let owner = self.own_item(character)?;
+            if owner.kind != WorldKind::Character {
+                return Err(WorldError::NotFound);
+            }
+            if owner.owner_project.is_some() && owner.owner_project != found.owner_project {
+                return Err(WorldError::OtherProject);
+            }
+        }
+        found.belongs_to = character;
+        self.world_book.world.save_character(&found)?;
+        Ok(found)
+    }
+
+    /// The objects that belong to `character`, by name.
+    pub fn belongings(&self, character: WorldItemId) -> Result<Vec<WorldItem>, WorldError> {
+        let found = self.own_item(character)?;
+        let mut owners = vec![found.owner_project];
+        if found.owner_project.is_none() {
+            // A global character's belongings may be any project's.
+            owners.extend(
+                self.projects
+                    .projects(self.profile.id)?
+                    .into_iter()
+                    .map(|p| Some(p.id)),
+            );
+        }
+        let mut belongings = Vec::new();
+        for owner in owners {
+            belongings.extend(
+                self.world_book
+                    .world
+                    .characters(self.profile.id, owner)?
+                    .into_iter()
+                    .filter(|item| item.belongs_to == Some(character)),
+            );
+        }
+        Ok(belongings)
+    }
+
+    /// Imports the picture at `path` as `item`'s picture for `look`, kept at
+    /// once (#338): only a place's or an object's, a PNG, JPEG or WebP
+    /// within the limits of a product image, once the user `confirmed`
+    /// they may use it. It replaces the kept picture of that look.
+    pub fn import_world_picture(
+        &self,
+        item: WorldItemId,
+        look: Look,
+        path: &std::path::Path,
+        confirmed: bool,
+    ) -> Result<ReferencePicture, WorldError> {
+        let found = self.own_item(item)?;
+        if !found.kind.imports() {
+            return Err(WorldError::NotFound);
+        }
+        if !confirmed {
+            return Err(WorldError::NotConfirmed);
+        }
+        let bytes = crate::products::read_picture(path).map_err(|error| match error {
+            crate::ProductError::Image(reason) => WorldError::Import(reason),
+            _ => WorldError::ImportUnreadable,
+        })?;
+        let picture = bardo_domain::ProductPicture::image(bytes).map_err(WorldError::Import)?;
+        let folder = self.world_book.folder(found.owner_project);
+        if !self.world_book.files.reachable(&folder) {
+            return Err(WorldError::FolderNotFound);
+        }
+        let id = ReferencePictureId::new();
+        let file = format!("world-{id}.{}", picture.format().extension());
+        self.world_book
+            .files
+            .write(&folder, &file, picture.bytes())
+            .map_err(|_| WorldError::FolderNotFound)?;
+        let now = crate::publications::whole_millis(SystemTime::now());
+        let saved = ReferencePicture {
+            id,
+            item,
+            look,
+            file,
+            provenance: PictureProvenance {
+                provider: None,
+                model: String::new(),
+                prompt: String::new(),
+                generated_at: now,
+                job: None,
+                origin: PictureOrigin::Imported,
+                confirmed_at: Some(now),
+            },
+            kept: true,
+        };
+        self.world_book
+            .save_replacing(found.owner_project, &saved)?;
+        tracing::info!("imported a world picture");
+        Ok(saved)
     }
 
     /// Gives every member of the video's plan that is a character with a
@@ -1249,37 +1633,31 @@ impl Bardo {
             .lend_all(self.files.as_ref(), self.scene_plans.as_ref(), video)
     }
 
-    /// The characters the video picked, with their instructions, as the
-    /// scene planner gets them: a character gone, or of another project,
-    /// is left out.
-    pub(crate) fn fixed_cast(
-        &self,
-        video: &VideoProject,
-    ) -> Result<Vec<(Character, String)>, RepositoryError> {
+    /// What the video picked, with the instructions, as the scene
+    /// planner gets it: an item gone, or of another project, is left out.
+    pub(crate) fn fixed_world(&self, video: &VideoProject) -> Result<FixedWorld, RepositoryError> {
         let owner = self.video_owner(video)?;
-        let mut fixed = Vec::new();
+        let mut fixed = FixedWorld::default();
         for pick in self.world_book.world.picks(video.id)? {
-            if let Some(character) = self.world_book.world.character(pick.character)?
-                && (character.owner_project.is_none() || character.owner_project == owner)
+            if let Some(item) = self.world_book.world.character(pick.item)?
+                && (item.owner_project.is_none() || item.owner_project == owner)
             {
-                fixed.push((character, pick.instruction));
+                match item.kind {
+                    WorldKind::Character => fixed.cast.push((item, pick.instruction)),
+                    WorldKind::Place => fixed.places.push((item, pick.instruction)),
+                    WorldKind::Object => fixed.objects.push((item, pick.instruction)),
+                }
             }
         }
         Ok(fixed)
     }
-
-    /// Whether `name` is taken by another character of `owner`.
-    pub fn character_name_taken(&self, owner: Option<ProjectId>, name: &str) -> bool {
-        self.world_book
-            .world
-            .characters(self.profile.id, owner)
-            .is_ok_and(|characters| characters.iter().any(|c| same_name(c.name(), name)))
-    }
 }
 
 /// What the scene planner is told of the fixed cast: one numbered entry
-/// per picked character, or that none was picked.
-pub(crate) fn fixed_cast_lines(fixed: &[(Character, String)]) -> String {
+/// per picked character, with the picked objects it owns, or that none was
+/// picked.
+pub(crate) fn fixed_cast_lines(world: &FixedWorld) -> String {
+    let fixed = &world.cast;
     if fixed.is_empty() {
         return "None: no character was picked for this video.".to_owned();
     }
@@ -1289,10 +1667,69 @@ pub(crate) fn fixed_cast_lines(fixed: &[(Character, String)]) -> String {
          Add other people to the cast only for someone none of them can be.",
     );
     for (number, (character, instruction)) in fixed.iter().enumerate() {
+        let belongings: Vec<&str> = world
+            .objects
+            .iter()
+            .filter(|(object, _)| object.belongs_to == Some(character.id))
+            .map(|(object, _)| object.name())
+            .collect();
         text.push_str(&format!(
             "\n{}. {}",
             number + 1,
-            character.planner_lines(instruction)
+            character.planner_lines_with(instruction, &belongings)
+        ));
+    }
+    text
+}
+
+/// What the scene planner is told of the fixed places (#338): one numbered
+/// entry per picked place, or that none was picked.
+pub(crate) fn fixed_places_lines(world: &FixedWorld) -> String {
+    if world.places.is_empty() {
+        return "None: no place was picked for this video.".to_owned();
+    }
+    let mut text = String::from(
+        "Put each of these places in the places under this exact name and with this exact \
+         description, and set the scenes their notes and the story call for in them. Add \
+         other places only for somewhere none of them can be.",
+    );
+    for (number, (place, instruction)) in world.places.iter().enumerate() {
+        text.push_str(&format!(
+            "\n{}. {}",
+            number + 1,
+            place.planner_lines(instruction)
+        ));
+    }
+    text
+}
+
+/// What the scene planner is told of the fixed objects (#338): one
+/// numbered entry per picked object, by the number a scene's `objects`
+/// gives, or that none was picked.
+pub(crate) fn fixed_objects_lines(world: &FixedWorld) -> String {
+    if world.objects.is_empty() {
+        return "None: no object was picked for this video.".to_owned();
+    }
+    let mut text = String::from(
+        "Show these objects in the scenes their notes and the story call for, under this \
+         exact name and as described, and list in each scene's `objects` the numbers of \
+         those it shows. Never list an object a scene does not show.",
+    );
+    for (number, (object, instruction)) in world.objects.iter().enumerate() {
+        let owner = object
+            .belongs_to
+            .and_then(|owner| {
+                world
+                    .cast
+                    .iter()
+                    .find(|(character, _)| character.id == owner)
+            })
+            .map(|(character, _)| format!("\n   Belongs to: {}", character.name()))
+            .unwrap_or_default();
+        text.push_str(&format!(
+            "\n{}. {}{owner}",
+            number + 1,
+            object.planner_lines(instruction)
         ));
     }
     text
@@ -1316,10 +1753,11 @@ mod tests {
         app.open_project().unwrap().map(|project| project.id)
     }
 
-    fn character(app: &Bardo, owner: Option<ProjectId>, name: &str, look: &str) -> Character {
-        app.create_character(
+    fn character(app: &Bardo, owner: Option<ProjectId>, name: &str, look: &str) -> WorldItem {
+        app.create_world_item(
             owner,
-            CharacterDraft {
+            WorldKind::Character,
+            WorldItemDraft {
                 name: name.into(),
                 appearance: look.into(),
                 always: "Carries a red umbrella".into(),
@@ -1394,13 +1832,13 @@ mod tests {
         );
     }
 
-    fn pick(app: &Bardo, video: &VideoProject, picked: &[(&Character, &str)]) {
+    fn pick(app: &Bardo, video: &VideoProject, picked: &[(&WorldItem, &str)]) {
         app.set_who_appears(
             video.id,
             picked
                 .iter()
-                .map(|(character, instruction)| CastPick {
-                    character: character.id,
+                .map(|(character, instruction)| WorldPick {
+                    item: character.id,
                     instruction: (*instruction).into(),
                 })
                 .collect(),
@@ -1418,7 +1856,7 @@ mod tests {
             .count()
     }
 
-    fn kept_pictures(app: &Bardo, character: CharacterId) -> Vec<ReferencePicture> {
+    fn kept_pictures(app: &Bardo, character: WorldItemId) -> Vec<ReferencePicture> {
         app.world_book
             .world
             .pictures(character)
@@ -1591,6 +2029,539 @@ mod tests {
         }
     }
 
+    const BAKERY: &str = "A tiny corner bakery, blue tiles, wooden shelves of bread, morning light";
+    const LAMP: &str = "A dented brass oil lamp with a green glass chimney";
+
+    fn thing(app: &Bardo, kind: WorldKind, name: &str, look: &str) -> WorldItem {
+        app.create_world_item(
+            owner(app),
+            kind,
+            WorldItemDraft {
+                name: name.into(),
+                appearance: look.into(),
+                ..WorldItemDraft::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// The bakery in the first and last scenes, the lamp only in the first,
+    /// and a place of the planner's own in the second.
+    fn world_answer() -> String {
+        serde_json::json!({
+            "cast": [],
+            "places": [
+                {"name": "the Bakery", "description": "Some shop the planner imagined"},
+                {"name": "The pier", "description": "A wooden pier at dusk"},
+            ],
+            "scenes": [
+                {"first_sentence": 0, "prompt": "Dawn at the bakery, the lamp lit", "cast": [],
+                 "place": 0, "objects": [1, 7], "motion": "Slow push in"},
+                {"first_sentence": 1, "prompt": "The probe over the pier", "cast": [],
+                 "place": 1, "motion": "Drift"},
+                {"first_sentence": 2, "prompt": "Closing time at the bakery", "cast": [],
+                 "place": 0, "motion": "Static"},
+            ],
+        })
+        .to_string()
+    }
+
+    fn plan_world(h: &Harness, app: &Bardo, video: &VideoProject) {
+        h.answer(world_answer());
+        done(
+            app,
+            app.plan_scenes(video.id, true, BudgetConsent::Ask).unwrap(),
+        );
+    }
+
+    fn scene_prompts(h: &Harness) -> Vec<String> {
+        h.images
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| matches!(request.shape, ImageShape::Frame(_)))
+            .filter(|request| {
+                request.prompt.contains("Dawn")
+                    || request.prompt.contains("probe")
+                    || request.prompt.contains("Closing")
+            })
+            .map(|request| request.prompt.clone())
+            .collect()
+    }
+
+    #[test]
+    fn picked_places_and_objects_reach_the_planner_and_are_drawn_once_per_look() {
+        let h = Harness::new();
+        let app = h.start();
+        let video = h.narrated_project(&app);
+        let rosa = character(&app, owner(&app), "Rosa", ROSA);
+        let bakery = thing(&app, WorldKind::Place, "The bakery", BAKERY);
+        let lamp = thing(&app, WorldKind::Object, "Brass lamp", LAMP);
+        app.set_belongs_to(lamp.id, Some(rosa.id)).unwrap();
+        let unpicked = thing(
+            &app,
+            WorldKind::Place,
+            "The lighthouse",
+            "A white lighthouse",
+        );
+        pick(
+            &app,
+            &video,
+            &[
+                (&rosa, ""),
+                (&bakery, "Opens and closes the video"),
+                (&lamp, ""),
+            ],
+        );
+
+        plan_world(&h, &app, &video);
+        let request = h.text.requests().pop().unwrap();
+        let sent = format!("{}\n{}", request.instructions, request.prompt);
+        assert!(
+            sent.contains("<fixed_places>") && sent.contains(BAKERY),
+            "{sent}"
+        );
+        assert!(sent.contains("Opens and closes the video"));
+        assert!(sent.contains("<fixed_objects>") && sent.contains("1. Brass lamp"));
+        assert!(sent.contains("Belongs to: Rosa"));
+        assert!(
+            sent.contains("Has: Brass lamp"),
+            "the character's belongings"
+        );
+        assert!(!sent.contains("lighthouse"), "never an unpicked place");
+        let _ = unpicked;
+
+        let plan = app.scenes(video.id).unwrap().plan.unwrap();
+        assert_eq!(plan.places()[0].item(), Some(bakery.id));
+        assert_eq!(plan.places()[0].name, "The bakery", "the world's name");
+        assert_eq!(plan.places()[0].description().as_str(), BAKERY);
+        assert_eq!(plan.places()[1].item(), None, "the planner's own place");
+        assert_eq!(
+            plan.scenes()[0].objects(),
+            [lamp.id],
+            "an unknown number is dropped"
+        );
+        assert!(plan.scenes()[2].objects().is_empty());
+
+        let view = app.scenes(video.id).unwrap();
+        assert_eq!(view.missing_world_pictures, 2, "the bakery and the lamp");
+        assert_eq!(view.missing_images(), 3 + 2);
+        draw(&app, &video);
+        let world: Vec<ImageRequest> = h
+            .images
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request.prompt.starts_with("A reference picture of one"))
+            .cloned()
+            .collect();
+        assert_eq!(world.len(), 2, "one picture each");
+        assert!(world.iter().any(|request| request.shape
+            == ImageShape::Frame(bardo_domain::AspectRatio::Landscape)
+            && request.prompt.contains(BAKERY)));
+        let prompts = scene_prompts(&h);
+        let first = prompts.iter().find(|p| p.contains("Dawn")).unwrap();
+        assert!(first.contains("this place itself"), "{first}");
+        assert!(first.contains("Brass lamp, A dented brass"), "{first}");
+        let last = prompts.iter().find(|p| p.contains("Closing")).unwrap();
+        assert!(last.contains("this place itself"));
+        assert!(!last.contains("Brass lamp"), "only scenes that show it");
+        let pier = prompts.iter().find(|p| p.contains("probe")).unwrap();
+        assert!(!pier.contains("this place itself"));
+        for item in [bakery.id, lamp.id] {
+            let kept = kept_pictures(&app, item);
+            assert_eq!(kept.len(), 1);
+            assert_eq!(kept[0].provenance.origin, PictureOrigin::Video);
+        }
+
+        // The next video in the look lends them.
+        let second = video_on(&app, &video, "The second probe");
+        narrate(&h, &app, &second);
+        pick(&app, &second, &[(&bakery, ""), (&lamp, "")]);
+        plan_world(&h, &app, &second);
+        assert_eq!(app.scenes(second.id).unwrap().missing_world_pictures, 0);
+        let before = h.images.requests.lock().unwrap().len();
+        draw(&app, &second);
+        let asked = h.images.requests.lock().unwrap()[before..]
+            .iter()
+            .filter(|request| request.prompt.starts_with("A reference picture of one"))
+            .count();
+        assert_eq!(asked, 0, "no paid call for them");
+    }
+
+    fn world_requests(h: &Harness) -> usize {
+        h.images
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request.prompt.starts_with("A reference picture of one"))
+            .count()
+    }
+
+    #[test]
+    fn a_world_picture_that_fails_is_tried_once_and_its_scenes_are_described() {
+        let h = Harness::new();
+        let app = h.start();
+        let video = h.narrated_project(&app);
+        let bakery = thing(&app, WorldKind::Place, "The bakery", BAKERY);
+        pick(&app, &video, &[(&bakery, "")]);
+        plan_world(&h, &app, &video);
+        h.images.decline("A reference picture of one");
+
+        // The job ends well: the scenes are drawn from the description.
+        draw(&app, &video);
+        assert_eq!(world_requests(&h), 1, "tried once for both scenes");
+        let prompts = scene_prompts(&h);
+        assert_eq!(prompts.len(), 3, "every scene is drawn");
+        for prompt in prompts.iter().filter(|p| !p.contains("probe")) {
+            assert!(!prompt.contains("this place itself"), "{prompt}");
+            assert!(prompt.contains(BAKERY), "described: {prompt}");
+        }
+        assert!(kept_pictures(&app, bakery.id).is_empty());
+    }
+
+    #[test]
+    fn a_world_picture_the_world_cannot_keep_is_paid_once_per_run() {
+        let h = Harness::new();
+        let app = h.start();
+        let video = h.narrated_project(&app);
+        let bakery = thing(&app, WorldKind::Place, "The bakery", BAKERY);
+        pick(&app, &video, &[(&bakery, "")]);
+        plan_world(&h, &app, &video);
+        // Reachable, but full: the picture is drawn and cannot be kept.
+        h.world_files
+            .refuse_writes(&app.world_book.folder(owner(&app)));
+
+        draw(&app, &video);
+        assert_eq!(world_requests(&h), 1, "not paid again for the next scene");
+        let prompts = scene_prompts(&h);
+        let at_the_bakery: Vec<&String> = prompts.iter().filter(|p| !p.contains("probe")).collect();
+        assert_eq!(at_the_bakery.len(), 2);
+        assert!(
+            at_the_bakery
+                .iter()
+                .all(|prompt| prompt.contains("this place itself")),
+            "both scenes use the one drawing"
+        );
+        assert!(kept_pictures(&app, bakery.id).is_empty());
+    }
+
+    #[test]
+    fn a_duplicated_imported_picture_stays_usable() {
+        let h = Harness::new();
+        let app = h.start();
+        let bakery = thing(&app, WorldKind::Place, "The bakery", BAKERY);
+        let look = Look::Style(bardo_domain::VisualStyle::Watercolor);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bakery.png");
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend(1200u32.to_be_bytes());
+        png.extend(800u32.to_be_bytes());
+        png.extend([8, 2, 0, 0, 0, 1]);
+        std::fs::write(&path, &png).unwrap();
+        app.import_world_picture(bakery.id, look.clone(), &path, true)
+            .unwrap();
+
+        let copy = app.duplicate_world_item(bakery.id).unwrap();
+        let found = app.world_book.world.character(copy.id).unwrap().unwrap();
+        let usable = app.world_book.usable(&found, &look).unwrap();
+        assert!(usable.is_some(), "the copy is the look's picture");
+        assert_eq!(
+            usable.unwrap().provenance.origin,
+            PictureOrigin::Copied,
+            "and says it was copied"
+        );
+    }
+
+    #[test]
+    fn an_edited_plan_place_stops_following_the_world_place() {
+        let h = Harness::new();
+        let app = h.start();
+        let video = h.narrated_project(&app);
+        let bakery = thing(&app, WorldKind::Place, "The bakery", BAKERY);
+        pick(&app, &video, &[(&bakery, "")]);
+        plan_world(&h, &app, &video);
+        let plan = app
+            .edit_place_description(video.id, 0, "A night market under paper lanterns")
+            .unwrap();
+        assert_eq!(plan.places()[0].item(), None, "the video's own now");
+
+        // A new appearance of the world place leaves it as the user wrote it.
+        app.edit_world_item(
+            bakery.id,
+            WorldItemDraft {
+                name: "The bakery".into(),
+                appearance: "A bakery painted blue".into(),
+                ..WorldItemDraft::default()
+            },
+            true,
+        )
+        .unwrap();
+        let plan = app.scenes(video.id).unwrap().plan.unwrap();
+        assert_eq!(
+            plan.places()[0].description().as_str(),
+            "A night market under paper lanterns"
+        );
+    }
+
+    #[test]
+    fn an_archived_item_is_never_picked_anew_but_stays_where_it_was() {
+        let h = Harness::new();
+        let app = h.start();
+        let video = h.narrated_project(&app);
+        let bakery = thing(&app, WorldKind::Place, "The bakery", BAKERY);
+        let lamp = thing(&app, WorldKind::Object, "Brass lamp", LAMP);
+        pick(&app, &video, &[(&bakery, "")]);
+        app.archive_world_item(bakery.id, true).unwrap();
+        app.archive_world_item(lamp.id, true).unwrap();
+        // Saving the instructions again keeps the archived bakery.
+        pick(&app, &video, &[(&bakery, "At dawn")]);
+        assert!(matches!(
+            app.set_who_appears(
+                video.id,
+                vec![WorldPick {
+                    item: lamp.id,
+                    instruction: String::new(),
+                }],
+            ),
+            Err(WorldError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn deleting_a_place_or_an_object_leaves_the_plan_its_own_and_its_uses_go() {
+        let h = Harness::new();
+        let app = h.start();
+        let video = h.narrated_project(&app);
+        let bakery = thing(&app, WorldKind::Place, "The bakery", BAKERY);
+        let lamp = thing(&app, WorldKind::Object, "Brass lamp", LAMP);
+        let globe = thing(&app, WorldKind::Object, "Desk globe", "An old desk globe");
+        pick(&app, &video, &[(&bakery, ""), (&lamp, ""), (&globe, "")]);
+        h.answer(
+            serde_json::json!({
+                "cast": [],
+                "places": [{"name": "The bakery", "description": "Some shop"}],
+                "scenes": [
+                    {"first_sentence": 0, "prompt": "Dawn at the bakery", "cast": [],
+                     "place": 0, "objects": [1, 2], "motion": "Slow push in"},
+                    {"first_sentence": 1, "prompt": "The probe", "cast": [], "motion": "Drift"},
+                    {"first_sentence": 2, "prompt": "Closing time", "cast": [],
+                     "place": 0, "objects": [2], "motion": "Static"},
+                ],
+            })
+            .to_string(),
+        );
+        done(
+            &app,
+            app.plan_scenes(video.id, true, BudgetConsent::Ask).unwrap(),
+        );
+        for item in [bakery.id, lamp.id, globe.id] {
+            assert!(
+                !app.world_book
+                    .world
+                    .character_uses(item)
+                    .unwrap()
+                    .is_empty(),
+                "the plan uses it"
+            );
+        }
+
+        app.world_book.world.delete_character(bakery.id).unwrap();
+        app.world_book.world.delete_character(lamp.id).unwrap();
+        let plan = app.scenes(video.id).unwrap().plan.unwrap();
+        assert_eq!(plan.places()[0].item(), None, "the video's own place");
+        assert_eq!(plan.places()[0].description().as_str(), BAKERY);
+        assert_eq!(plan.scenes()[0].objects(), [globe.id], "the other stays");
+        assert_eq!(plan.scenes()[2].objects(), [globe.id]);
+        assert!(
+            !app.world_book
+                .world
+                .character_uses(globe.id)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn belongings_are_offered_with_their_character_and_never_picked_alone() {
+        let h = Harness::new();
+        let app = h.start();
+        let video = h.narrated_project(&app);
+        let rosa = character(&app, owner(&app), "Rosa", ROSA);
+        let lamp = thing(&app, WorldKind::Object, "Brass lamp", LAMP);
+        let global_object = app
+            .create_world_item(
+                None,
+                WorldKind::Object,
+                WorldItemDraft {
+                    name: "A globe".into(),
+                    appearance: "An old desk globe".into(),
+                    ..WorldItemDraft::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            matches!(
+                app.set_belongs_to(global_object.id, Some(rosa.id)),
+                Err(WorldError::OtherProject)
+            ),
+            "a global object belongs only to a global character"
+        );
+        assert!(matches!(
+            app.set_belongs_to(rosa.id, Some(rosa.id)),
+            Err(WorldError::NotFound)
+        ));
+        app.set_belongs_to(lamp.id, Some(rosa.id)).unwrap();
+        let belongings: Vec<WorldItemId> = app
+            .belongings(rosa.id)
+            .unwrap()
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(belongings, [lamp.id]);
+
+        assert!(
+            app.who_appears(video.id)
+                .unwrap()
+                .offered_belongings()
+                .is_empty()
+        );
+        pick(&app, &video, &[(&rosa, "")]);
+        let who = app.who_appears(video.id).unwrap();
+        assert_eq!(
+            who.offered_belongings()
+                .iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            [lamp.id]
+        );
+        assert!(!who.is_picked(lamp.id), "only when picked");
+        plan(&h, &app, &video);
+        let request = h.text.requests().pop().unwrap();
+        assert!(!request.prompt.contains("Brass lamp"));
+    }
+
+    #[test]
+    fn picks_are_counted_per_kind() {
+        let h = Harness::new();
+        let app = h.start();
+        let video = h.narrated_project(&app);
+        let places: Vec<WorldItem> = (0..=bardo_domain::MAX_PICKED_PLACES)
+            .map(|n| thing(&app, WorldKind::Place, &format!("Room {n}"), "A plain room"))
+            .collect();
+        let three: Vec<WorldItem> = ["Ana", "Bia", "Caio"]
+            .iter()
+            .map(|name| character(&app, owner(&app), name, ROSA))
+            .collect();
+        let mut picked: Vec<(&WorldItem, &str)> = three.iter().map(|c| (c, "")).collect();
+        picked.extend(
+            places[..bardo_domain::MAX_PICKED_PLACES]
+                .iter()
+                .map(|p| (p, "")),
+        );
+        pick(&app, &video, &picked);
+        assert_eq!(
+            app.who_appears(video.id).unwrap().picked.len(),
+            3 + bardo_domain::MAX_PICKED_PLACES
+        );
+        let too_many: Vec<WorldPick> = places
+            .iter()
+            .map(|place| WorldPick {
+                item: place.id,
+                instruction: String::new(),
+            })
+            .collect();
+        assert!(matches!(
+            app.set_who_appears(video.id, too_many),
+            Err(WorldError::TooManyPicked)
+        ));
+    }
+
+    #[test]
+    fn an_imported_picture_needs_a_confirmation_and_never_a_persons() {
+        let h = Harness::new();
+        let app = h.start();
+        let rosa = character(&app, owner(&app), "Rosa", ROSA);
+        let bakery = thing(&app, WorldKind::Place, "The bakery", BAKERY);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bakery.png");
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend(1200u32.to_be_bytes());
+        png.extend(800u32.to_be_bytes());
+        png.extend([8, 2, 0, 0, 0, 1]);
+        std::fs::write(&path, &png).unwrap();
+        let look = Look::Style(bardo_domain::VisualStyle::Watercolor);
+        assert!(matches!(
+            app.import_world_picture(bakery.id, look.clone(), &path, false),
+            Err(WorldError::NotConfirmed)
+        ));
+        assert!(matches!(
+            app.import_world_picture(rosa.id, look.clone(), &path, true),
+            Err(WorldError::NotFound)
+        ));
+        let small = dir.path().join("small.png");
+        std::fs::write(&small, &png[..16]).unwrap();
+        assert!(matches!(
+            app.import_world_picture(bakery.id, look.clone(), &small, true),
+            Err(WorldError::Import(_))
+        ));
+        let imported = app
+            .import_world_picture(bakery.id, look.clone(), &path, true)
+            .unwrap();
+        assert_eq!(imported.provenance.origin, PictureOrigin::Imported);
+        assert_eq!(imported.provenance.provider, None);
+        assert!(imported.provenance.confirmed_at.is_some());
+        assert_eq!(
+            kept_pictures(&app, bakery.id),
+            std::slice::from_ref(&imported)
+        );
+        let folder = app.world_book.folder(owner(&app));
+        assert_eq!(h.world_files.read(&folder, &imported.file).unwrap(), png);
+        // It is the look's picture: nothing is drawn for it.
+        let found = app.world_book.world.character(bakery.id).unwrap().unwrap();
+        assert!(app.world_book.usable(&found, &look).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_plans_place_saved_to_the_world_is_picked_and_followed() {
+        let h = Harness::new();
+        let app = h.start();
+        let video = h.narrated_project(&app);
+        plan_world(&h, &app, &video);
+        let place = app.save_place_to_world(video.id, 1, false).unwrap();
+        assert_eq!(place.kind, WorldKind::Place);
+        assert_eq!(place.name(), "The pier");
+        assert_eq!(place.details.appearance(), "A wooden pier at dusk");
+        let plan = app.scenes(video.id).unwrap().plan.unwrap();
+        assert_eq!(plan.places()[1].item(), Some(place.id));
+        assert!(app.who_appears(video.id).unwrap().is_picked(place.id));
+        assert!(
+            matches!(
+                app.save_place_to_world(video.id, 1, true),
+                Err(WorldError::NameTaken)
+            ),
+            "saved once"
+        );
+        // A new description reaches the plan's place.
+        let draft = WorldItemDraft {
+            appearance: "A stone pier at night".into(),
+            ..WorldItemDraft::from(&place.details)
+        };
+        app.edit_world_item(place.id, draft, true).unwrap();
+        let plan = app.scenes(video.id).unwrap().plan.unwrap();
+        assert_eq!(
+            plan.places()[1].description().as_str(),
+            "A stone pier at night"
+        );
+        assert!(matches!(
+            app.delete_world_item(place.id),
+            Err(WorldError::InUse(_))
+        ));
+    }
+
     #[test]
     fn changing_who_appears_after_planning_marks_the_plan_for_review() {
         let h = Harness::new();
@@ -1617,13 +2588,13 @@ mod tests {
         let app = h.start();
         let video = project(&app);
         let owner = owner(&app);
-        let picked: Vec<Character> = (0..4)
+        let picked: Vec<WorldItem> = (0..4)
             .map(|n| character(&app, owner, &format!("Person {n}"), ROSA))
             .collect();
-        let picks: Vec<CastPick> = picked
+        let picks: Vec<WorldPick> = picked
             .iter()
-            .map(|c| CastPick {
-                character: c.id,
+            .map(|c| WorldPick {
+                item: c.id,
                 instruction: String::new(),
             })
             .collect();
@@ -1634,9 +2605,9 @@ mod tests {
         assert!(matches!(
             app.set_who_appears(
                 video.id,
-                vec![CastPick {
-                    character: picked[0].id,
-                    instruction: "x".repeat(CastPick::MAX_INSTRUCTION_CHARS + 1),
+                vec![WorldPick {
+                    item: picked[0].id,
+                    instruction: "x".repeat(WorldPick::MAX_INSTRUCTION_CHARS + 1),
                 }]
             ),
             Err(WorldError::InstructionTooLong)
@@ -1651,8 +2622,8 @@ mod tests {
         assert!(matches!(
             app.set_who_appears(
                 video.id,
-                vec![CastPick {
-                    character: stranger.id,
+                vec![WorldPick {
+                    item: stranger.id,
                     instruction: String::new(),
                 }]
             ),
@@ -1680,14 +2651,14 @@ mod tests {
         let world = app.world_book.folder(owner);
 
         // A new name and notes keep the pictures.
-        let mut draft = CharacterDraft::from(&rosa.details);
+        let mut draft = WorldItemDraft::from(&rosa.details);
         draft.name = "Dona Rosa".into();
         draft.never = "Never shouts".into();
-        app.edit_character(rosa.id, draft.clone(), false).unwrap();
+        app.edit_world_item(rosa.id, draft.clone(), false).unwrap();
         assert_eq!(kept_pictures(&app, rosa.id).len(), 1);
 
         draft.appearance = "A woman in her seventies, short grey hair, red coat".into();
-        match app.edit_character(rosa.id, draft.clone(), false) {
+        match app.edit_world_item(rosa.id, draft.clone(), false) {
             Err(WorldError::DropsPictures { looks, videos }) => {
                 assert_eq!(looks, std::slice::from_ref(&picture.look));
                 assert_eq!(videos, std::slice::from_ref(&video.title));
@@ -1696,7 +2667,7 @@ mod tests {
         }
         assert_eq!(kept_pictures(&app, rosa.id).len(), 1, "nothing changed yet");
 
-        app.edit_character(rosa.id, draft, true).unwrap();
+        app.edit_world_item(rosa.id, draft, true).unwrap();
         assert!(kept_pictures(&app, rosa.id).is_empty());
         assert!(h.world_files.read(&world, &picture.file).is_err());
         let plan = app.scenes(video.id).unwrap().plan.unwrap();
@@ -1718,18 +2689,18 @@ mod tests {
         let rosa = character(&app, owner(&app), "Rosa", ROSA);
         pick(&app, &video, &[(&rosa, "")]);
         plan(&h, &app, &video);
-        match app.delete_character(rosa.id) {
+        match app.delete_world_item(rosa.id) {
             Err(WorldError::InUse(titles)) => {
                 assert_eq!(titles, std::slice::from_ref(&video.title))
             }
             other => panic!("refused: {other:?}"),
         }
-        app.archive_character(rosa.id, true).unwrap();
+        app.archive_world_item(rosa.id, true).unwrap();
         assert!(app.who_appears(video.id).unwrap().available.is_empty());
         assert_eq!(app.who_appears(video.id).unwrap().picked.len(), 1, "kept");
 
         app.archive_video(video.id).unwrap();
-        app.delete_character(rosa.id).unwrap();
+        app.delete_world_item(rosa.id).unwrap();
         let plan = app.scenes(video.id).unwrap().plan.unwrap();
         assert_eq!(plan.cast()[0].character(), None, "an extra now");
         assert!(app.who_appears(video.id).unwrap().picked.is_empty());
@@ -1743,18 +2714,19 @@ mod tests {
         let owner = owner(&app);
         assert!(owner.is_some());
         character(&app, owner, "Rosa", ROSA);
-        let taken = app.create_character(
+        let taken = app.create_world_item(
             owner,
-            CharacterDraft {
+            WorldKind::Character,
+            WorldItemDraft {
                 name: " rosa ".into(),
                 appearance: BENTO.into(),
-                ..CharacterDraft::default()
+                ..WorldItemDraft::default()
             },
         );
         assert!(matches!(taken, Err(WorldError::NameTaken)));
         character(&app, None, "Rosa", ROSA);
         let copy = app
-            .duplicate_character(character(&app, owner, "Bento", BENTO).id)
+            .duplicate_world_item(character(&app, owner, "Bento", BENTO).id)
             .unwrap();
         assert_ne!(copy.name(), "Bento");
         assert_eq!(copy.details.appearance(), BENTO);
@@ -1897,9 +2869,9 @@ mod tests {
 
         // An appearance changed since: the waiting picture shows another face.
         let waiting = app.world_book.world.pictures(rosa.id).unwrap().remove(0);
-        let mut draft = CharacterDraft::from(&rosa.details);
+        let mut draft = WorldItemDraft::from(&rosa.details);
         draft.appearance = BENTO.into();
-        app.edit_character(rosa.id, draft, true).unwrap();
+        app.edit_world_item(rosa.id, draft, true).unwrap();
         app.world_book.world.save_picture(&waiting).unwrap();
         assert!(matches!(
             app.keep_world_picture(rosa.id, waiting.id),

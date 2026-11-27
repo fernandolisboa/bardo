@@ -475,6 +475,8 @@ mod tests {
             let mut conn = db.conn();
             conn.execute_batch(
                 "ALTER TABLE scene_plan DROP COLUMN picks_changed;
+                 ALTER TABLE scene DROP COLUMN objects;
+                 ALTER TABLE scene_place DROP COLUMN item_id;
                  ALTER TABLE scene_cast DROP COLUMN character_id;
                  DROP TABLE video_cast_pick; DROP TABLE reference_picture; DROP TABLE character;
                  DROP TABLE deleted_work;
