@@ -2314,6 +2314,7 @@ pub(crate) mod ad_tests {
                 kind: bardo_domain::ProductKind::Idea,
                 ..crate::ad_angles::testing::draft()
             },
+            true,
         )
         .unwrap();
         let concept = bardo_domain::ProductConcept {

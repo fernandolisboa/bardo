@@ -9,7 +9,7 @@ use std::time::SystemTime;
 
 use crate::persona::numbered_copy;
 use crate::{
-    ImageFormat, JobId, ProductSheet, ProfileId, RepositoryError, TemplateUsed,
+    ImageFormat, JobId, ProductSheet, ProfileId, ProjectId, RepositoryError, TemplateUsed,
     image_declares_transparency, image_dimensions,
 };
 
@@ -453,6 +453,8 @@ fn normalize_link(text: &str) -> Option<String> {
 pub struct Product {
     pub id: ProductId,
     pub owner: ProfileId,
+    /// The project that owns it, or `None` for the global library.
+    pub owner_project: Option<ProjectId>,
     pub brief: ProductBrief,
     /// Hidden from the list and from new ads; its videos keep it.
     pub archived: bool,
@@ -471,9 +473,23 @@ impl Product {
         Self {
             id: ProductId::new(),
             owner,
+            owner_project: None,
             brief,
             archived: false,
         }
+    }
+
+    /// The same product, owned by `project` (`None`: the global library).
+    pub fn owned_by(self, project: Option<ProjectId>) -> Self {
+        Self {
+            owner_project: project,
+            ..self
+        }
+    }
+
+    /// Whether it is in the global library.
+    pub fn is_global(&self) -> bool {
+        self.owner_project.is_none()
     }
 
     /// Whether the product may be deleted, given how many video projects

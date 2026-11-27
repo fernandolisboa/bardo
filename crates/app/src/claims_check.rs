@@ -1240,6 +1240,7 @@ mod tests {
                 must_say: "Sold by Paper & Co.".into(),
                 ..crate::ad_angles::testing::draft()
             },
+            true,
         )
         .unwrap();
         assert!(claims(&app, &project).current.unwrap().outdated);

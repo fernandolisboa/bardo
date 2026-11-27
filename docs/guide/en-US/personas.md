@@ -8,12 +8,14 @@ tour: personas
 
 # Narrators
 
-A persona is a narrator: a voice from your ElevenLabs account, a tone, a script style and the settings ElevenLabs reads with. Personas belong to you, not to a channel: one can narrate for several channels, and each channel has a default ([Projects and stages](projects.md#narrator)). They live on [Narrators](bardo:go/narrators). [Show me the screen](bardo:tour/personas).
+A persona is a narrator: a voice from your ElevenLabs account, a tone, a script style and the settings ElevenLabs reads with. A persona belongs to a project, or to the [Global library](global-library.md) for every project to use: one can narrate for several channels, and each channel has a default ([Projects and stages](projects.md#narrator)). They live on [Narrators](bardo:go/narrators). [Show me the screen](bardo:tour/personas).
 
 <a id="library"></a>
 ## Your narrators
 
-The list holds every persona, with its voice. Bardo comes with four, two in English and two in Portuguese; **New persona** adds your own, and picking one opens it for editing. Saving a persona that some channels use as their default changes their narrator too, so Bardo names those channels and asks first. To change only one channel's narrator, **Duplicate** the persona and edit the copy; the copy keeps the look.
+On a project's **Narrators** entry, the list holds the project's own personas and the global ones its channels and videos use, tagged **Global**; the **Narrators** tab of the Global library holds the global ones. Bardo comes with four global personas, two in English and two in Portuguese. **New persona** adds one where you are: to the project on its entry, to the global library on its tab. Picking one opens it for editing. A channel or video of a project can use the project's personas and the global ones.
+
+A global persona is used by reference: saving it changes the narrator of every channel and video that uses it, in every project, so Bardo lists those places (*Project › Channel*, or *Project › Channel › Video*) and asks first. To change it for this project only, **Bring into the project**: Bardo makes an independent copy that belongs to the project, with its look, under a name you can change (if the project already has one by that name, Bardo suggests *Name (Global)*). Changes not yet saved in the form go to the copy, never to the global persona. What already uses the global persona keeps it until you pick the copy. Names are unique within a project and within the global library. To change only one channel's narrator, **Duplicate** the persona and edit the copy; the copy keeps the look. On a project's entry the copy is the project's own; on the Global library's tab it is global.
 
 <a id="voice"></a>
 ## The voice

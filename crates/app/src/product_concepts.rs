@@ -525,7 +525,8 @@ impl Bardo {
     /// The product's Concept image section.
     pub fn product_concept(&self, product: ProductId) -> Result<ConceptView, ConceptError> {
         let found = self.concept_product(product)?;
-        let template = self.current_template(TemplateKind::ConceptPrompt)?;
+        let template =
+            self.current_template_in(TemplateKind::ConceptPrompt, found.owner_project)?;
         let rendered = self.render_concept_prompt(&found, &template)?;
         let images = self.products.image_count(product)?;
         Ok(ConceptView {
@@ -561,7 +562,8 @@ impl Bardo {
                 return Err(ConceptError::MissingKey(provider));
             }
         }
-        let template = self.current_template(TemplateKind::ConceptPrompt)?;
+        let template =
+            self.current_template_in(TemplateKind::ConceptPrompt, found.owner_project)?;
         let rendered = self.render_concept_prompt(&found, &template)?;
         if let Err(estimate) = self.check_budget(&draw_calls(&rendered), consent)? {
             return Err(ConceptError::OverBudget(estimate));
@@ -766,6 +768,7 @@ mod tests {
                 kind: ProductKind::Idea,
                 ..draft()
             },
+            true,
         )
         .unwrap();
         assert!(!app.is_concept_project(&existing));
@@ -779,6 +782,7 @@ mod tests {
                 kind: ProductKind::Idea,
                 ..draft()
             },
+            true,
         )
         .unwrap();
         let channel = crate::ad_angles::testing::channel(&app);
@@ -787,7 +791,7 @@ mod tests {
         let concept = app.approve_ad_angle(view.angles[0].angle.id).unwrap();
         assert!(app.is_concept_project(&concept));
         // It stays one once the product is no longer an idea.
-        app.update_product(product.id, draft()).unwrap();
+        app.update_product(product.id, draft(), true).unwrap();
         assert!(app.is_concept_project(&concept));
     }
 
@@ -903,7 +907,7 @@ mod tests {
         // The idea became a physical product before the retry.
         let mut draft = ProductDraft::from(&product.brief);
         draft.kind = ProductKind::Physical;
-        app.update_product(product.id, draft).unwrap();
+        app.update_product(product.id, draft, true).unwrap();
         *h.images.failure.lock().unwrap() = None;
         app.retry_job(job.id()).unwrap();
         let job = wait_done(&app, job.id());

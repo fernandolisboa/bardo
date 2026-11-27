@@ -30,6 +30,7 @@ mod guide;
 mod guide_site;
 pub mod i18n;
 mod jobs;
+mod library;
 mod localization;
 pub mod logging;
 mod look_framing;
@@ -171,6 +172,7 @@ pub use guide::{
 pub use guide_site::{SiteFile, SiteOptions, guide_site};
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
+pub use library::{LibraryUse, usable_in};
 pub use localization::{
     LocalizationError, MadeVersion, VersionBlock, VersionScenes, VersionSource, VersionTarget,
     VersionsView,
@@ -241,7 +243,7 @@ pub use stages::{
     scene_states,
 };
 pub use take_analysis::{AnalysisStatus, TakeAnalysisView};
-pub use templates::{TemplateError, default_template};
+pub use templates::{TemplateError, TemplateInUse, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 pub use thumbnails::{
     BackgroundChoice, ThumbnailComposer, ThumbnailEdit, ThumbnailError, ThumbnailView,

@@ -1,8 +1,8 @@
 use bardo_domain::{
     ConceptDrawing, JobId, MAX_PRODUCT_IMAGES, Product, ProductBrief, ProductConcept, ProductDraft,
     ProductId, ProductImage, ProductImageId, ProductImageKind, ProductKind, ProductLogo,
-    ProductOwnership, ProductPicture, ProductRepository, ProductSheet, ProfileId, RepositoryError,
-    TemplateUsed, TemplateVersionId,
+    ProductOwnership, ProductPicture, ProductRepository, ProductSheet, ProfileId, ProjectId,
+    RepositoryError, TemplateUsed, TemplateVersionId,
 };
 use rusqlite::{OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -10,7 +10,8 @@ use uuid::Uuid;
 use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 const SELECT_PRODUCT: &str = "SELECT id, profile_id, name, kind, description, audience, facts, \
-     offer, link, call_to_action, ownership, must_say, never_say, archived FROM product";
+     offer, link, call_to_action, ownership, must_say, never_say, archived, owner_project_id \
+     FROM product";
 
 /// A product row as stored, before domain validation.
 struct ProductRow {
@@ -22,6 +23,7 @@ struct ProductRow {
     /// must say, never say.
     text: [String; 9],
     archived: bool,
+    owner_project_id: Option<String>,
 }
 
 impl ProductRow {
@@ -43,6 +45,7 @@ impl ProductRow {
                 row.get(12)?,
             ],
             archived: row.get(13)?,
+            owner_project_id: row.get(14)?,
         })
     }
 
@@ -82,6 +85,11 @@ impl ProductRow {
         Ok(Product {
             id: ProductId::from(Uuid::parse_str(&self.id).map_err(boxed)?),
             owner: ProfileId::from(Uuid::parse_str(&self.profile_id).map_err(boxed)?),
+            owner_project: self
+                .owner_project_id
+                .map(|id| Uuid::parse_str(&id).map(ProjectId::from))
+                .transpose()
+                .map_err(boxed)?,
             brief,
             archived: self.archived,
         })
@@ -161,9 +169,10 @@ impl ProductRepository for Database {
             .execute(
                 "INSERT INTO product (id, profile_id, name, kind, description, audience, facts,
                                       offer, link, call_to_action, ownership, must_say, never_say,
-                                      archived)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                                      archived, owner_project_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                  ON CONFLICT (id) DO UPDATE SET
+                     owner_project_id = excluded.owner_project_id,
                      name = excluded.name,
                      kind = excluded.kind,
                      description = excluded.description,
@@ -192,6 +201,7 @@ impl ProductRepository for Database {
                     brief.must_say(),
                     brief.never_say(),
                     product.archived,
+                    product.owner_project.map(|id| id.to_string()),
                 ],
             )
             .map_err(boxed)?;

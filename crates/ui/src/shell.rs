@@ -25,6 +25,7 @@ use crate::guide_screen::{GuideScreen, GuideScreenEvent, OpenGuide, TourThisScre
 use crate::jobs::JobsPanel;
 use crate::kit::Tone;
 use crate::layout;
+use crate::library::LibraryScope;
 use crate::missed::{MissedChanged, MissedPosts};
 use crate::network_accounts::OpenNetworkSettings;
 use crate::overview::{OpenIdeas, OpenVideo, OverviewScreen};
@@ -64,6 +65,10 @@ pub struct Shell {
     accounts: Entity<AccountsScreen>,
     personas: Entity<PersonasScreen>,
     products: Entity<ProductsScreen>,
+    /// The global library's Narrators, Products and Templates tabs.
+    global_personas: Entity<PersonasScreen>,
+    global_products: Entity<ProductsScreen>,
+    global_templates: Entity<TemplatesScreen>,
     /// The open project's world, on World.
     world: Entity<WorldScreen>,
     /// The global library's world, on its World tab.
@@ -118,8 +123,14 @@ impl Shell {
         let overview = cx.new(|cx| OverviewScreen::new(bardo.clone(), cx));
         let channels = cx.new(|cx| ChannelsScreen::new(bardo.clone(), window, cx));
         let accounts = cx.new(|cx| AccountsScreen::new(bardo.clone(), window, cx));
-        let personas = cx.new(|cx| PersonasScreen::new(bardo.clone(), window, cx));
-        let products = cx.new(|cx| ProductsScreen::new(bardo.clone(), window, cx));
+        let personas =
+            cx.new(|cx| PersonasScreen::new(bardo.clone(), LibraryScope::Project, window, cx));
+        let products =
+            cx.new(|cx| ProductsScreen::new(bardo.clone(), LibraryScope::Project, window, cx));
+        let global_personas =
+            cx.new(|cx| PersonasScreen::new(bardo.clone(), LibraryScope::Global, window, cx));
+        let global_products =
+            cx.new(|cx| ProductsScreen::new(bardo.clone(), LibraryScope::Global, window, cx));
         let world = cx.new(|cx| WorldScreen::new(bardo.clone(), WorldScope::Project, window, cx));
         let global_world =
             cx.new(|cx| WorldScreen::new(bardo.clone(), WorldScope::Global, window, cx));
@@ -127,7 +138,10 @@ impl Shell {
         let themes = cx.new(|cx| ThemesScreen::new(bardo.clone(), window, cx));
         let performance = cx.new(|cx| PerformanceScreen::new(bardo.clone(), window, cx));
         let projects = cx.new(|cx| ProjectsScreen::new(bardo.clone(), window, cx));
-        let templates = cx.new(|cx| TemplatesScreen::new(bardo.clone(), window, cx));
+        let templates =
+            cx.new(|cx| TemplatesScreen::new(bardo.clone(), LibraryScope::Project, window, cx));
+        let global_templates =
+            cx.new(|cx| TemplatesScreen::new(bardo.clone(), LibraryScope::Global, window, cx));
         let costs = cx.new(|cx| CostsScreen::new(bardo.clone(), window, cx));
         let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
         let switcher = cx.new(|cx| ProjectSwitcher::new(bardo.clone(), window, cx));
@@ -249,11 +263,14 @@ impl Shell {
                 &products,
                 window,
                 |this, _, event: &OpenProject, window, cx| {
-                    let project = event.0;
-                    this.pick(Destination::Videos, window, cx);
-                    this.projects.update(cx, |projects, cx| {
-                        projects.show_project(project, window, cx)
-                    });
+                    this.show_ad_video(event.0, window, cx);
+                },
+            ),
+            cx.subscribe_in(
+                &global_products,
+                window,
+                |this, _, event: &OpenProject, window, cx| {
+                    this.show_ad_video(event.0, window, cx);
                 },
             ),
         ];
@@ -292,6 +309,9 @@ impl Shell {
             accounts,
             personas,
             products,
+            global_personas,
+            global_products,
+            global_templates,
             world,
             global_world,
             research,
@@ -344,6 +364,15 @@ impl Shell {
         self.projects
             .update(cx, |projects, cx| projects.reload(window, cx));
         self.products
+            .update(cx, |products, cx| products.reload(window, cx));
+        self.personas
+            .update(cx, |personas, cx| personas.reload(window, cx));
+        self.templates
+            .update(cx, |templates, cx| templates.reload(window, cx));
+        // Their Bring into the project goes to the open project.
+        self.global_personas
+            .update(cx, |personas, cx| personas.reload(window, cx));
+        self.global_products
             .update(cx, |products, cx| products.reload(window, cx));
         self.world.update(cx, |world, cx| world.reload(window, cx));
         // The global world's looks are the open project's channels'.
@@ -441,6 +470,18 @@ impl Shell {
         cx.notify();
     }
 
+    /// An ad angle's video, on Videos.
+    fn show_ad_video(
+        &mut self,
+        video: VideoProjectId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pick(Destination::Videos, window, cx);
+        self.projects
+            .update(cx, |projects, cx| projects.show_project(video, window, cx));
+    }
+
     /// Re-reads the screen the global library's tab shows.
     fn reload_library(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.library_tab {
@@ -448,13 +489,13 @@ impl Shell {
                 .global_world
                 .update(cx, |world, cx| world.reload(window, cx)),
             LibraryTab::Narrators => self
-                .personas
+                .global_personas
                 .update(cx, |personas, cx| personas.reload(window, cx)),
             LibraryTab::Products => self
-                .products
+                .global_products
                 .update(cx, |products, cx| products.reload(window, cx)),
             LibraryTab::Templates => self
-                .templates
+                .global_templates
                 .update(cx, |templates, cx| templates.reload(window, cx)),
         }
     }
@@ -706,9 +747,9 @@ impl Shell {
             Destination::Overview => self.overview.read(cx).has_content(),
             Destination::Library => match self.library_tab {
                 LibraryTab::World => self.global_world.read(cx).has_content(),
-                LibraryTab::Narrators => self.personas.read(cx).has_content(),
-                LibraryTab::Products => self.products.read(cx).has_content(),
-                LibraryTab::Templates => self.templates.read(cx).has_content(),
+                LibraryTab::Narrators => self.global_personas.read(cx).has_content(),
+                LibraryTab::Products => self.global_products.read(cx).has_content(),
+                LibraryTab::Templates => self.global_templates.read(cx).has_content(),
             },
             // Its providers and rates always show.
             Destination::Costs => true,
@@ -1102,9 +1143,9 @@ impl Shell {
             Destination::Overview => self.overview.clone().into_any_element(),
             Destination::Library => match self.library_tab {
                 LibraryTab::World => self.global_world.clone().into_any_element(),
-                LibraryTab::Narrators => self.personas.clone().into_any_element(),
-                LibraryTab::Products => self.products.clone().into_any_element(),
-                LibraryTab::Templates => self.templates.clone().into_any_element(),
+                LibraryTab::Narrators => self.global_personas.clone().into_any_element(),
+                LibraryTab::Products => self.global_products.clone().into_any_element(),
+                LibraryTab::Templates => self.global_templates.clone().into_any_element(),
             },
             Destination::Channels => self.channels.clone().into_any_element(),
             Destination::Accounts => self.accounts.clone().into_any_element(),

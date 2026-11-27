@@ -444,8 +444,8 @@ pub use take_model::{
 };
 pub use template::{
     MissingValue, RenderedPrompt, TemplateBody, TemplateField, TemplateFieldError, TemplateKind,
-    TemplateProblem, TemplateRepository, TemplateValues, TemplateVariable, TemplateVersion,
-    TemplateVersionId, UnknownTemplateKind,
+    TemplateProblem, TemplateRepository, TemplateSource, TemplateValues, TemplateVariable,
+    TemplateVersion, TemplateVersionId, UnknownTemplateKind, template_in_use,
 };
 pub use text::{
     GeneratedText, Stop, TextEffort, TextFormat, TextGenerator, TextImage, TextRequest, TokenUsage,

@@ -2,31 +2,47 @@
 //! kind (the script, the scene plan's image prompts). The versions are the
 //! collection and the editor its inspector: it holds the current version's
 //! text; picking an older version loads its text, and saving always creates
-//! the next version.
+//! the next version. On a project's entry it edits the template that
+//! project uses, its own or the global one, and says which; on the Global
+//! library's tab it edits the global templates (#339).
 
 use bardo_app::bardo_domain::{
-    TemplateField, TemplateFieldError, TemplateKind, TemplateVersion, TemplateVersionId,
+    ProjectId, TemplateField, TemplateFieldError, TemplateKind, TemplateSource, TemplateVersion,
+    TemplateVersionId,
 };
 use std::rc::Rc;
 
-use bardo_app::{Bardo, Control, Destination, Text, TourAnchor, default_template};
+use bardo_app::{Bardo, Control, Destination, TemplateError, Text, TourAnchor, default_template};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::{
-    ActiveTheme as _, IconName, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, IconName, Selectable as _, Sizable as _, StyledExt as _,
+    h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Entity, ScrollHandle, SharedString, Window, div, px};
 
 use crate::appearance::look;
 use crate::kit::{self, Tone};
+use crate::library::{self, LibraryScope};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
 use crate::{guide, layout};
 
 pub struct TemplatesScreen {
     bardo: Entity<Bardo>,
+    scope: LibraryScope,
+    /// The project whose template the screen edits (`None`: the global
+    /// one).
+    owner: Option<ProjectId>,
+    /// A project entry with no project open.
+    no_project: bool,
     kind: TemplateKind,
+    /// Whose template of `kind` the owner uses.
+    source: TemplateSource,
+    /// The projects a save of the global template would change, shown
+    /// before it goes through.
+    confirm: Option<Vec<String>>,
     /// Newest first; the first is the current version.
     versions: Vec<TemplateVersion>,
     /// The version whose text the editor started from.
@@ -42,12 +58,22 @@ pub struct TemplatesScreen {
 }
 
 impl TemplatesScreen {
-    pub fn new(bardo: Entity<Bardo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        bardo: Entity<Bardo>,
+        scope: LibraryScope,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let instructions = cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 12));
         let prompt = cx.new(|cx| TextareaState::new(window, cx).auto_grow(6, 16));
         let mut screen = Self {
             bardo,
+            scope,
+            owner: None,
+            no_project: false,
             kind: TemplateKind::Script,
+            source: TemplateSource::Global,
+            confirm: None,
             versions: Vec::new(),
             base: None,
             instructions,
@@ -63,9 +89,16 @@ impl TemplatesScreen {
 
     /// Re-reads the versions and puts the current one in the editor.
     pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.bardo.read(cx).template_versions(self.kind) {
-            Ok(versions) => {
-                self.versions = versions;
+        let (owner, no_project) = self.scope.owner(self.bardo.read(cx));
+        if owner != self.owner {
+            self.notice = None;
+        }
+        (self.owner, self.no_project) = (owner, no_project);
+        self.confirm = None;
+        match self.bardo.read(cx).template_in_use(self.kind, self.owner) {
+            Ok(in_use) => {
+                self.source = in_use.source;
+                self.versions = in_use.versions;
                 self.error = None;
                 if let Some(current) = self.versions.first().cloned() {
                     self.load(&current, window, cx);
@@ -113,14 +146,17 @@ impl TemplatesScreen {
         cx.notify();
     }
 
-    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn save(&mut self, confirmed: bool, window: &mut Window, cx: &mut Context<Self>) {
         let instructions = self.instructions.read(cx).value();
         let prompt = self.prompt.read(cx).value();
         let current = self.versions.first().map(|version| version.id);
-        let result = self
-            .bardo
-            .read(cx)
-            .save_template(self.kind, &instructions, &prompt);
+        let result = self.bardo.read(cx).save_template_in(
+            self.kind,
+            self.owner,
+            (&instructions, &prompt),
+            confirmed,
+        );
+        self.confirm = None;
         match result {
             Ok(saved) => {
                 let bardo = self.bardo.read(cx);
@@ -130,6 +166,10 @@ impl TemplatesScreen {
                     bardo.text_with(Text::TemplateSaved, &[("n", &saved.number.to_string())])
                 }));
                 self.reload(window, cx);
+            }
+            Err(TemplateError::UsedByProjects(projects)) => {
+                self.confirm = Some(projects);
+                self.notice = None;
             }
             Err(error) if !error.field_errors().is_empty() => {
                 self.errors = error.field_errors().to_vec();
@@ -141,6 +181,101 @@ impl TemplatesScreen {
             }
         }
         cx.notify();
+    }
+
+    /// Gives the open project its own template of the kind, from the
+    /// global one's latest version.
+    fn make_own(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.owner else {
+            return;
+        };
+        let result = self
+            .bardo
+            .read(cx)
+            .make_project_template(self.kind, project);
+        match result {
+            Ok(_) => {
+                self.reload(window, cx);
+                self.notice = Some(tr(self.bardo.read(cx), Text::TemplateMadeOwn));
+            }
+            Err(error) => self.error = Some(error.message()),
+        }
+        cx.notify();
+    }
+
+    /// Whose template the screen edits, on a project's entry, with *Make
+    /// it this project's own* while it is the global one.
+    fn render_source(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.scope != LibraryScope::Project || self.owner.is_none() || self.versions.is_empty() {
+            return None;
+        }
+        let bardo = self.bardo.read(cx);
+        let (pill, hint) = match self.source {
+            TemplateSource::Project => (
+                kit::status_with(
+                    Tone::Accent,
+                    IconName::Folder,
+                    tr(bardo, Text::TemplateSourceProject),
+                    cx,
+                ),
+                Text::TemplateSourceProjectHint,
+            ),
+            TemplateSource::Global => (
+                kit::status_with(
+                    Tone::Info,
+                    IconName::Globe,
+                    tr(bardo, Text::TemplateSourceGlobal),
+                    cx,
+                ),
+                Text::TemplateSourceGlobalHint,
+            ),
+        };
+        let muted = look(cx).tokens.text2;
+        let make_own = (self.source == TemplateSource::Global).then(|| {
+            h_flex().child(
+                Button::new("template-make-own")
+                    .outline()
+                    .small()
+                    .icon(IconName::Copy)
+                    .label(tr(bardo, Text::TemplateMakeOwn))
+                    .on_click(
+                        cx.listener(|this, _: &ClickEvent, window, cx| this.make_own(window, cx)),
+                    ),
+            )
+        });
+        Some(
+            kit::anchor(
+                TourAnchor::Control(Control::TemplateSource),
+                v_flex()
+                    .gap_1p5()
+                    .child(h_flex().child(pill))
+                    .child(div().text_xs().text_color(muted).child(tr(bardo, hint)))
+                    .children(make_own),
+            )
+            .into_any_element(),
+        )
+    }
+
+    /// The projects a save of the global template changes, with *Save
+    /// anyway* and *Cancel*.
+    fn render_confirm(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let projects = self.confirm.clone()?;
+        let title = tr(self.bardo.read(cx), Text::TemplateGlobalUsedBy);
+        let lines = projects
+            .iter()
+            .map(|name| SharedString::from(format!("• {name}")))
+            .collect();
+        Some(library::confirm_uses(
+            "template-save",
+            &self.bardo,
+            (title, lines),
+            |this: &mut Self, window, cx| this.save(true, window, cx),
+            |this: &mut Self, _, cx| {
+                this.confirm = None;
+                cx.notify();
+            },
+            cx,
+        ))
     }
 
     /// The template's versions, newest first, under the kind buttons.
@@ -214,6 +349,8 @@ impl TemplatesScreen {
     }
 
     fn render_editor(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let source = self.render_source(cx);
+        let confirm = self.render_confirm(cx);
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let base_number = self
@@ -274,6 +411,11 @@ impl TemplatesScreen {
                 bardo,
                 Text::TemplateKindName(self.kind),
             )))
+            .children(
+                self.no_project
+                    .then(|| kit::notice(Tone::Info, tr(bardo, Text::LibraryNoProject), cx)),
+            )
+            .children(source)
             .children(base_number.map(|n| {
                 div()
                     .text_xs()
@@ -315,9 +457,10 @@ impl TemplatesScreen {
                     .child(
                         Button::new("save-template")
                             .primary()
+                            .disabled(self.no_project || self.confirm.is_some())
                             .label(tr(bardo, Text::SaveTemplate))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.save(window, cx)
+                                this.save(false, window, cx)
                             })),
                     )
                     .child(
@@ -346,6 +489,7 @@ impl TemplatesScreen {
                     ),
                 scroll,
             ))
+            .children(confirm)
             .children(
                 self.notice
                     .clone()

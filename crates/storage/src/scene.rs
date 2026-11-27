@@ -1244,7 +1244,13 @@ mod tests {
             // then migrated.
             let mut conn = s.db.conn();
             conn.execute_batch(
-                "ALTER TABLE scene_plan DROP COLUMN picks_changed;
+                "DROP INDEX template_version_number;
+                 ALTER TABLE template_version DROP COLUMN owner_project_id;
+                 DROP INDEX persona_profile_name;
+                 ALTER TABLE persona DROP COLUMN owner_project_id;
+                 CREATE UNIQUE INDEX persona_profile_name
+                     ON persona (profile_id, name COLLATE NOCASE);
+                 ALTER TABLE scene_plan DROP COLUMN picks_changed;
                  ALTER TABLE scene DROP COLUMN objects;
                  ALTER TABLE scene_place DROP COLUMN item_id;
                  ALTER TABLE scene_cast DROP COLUMN character_id;

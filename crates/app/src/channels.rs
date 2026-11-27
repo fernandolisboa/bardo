@@ -4,7 +4,7 @@
 //! the profile.
 
 use bardo_domain::{
-    Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, RepositoryError,
+    Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, ProjectId, RepositoryError,
 };
 
 use crate::{AppError, Bardo, PersonaError, Text};
@@ -90,11 +90,7 @@ impl Bardo {
         project: Option<&str>,
         draft: ChannelDraft,
     ) -> Result<Channel, ChannelError> {
-        let draft = self.with_current_clip_model(draft);
-        let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
-        self.ensure_name_free(&details, None)?;
-        self.ensure_own_persona(&details)?;
-        self.ensure_offered_clip_model(&details)?;
+        let details = self.new_channel_details(draft)?;
         let project = match project {
             Some(name) => self.project_named(name),
             None => self.project_for_new_channel(details.name()),
@@ -103,6 +99,33 @@ impl Bardo {
             crate::ProjectError::Repository(error) => ChannelError::Repository(error),
             other => ChannelError::Repository(RepositoryError(other.to_string().into())),
         })?;
+        self.save_new_channel(project, details)
+    }
+
+    /// A new channel in `project`, which the caller already found.
+    pub(crate) fn create_channel_at(
+        &self,
+        project: ProjectId,
+        draft: ChannelDraft,
+    ) -> Result<Channel, ChannelError> {
+        let details = self.new_channel_details(draft)?;
+        self.save_new_channel(project, details)
+    }
+
+    fn new_channel_details(&self, draft: ChannelDraft) -> Result<ChannelDetails, ChannelError> {
+        let draft = self.with_current_clip_model(draft);
+        let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
+        self.ensure_name_free(&details, None)?;
+        self.ensure_offered_clip_model(&details)?;
+        Ok(details)
+    }
+
+    fn save_new_channel(
+        &self,
+        project: ProjectId,
+        details: ChannelDetails,
+    ) -> Result<Channel, ChannelError> {
+        self.ensure_own_persona(&details, project)?;
         let channel = Channel::new(self.profile.id, project, details);
         self.channels.save(&channel)?;
         Ok(channel)
@@ -121,19 +144,26 @@ impl Bardo {
         let draft = self.with_current_clip_model(draft);
         let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
         self.ensure_name_free(&details, Some(id))?;
-        self.ensure_own_persona(&details)?;
+        self.ensure_own_persona(&details, channel.project)?;
         self.ensure_offered_clip_model(&details)?;
         channel.details = details;
         self.channels.save(&channel)?;
         Ok(channel)
     }
 
-    fn ensure_own_persona(&self, details: &ChannelDetails) -> Result<(), ChannelError> {
+    /// Fails unless the default narrator is the profile's, and global or
+    /// `project`'s own.
+    fn ensure_own_persona(
+        &self,
+        details: &ChannelDetails,
+        project: ProjectId,
+    ) -> Result<(), ChannelError> {
         let Some(id) = details.default_persona() else {
             return Ok(());
         };
         match self.own_persona(id) {
-            Ok(_) => Ok(()),
+            Ok(persona) if crate::usable_in(persona.owner_project, Some(project)) => Ok(()),
+            Ok(_) => Err(ChannelError::PersonaNotFound),
             Err(PersonaError::Repository(error)) => Err(ChannelError::Repository(error)),
             Err(_) => Err(ChannelError::PersonaNotFound),
         }

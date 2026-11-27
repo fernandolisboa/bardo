@@ -9,7 +9,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::{ProfileId, RepositoryError};
+use crate::{ProfileId, ProjectId, RepositoryError, VideoProjectId};
 
 uuid_id!(
     /// Identifies one saved version of a template.
@@ -700,6 +700,8 @@ impl TemplateBody {
 pub struct TemplateVersion {
     pub id: TemplateVersionId,
     pub owner: ProfileId,
+    /// The project whose own template it is, or `None` for the global one.
+    pub owner_project: Option<ProjectId>,
     /// 1 for the first version, then one more per save.
     pub number: u32,
     pub body: TemplateBody,
@@ -707,13 +709,27 @@ pub struct TemplateVersion {
 }
 
 impl TemplateVersion {
-    /// The first version of the owner's template.
+    /// The first version of the owner's global template.
     pub fn first(owner: ProfileId, body: TemplateBody, now: SystemTime) -> Self {
         Self {
             id: TemplateVersionId::new(),
             owner,
+            owner_project: None,
             number: 1,
             body,
+            created_at: now,
+        }
+    }
+
+    /// The first version of `project`'s own template: a copy of `from`'s
+    /// text (the global template's latest version), numbered 1.
+    pub fn project_copy(from: &TemplateVersion, project: ProjectId, now: SystemTime) -> Self {
+        Self {
+            id: TemplateVersionId::new(),
+            owner: from.owner,
+            owner_project: Some(project),
+            number: 1,
+            body: from.body.clone(),
             created_at: now,
         }
     }
@@ -728,6 +744,7 @@ impl TemplateVersion {
         (body != self.body).then(|| Self {
             id: TemplateVersionId::new(),
             owner: self.owner,
+            owner_project: self.owner_project,
             number: self.number + 1,
             body,
             created_at: now,
@@ -735,14 +752,53 @@ impl TemplateVersion {
     }
 }
 
+/// Whose template of a kind a project uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TemplateSource {
+    /// The project's own, which wins inside the project.
+    Project,
+    /// The global template, which every project without its own uses.
+    Global,
+}
+
+/// The versions of the template a project uses for one kind: its own when
+/// it has one (`project`, oldest first), else the global one's. Generations
+/// keep pointing at the version they used, so neither list is ever cut.
+pub fn template_in_use(
+    project: Vec<TemplateVersion>,
+    global: Vec<TemplateVersion>,
+) -> (TemplateSource, Vec<TemplateVersion>) {
+    if project.is_empty() {
+        (TemplateSource::Global, global)
+    } else {
+        (TemplateSource::Project, project)
+    }
+}
+
 /// Persistence port for template versions. Shared with job worker threads.
 pub trait TemplateRepository: Send + Sync {
-    /// Every version of the owner's template of `kind`, oldest first.
+    /// Every version of the template of `kind` that `project` owns, or of
+    /// the global one for `None`, oldest first.
     fn template_versions(
         &self,
         owner: ProfileId,
+        project: Option<ProjectId>,
         kind: TemplateKind,
     ) -> Result<Vec<TemplateVersion>, RepositoryError>;
+
+    /// The projects that have their own template of `kind`.
+    fn projects_with_template(
+        &self,
+        owner: ProfileId,
+        kind: TemplateKind,
+    ) -> Result<Vec<ProjectId>, RepositoryError>;
+
+    /// The videos with a generation made from one of `project`'s own
+    /// templates.
+    fn videos_using_templates_of(
+        &self,
+        project: ProjectId,
+    ) -> Result<Vec<VideoProjectId>, RepositoryError>;
 
     fn template_version(
         &self,
@@ -758,9 +814,25 @@ impl<T: TemplateRepository + ?Sized> TemplateRepository for Arc<T> {
     fn template_versions(
         &self,
         owner: ProfileId,
+        project: Option<ProjectId>,
         kind: TemplateKind,
     ) -> Result<Vec<TemplateVersion>, RepositoryError> {
-        (**self).template_versions(owner, kind)
+        (**self).template_versions(owner, project, kind)
+    }
+
+    fn projects_with_template(
+        &self,
+        owner: ProfileId,
+        kind: TemplateKind,
+    ) -> Result<Vec<ProjectId>, RepositoryError> {
+        (**self).projects_with_template(owner, kind)
+    }
+
+    fn videos_using_templates_of(
+        &self,
+        project: ProjectId,
+    ) -> Result<Vec<VideoProjectId>, RepositoryError> {
+        (**self).videos_using_templates_of(project)
     }
 
     fn template_version(
@@ -969,5 +1041,69 @@ mod tests {
     fn saving_the_same_text_adds_no_version() {
         let first = TemplateVersion::first(ProfileId::new(), body("A", "B"), at(0));
         assert_eq!(first.revise(body(" A ", "B\n"), at(5)), None);
+    }
+
+    fn version_of(
+        kind: TemplateKind,
+        project: Option<ProjectId>,
+        number: u32,
+        text: &str,
+    ) -> TemplateVersion {
+        TemplateVersion {
+            number,
+            owner_project: project,
+            ..TemplateVersion::first(
+                ProfileId::new(),
+                TemplateBody::new(kind, text, text).unwrap(),
+                at(u64::from(number)),
+            )
+        }
+    }
+
+    #[test]
+    fn a_project_uses_its_own_template_of_a_kind_else_the_global_one() {
+        assert!(TemplateKind::ALL.contains(&TemplateKind::AdAngles));
+        assert!(TemplateKind::ALL.contains(&TemplateKind::AdScript));
+        assert!(TemplateKind::ALL.contains(&TemplateKind::AdMetadata));
+        let project = ProjectId::new();
+        for kind in TemplateKind::ALL {
+            let global = vec![
+                version_of(kind, None, 1, "global one"),
+                version_of(kind, None, 2, "global two"),
+            ];
+
+            let (source, versions) = template_in_use(Vec::new(), global.clone());
+            assert_eq!(source, TemplateSource::Global, "{kind:?} without its own");
+            assert_eq!(versions, global, "{kind:?}");
+
+            let own = vec![version_of(kind, Some(project), 1, "own")];
+            let (source, versions) = template_in_use(own.clone(), global);
+            assert_eq!(source, TemplateSource::Project, "{kind:?} with its own");
+            assert_eq!(versions, own, "{kind:?}: the project's own wins");
+        }
+    }
+
+    #[test]
+    fn a_project_template_starts_as_a_copy_of_the_latest_global_version() {
+        let project = ProjectId::new();
+        let global = version_of(TemplateKind::AdScript, None, 4, "latest");
+        let copy = TemplateVersion::project_copy(&global, project, at(9));
+        assert_eq!(copy.number, 1, "its own history starts at 1");
+        assert_eq!(copy.owner_project, Some(project));
+        assert_eq!(copy.body, global.body);
+        assert_ne!(copy.id, global.id, "generations keep the global version");
+
+        let next = copy
+            .revise(
+                TemplateBody::new(TemplateKind::AdScript, "changed", "changed").unwrap(),
+                at(10),
+            )
+            .unwrap();
+        assert_eq!(
+            next.owner_project,
+            Some(project),
+            "a revision stays the project's"
+        );
+        assert_eq!(next.number, 2);
     }
 }

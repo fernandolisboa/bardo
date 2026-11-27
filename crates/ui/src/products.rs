@@ -11,9 +11,9 @@ use std::sync::Arc;
 use bardo_app::bardo_domain::{
     ImageFormat, MAX_PRODUCT_IMAGES, Product, ProductBrief, ProductDraft, ProductFieldError,
     ProductId, ProductImage, ProductImageError, ProductImageId, ProductImageKind, ProductKind,
-    ProductLogo, ProductOwnership, ProductPicture, split_facts,
+    ProductLogo, ProductOwnership, ProductPicture, ProjectId, split_facts,
 };
-use bardo_app::{Bardo, Control, Destination, ProductError, Text, TourAnchor};
+use bardo_app::{Bardo, Control, Destination, LibraryUse, ProductError, Text, TourAnchor};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
@@ -29,6 +29,7 @@ use gpui_kit::{
 
 use crate::ad_angles::{AnglesSection, OpenProject};
 use crate::kit::{self, Tone};
+use crate::library::{self, BringForm, LibraryScope};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::product_concept::ConceptSection;
 use crate::product_sheet::SheetSection;
@@ -68,6 +69,8 @@ enum Notice {
     Archived,
     Restored,
     Deleted(String),
+    /// Brought into the open project: the copy's name and the project's.
+    Brought(String, String),
     Error(Text),
 }
 
@@ -140,6 +143,18 @@ impl EventEmitter<OpenProject> for ProductsScreen {}
 
 pub struct ProductsScreen {
     bardo: Entity<Bardo>,
+    /// The open project's products, or the global library's.
+    scope: LibraryScope,
+    /// Whose products the list shows and new ones go to (`None`: the
+    /// global library), read when the screen reloads.
+    owner: Option<ProjectId>,
+    /// A project scope with no project open.
+    no_project: bool,
+    /// *Bring into the project* in progress for the edited product.
+    bring: Option<BringForm>,
+    /// The uses of the edited global product, to confirm before the save
+    /// goes through.
+    confirm: Option<Vec<LibraryUse>>,
     products: Vec<Product>,
     load_failed: bool,
     show_archived: bool,
@@ -196,7 +211,12 @@ pub struct ProductsScreen {
 }
 
 impl ProductsScreen {
-    pub fn new(bardo: Entity<Bardo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        bardo: Entity<Bardo>,
+        scope: LibraryScope,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let name = cx.new(|cx| InputState::new(window, cx));
         let description = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 10));
         let audience = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 8));
@@ -253,6 +273,11 @@ impl ProductsScreen {
 
         let mut screen = Self {
             bardo,
+            scope,
+            owner: None,
+            no_project: false,
+            bring: None,
+            confirm: None,
             products: Vec::new(),
             load_failed: false,
             show_archived: false,
@@ -301,10 +326,17 @@ impl ProductsScreen {
     /// Re-reads the products: a restored backup or an imported settings
     /// file may have changed them.
     pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let before = self.owner;
         self.reload_list(cx);
         self.sheet_pending = true;
         self.angles_pending = true;
-        if let Some(id) = self.editing {
+        if self.owner != before {
+            // Another project opened: its products show.
+            match self.first_listed() {
+                Some(first) => self.edit(first, window, cx),
+                None => self.start_new(window, cx),
+            }
+        } else if let Some(id) = self.editing {
             let stored = self
                 .products
                 .iter()
@@ -332,7 +364,15 @@ impl ProductsScreen {
     }
 
     fn reload_list(&mut self, cx: &mut Context<Self>) {
-        match self.bardo.read(cx).products() {
+        let (owner, no_project) = self.scope.owner(self.bardo.read(cx));
+        self.owner = owner;
+        self.no_project = no_project;
+        if no_project {
+            self.products.clear();
+            self.load_failed = false;
+            return;
+        }
+        match self.bardo.read(cx).library_products(owner) {
             Ok(products) => {
                 self.products = products;
                 self.load_failed = false;
@@ -428,6 +468,9 @@ impl ProductsScreen {
             self.notice = None;
         }
         self.confirm_delete = false;
+        // A save's uses or a copy's name were asked about other text.
+        self.confirm = None;
+        self.bring = None;
         cx.notify();
     }
 
@@ -511,6 +554,8 @@ impl ProductsScreen {
     fn reset_feedback(&mut self) {
         self.field_errors.clear();
         self.notice = None;
+        self.bring = None;
+        self.confirm = None;
         self.confirm_delete = false;
         self.importing = None;
         self.confirm_remove = None;
@@ -551,14 +596,36 @@ impl ProductsScreen {
     /// Saves the form; `false` when it could not be, with the reason on
     /// show.
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.save_confirmed(false, window, cx)
+    }
+
+    /// Saves the form; `confirmed` says the user saw where the edited
+    /// global product is used. `false` when it could not be saved, with
+    /// the reason or the uses on show.
+    fn save_confirmed(
+        &mut self,
+        confirmed: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.no_project && self.editing.is_none() {
+            return false;
+        }
         let draft = self.draft(cx);
         let bardo = self.bardo.read(cx);
         let result = match self.editing {
-            Some(id) => bardo.update_product(id, draft),
-            None => bardo.create_product(draft),
+            Some(id) => bardo.update_product(id, draft, confirmed),
+            None => bardo.create_product_in(self.owner, draft),
         };
         let saved = match result {
+            Err(ProductError::UsedIn(uses)) => {
+                self.field_errors.clear();
+                self.notice = None;
+                self.confirm = Some(uses);
+                false
+            }
             Ok(saved) => {
+                self.confirm = None;
                 self.reload_list(cx);
                 let created = self.editing.is_none();
                 self.editing = Some(saved.id);
@@ -602,7 +669,9 @@ impl ProductsScreen {
         if self.dirty(cx) && !self.save(window, cx) {
             return;
         }
-        match self.bardo.read(cx).duplicate_product(id) {
+        // On a project's entry a global product's copy is the project's
+        // own, so it shows in this list.
+        match self.bardo.read(cx).duplicate_product_into(id, self.owner) {
             Ok(copy) => {
                 self.reload_list(cx);
                 self.edit(copy.id, window, cx);
@@ -656,6 +725,126 @@ impl ProductsScreen {
             Err(error) => self.show_error(&error),
         }
         cx.notify();
+    }
+
+    /// Opens *Bring into the project* for the edited global product.
+    fn start_bring(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(product) = self.edited_product() else {
+            return;
+        };
+        let name = product.brief.name().to_owned();
+        self.confirm = None;
+        self.notice = None;
+        self.bring = Some(BringForm::new(&name, window, cx));
+        cx.notify();
+    }
+
+    /// Copies the edited global product into the open project under the
+    /// typed name; a taken name comes back with a suggestion in the field.
+    fn bring_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(id), Some(form)) = (self.editing, &self.bring) else {
+            return;
+        };
+        let Some((project, project_name)) = library::open_project(self.bardo.read(cx)) else {
+            return;
+        };
+        let name = form.typed(cx);
+        // Edits not yet saved go to the copy, never to the global one.
+        let draft = self.dirty(cx).then(|| self.draft(cx));
+        let bardo = self.bardo.read(cx);
+        let result = bardo
+            .bring_product_into_project(id, project, Some(&name))
+            .and_then(|copy| match draft {
+                Some(draft) => bardo.update_product(
+                    copy.id,
+                    ProductDraft {
+                        name: copy.brief.name().to_owned(),
+                        ..draft
+                    },
+                    true,
+                ),
+                None => Ok(copy),
+            });
+        match result {
+            Ok(copy) => {
+                self.reload_list(cx);
+                let shown = self.products.iter().any(|product| product.id == copy.id);
+                // Off the project's list, the form goes back to the global
+                // product as saved: its edits went to the copy.
+                self.edit(if shown { copy.id } else { id }, window, cx);
+                self.bring = None;
+                self.notice = Some(Notice::Brought(copy.brief.name().to_owned(), project_name));
+            }
+            Err(ProductError::NameClash { suggestion }) => {
+                if let Some(form) = &mut self.bring {
+                    form.error = Some(Text::LibraryNameClash);
+                    form.name
+                        .update(cx, |input, cx| input.set_value(suggestion, window, cx));
+                }
+            }
+            Err(error) => {
+                if let Some(form) = &mut self.bring {
+                    form.error = error.form_message().or(Some(Text::ProductNotSaved));
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// The product being edited, as listed.
+    fn edited_product(&self) -> Option<&Product> {
+        let id = self.editing?;
+        self.products.iter().find(|product| product.id == id)
+    }
+
+    /// The uses of the edited global product before its save, or *Bring
+    /// into the project* (its button, or its form once open).
+    fn render_library(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut parts = Vec::new();
+        let bardo = self.bardo.read(cx);
+        if let Some(uses) = &self.confirm {
+            let title = SharedString::from(
+                bardo.text_with(Text::LibraryUsesTitle, &[("n", &uses.len().to_string())]),
+            );
+            let lines = uses.iter().map(library::use_line).collect();
+            parts.push(library::confirm_uses(
+                "product-save",
+                &self.bardo,
+                (title, lines),
+                |this: &mut Self, window, cx| {
+                    this.save_confirmed(true, window, cx);
+                },
+                |this: &mut Self, _, cx| {
+                    this.confirm = None;
+                    cx.notify();
+                },
+                cx,
+            ));
+        }
+        let bardo = self.bardo.read(cx);
+        let global = self.edited_product().filter(|product| product.is_global());
+        if let (Some(_), Some((_, project))) = (global, library::open_project(bardo)) {
+            parts.push(match &self.bring {
+                Some(form) => library::render_bring(
+                    "product-bring",
+                    &self.bardo,
+                    (form, &project),
+                    |this: &mut Self, window, cx| this.bring_in(window, cx),
+                    |this: &mut Self, _, cx| {
+                        this.bring = None;
+                        cx.notify();
+                    },
+                    cx,
+                ),
+                None => library::bring_button(
+                    "bring-product",
+                    &self.bardo,
+                    |this: &mut Self, window, cx| this.start_bring(window, cx),
+                    cx,
+                ),
+            });
+        }
+        parts
     }
 
     fn show_error(&mut self, error: &ProductError) {
@@ -806,11 +995,28 @@ impl ProductsScreen {
                 );
                 tile.selected = self.editing == Some(id);
                 tile.title = Some(SharedString::from(product.brief.name().to_owned()));
-                tile.text = Some(tr(bardo, Text::ProductKindName(product.brief.kind())));
-                tile.status = product.archived.then(|| {
-                    kit::status(Tone::Neutral, tr(bardo, Text::ProductArchivedTag), cx)
-                        .into_any_element()
-                });
+                let kind = tr(bardo, Text::ProductKindName(product.brief.kind()));
+                // Shown even when archived takes the status: editing a
+                // global product changes it everywhere.
+                tile.text = Some(
+                    if self.scope == LibraryScope::Project && product.is_global() {
+                        SharedString::from(format!(
+                            "{kind} · {}",
+                            tr(bardo, Text::LibraryGlobalTag)
+                        ))
+                    } else {
+                        kind
+                    },
+                );
+                tile.status = if product.archived {
+                    Some(
+                        kit::status(Tone::Neutral, tr(bardo, Text::ProductArchivedTag), cx)
+                            .into_any_element(),
+                    )
+                } else {
+                    (self.scope == LibraryScope::Project && product.is_global())
+                        .then(|| library::global_tag(bardo, cx))
+                };
                 tile
             })
             .collect();
@@ -820,7 +1026,14 @@ impl ProductsScreen {
             div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(tr(bardo, Text::ProductsEmpty))
+                .child(tr(
+                    bardo,
+                    if self.no_project {
+                        Text::LibraryNoProject
+                    } else {
+                        Text::ProductsEmpty
+                    },
+                ))
                 .into_any_element()
         });
         if !self.load_failed {
@@ -1536,6 +1749,11 @@ impl ProductsScreen {
         let facts = self.render_facts(cx);
         let pictures = self.render_pictures(cx);
         let delete = self.confirm_delete.then(|| self.render_delete(cx));
+        let library_parts = self.render_library(cx);
+        let global_note = self
+            .edited_product()
+            .filter(|product| self.scope == LibraryScope::Project && product.is_global())
+            .map(|_| library::global_note(self.bardo.read(cx), cx));
         let errors = [
             NAME_ERRORS,
             DESCRIPTION_ERRORS,
@@ -1590,6 +1808,15 @@ impl ProductsScreen {
                         .text_with(Text::ProductDeleted, &[("name", name)])
                         .into(),
                 ),
+                Notice::Brought(name, project) => (
+                    Tone::Success,
+                    bardo
+                        .text_with(
+                            Text::LibraryBrought,
+                            &[("name", name), ("project", project)],
+                        )
+                        .into(),
+                ),
                 Notice::Error(text) => (Tone::Danger, tr(bardo, *text)),
             };
             kit::notice(tone, text, cx)
@@ -1602,6 +1829,7 @@ impl ProductsScreen {
                 Button::new("save-product")
                     .primary()
                     .label(tr(bardo, action))
+                    .disabled(self.confirm.is_some() || (self.no_project && self.editing.is_none()))
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.save(window, cx);
                     })),
@@ -1657,13 +1885,18 @@ impl ProductsScreen {
                     .gap_4()
                     .child(tabs)
                     .child(
-                        v_flex().gap_1().child(kit::title(tr(bardo, title))).child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.muted_foreground)
-                                .child(tr(bardo, Text::ProductBriefHint)),
-                        ),
+                        v_flex()
+                            .gap_1()
+                            .child(kit::title(tr(bardo, title)))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child(tr(bardo, Text::ProductBriefHint)),
+                            )
+                            .children(global_note),
                     )
+                    .children(library_parts)
                     .child(
                         kit::card(cx)
                             .p_4()
@@ -1829,6 +2062,7 @@ impl Render for ProductsScreen {
                 .small()
                 .primary()
                 .label(tr(bardo, Text::NewProduct))
+                .disabled(self.no_project)
                 .on_click(
                     cx.listener(|this, _: &ClickEvent, window, cx| this.start_new(window, cx)),
                 )

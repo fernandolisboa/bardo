@@ -1,7 +1,8 @@
 use bardo_domain::{
     GenerationPresets, JobId, LookAsset, LookAssetKind, LookDrawing, LookFaceMeasure, LookImage,
     LookSource, Persona, PersonaDetails, PersonaDraft, PersonaId, PersonaLook, PersonaRepository,
-    ProfileId, Provider, RepositoryError, TemplateUsed, TemplateVersionId, VoiceFlag, VoiceRef,
+    ProfileId, ProjectId, Provider, RepositoryError, TemplateUsed, TemplateVersionId, VoiceFlag,
+    VoiceRef,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -9,7 +10,8 @@ use uuid::Uuid;
 use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 const SELECT_PERSONA: &str = "SELECT id, profile_id, name, voice_provider, voice_id, voice_name, \
-     tone, script_style, stability, similarity, style, speed, voice_flag, realistic_voice FROM persona";
+     tone, script_style, stability, similarity, style, speed, voice_flag, realistic_voice, \
+     owner_project_id FROM persona";
 
 /// A persona row as stored, before domain validation.
 struct PersonaRow {
@@ -24,6 +26,7 @@ struct PersonaRow {
     presets: [i64; 4],
     voice_flag: Option<String>,
     realistic_voice: bool,
+    owner_project_id: Option<String>,
 }
 
 impl PersonaRow {
@@ -40,6 +43,7 @@ impl PersonaRow {
             presets: [row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?],
             voice_flag: row.get(12)?,
             realistic_voice: row.get(13)?,
+            owner_project_id: row.get(14)?,
         })
     }
 
@@ -75,6 +79,11 @@ impl PersonaRow {
         Ok(Persona {
             id: PersonaId::from(Uuid::parse_str(&self.id).map_err(boxed)?),
             owner: ProfileId::from(Uuid::parse_str(&self.profile_id).map_err(boxed)?),
+            owner_project: self
+                .owner_project_id
+                .map(|id| Uuid::parse_str(&id).map(ProjectId::from))
+                .transpose()
+                .map_err(boxed)?,
             details,
             voice_flag,
         })
@@ -99,9 +108,10 @@ fn upsert(tx: &Transaction<'_>, persona: &Persona) -> rusqlite::Result<()> {
     tx.execute(
         "INSERT INTO persona (id, profile_id, name, voice_provider, voice_id, voice_name, tone,
                               script_style, stability, similarity, style, speed, voice_flag,
-                              realistic_voice)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                              realistic_voice, owner_project_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT (id) DO UPDATE SET
+             owner_project_id = excluded.owner_project_id,
              name = excluded.name,
              voice_provider = excluded.voice_provider,
              voice_id = excluded.voice_id,
@@ -130,6 +140,7 @@ fn upsert(tx: &Transaction<'_>, persona: &Persona) -> rusqlite::Result<()> {
             presets.speed,
             flag_code(persona.voice_flag),
             details.realistic_voice(),
+            persona.owner_project.map(|id| id.to_string()),
         ],
     )?;
     Ok(())
@@ -694,6 +705,7 @@ mod tests {
                 "updated_at",
                 "voice_flag",
                 "realistic_voice",
+                "owner_project_id",
             ]
         );
     }

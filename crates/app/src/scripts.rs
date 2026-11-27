@@ -471,11 +471,14 @@ impl Bardo {
     /// The template a project's script is written from: the ad script
     /// template for an ad, the script template for every other project.
     fn script_template(&self, project: &VideoProject) -> Result<TemplateVersion, ScriptError> {
-        Ok(self.current_template(if project.is_ad() {
-            TemplateKind::AdScript
-        } else {
-            TemplateKind::Script
-        })?)
+        Ok(self.channel_template(
+            if project.is_ad() {
+                TemplateKind::AdScript
+            } else {
+                TemplateKind::Script
+            },
+            project.channel,
+        )?)
     }
 
     /// The facts an ad script template is filled with: the channel's and

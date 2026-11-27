@@ -221,6 +221,9 @@ pub enum Control {
     ProductAngleActions,
     /// Templates: one button per kind of template.
     TemplateKinds,
+    /// Templates: whose template the open project uses, its own or the
+    /// global one, and making it the project's own.
+    TemplateSource,
     /// Templates: the instructions and the prompt.
     TemplateFields,
     /// Templates: the variables a template can use.
@@ -947,7 +950,7 @@ pub const PERSONAS: Tour = {
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Personas,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "library", TourAnchor::Collection).learn(PAGE, "library"),
@@ -1009,7 +1012,7 @@ pub const PRODUCTS: Tour = {
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Products,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "library", TourAnchor::Collection).learn(PAGE, "library"),
@@ -1099,12 +1102,17 @@ pub const TEMPLATES: Tour = {
     const EDITOR: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Templates,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "kinds", control(Control::TemplateKinds))
                 .missing(WhenMissing::LightPart(TourAnchor::Collection))
                 .learn(PAGE, "kinds"),
+            // Only on a project's entry: the Global library's tab edits the
+            // global templates.
+            on(AT, "source", control(Control::TemplateSource))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "project"),
             on(AT, "versions", TourAnchor::Collection).learn(PAGE, "versions"),
             on(AT, "fields", control(Control::TemplateFields))
                 .missing(EDITOR)

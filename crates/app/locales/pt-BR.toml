@@ -1179,6 +1179,12 @@ revert = "Descartar alterações"
 default = "Carregar o padrão do Bardo"
 saved = "Salvo como versão {n}."
 unchanged = "Nada mudou, então nenhuma versão foi criada."
+source_project = "Modelo próprio deste projeto"
+source_global = "Modelo global"
+source_project_hint = "Este projeto usa a própria versão deste modelo; o global continua como está para os outros projetos."
+source_global_hint = "Este projeto usa o modelo global: salvar aqui muda o modelo em todo projeto que o usa. Torne-o próprio deste projeto para mudar só aqui."
+make_own = "Tornar próprio deste projeto"
+made_own = "Este projeto agora tem um modelo próprio, começando pela última versão do global."
 
 [templates.kind]
 script = "Roteiro"
@@ -1253,6 +1259,8 @@ required = "Escreva o prompt."
 too_long = "Use no máximo 8000 caracteres."
 unknown_variable = "Use só as variáveis listadas abaixo, escritas como aparecem."
 unclosed_variable = "Falta fechar uma variável com }}."
+global_used_by = "O modelo global é usado por estes projetos. Salvar muda o modelo em todos eles:"
+already_own = "Este projeto já tem um modelo próprio."
 
 [age]
 just_now = "agora há pouco"
@@ -1294,8 +1302,8 @@ save = "Salvar alterações"
 duplicate = "Duplicar"
 saved = "Narrador salvo."
 duplicated = "{name} criado. Edite à vontade; o original continua como estava."
-used_by = "Narrador padrão de: {channels}"
-unused = "Nenhum canal usa este narrador como padrão ainda."
+used_by = "Usado em: {places}"
+unused = "Nenhum canal ou vídeo usa este narrador ainda."
 copy_suffix = "cópia"
 imported_suffix = "importada"
 export = "Exportar para arquivo…"
@@ -3186,7 +3194,7 @@ name = "Tour dos Narradores"
 
 [tour.personas.library]
 title = "Seus narradores"
-body = "Narradores que você reutiliza entre canais: quatro vêm com o Bardo, e você pode criar os seus. Escolha um para editá-lo."
+body = "Os narradores deste projeto, mais os globais que ele usa, marcados como Global. Os novos ficam no projeto; a aba da Biblioteca global guarda os que todo projeto pode usar. Escolha um para editá-lo."
 
 [tour.personas.voice]
 title = "A voz"
@@ -3217,7 +3225,7 @@ name = "Tour de Produtos"
 
 [tour.products.library]
 title = "Seus produtos"
-body = "Um produto é o que um anúncio vende: um app, um curso, um objeto, um serviço ou só uma ideia. Escolha um para editar, ou clique em Novo produto."
+body = "Um produto é o que um anúncio vende: um app, um curso, um objeto, um serviço ou só uma ideia. Esta lista tem os produtos do projeto e os globais que os anúncios dele usam, marcados como Global. Escolha um para editar, ou clique em Novo produto."
 
 [tour.products.brief]
 title = "O briefing"
@@ -3264,6 +3272,10 @@ name = "Tour dos Modelos"
 [tour.templates.kinds]
 title = "Tipos de modelo"
 body = "Um modelo é um prompt que o Bardo envia à IA: para o roteiro, os prompts de imagem das cenas, o prompt de música e os metadados da publicação. Escolha o tipo que quer editar."
+
+[tour.templates.source]
+title = "Do projeto ou global"
+body = "Um projeto usa o próprio modelo de um tipo quando tem um, senão o global. Use Tornar próprio deste projeto para mudá-lo aqui sem mexer nos outros projetos."
 
 [tour.templates.versions]
 title = "Versões"
@@ -4983,6 +4995,7 @@ scheduled_post = "Uma publicação espera o horário no Bardo. Envie agora ou ca
 held_on_network = "Uma publicação espera na rede para ficar pública no horário. Publique ou remova na rede antes."
 active_job = "Uma tarefa deste canal ou de um vídeo dele está na fila ou em andamento. Espere terminar ou cancele em Tarefas."
 version_elsewhere = "Um dos vídeos dele é versão localizada de outro canal deste projeto, ou tem uma versão lá. Versões ficam dentro de um projeto."
+project_items = "O canal ou um vídeo dele usa um narrador ou produto deste projeto, ou foi escrito com um dos modelos dele. Os itens de um projeto ficam nele: escolha narradores e produtos globais antes; um vídeo feito com os modelos deste projeto mantém o canal aqui."
 
 [project_spend]
 unknown = "Projeto removido"
@@ -5040,7 +5053,20 @@ resume_export = "retomar a exportação"
 post = "enviar o vídeo ou vincular a publicação"
 
 [library]
-hint = "Narradores, produtos e modelos que todo projeto pode usar. Por enquanto são os mesmos que cada projeto mostra."
+hint = "Narradores, produtos e modelos que todo projeto pode usar. Os de um projeto ficam nas entradas dele."
+global_source = "Global"
+global_tag = "Global"
+global_note = "Da biblioteca global: este projeto usa por referência, então editar muda em todo lugar onde é usado. Traga para o projeto para mudar só aqui."
+uses_title = "Usado em {n} lugar(es). Salvar muda em todos eles:"
+save_anyway = "Salvar mesmo assim"
+cancel = "Cancelar"
+bring = "Trazer para o projeto"
+bring_title = "Trazer para {project}"
+bring_hint = "Faz uma cópia independente que pertence a este projeto. A global fica como está, e o que já a usa continua usando até você escolher a cópia."
+bring_name = "Nome neste projeto"
+bring_confirm = "Trazer"
+brought = "{name} agora está em {project}."
+no_project = "Abra um projeto para ver os itens dele. A biblioteca global fica em Biblioteca global."
 
 [tour.overview]
 name = "Tour da visão geral"
@@ -5384,3 +5410,7 @@ from_world = "Do mundo"
 hint = "Guarda este lugar como um lugar que outros vídeos podem escolher. A primeira imagem é desenhada quando um vídeo precisar."
 save_global = "Salvar na biblioteca global"
 save_project = "Salvar em Mundo"
+
+[library.error]
+name_clash = "Este projeto já tem um item com esse nome. Escolha outro nome."
+other_project = "Isso pertence a outro projeto. Escolha um deste projeto ou um global."

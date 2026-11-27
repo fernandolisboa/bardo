@@ -1071,7 +1071,13 @@ impl Bardo {
             Some(id) => Some(self.angle_channel(id)?),
             None => channels.first().cloned(),
         };
-        let template = self.current_template(TemplateKind::AdAngles)?;
+        let template = self.current_template_in(
+            TemplateKind::AdAngles,
+            channel
+                .as_ref()
+                .map(|channel| channel.project)
+                .or(product.owner_project),
+        )?;
         let engine = self.decision_engine();
         let sheet = match self.sheet_for_angles(&product) {
             Ok(sheet) => Ok(sheet),
@@ -1195,6 +1201,9 @@ impl Bardo {
     ) -> Result<JobId, AdAngleError> {
         let product = self.angle_product(product)?;
         let channel = self.angle_channel(channel)?;
+        if !crate::usable_in(product.owner_project, Some(channel.project)) {
+            return Err(AdAngleError::ProductNotFound);
+        }
         let sheet = self.sheet_for_angles(&product)?;
         if self.work_busy(&Self::ad_angles_work(product.id, channel.id)) {
             return Err(AdAngleError::Busy);
@@ -1202,7 +1211,7 @@ impl Bardo {
         let engine = self.decision_engine();
         self.ensure_angle_key(Provider::Claude)?;
         self.ensure_angle_key(engine.provider())?;
-        let template = self.current_template(TemplateKind::AdAngles)?;
+        let template = self.channel_template(TemplateKind::AdAngles, channel.id)?;
         let (rendered, numbered) = self.render_angles(&template, &product, &sheet, &channel)?;
         let waiting = self
             .ads
@@ -1241,6 +1250,9 @@ impl Bardo {
     ) -> Result<JobId, AdAngleError> {
         let product = self.angle_product(product)?;
         let channel = self.angle_channel(channel)?;
+        if !crate::usable_in(product.owner_project, Some(channel.project)) {
+            return Err(AdAngleError::ProductNotFound);
+        }
         if self.work_busy(&Self::ad_angles_work(product.id, channel.id)) {
             return Err(AdAngleError::Busy);
         }
@@ -1324,6 +1336,11 @@ impl Bardo {
         let mut angle = self.own_angle(id)?;
         let product = self.angle_product(angle.product)?;
         let channel = self.angle_channel(angle.channel)?;
+        // A channel moved to another project since the angle was proposed
+        // no longer reaches its former project's own product.
+        if !crate::usable_in(product.owner_project, Some(channel.project)) {
+            return Err(AdAngleError::ProductNotFound);
+        }
         // What proposing needs, approving needs: without a confirmed
         // claim the brief would start empty and could never be confirmed.
         let sheet = self.sheet_for_angles(&product)?;
@@ -1487,6 +1504,37 @@ mod tests {
     use super::testing::*;
     use super::*;
     use crate::scenes::tests::{Harness, done, wait_done};
+
+    #[test]
+    fn a_channel_moved_away_cannot_start_ads_of_its_former_projects_product() {
+        let h = Harness::new();
+        let app = start(&h);
+        let channel = channel(&app);
+        let own = app
+            .create_product_in(Some(channel.project), draft())
+            .unwrap();
+        app.start_product_sheet(own.id).unwrap();
+        app.add_claim(own.id, "Lasts 3 school years", ClaimKind::Benefit)
+            .unwrap();
+        suggest(&h, &app, own.id, channel.id);
+        let other = app
+            .create_project(bardo_domain::ProjectDraft {
+                name: "Elsewhere".into(),
+                color: bardo_domain::ProjectColor::Teal,
+            })
+            .unwrap();
+        app.move_channel(channel.id, other.id).unwrap();
+
+        let view = app.ad_angles(own.id, Some(channel.id)).unwrap();
+        assert!(matches!(
+            app.approve_ad_angle(view.angles[0].angle.id),
+            Err(AdAngleError::ProductNotFound)
+        ));
+        assert!(matches!(
+            app.rank_ad_angles(own.id, channel.id, BudgetConsent::Ask),
+            Err(AdAngleError::ProductNotFound)
+        ));
+    }
 
     const PATIENCE: Duration = Duration::from_secs(10);
 
