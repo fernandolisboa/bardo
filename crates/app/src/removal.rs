@@ -217,10 +217,12 @@ impl Deletion {
                 .write_records(project, folder)
                 .map_err(RemovalError::RecordsNotWritten)?;
         }
-        if let Some(folder) = &self.folder {
-            self.trash
-                .discard(folder, self.discard)
-                .map_err(RemovalError::FolderNotRemoved)?;
+        if let Some(folder) = &self.folder
+            && let Err(error) = self.trash.discard(folder, self.discard)
+        {
+            // The project stays: its folder keeps no stale records.
+            let _ = std::fs::remove_file(folder.join(bardo_domain::PROJECT_RECORDS));
+            return Err(RemovalError::FolderNotRemoved(error));
         }
         let mut disconnected = true;
         for disconnection in self.disconnections {

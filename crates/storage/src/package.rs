@@ -27,10 +27,10 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    FolderImport, PACKAGE_FORMAT, PROJECT_MANIFEST, PROJECT_RECORDS, PackageContents, PackageError,
-    PackageExport, PackageImport, PackageImported, PackageManifest, ProjectColor, ProjectId,
-    ProjectManifest, ProjectPackages, TemplateKind, VIDEOS_DIR, WORLD_DIR, free_name, rewrite_ids,
-    video_folder_name,
+    FolderImport, PACKAGE_FORMAT, PACKED_VIDEOS, PROJECT_MANIFEST, PROJECT_RECORDS,
+    PackageContents, PackageError, PackageExport, PackageImport, PackageImported, PackageManifest,
+    ProjectColor, ProjectId, ProjectManifest, ProjectPackages, TemplateKind, VIDEOS_DIR, WORLD_DIR,
+    free_name, rewrite_ids, video_folder_name,
 };
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
@@ -262,10 +262,22 @@ fn pull_parents(
     parent: &Table,
 ) -> rusqlite::Result<usize> {
     let columns = parent.column_list();
+    // A library item comes only when it is global or the project's own:
+    // another project's never travels (a moved channel's pick of it).
+    let owned = if parent
+        .columns
+        .iter()
+        .any(|column| column == "owner_project_id")
+    {
+        " AND (p.owner_project_id IS NULL
+               OR p.owner_project_id IN (SELECT id FROM main.project))"
+    } else {
+        ""
+    };
     conn.execute(
         &format!(
             "INSERT OR IGNORE INTO main.{p} ({columns}) SELECT {columns} FROM src.{p} p
-             WHERE EXISTS (SELECT 1 FROM main.{t} c WHERE {on})",
+             WHERE EXISTS (SELECT 1 FROM main.{t} c WHERE {on}){owned}",
             t = quoted(&table.name),
             p = quoted(&parent.name),
             on = key.joined("c", "p"),
@@ -293,7 +305,10 @@ fn settle_references(conn: &Connection, tables: &[Table]) -> rusqlite::Result<()
                     on = key.joined("c", "p"),
                 );
                 let t = quoted(&table.name);
-                if key.from.iter().all(|from| table.nullable.contains(from)) {
+                // An item of a project that is not here is not made global:
+                // it goes.
+                let owner = key.from == ["owner_project_id"];
+                if !owner && key.from.iter().all(|from| table.nullable.contains(from)) {
                     let cleared = key
                         .from
                         .iter()
@@ -321,8 +336,11 @@ fn settle_references(conn: &Connection, tables: &[Table]) -> rusqlite::Result<()
 /// items it uses, checked and vacuumed (no page of anything else
 /// survives).
 fn write_records_file(db: &Database, project: ProjectId, to: &Path) -> Result<(), PackageError> {
-    let source = to.with_extension("source.partial");
-    let _ = fs::remove_file(&source);
+    // The whole profile's copy stays in this computer's temporary folder,
+    // never beside the package or in a project folder (which a sync client
+    // may upload, or the Recycle Bin keep).
+    let scratch = Scratch::new();
+    let source = scratch.0.clone();
     let _ = fs::remove_file(to);
     let result = (|| {
         {
@@ -362,7 +380,7 @@ fn write_records_file(db: &Database, project: ProjectId, to: &Path) -> Result<()
         }
         conn.close().map_err(|(_, error)| database_error(error))
     })();
-    let _ = fs::remove_file(&source);
+    drop(scratch);
     if result.is_err() {
         let _ = fs::remove_file(to);
     }
@@ -484,7 +502,10 @@ fn tidy(conn: &Connection, tables: &[Table]) -> rusqlite::Result<()> {
          WHERE post_id IS NULL
             OR NOT (kind = 'manual' OR upload_status IN ('published', 'restricted'));
          UPDATE publication SET upload_claimed_at = NULL;
-         UPDATE job SET leased_by = NULL, leased_until = NULL;",
+         UPDATE job SET leased_by = NULL, leased_until = NULL, checkpoint = NULL,
+                        external_handle = NULL;
+         UPDATE user_profile SET base_folder = NULL;
+         UPDATE take_result SET cost_micros = NULL;",
     )?;
     // No connection travels: every YouTube number goes, as a backup leaves
     // out an unconnected channel's.
@@ -588,14 +609,29 @@ fn media_under(path: &Path, entry: &str, files: &mut Vec<MediaFile>) -> Result<(
 fn entry_under<'a>(name: &'a str, prefix: &str) -> Option<&'a str> {
     let rest = name.strip_prefix(prefix)?.strip_prefix('/')?;
     let safe = !rest.is_empty()
-        && rest.split('/').all(|part| {
-            !part.is_empty()
-                && part != "."
-                && part != ".."
-                && !part.contains('\\')
-                && !part.contains(':')
-        });
+        && rest
+            .split('/')
+            .all(|part| fine_part(part) && !part.contains('\\'));
     safe.then_some(rest)
+}
+
+/// A file or folder name Windows takes as it is, inside its folder: no
+/// `.` or `..`, no drive or stream (`:`), no device name (`CON`, `NUL`,
+/// `COM1`…), no trailing dot or space.
+fn fine_part(part: &str) -> bool {
+    const DEVICES: [&str; 22] = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    let stem = part.split('.').next().unwrap_or(part).trim_end();
+    !part.is_empty()
+        && part != "."
+        && part != ".."
+        && !part.contains(':')
+        && !part.ends_with(['.', ' '])
+        && !DEVICES
+            .iter()
+            .any(|device| stem.eq_ignore_ascii_case(device))
 }
 
 fn join_relative(base: &Path, relative: &str) -> PathBuf {
@@ -633,6 +669,78 @@ struct Bringing<'a> {
     color: Option<ProjectColor>,
     folder: &'a Path,
     templates: &'a [TemplateKind],
+    /// Comes back archived: a deleted archived project's folder whose
+    /// media is still packed in `Videos.zip`, which *Unarchive* unpacks.
+    archived: bool,
+}
+
+/// Columns naming a file or a folder inside a project's folder: joined to
+/// it later, so a package's own values must stay inside.
+fn names_a_file(table: &str, column: &str) -> bool {
+    table != "export"
+        && table != "user_profile"
+        && (column == "file"
+            || column.ends_with("_file")
+            || column == "file_name"
+            || column == "folder_name")
+}
+
+/// Whether `name` is a relative path that stays under its folder on
+/// Windows and elsewhere.
+fn stays_inside(name: &str) -> bool {
+    name.is_empty()
+        || !name.starts_with('/')
+            && !name.starts_with('\\')
+            && name.split(['/', '\\']).all(fine_part)
+}
+
+/// Treats a package as anything a file can hold: one project; nothing of
+/// what never travels (an unfinished job would run, and pay, here; a
+/// connection would read as signed in); the same tidying as an export;
+/// and no file name that would lead out of the project's folder.
+fn untrusted(conn: &Connection, tables: &[Table]) -> Result<(), PackageError> {
+    let projects = count(conn, "SELECT COUNT(*) FROM project").map_err(database_error)?;
+    if projects != 1 {
+        return Err(PackageError::Damaged(format!("{projects} projects")));
+    }
+    for table in tables {
+        let name = table.name.as_str();
+        if name == "job" {
+            conn.execute("DELETE FROM job WHERE state <> 'done'", [])
+                .map_err(database_error)?;
+        } else if name != "user_profile" && !table.travels() {
+            conn.execute(&format!("DELETE FROM main.{}", quoted(name)), [])
+                .map_err(database_error)?;
+        }
+    }
+    tidy(conn, tables).map_err(database_error)?;
+    for table in tables {
+        for column in table
+            .columns
+            .iter()
+            .filter(|column| names_a_file(&table.name, column))
+        {
+            let values: Vec<String> = conn
+                .prepare(&format!(
+                    "SELECT {c} FROM main.{t} WHERE typeof({c}) = 'text'",
+                    c = quoted(column),
+                    t = quoted(&table.name)
+                ))
+                .and_then(|mut statement| {
+                    statement
+                        .query_map([], |row| row.get(0))?
+                        .collect::<rusqlite::Result<_>>()
+                })
+                .map_err(database_error)?;
+            if let Some(bad) = values.iter().find(|value| !stays_inside(value)) {
+                return Err(PackageError::Damaged(format!(
+                    "{}.{column} leaves its folder: {bad}",
+                    table.name
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Readies the records at `path` (a copy of the package's) to come into
@@ -653,6 +761,7 @@ fn prepare(live: &Database, path: &Path, bringing: &Bringing<'_>) -> Result<Plan
     conn.pragma_update(None, "foreign_keys", "OFF")
         .map_err(database_error)?;
     let own = tables(&conn, "main").map_err(database_error)?;
+    untrusted(&conn, &own)?;
 
     let (old_project, old_owner): (String, String) = conn
         .query_row("SELECT id, profile_id FROM project", [], |row| {
@@ -694,9 +803,18 @@ fn prepare(live: &Database, path: &Path, bringing: &Bringing<'_>) -> Result<Plan
     });
     let now = to_unix_millis(SystemTime::now());
     conn.execute(
-        "UPDATE project SET name = ?1, folder = ?2, state = 'active', opened_at = NULL,
+        "UPDATE project SET name = ?1, folder = ?2, state = ?4, opened_at = NULL,
                             favorite_position = NULL, created_at = ?3",
-        params![name, bringing.folder.to_string_lossy(), now],
+        params![
+            name,
+            bringing.folder.to_string_lossy(),
+            now,
+            if bringing.archived {
+                "archived"
+            } else {
+                "active"
+            }
+        ],
     )
     .map_err(database_error)?;
     if let Some(color) = bringing.color {
@@ -913,8 +1031,14 @@ fn prepare(live: &Database, path: &Path, bringing: &Bringing<'_>) -> Result<Plan
 }
 
 /// Brings the prepared records at `path` into `live`, every id rewritten,
-/// in one transaction checked for references pointing nowhere.
-fn bring_in(live: &Database, path: &Path, plan: &Plan) -> Result<(), PackageError> {
+/// in one transaction checked for references pointing nowhere. Rolls back
+/// when `proceed` says to stop just before the commit.
+fn bring_in(
+    live: &Database,
+    path: &Path,
+    plan: &Plan,
+    proceed: &mut dyn FnMut() -> bool,
+) -> Result<(), PackageError> {
     let conn = live.conn();
     conn.execute(
         "ATTACH DATABASE ?1 AS pkg",
@@ -930,6 +1054,7 @@ fn bring_in(live: &Database, path: &Path, plan: &Plan) -> Result<(), PackageErro
             .collect();
         conn.execute_batch("BEGIN IMMEDIATE; PRAGMA defer_foreign_keys = ON;")
             .map_err(database_error)?;
+        let mut filled = Vec::new();
         let inserted = (|| {
             for table in theirs.iter().filter(|table| table.name != "user_profile") {
                 let Some(target) = ours.get(&table.name) else {
@@ -969,15 +1094,33 @@ fn bring_in(live: &Database, path: &Path, plan: &Plan) -> Result<(), PackageErro
                         })
                         .collect::<rusqlite::Result<Vec<Value>>>()?;
                     insert.execute(params_from_iter(values))?;
+                    if filled.last() != Some(&table.name) {
+                        filled.push(table.name.clone());
+                    }
                 }
             }
-            let dangling: Option<String> = conn
-                .query_row("PRAGMA main.foreign_key_check", [], |row| row.get(0))
-                .optional()?;
-            Ok::<_, rusqlite::Error>(dangling)
+            // Only the tables it filled: a reference broken elsewhere in
+            // the profile is not this package's.
+            for table in &filled {
+                let dangling: Option<String> = conn
+                    .query_row(
+                        &format!("PRAGMA main.foreign_key_check({})", quoted(table)),
+                        [],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if dangling.is_some() {
+                    return Ok(dangling);
+                }
+            }
+            Ok::<_, rusqlite::Error>(None)
         })();
         match inserted {
-            Ok(None) => conn.execute_batch("COMMIT").map_err(database_error),
+            Ok(None) if proceed() => conn.execute_batch("COMMIT").map_err(database_error),
+            Ok(None) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                Err(PackageError::Stopped)
+            }
             Ok(Some(table)) => {
                 let _ = conn.execute_batch("ROLLBACK");
                 Err(PackageError::Damaged(format!(
@@ -990,8 +1133,11 @@ fn bring_in(live: &Database, path: &Path, plan: &Plan) -> Result<(), PackageErro
             }
         }
     })();
-    let _ = conn.execute_batch("DETACH DATABASE pkg");
-    result
+    // Left attached, the next import could not attach its own.
+    let detached = conn
+        .execute_batch("DETACH DATABASE pkg")
+        .map_err(database_error);
+    result.and(detached)
 }
 
 /// A scratch copy of a records file, removed when dropped.
@@ -1153,10 +1299,17 @@ impl LocalPackages {
             .map_err(zip_error)?;
         copier.copy(&mut File::open(records)?, &mut zip)?;
         for file in &media {
-            // A file removed since the walk is left out.
+            // A file removed since the walk is left out; a folder gone
+            // (a drive unplugged) stops the package, so none is written
+            // without its media.
             let mut source = match File::open(&file.path) {
                 Ok(source) => source,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error)
+                    if error.kind() == io::ErrorKind::NotFound
+                        && file.path.parent().is_some_and(Path::is_dir) =>
+                {
+                    continue;
+                }
                 Err(error) => return Err(error.into()),
             };
             zip.start_file(file.entry.as_str(), sized(stored, file.bytes))
@@ -1268,7 +1421,10 @@ impl ProjectPackages for LocalPackages {
         let _ = fs::remove_file(&records);
         match written {
             Ok(manifest) => {
-                fs::rename(&part, &request.to)?;
+                if let Err(error) = fs::rename(&part, &request.to) {
+                    let _ = fs::remove_file(&part);
+                    return Err(error.into());
+                }
                 tracing::info!(
                     files = manifest.contents.media_files,
                     "exported a project package"
@@ -1323,10 +1479,22 @@ impl ProjectPackages for LocalPackages {
                 color: Some(request.color),
                 folder: &request.folder,
                 templates: &request.templates,
+                archived: false,
             },
         )?;
         if !is_empty_folder(&request.folder)? {
-            return Err(PackageError::FolderNotEmpty);
+            // Left by a run of this same import cut short (Bardo closed,
+            // or the computer went off): it starts over.
+            let ours = fs::read_to_string(request.folder.join(PROJECT_MANIFEST))
+                .ok()
+                .and_then(|text| ProjectManifest::parse(&text))
+                .is_some_and(|manifest| {
+                    manifest.names(request.project, request.owner, &request.data_home)
+                });
+            if !ours {
+                return Err(PackageError::FolderNotEmpty);
+            }
+            fs::remove_dir_all(&request.folder)?;
         }
         let made = (|| {
             write_manifest(
@@ -1339,11 +1507,18 @@ impl ProjectPackages for LocalPackages {
                 },
             )?;
             self.extract_media(&mut archive, &request.folder, &plan, progress)?;
-            bring_in(&self.db, &scratch.0, &plan)
+            bring_in(&self.db, &scratch.0, &plan, &mut || progress(1, 1))
         })();
-        if let Err(error) = made {
-            let _ = fs::remove_dir_all(&request.folder);
-            return Err(error);
+        match made {
+            Ok(()) => {}
+            // Stopped: the caller knows whether the user cancelled (the
+            // folder goes) or Bardo is closing (it stays, and the next run
+            // starts over in it).
+            Err(PackageError::Stopped) => return Err(PackageError::Stopped),
+            Err(error) => {
+                let _ = fs::remove_dir_all(&request.folder);
+                return Err(error);
+            }
         }
         tracing::info!(
             skipped = plan.skipped_posts,
@@ -1365,9 +1540,12 @@ impl ProjectPackages for LocalPackages {
             return Ok(());
         }
         let part = folder.join(format!("{PROJECT_RECORDS}.partial"));
-        write_records_file(&self.db, project, &part)?;
-        fs::rename(&part, folder.join(PROJECT_RECORDS))?;
-        Ok(())
+        let written = write_records_file(&self.db, project, &part)
+            .and_then(|()| Ok(fs::rename(&part, folder.join(PROJECT_RECORDS))?));
+        if written.is_err() {
+            let _ = fs::remove_file(&part);
+        }
+        written
     }
 
     fn folder_records(&self, folder: &Path) -> Option<PackageManifest> {
@@ -1392,24 +1570,48 @@ impl ProjectPackages for LocalPackages {
                 color: None,
                 folder: &request.folder,
                 templates: &[],
+                archived: request.folder.join(PACKED_VIDEOS).is_file(),
             },
         )?;
-        bring_in(&self.db, &scratch.0, &plan)?;
-        // The folder names the new project now; the files whose names
-        // carry an id follow.
-        write_manifest(
-            &request.folder,
-            &ProjectManifest {
-                project: request.project,
-                name: plan.name.clone(),
-                profile: request.owner,
-                data_home: request.data_home.clone(),
-            },
-        )?;
-        for dir in [VIDEOS_DIR, WORLD_DIR] {
-            rename_ids_in(&request.folder.join(dir), &plan);
+        // The files whose names carry an id follow first, and the folder
+        // names the new project, so the records only go in once the disk
+        // agrees with them; anything that fails puts it all back.
+        let manifest_path = request.folder.join(PROJECT_MANIFEST);
+        let old_manifest = fs::read(&manifest_path).ok();
+        let mut renamed = Vec::new();
+        let brought = (|| {
+            for dir in [VIDEOS_DIR, WORLD_DIR] {
+                rename_ids_in(&request.folder.join(dir), &plan, &mut renamed)?;
+            }
+            write_manifest(
+                &request.folder,
+                &ProjectManifest {
+                    project: request.project,
+                    name: plan.name.clone(),
+                    profile: request.owner,
+                    data_home: request.data_home.clone(),
+                },
+            )?;
+            bring_in(&self.db, &scratch.0, &plan, &mut || true)
+        })();
+        if let Err(error) = brought {
+            for (old, new) in renamed.iter().rev() {
+                let _ = fs::rename(new, old);
+            }
+            match &old_manifest {
+                Some(old) => {
+                    let _ = fs::write(&manifest_path, old);
+                }
+                None => {
+                    let _ = fs::remove_file(&manifest_path);
+                }
+            }
+            return Err(error);
         }
-        let _ = fs::remove_file(&records);
+        // Gone, so opening the folder again relinks the project.
+        if let Err(error) = fs::remove_file(&records) {
+            tracing::warn!("could not remove an opened folder's records: {error}");
+        }
         tracing::info!("opened a deleted project's folder as a new project");
         Ok(PackageImported {
             project: request.project,
@@ -1420,25 +1622,30 @@ impl ProjectPackages for LocalPackages {
     }
 }
 
-/// Renames every file under `dir` whose name carries an id that changed.
-fn rename_ids_in(dir: &Path, plan: &Plan) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
+/// Renames every file under `dir` whose name carries an id that changed,
+/// noting each rename (old path, new path) so it can be undone.
+fn rename_ids_in(dir: &Path, plan: &Plan, renamed: &mut Vec<(PathBuf, PathBuf)>) -> io::Result<()> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
     };
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            rename_ids_in(&path, plan);
+            rename_ids_in(&path, plan, renamed)?;
         }
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        if let Some(new) = plan.rewrite(&name)
-            && let Err(error) = fs::rename(&path, dir.join(new))
-        {
-            tracing::warn!("could not rename a file of an opened folder: {error}");
+        if let Some(new) = plan.rewrite(&name) {
+            let new = dir.join(new);
+            fs::rename(&path, &new)?;
+            renamed.push((path, new));
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]

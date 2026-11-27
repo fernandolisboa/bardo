@@ -270,6 +270,14 @@ impl Bardo {
             return Err(ProjectError::NameTaken.into());
         }
         let project = choice.id;
+        if self
+            .projects
+            .project(project)
+            .map_err(ProjectError::from)?
+            .is_some()
+        {
+            return Err(ProjectError::NameTaken.into());
+        }
         let folder = self.new_project_folder(details.name(), project, choice.place.as_deref());
         let queued_folder = queued
             .iter()
@@ -351,13 +359,14 @@ impl Bardo {
             ProjectExportHandler {
                 owner,
                 packages: Arc::clone(&book.packages),
-                projects,
+                projects: Arc::clone(&projects),
                 folders: Arc::clone(&book.folders),
                 places: book.places.clone(),
             },
             ProjectImportHandler {
                 owner,
                 packages: Arc::clone(&book.packages),
+                projects: Arc::clone(&projects),
                 data_home: book.places.data_home.clone(),
             },
         )
@@ -407,20 +416,38 @@ impl JobHandler for ProjectExportHandler {
             .and_then(Value::as_str)
             .map(PathBuf::from)
             .ok_or_else(|| unexpected(&"no file in the payload"))?;
-        // Deleted since: nothing to write.
+        // Deleted since (deleting waits for the export, so only by
+        // another way): no package, and Jobs says so.
         let Some(project) = self.projects.project(id).map_err(|e| unexpected(&e))? else {
-            return Ok(());
+            return Err(JobFailure::new(
+                JobFailureKind::Files,
+                "the project is gone: no package was written",
+            ));
         };
+        // Its drive unplugged since the job was let through: a package
+        // without its media would read as whole.
+        if project
+            .folder
+            .as_ref()
+            .is_some_and(|folder| !folder.is_dir())
+        {
+            return Err(JobFailure::new(
+                JobFailureKind::Files,
+                "the project's folder cannot be reached",
+            ));
+        }
         let mut videos = Vec::new();
         for video in self.folders.videos_in(&[id]).map_err(|e| unexpected(&e))? {
-            if let Some(path) = self
+            // Where `Bardo::video_folder` finds it: its project's folder,
+            // or the old projects folder before the media moved.
+            let path = self
                 .folders
                 .video_folder(video)
                 .map_err(|e| unexpected(&e))?
                 .and_then(|folder| folder.path())
-            {
-                videos.push((video, path));
-            }
+                .filter(|path| path.is_dir())
+                .unwrap_or_else(|| self.places.old_media.join(video.to_string()));
+            videos.push((video, path));
         }
         let chosen = self
             .folders
@@ -454,6 +481,7 @@ impl JobHandler for ProjectExportHandler {
 pub(crate) struct ProjectImportHandler {
     owner: ProfileId,
     packages: Arc<dyn ProjectPackages>,
+    projects: Arc<dyn ProjectRepository>,
     data_home: String,
 }
 
@@ -496,7 +524,27 @@ impl JobHandler for ProjectImportHandler {
                 cx.report_progress(Progress::DONE);
                 Ok(())
             }
-            Err(PackageError::Stopped) => Ok(()),
+            // Cancelled: its folder goes, once it is still this import's
+            // and no project came of it. Closing (or another runner taking
+            // the job) leaves it, and the next run starts over in it.
+            Err(PackageError::Stopped) => {
+                let ours = std::fs::read_to_string(request.folder.join(PROJECT_MANIFEST))
+                    .ok()
+                    .and_then(|text| bardo_domain::ProjectManifest::parse(&text))
+                    .is_some_and(|manifest| {
+                        manifest.names(request.project, request.owner, &request.data_home)
+                    });
+                let made = self
+                    .projects
+                    .project(request.project)
+                    .ok()
+                    .flatten()
+                    .is_some();
+                if cx.cancelled() && ours && !made {
+                    let _ = std::fs::remove_dir_all(&request.folder);
+                }
+                Ok(())
+            }
             Err(error) => Err(failure(error, "import")),
         }
     }

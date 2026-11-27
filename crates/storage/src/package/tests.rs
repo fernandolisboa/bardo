@@ -762,3 +762,179 @@ fn global_templates_come_in_as_the_projects_own_only_when_ticked() {
     assert_eq!(id, template);
     assert_eq!(owned, None);
 }
+
+#[test]
+fn an_import_cut_short_starts_over_in_its_own_folder() {
+    let source = source();
+    let (package, _) = source.export();
+    let db = Arc::new(Database::open_in_memory().unwrap());
+    let owner = profile(&db);
+    let packages = LocalPackages::new(Arc::clone(&db));
+    let project = ProjectId::new();
+    let folder = source.folder("Imported");
+    let request = PackageImport {
+        package,
+        owner,
+        project,
+        name: "Bakery".into(),
+        color: ProjectColor::Rose,
+        folder: folder.clone(),
+        data_home: "Bardo".into(),
+        templates: Vec::new(),
+    };
+    // Stopped once the media is out, just before the records commit: no
+    // project, and the folder stays for the next run.
+    let mut calls = 0;
+    let stopped = packages.import(&request, &mut |done, total| {
+        calls += 1;
+        !(done == 1 && total == 1)
+    });
+    assert!(matches!(stopped, Err(PackageError::Stopped)), "{stopped:?}");
+    assert!(calls > 1);
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM project"), 0);
+    assert!(folder.join(PROJECT_MANIFEST).is_file());
+
+    // The next run of the same import starts over in it.
+    packages.import(&request, &mut |_, _| true).unwrap();
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM project"), 1);
+
+    // Another import's folder is never wiped.
+    let other = PackageImport {
+        project: ProjectId::new(),
+        name: "Other".into(),
+        ..request
+    };
+    assert!(matches!(
+        packages.import(&other, &mut |_, _| true),
+        Err(PackageError::FolderNotEmpty)
+    ));
+    assert!(folder.join(PROJECT_MANIFEST).is_file());
+}
+
+/// `package` with its records changed by `statements`, as a hand-made
+/// package could be.
+fn tampered(source: &Source, package: &Path, statements: &str) -> PathBuf {
+    let records = source.folder("tampered.db");
+    {
+        let conn = records_of(package, &records);
+        conn.execute_batch(statements).unwrap();
+    }
+    let out = source.folder("Tampered.bardo-project");
+    let mut from = zip::ZipArchive::new(File::open(package).unwrap()).unwrap();
+    let mut zip = zip::ZipWriter::new(File::create(&out).unwrap());
+    let options = zip::write::SimpleFileOptions::default();
+    for index in 0..from.len() {
+        let mut entry = from.by_index(index).unwrap();
+        let name = entry.name().unwrap().into_owned();
+        zip.start_file(name.as_str(), options).unwrap();
+        if name == RECORDS_ENTRY {
+            zip.write_all(&fs::read(&records).unwrap()).unwrap();
+        } else {
+            io::copy(&mut entry, &mut zip).unwrap();
+        }
+    }
+    zip.finish().unwrap();
+    out
+}
+
+fn import_into_clean(
+    source: &Source,
+    package: PathBuf,
+) -> (Arc<Database>, Result<PackageImported, PackageError>) {
+    let db = Arc::new(Database::open_in_memory().unwrap());
+    let owner = profile(&db);
+    let packages = LocalPackages::new(Arc::clone(&db));
+    let imported = packages.import(
+        &PackageImport {
+            package,
+            owner,
+            project: ProjectId::new(),
+            name: "Bakery".into(),
+            color: ProjectColor::Rose,
+            folder: source.folder(&format!("Imported {}", Uuid::new_v4())),
+            data_home: "Bardo".into(),
+            templates: Vec::new(),
+        },
+        &mut |_, _| true,
+    );
+    (db, imported)
+}
+
+#[test]
+fn a_package_is_never_trusted() {
+    let source = source();
+    let (package, _) = source.export();
+
+    // A file name that would lead out of the project's folder.
+    let escaping = tampered(
+        &source,
+        &package,
+        r"UPDATE video_project SET folder_name = '..\..\Startup';",
+    );
+    let (db, imported) = import_into_clean(&source, escaping);
+    assert!(
+        matches!(imported, Err(PackageError::Damaged(_))),
+        "{imported:?}"
+    );
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM project"), 0);
+
+    // A queued job, a connection and a budget slipped in: none of them
+    // come, and the project does.
+    let account: String = {
+        let records = source.folder("peek.db");
+        let conn = records_of(&package, &records);
+        conn.query_row("SELECT id FROM network_account", [], |row| row.get(0))
+            .unwrap()
+    };
+    let loaded = tampered(
+        &source,
+        &package,
+        &format!(
+            "INSERT INTO job (id, profile_id, kind, payload, state, progress, attempts)
+             SELECT '{job}', profile_id, 'script_generation', '{{}}', 'queued', 0, 0 FROM project;
+             INSERT INTO network_connection (account_id, profile_id, status, identity_id,
+                                             identity_name, scopes, expires_at, connected_at)
+             SELECT '{account}', profile_id, 'connected', 'UC1', 'X', 'upload', 0, 0 FROM project;
+             INSERT INTO budget (profile_id, provider, monthly_micros)
+             SELECT profile_id, 'claude', 1 FROM project;",
+            job = Uuid::new_v4(),
+        ),
+    );
+    let (db, imported) = import_into_clean(&source, loaded);
+    imported.unwrap();
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM project"), 1);
+    assert_eq!(
+        count(&db, "SELECT COUNT(*) FROM job WHERE state <> 'done'"),
+        0
+    );
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM network_connection"), 0);
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM budget"), 0);
+}
+
+#[test]
+fn another_projects_item_never_travels() {
+    let source = source();
+    // A channel moved from Garage kept a pick of Garage's own character.
+    let gus: String = source
+        .db
+        .conn()
+        .query_row("SELECT id FROM character WHERE name = 'Gus'", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    pick(&source.db, source.seeded.video, &gus);
+    let (package, _) = source.export();
+    let records = source.folder("records.db");
+    let conn = records_of(&package, &records);
+    assert_eq!(
+        one(&conn, "SELECT COUNT(*) FROM character WHERE name = 'Gus'"),
+        0
+    );
+    assert_eq!(
+        one(
+            &conn,
+            &format!("SELECT COUNT(*) FROM video_cast_pick WHERE character_id = '{gus}'")
+        ),
+        0
+    );
+}

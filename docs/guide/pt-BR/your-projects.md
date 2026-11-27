@@ -84,7 +84,7 @@ Ele nunca leva chaves de API, credenciais de app, logins nas redes ou tokens, cu
 **Abrir projeto de uma pasta…** pede a pasta de um projeto (a que tem **bardo-project.json**) e abre o projeto dela:
 
 - um projeto que o Bardo conhece, cuja pasta você moveu, passa a usar o lugar novo, como **Localizar…** faz ([Pasta não encontrada](storage.md#not-found));
-- a pasta de um projeto excluído, restaurada da Lixeira, volta como um projeto novo a partir dos registros que guarda, com a mídia onde está.
+- a pasta de um projeto excluído, restaurada da Lixeira, volta como um projeto novo a partir dos registros que guarda, com a mídia onde está. Um cuja mídia foi compactada volta arquivado: **Desarquivar** descompacta a mídia.
 
 Uma pasta de outra cópia do Bardo ou de outro perfil é recusada: exporte o projeto lá e importe o pacote aqui.
 

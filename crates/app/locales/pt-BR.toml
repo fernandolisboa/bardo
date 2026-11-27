@@ -2923,7 +2923,7 @@ body = "Em dois minutos, este tour mostra onde fica cada coisa. Avance com Próx
 
 [tour.welcome.projects]
 title = "Seus projetos"
-body = "Um projeto reúne os canais de uma marca, com as ideias e os vídeos deles. O seletor ao lado do logo abre outro projeto, deixa à mão seus favoritos e os recentes cria projetos novos e exporta, importa ou reabre um projeto pela pasta dele. As telas mostram o projeto aberto."
+body = "Um projeto reúne os canais de uma marca, com as ideias e os vídeos deles. O seletor ao lado do logo abre outro projeto, deixa à mão seus favoritos e os recentes, cria projetos novos e exporta, importa ou reabre um projeto pela pasta dele. As telas mostram o projeto aberto."
 
 [tour.welcome.project]
 title = "Seu projeto"
@@ -5563,6 +5563,7 @@ export_started = "Exportando {name}. Acompanhe em Tarefas."
 import_started = "Importando {name}. Ele aparece nesta lista quando a tarefa terminar: acompanhe em Tarefas."
 relinked = "{name} usa esta pasta agora."
 reopened = "{name} voltou como um projeto novo."
+opened_archived = "{name} está em Projetos arquivados: desarquive o projeto lá para abri-lo."
 
 [package_import]
 title = "Importar {name}"

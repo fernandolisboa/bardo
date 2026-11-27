@@ -591,18 +591,26 @@ impl ProjectSwitcher {
                     return;
                 }
             };
-            // It opens, and the list stays up to say what happened.
+            // It opens, and the list stays up to say what happened. An
+            // archived one stays archived: Unarchive opens it.
             let bardo = this.bardo.read(cx);
+            let Some(project) = bardo
+                .projects()
+                .ok()
+                .and_then(|all| all.into_iter().find(|project| project.id == id))
+            else {
+                this.problem = Some(Text::ProjectNotFoundAny);
+                return;
+            };
+            let name = project.name().to_owned();
+            if !project.is_active() {
+                this.notice = Some(bardo.text_with(Text::FolderOpenedArchived, &[("name", &name)]));
+                return;
+            }
             if let Err(error) = bardo.switch_project(id) {
                 this.problem = Some(error.message());
                 return;
             }
-            let name = bardo
-                .projects()
-                .ok()
-                .and_then(|all| all.into_iter().find(|project| project.id == id))
-                .map(|project| project.name().to_owned())
-                .unwrap_or_default();
             this.notice = Some(bardo.text_with(said, &[("name", &name)]));
             cx.emit(ProjectSwitched);
         });

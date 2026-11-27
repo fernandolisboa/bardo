@@ -263,3 +263,28 @@ fn a_second_export_of_the_same_project_waits_for_the_first() {
     let busy = app.export_project_package(bakery.id, dir.path().join("two.bardo-project"));
     assert!(matches!(busy, Err(PackageProblem::Busy)));
 }
+
+#[test]
+fn a_deleted_project_with_packed_media_comes_back_archived() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = on_disk(dir.path());
+    let (bakery, _) = filled(&app, "Bakery");
+    let folder = app.project_folder(bakery.id).unwrap();
+    // As *Compress media* leaves it.
+    std::fs::write(folder.join(bardo_domain::PACKED_VIDEOS), b"PK").unwrap();
+    app.deletion(Removable::Project(bakery.id), "Bakery", false)
+        .unwrap()
+        .run()
+        .unwrap();
+
+    let FolderOpened::Imported(back) = app.open_project_folder(&folder).unwrap() else {
+        panic!("not imported");
+    };
+    let project = app
+        .projects()
+        .unwrap()
+        .into_iter()
+        .find(|p| p.id == back.project)
+        .unwrap();
+    assert!(!project.is_active(), "Unarchive unpacks its media");
+}

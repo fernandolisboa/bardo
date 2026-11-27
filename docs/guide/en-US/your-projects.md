@@ -84,7 +84,7 @@ It never holds API keys, app credentials, network sign-ins or tokens, costs, unf
 **Open a project from a folder…** asks for a project's folder (the one with **bardo-project.json**) and opens its project:
 
 - a project Bardo knows, whose folder you moved, points at the new place, as **Locate…** does ([Folder not found](storage.md#not-found));
-- a deleted project's folder, restored from the Recycle Bin, comes back as a new project from the records it holds, with its media where it is.
+- a deleted project's folder, restored from the Recycle Bin, comes back as a new project from the records it holds, with its media where it is. One whose media was compressed comes back archived: **Unarchive** unpacks it.
 
 A folder from another copy of Bardo or another profile is refused: export the project there and import its package here.
 

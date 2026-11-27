@@ -5563,6 +5563,7 @@ export_started = "Exporting {name}. Follow it in Jobs."
 import_started = "Importing {name}. It shows in this list once its job ends: follow it in Jobs."
 relinked = "{name} uses this folder now."
 reopened = "{name} is back as a new project."
+opened_archived = "{name} is in Archived projects: unarchive it there to open it."
 
 [package_import]
 title = "Import {name}"
