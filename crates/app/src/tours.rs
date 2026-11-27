@@ -186,6 +186,8 @@ pub enum Control {
     PersonaShare,
     /// Personas: the look, drawn or a photo of the user.
     PersonaLook,
+    /// World: the Characters, Places and Objects tabs.
+    WorldKinds,
     /// World: a character's name, appearance and notes.
     WorldCharacter,
     /// World: a character's reference pictures, one per look.
@@ -971,17 +973,19 @@ pub const PERSONAS: Tour = {
     }
 };
 
-/// World: the characters, one's appearance and notes, its reference
-/// pictures and keeping the world tidy, in the order the form shows them.
+/// World: the Characters, Places and Objects tabs, the list, one item's
+/// appearance and notes, keeping the world tidy and its reference
+/// pictures, in the order the form shows them.
 pub const WORLD: Tour = {
     const AT: Destination = Destination::World;
     const PAGE: &str = "world";
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::World,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
+            on(AT, "kinds", control(Control::WorldKinds)).learn(PAGE, "kinds"),
             on(AT, "characters", TourAnchor::Collection).learn(PAGE, "characters"),
             on(AT, "character", control(Control::WorldCharacter))
                 .missing(FORM)

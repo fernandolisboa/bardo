@@ -1,9 +1,12 @@
-//! A project's world (ADR-0047 item 6): the characters that may appear in
-//! its videos, each kept with a reference picture per look so a look draws
-//! each one once. Owned by a project, or by the global library.
+//! A project's world (ADR-0047 item 6): the characters, places and objects
+//! that may appear in its videos (#337, #338), each kept with a reference
+//! picture per look so a look draws each one once. Owned by a project, or
+//! by the global library. An object may belong to a character.
 //!
 //! Only what a video picks enters it ("Who appears"): the scene planner
-//! gets the picked characters as fixed cast and never an unpicked one.
+//! gets the picked characters as fixed cast, the picked places as fixed
+//! places and the picked objects as fixed objects, and never an unpicked
+//! one.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -14,8 +17,8 @@ use crate::{
 };
 
 uuid_id!(
-    /// Identifies a character of a world.
-    CharacterId
+    /// Identifies a character, place or object of a world.
+    WorldItemId
 );
 
 uuid_id!(
@@ -27,9 +30,70 @@ uuid_id!(
 /// many recurring people (`MAX_CAST`).
 pub const MAX_PICKED: usize = crate::MAX_CAST;
 
+/// The most places one video may pick (#338): fewer than a plan's
+/// `MAX_PLACES`, so the planner keeps room for places of its own.
+pub const MAX_PICKED_PLACES: usize = 3;
+
+/// The most objects one video may pick (a scene shows at most
+/// `MAX_SCENE_OBJECTS` of them).
+pub const MAX_OBJECTS: usize = 6;
+
+/// What a world item is (#338).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum WorldKind {
+    /// Someone who appears in scenes, as a cast member.
+    #[default]
+    Character,
+    /// Where scenes happen, as a plan's place.
+    Place,
+    /// A thing scenes show: a motorbike, a lantern. May belong to a
+    /// character.
+    Object,
+}
+
+impl WorldKind {
+    pub const ALL: [WorldKind; 3] = [WorldKind::Character, WorldKind::Place, WorldKind::Object];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            WorldKind::Character => "character",
+            WorldKind::Place => "place",
+            WorldKind::Object => "object",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.code() == code)
+    }
+
+    /// How many of this kind one video may pick.
+    pub fn max_picked(self) -> usize {
+        match self {
+            WorldKind::Character => MAX_PICKED,
+            WorldKind::Place => MAX_PICKED_PLACES,
+            WorldKind::Object => MAX_OBJECTS,
+        }
+    }
+
+    /// The shape its reference picture is drawn in: a person or a thing
+    /// standing, or a place as a wide view.
+    pub fn picture_shape(self) -> crate::ImageShape {
+        match self {
+            WorldKind::Character | WorldKind::Object => crate::ImageShape::Portrait,
+            WorldKind::Place => crate::ImageShape::Frame(crate::AspectRatio::Landscape),
+        }
+    }
+
+    /// Whether the user may import a picture for it: a place or an object,
+    /// never a person.
+    pub fn imports(self) -> bool {
+        self != WorldKind::Character
+    }
+}
+
 /// A character's fields as the user typed them, before validation.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct CharacterDraft {
+pub struct WorldItemDraft {
     pub name: String,
     /// How they look, always: face, age, hair, build, clothes.
     pub appearance: String,
@@ -41,7 +105,7 @@ pub struct CharacterDraft {
 
 /// Why a draft is not a valid character.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CharacterFieldError {
+pub enum WorldItemFieldError {
     NameRequired,
     NameTooLong,
     AppearanceRequired,
@@ -49,26 +113,26 @@ pub enum CharacterFieldError {
     NotesTooLong,
 }
 
-impl CharacterFieldError {
-    pub const ALL: [CharacterFieldError; 5] = [
-        CharacterFieldError::NameRequired,
-        CharacterFieldError::NameTooLong,
-        CharacterFieldError::AppearanceRequired,
-        CharacterFieldError::AppearanceTooLong,
-        CharacterFieldError::NotesTooLong,
+impl WorldItemFieldError {
+    pub const ALL: [WorldItemFieldError; 5] = [
+        WorldItemFieldError::NameRequired,
+        WorldItemFieldError::NameTooLong,
+        WorldItemFieldError::AppearanceRequired,
+        WorldItemFieldError::AppearanceTooLong,
+        WorldItemFieldError::NotesTooLong,
     ];
 }
 
 /// The user-editable part of a character, always valid.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CharacterDetails {
+pub struct WorldItemDetails {
     name: String,
     appearance: String,
     always: String,
     never: String,
 }
 
-impl CharacterDetails {
+impl WorldItemDetails {
     /// In characters, as a cast member's name.
     pub const MAX_NAME_CHARS: usize = crate::MAX_CAST_NAME_CHARS;
     /// In characters: a paragraph, as a cast member's description.
@@ -77,27 +141,27 @@ impl CharacterDetails {
     pub const MAX_NOTE_CHARS: usize = 1_000;
 
     /// Trims the fields and checks them.
-    pub fn validate(draft: CharacterDraft) -> Result<Self, CharacterFieldError> {
+    pub fn validate(draft: WorldItemDraft) -> Result<Self, WorldItemFieldError> {
         let name = draft.name.trim().to_owned();
         if name.is_empty() {
-            return Err(CharacterFieldError::NameRequired);
+            return Err(WorldItemFieldError::NameRequired);
         }
         if name.chars().count() > Self::MAX_NAME_CHARS {
-            return Err(CharacterFieldError::NameTooLong);
+            return Err(WorldItemFieldError::NameTooLong);
         }
         let appearance = draft.appearance.trim().to_owned();
         if appearance.is_empty() {
-            return Err(CharacterFieldError::AppearanceRequired);
+            return Err(WorldItemFieldError::AppearanceRequired);
         }
         if appearance.chars().count() > Self::MAX_APPEARANCE_CHARS {
-            return Err(CharacterFieldError::AppearanceTooLong);
+            return Err(WorldItemFieldError::AppearanceTooLong);
         }
         let always = draft.always.trim().to_owned();
         let never = draft.never.trim().to_owned();
         if always.chars().count() > Self::MAX_NOTE_CHARS
             || never.chars().count() > Self::MAX_NOTE_CHARS
         {
-            return Err(CharacterFieldError::NotesTooLong);
+            return Err(WorldItemFieldError::NotesTooLong);
         }
         Ok(Self {
             name,
@@ -136,8 +200,8 @@ pub fn same_name(one: &str, other: &str) -> bool {
     one.trim().to_lowercase() == other.trim().to_lowercase()
 }
 
-impl From<&CharacterDetails> for CharacterDraft {
-    fn from(details: &CharacterDetails) -> Self {
+impl From<&WorldItemDetails> for WorldItemDraft {
+    fn from(details: &WorldItemDetails) -> Self {
         Self {
             name: details.name.clone(),
             appearance: details.appearance.clone(),
@@ -151,29 +215,37 @@ impl From<&CharacterDetails> for CharacterDraft {
 /// fixed appearance, what they always and never do. Always an original
 /// person, never a real one. Not a voice: the narrator speaks.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Character {
-    pub id: CharacterId,
+pub struct WorldItem {
+    pub id: WorldItemId,
     pub owner: ProfileId,
     /// The project that owns it; `None` for the global library.
     pub owner_project: Option<ProjectId>,
-    pub details: CharacterDetails,
+    /// A character, a place or an object; fixed once made.
+    pub kind: WorldKind,
+    /// The character an object belongs to (its belongings, #338): of the
+    /// same owner, or of the global library. `None` for anything else.
+    pub belongs_to: Option<WorldItemId>,
+    pub details: WorldItemDetails,
     /// When it was archived: hidden from the pickers, kept with its
     /// pictures. `None` while active.
     pub archived_at: Option<SystemTime>,
     pub created_at: SystemTime,
 }
 
-impl Character {
+impl WorldItem {
     pub fn new(
         owner: ProfileId,
         owner_project: Option<ProjectId>,
-        details: CharacterDetails,
+        kind: WorldKind,
+        details: WorldItemDetails,
         now: SystemTime,
     ) -> Self {
         Self {
-            id: CharacterId::new(),
+            id: WorldItemId::new(),
             owner,
             owner_project,
+            kind,
+            belongs_to: None,
             details,
             archived_at: None,
             created_at: now,
@@ -188,13 +260,44 @@ impl Character {
         self.archived_at.is_some()
     }
 
-    /// What the scene planner is told of them, with the video's own
+    /// The prompt a place's or an object's reference picture is drawn
+    /// from in `style` (a character's is its cast portrait's): the thing
+    /// alone, so every scene that shows it can be drawn with it.
+    pub fn picture_prompt(&self, style: crate::StyleChoice) -> String {
+        let (what, framing) = match self.kind {
+            WorldKind::Place => (
+                "A reference picture of one place of a video",
+                "A wide, eye-level view of the whole place, evenly lit, with no people in it. \
+                 No text, logos or watermarks.",
+            ),
+            WorldKind::Object | WorldKind::Character => (
+                "A reference picture of one object of a video",
+                "The object alone and whole, centered, against a plain, evenly lit background. \
+                 No people, no text, logos or watermarks.",
+            ),
+        };
+        style.applied(&format!(
+            "{what}, {name}: {appearance}\n\n{framing}",
+            name = self.name(),
+            appearance = self.details.appearance(),
+        ))
+    }
+
+    /// What the scene planner is told of it, with the video's own
     /// instruction when there is one.
     pub fn planner_lines(&self, instruction: &str) -> String {
+        self.planner_lines_with(instruction, &[])
+    }
+
+    /// [`WorldItem::planner_lines`] with the names of a character's
+    /// belongings the video picked too.
+    pub fn planner_lines_with(&self, instruction: &str, belongings: &[&str]) -> String {
         let mut text = format!("{}: {}", self.name(), self.details.appearance());
+        let has = belongings.join(", ");
         for (label, note) in [
             ("Always", self.details.always()),
             ("Never", self.details.never()),
+            ("Has", has.as_str()),
             ("In this video", instruction.trim()),
         ] {
             if !note.is_empty() {
@@ -285,16 +388,20 @@ pub enum PictureOrigin {
     World,
     /// A video's cast portrait the user saved to the world with it.
     Saved,
-    /// Copied with a duplicated character.
+    /// Copied with a duplicated item.
     Copied,
+    /// A picture the user imported for a place or an object (#338), after
+    /// confirming they may use it.
+    Imported,
 }
 
 impl PictureOrigin {
-    pub const ALL: [PictureOrigin; 4] = [
+    pub const ALL: [PictureOrigin; 5] = [
         PictureOrigin::Video,
         PictureOrigin::World,
         PictureOrigin::Saved,
         PictureOrigin::Copied,
+        PictureOrigin::Imported,
     ];
 
     pub fn code(self) -> &'static str {
@@ -303,6 +410,7 @@ impl PictureOrigin {
             PictureOrigin::World => "world",
             PictureOrigin::Saved => "saved",
             PictureOrigin::Copied => "copied",
+            PictureOrigin::Imported => "imported",
         }
     }
 
@@ -311,6 +419,7 @@ impl PictureOrigin {
             "world" => PictureOrigin::World,
             "saved" => PictureOrigin::Saved,
             "copied" => PictureOrigin::Copied,
+            "imported" => PictureOrigin::Imported,
             _ => PictureOrigin::Video,
         }
     }
@@ -321,21 +430,27 @@ impl PictureOrigin {
 /// leaves it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PictureProvenance {
-    pub provider: Provider,
+    /// Who drew it; `None` for an imported picture.
+    pub provider: Option<Provider>,
+    /// Empty for an imported picture.
     pub model: String,
-    /// The whole prompt it was drawn from.
+    /// The whole prompt it was drawn from; empty for an imported picture.
     pub prompt: String,
     pub generated_at: SystemTime,
     /// The job that drew it; jobs may be cleaned up.
     pub job: Option<JobId>,
     pub origin: PictureOrigin,
+    /// When the user confirmed they may use an imported picture; `None`
+    /// for a drawn one.
+    pub confirmed_at: Option<SystemTime>,
 }
 
-/// A character's portrait for one look, kept in the world folder.
+/// A world item's picture for one look, kept in the world folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReferencePicture {
     pub id: ReferencePictureId,
-    pub character: CharacterId,
+    /// The item it shows.
+    pub item: WorldItemId,
     pub look: Look,
     /// The file's name in the owner's world folder.
     pub file: String,
@@ -345,15 +460,15 @@ pub struct ReferencePicture {
     pub kept: bool,
 }
 
-/// A character a video picked, with what it is told for that video only.
+/// A world item a video picked, with what it is told for that video only.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CastPick {
-    pub character: CharacterId,
+pub struct WorldPick {
+    pub item: WorldItemId,
     /// "Arrives on the motorbike in the first scene", "never speaks".
     pub instruction: String,
 }
 
-impl CastPick {
+impl WorldPick {
     /// In characters.
     pub const MAX_INSTRUCTION_CHARS: usize = 500;
 }
@@ -361,7 +476,7 @@ impl CastPick {
 /// A video that uses a character: one that picked it, or whose plan has it
 /// in its cast.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CharacterUse {
+pub struct WorldItemUse {
     pub video: VideoProjectId,
     pub title: String,
     pub archived: bool,
@@ -375,19 +490,19 @@ pub trait WorldRepository: Send + Sync {
         &self,
         owner: ProfileId,
         project: Option<ProjectId>,
-    ) -> Result<Vec<Character>, RepositoryError>;
+    ) -> Result<Vec<WorldItem>, RepositoryError>;
 
-    fn character(&self, id: CharacterId) -> Result<Option<Character>, RepositoryError>;
+    fn character(&self, id: WorldItemId) -> Result<Option<WorldItem>, RepositoryError>;
 
     /// Adds or replaces the character.
-    fn save_character(&self, character: &Character) -> Result<(), RepositoryError>;
+    fn save_character(&self, character: &WorldItem) -> Result<(), RepositoryError>;
 
     /// Removes the character with its pictures and picks; plans that had
     /// it keep their cast member, no longer linked to it.
-    fn delete_character(&self, id: CharacterId) -> Result<(), RepositoryError>;
+    fn delete_character(&self, id: WorldItemId) -> Result<(), RepositoryError>;
 
     /// The character's reference pictures, kept and waiting.
-    fn pictures(&self, character: CharacterId) -> Result<Vec<ReferencePicture>, RepositoryError>;
+    fn pictures(&self, character: WorldItemId) -> Result<Vec<ReferencePicture>, RepositoryError>;
 
     /// Adds the picture. A kept picture replaces the kept one of its look;
     /// a waiting one, the waiting one of its look.
@@ -396,14 +511,14 @@ pub trait WorldRepository: Send + Sync {
     fn remove_picture(&self, id: ReferencePictureId) -> Result<(), RepositoryError>;
 
     /// The characters the video picked, in order.
-    fn picks(&self, video: VideoProjectId) -> Result<Vec<CastPick>, RepositoryError>;
+    fn picks(&self, video: VideoProjectId) -> Result<Vec<WorldPick>, RepositoryError>;
 
     /// Replaces what the video picked; with `review`, its saved plan is
     /// marked for review.
     fn set_picks(
         &self,
         video: VideoProjectId,
-        picks: &[CastPick],
+        picks: &[WorldPick],
         review: bool,
     ) -> Result<(), RepositoryError>;
 
@@ -412,7 +527,7 @@ pub trait WorldRepository: Send + Sync {
 
     /// The videos that picked the character or have it in their plan's
     /// cast.
-    fn character_uses(&self, character: CharacterId) -> Result<Vec<CharacterUse>, RepositoryError>;
+    fn character_uses(&self, character: WorldItemId) -> Result<Vec<WorldItemUse>, RepositoryError>;
 }
 
 /// The world's picture files: in a project's `World` folder, or the global
@@ -439,39 +554,39 @@ pub trait WorldFiles: Send + Sync {
 mod tests {
     use super::*;
 
-    fn draft(name: &str, appearance: &str) -> CharacterDraft {
-        CharacterDraft {
+    fn draft(name: &str, appearance: &str) -> WorldItemDraft {
+        WorldItemDraft {
             name: name.into(),
             appearance: appearance.into(),
-            ..CharacterDraft::default()
+            ..WorldItemDraft::default()
         }
     }
 
     #[test]
     fn a_character_needs_a_name_and_an_appearance_within_limits() {
         assert_eq!(
-            CharacterDetails::validate(draft("  ", "tall")),
-            Err(CharacterFieldError::NameRequired)
+            WorldItemDetails::validate(draft("  ", "tall")),
+            Err(WorldItemFieldError::NameRequired)
         );
         assert_eq!(
-            CharacterDetails::validate(draft("Ana", " ")),
-            Err(CharacterFieldError::AppearanceRequired)
+            WorldItemDetails::validate(draft("Ana", " ")),
+            Err(WorldItemFieldError::AppearanceRequired)
         );
         assert_eq!(
-            CharacterDetails::validate(draft(&"a".repeat(61), "tall")),
-            Err(CharacterFieldError::NameTooLong)
+            WorldItemDetails::validate(draft(&"a".repeat(61), "tall")),
+            Err(WorldItemFieldError::NameTooLong)
         );
         assert_eq!(
-            CharacterDetails::validate(draft("Ana", &"a".repeat(1_501))),
-            Err(CharacterFieldError::AppearanceTooLong)
+            WorldItemDetails::validate(draft("Ana", &"a".repeat(1_501))),
+            Err(WorldItemFieldError::AppearanceTooLong)
         );
         let mut long = draft("Ana", "tall");
         long.never = "n".repeat(1_001);
         assert_eq!(
-            CharacterDetails::validate(long),
-            Err(CharacterFieldError::NotesTooLong)
+            WorldItemDetails::validate(long),
+            Err(WorldItemFieldError::NotesTooLong)
         );
-        let details = CharacterDetails::validate(draft(" Ana ", " tall ")).unwrap();
+        let details = WorldItemDetails::validate(draft(" Ana ", " tall ")).unwrap();
         assert_eq!((details.name(), details.appearance()), ("Ana", "tall"));
         assert!(details.same_name("ANA "));
     }
@@ -480,10 +595,11 @@ mod tests {
     fn the_planner_reads_the_notes_and_the_videos_instruction_only_when_set() {
         let mut typed = draft("Ana", "a baker in her sixties");
         typed.never = "smiles".into();
-        let ana = Character::new(
+        let ana = WorldItem::new(
             ProfileId::new(),
             None,
-            CharacterDetails::validate(typed).unwrap(),
+            WorldKind::Character,
+            WorldItemDetails::validate(typed).unwrap(),
             SystemTime::UNIX_EPOCH,
         );
         assert_eq!(
@@ -494,6 +610,22 @@ mod tests {
             ana.planner_lines(" opens the bakery "),
             "Ana: a baker in her sixties\n   Never: smiles\n   In this video: opens the bakery"
         );
+        assert_eq!(
+            ana.planner_lines_with("", &["the red van", "a whisk"]),
+            "Ana: a baker in her sixties\n   Never: smiles\n   Has: the red van, a whisk"
+        );
+    }
+
+    #[test]
+    fn a_kind_reads_back_from_its_code_and_only_places_and_objects_import() {
+        for kind in WorldKind::ALL {
+            assert_eq!(WorldKind::from_code(kind.code()), Some(kind));
+        }
+        assert_eq!(WorldKind::from_code("vehicle"), None);
+        assert!(!WorldKind::Character.imports());
+        assert!(WorldKind::Place.imports() && WorldKind::Object.imports());
+        assert_eq!(WorldKind::Character.max_picked(), MAX_PICKED);
+        assert_eq!(WorldKind::Place.max_picked(), MAX_PICKED_PLACES);
     }
 
     #[test]

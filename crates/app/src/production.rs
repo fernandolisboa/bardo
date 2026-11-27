@@ -298,7 +298,12 @@ impl Bardo {
                     .collect();
                 let missing = plan.missing_images();
                 let style = self.video_style(project)?;
-                (scenes, plan.missing_portraits(&missing, style).len())
+                let look = self.world_book.look_of(project, style);
+                (
+                    scenes,
+                    plan.missing_portraits(&missing, style).len()
+                        + self.world_book.missing_pictures(plan, &missing, &look),
+                )
             }
             None => {
                 // Sized as the Scenes stage sizes it, from the narration or

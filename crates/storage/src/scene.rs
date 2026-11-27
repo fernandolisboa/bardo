@@ -5,7 +5,7 @@ use bardo_domain::{
     JobId, NarrationId, Place, PlaceRecord, PortraitsUsed, ProductChecks, ProductImageId,
     ProfileId, Provider, RepositoryError, Scene, SceneClip, SceneImage, SceneKind, ScenePlan,
     ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord,
-    ShotBackdropDrawing, ShotColor, ShotLook, StretchLimit, VideoProjectId,
+    ShotBackdropDrawing, ShotColor, ShotLook, StretchLimit, VideoProjectId, WorldItemId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
@@ -72,6 +72,7 @@ struct SceneRow {
     /// The end card design it shows, and the one its picture shows (#281).
     card: Option<String>,
     shot_card: Option<String>,
+    objects: String,
 }
 
 /// What a scene holds about the product in use (#279) as stored; none
@@ -331,7 +332,8 @@ impl SceneRow {
                 .and_then(ShotLook::from_code)
                 .unwrap_or_default(),
         )
-        .with_product_checks(parse_product_checks(self.product_checks.as_deref())))
+        .with_product_checks(parse_product_checks(self.product_checks.as_deref()))
+        .with_objects(parse_objects(&self.objects)))
     }
 }
 
@@ -343,7 +345,8 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                  motion_prompt, clip_provider, clip_model, clip_failure, position,
                  cast_members, planned_motion_prompt, place, image_portraits,
                  pending_portraits, kind, product_image_id, shot_file, shot_image_id,
-                 shot_aspect, look, shot_look, shot_tones, product_checks, card, shot_card
+                 shot_aspect, look, shot_look, shot_tones, product_checks, card, shot_card,
+                 objects
              FROM scene WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -376,6 +379,7 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                     product_checks: row.get(28)?,
                     card: row.get(29)?,
                     shot_card: row.get(30)?,
+                    objects: row.get(31)?,
                 },
                 row.get::<_, i64>(14)?,
             ))
@@ -448,7 +452,7 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
                 .with_character(
                     character
                         .and_then(|id| uuid::Uuid::parse_str(&id).ok())
-                        .map(bardo_domain::CharacterId::from),
+                        .map(bardo_domain::WorldItemId::from),
                 ))
             },
         )
@@ -499,32 +503,57 @@ fn write_cast_member(
     Ok(())
 }
 
+/// The world objects a scene shows, as stored: ids, comma separated.
+fn objects_code(objects: &[WorldItemId]) -> String {
+    objects
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The world objects stored as `code`; an id that does not read is left
+/// out.
+fn parse_objects(code: &str) -> Vec<WorldItemId> {
+    code.split(',')
+        .filter_map(|id| uuid::Uuid::parse_str(id.trim()).ok())
+        .map(WorldItemId::from)
+        .collect()
+}
+
 /// The plan's places, in order.
 fn places(conn: &Connection, plan: &str) -> Result<Vec<Place>, RepositoryError> {
     let mut statement = conn
         .prepare(
-            "SELECT name, generated_description, description
+            "SELECT name, generated_description, description, item_id
              FROM scene_place WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
-    let rows: Vec<(String, String, String)> = statement
-        .query_map([plan], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+    let rows: Vec<(String, String, String, Option<String>)> = statement
+        .query_map([plan], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
         .map_err(boxed)?
         .collect::<Result<_, _>>()
         .map_err(boxed)?;
     rows.into_iter()
-        .map(|(name, generated, description)| {
+        .map(|(name, generated, description, item)| {
             Ok(Place::restore(PlaceRecord {
                 name,
                 generated_description: prompt(&generated)?,
                 description: prompt(&description)?,
-            }))
+            })
+            .with_item(
+                item.as_deref()
+                    .and_then(|id| uuid::Uuid::parse_str(id).ok())
+                    .map(WorldItemId::from),
+            ))
         })
         .collect()
 }
 
 /// Writes place `index` in place of the saved one: only its description
-/// changes after the plan is made.
+/// and the world place it follows change after the plan is made.
 fn write_place(
     tx: &Transaction<'_>,
     plan: &str,
@@ -532,15 +561,18 @@ fn write_place(
     place: &Place,
 ) -> Result<(), RepositoryError> {
     tx.execute(
-        "INSERT INTO scene_place (plan_id, position, name, generated_description, description)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT (plan_id, position) DO UPDATE SET description = excluded.description",
+        "INSERT INTO scene_place (plan_id, position, name, generated_description, description,
+             item_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT (plan_id, position) DO UPDATE SET description = excluded.description,
+             item_id = excluded.item_id",
         params![
             plan,
             position(index)?,
             place.name,
             place.generated_description().as_str(),
             place.description().as_str(),
+            place.item().map(|id| id.to_string()),
         ],
     )
     .map_err(boxed)?;
@@ -612,9 +644,9 @@ fn insert_scene(
              failure, motion_prompt, clip_provider, clip_model, clip_failure, cast_members,
              planned_motion_prompt, place, image_portraits, pending_portraits, kind,
              product_image_id, shot_file, shot_image_id, shot_aspect, look, shot_look,
-             shot_tones, product_checks, card, shot_card)
+             shot_tones, product_checks, card, shot_card, objects)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-             ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)",
+             ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)",
         params![
             plan,
             position(index)?,
@@ -651,6 +683,7 @@ fn insert_scene(
             product_checks_code(scene),
             scene.card(),
             scene.shot().and_then(|shot| shot.card.as_deref()),
+            objects_code(scene.objects()),
         ],
     )
     .map_err(boxed)?;
@@ -1212,6 +1245,8 @@ mod tests {
             let mut conn = s.db.conn();
             conn.execute_batch(
                 "ALTER TABLE scene_plan DROP COLUMN picks_changed;
+                 ALTER TABLE scene DROP COLUMN objects;
+                 ALTER TABLE scene_place DROP COLUMN item_id;
                  ALTER TABLE scene_cast DROP COLUMN character_id;
                  DROP TABLE video_cast_pick; DROP TABLE reference_picture; DROP TABLE character;
                  DROP TABLE deleted_work;
@@ -1380,6 +1415,7 @@ mod tests {
                 product: None,
                 cast: Vec::new(),
                 places: vec![PlaceDraft {
+                    item: None,
                     name: "the control room".into(),
                     description: "A dim 1970s control room, green screens, night.".into(),
                 }],

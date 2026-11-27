@@ -104,7 +104,7 @@ impl ProductError {
 
 /// Reads a picture file the user picked, no more than one byte past the
 /// largest file a product picture may be.
-fn read_picture(path: &Path) -> Result<Vec<u8>, ProductError> {
+pub(crate) fn read_picture(path: &Path) -> Result<Vec<u8>, ProductError> {
     let unreadable = |error: std::io::Error| {
         tracing::warn!(%error, "could not read a product picture");
         ProductError::Unreadable(error.to_string())

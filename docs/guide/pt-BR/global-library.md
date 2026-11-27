@@ -8,14 +8,14 @@ tour: library
 
 # Biblioteca global
 
-A **Biblioteca global** guarda o que todo projeto pode usar: personagens, narradores, produtos e modelos. [Mostre-me](bardo:tour/library).
+A **Biblioteca global** guarda o que todo projeto pode usar: personagens, lugares, objetos, narradores, produtos e modelos. [Mostre-me](bardo:tour/library).
 
 <a id="tabs"></a>
 ## As abas
 
 A biblioteca tem quatro abas:
 
-- **Mundo**: personagens que os vídeos de qualquer projeto podem escolher ([Mundo e personagens](world.md)).
+- **Mundo**: personagens, lugares e objetos que os vídeos de qualquer projeto podem escolher ([Mundo](world.md)).
 - **Narradores**: as vozes e rostos que falam nos seus vídeos ([Narradores](personas.md)).
 - **Produtos**: os produtos que seus anúncios mostram, com briefings e imagens ([Produtos](products.md)).
 - **Modelos**: as instruções a partir das quais o Claude escreve ([Modelos](templates.md)).
@@ -28,4 +28,4 @@ Cada aba é a mesma tela que você conhece, com as mesmas listas e formulários:
 <a id="projects"></a>
 ## Globais e do projeto
 
-Personagens podem ser do projeto, no [Mundo](world.md) dele, ou globais, nesta aba: um vídeo escolhe entre os dois. Hoje todo narrador, produto e modelo é global: as entradas Narradores, Produtos e Modelos do projeto na navegação abrem estas mesmas telas. Uma versão futura deixa cada projeto ter também os seus, com a biblioteca global compartilhada por todos.
+Personagens, lugares e objetos podem ser do projeto, no [Mundo](world.md) dele, ou globais, nesta aba: um vídeo escolhe entre os dois. Hoje todo narrador, produto e modelo é global: as entradas Narradores, Produtos e Modelos do projeto na navegação abrem estas mesmas telas. Uma versão futura deixa cada projeto ter também os seus, com a biblioteca global compartilhada por todos.

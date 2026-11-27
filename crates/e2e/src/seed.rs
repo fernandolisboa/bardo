@@ -1129,7 +1129,8 @@ fn jobs(db: &Database, profile: ProfileId, now: SystemTime) -> anyhow::Result<()
 }
 
 /// The space channel's project world: a captain the probe video picked,
-/// with her portrait in the channel's notes, and a global narrator cat.
+/// with her portrait in the channel's notes, her ship's bridge (picked
+/// too) and her compass (a belonging), and a global narrator cat.
 fn world(
     db: &Database,
     profile: ProfileId,
@@ -1138,38 +1139,62 @@ fn world(
     ffmpeg: &Path,
     now: SystemTime,
 ) -> anyhow::Result<()> {
-    let character =
-        |owner, name: &str, appearance: &str, always: &str| -> anyhow::Result<Character> {
-            let details = CharacterDetails::validate(CharacterDraft {
+    let item =
+        |kind, owner, name: &str, appearance: &str, always: &str| -> anyhow::Result<WorldItem> {
+            let details = WorldItemDetails::validate(WorldItemDraft {
                 name: name.into(),
                 appearance: appearance.into(),
                 always: always.into(),
                 never: String::new(),
             })
             .map_err(|error| anyhow!("a character: {error:?}"))?;
-            let character = Character::new(profile, owner, details, now);
+            let character = WorldItem::new(profile, owner, kind, details, now);
             WorldRepository::save_character(db, &character)?;
             Ok(character)
         };
-    let captain = character(
+    let captain = item(
+        WorldKind::Character,
         Some(channel.project),
         "Captain Vega",
         "A woman in her forties, short silver hair, navy flight jacket with a mission patch",
         "Wears the mission patch on her left shoulder",
     )?;
-    character(
+    item(
+        WorldKind::Character,
         None,
         "Orbit the cat",
         "A small grey cat with a white chest and a tiny orange space helmet",
         "",
     )?;
+    let bridge = item(
+        WorldKind::Place,
+        Some(channel.project),
+        "The bridge",
+        "A narrow starship bridge with curved blue consoles and a wide window onto the stars",
+        "Always lit by the consoles only",
+    )?;
+    let mut compass = item(
+        WorldKind::Object,
+        Some(channel.project),
+        "Brass compass",
+        "An old brass pocket compass with a cracked glass and an engraved lid",
+        "",
+    )?;
+    compass.belongs_to = Some(captain.id);
+    WorldRepository::save_character(db, &compass)?;
     WorldRepository::set_picks(
         db,
         probe.id,
-        &[CastPick {
-            character: captain.id,
-            instruction: "Only in the opening and the last scene".into(),
-        }],
+        &[
+            WorldPick {
+                item: captain.id,
+                instruction: "Only in the opening and the last scene".into(),
+            },
+            WorldPick {
+                item: bridge.id,
+                instruction: String::new(),
+            },
+        ],
         false,
     )?;
     let project = ProjectRepository::project(db, channel.project)?
@@ -1198,7 +1223,7 @@ fn world(
         db,
         &ReferencePicture {
             id,
-            character: captain.id,
+            item: captain.id,
             look: Look::of(
                 StyleChoice::FromNotes,
                 channel.id,
@@ -1206,12 +1231,13 @@ fn world(
             ),
             file,
             provenance: PictureProvenance {
-                provider: Provider::Gemini,
+                provider: Some(Provider::Gemini),
                 model: "gemini-2.5-flash-image".into(),
                 prompt: captain.details.appearance().to_owned(),
                 generated_at: now,
                 job: None,
                 origin: PictureOrigin::Video,
+                confirmed_at: None,
             },
             kept: true,
         },

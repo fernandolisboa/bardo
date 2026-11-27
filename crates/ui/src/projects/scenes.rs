@@ -230,6 +230,28 @@ impl ProjectsScreen {
         cx.notify();
     }
 
+    /// Keeps place `place` of the plan as a place of the video's project,
+    /// or of the global library with `global` (#338).
+    fn save_place_to_world(
+        &mut self,
+        place: usize,
+        global: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(id) = self.project else {
+            return;
+        };
+        match self.bardo.read(cx).save_place_to_world(id, place, global) {
+            Ok(_) => self.scenes_error = None,
+            Err(error) => self.scenes_error = Some(error.message()),
+        }
+        self.load_scenes(id, cx);
+        self.who_appears
+            .update(cx, |panel, cx| panel.show(Some(id), window, cx));
+        cx.notify();
+    }
+
     fn save_scene_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((_, index, field)) = self.editing_scene else {
             return;
@@ -2390,7 +2412,44 @@ impl ProjectsScreen {
             )
             .when(place.is_edited(), |row| {
                 row.child(kit::status(Tone::Info, tr(bardo, Text::PlaceEdited), cx))
+            })
+            .when(place.item().is_some(), |row| {
+                row.child(kit::status(
+                    Tone::Neutral,
+                    tr(bardo, Text::ScenesPlaceFromWorld),
+                    cx,
+                ))
             });
+        let save = (open.is_none() && !busy && place.item().is_none()).then(|| {
+            h_flex()
+                .gap_2()
+                .flex_wrap()
+                .items_center()
+                .child(
+                    Button::new(("save-place-world", index))
+                        .ghost()
+                        .xsmall()
+                        .label(tr(bardo, Text::ScenesPlaceSaveProject))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.save_place_to_world(at, false, window, cx)
+                        })),
+                )
+                .child(
+                    Button::new(("save-place-library", index))
+                        .ghost()
+                        .xsmall()
+                        .label(tr(bardo, Text::ScenesPlaceSaveGlobal))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.save_place_to_world(at, true, window, cx)
+                        })),
+                )
+                .child(guide::info(
+                    bardo,
+                    ("save-place-info", index),
+                    tr(bardo, Text::ScenesPlaceSaveHint),
+                    guide::refs::SCENES_PLACE_WORLD,
+                ))
+        });
         let description: AnyElement = match editor {
             Some(editor) => editor,
             None => kit::well(cx)
@@ -2411,6 +2470,7 @@ impl ProjectsScreen {
                 .child(name)
                 .child(description)
                 .children(left)
+                .children(save)
                 .into_any_element(),
         )
     }

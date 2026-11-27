@@ -261,7 +261,7 @@ pub use uploads::{
     UploadReviewError, UploadState, upload_state,
 };
 pub use voice_samples::{SampleAudio, SamplePlayer, VoiceSample, VoiceSampleError, VoiceSampling};
-pub use world::{CharacterCard, PictureView, WhoAppears, WorldError};
+pub use world::{PictureView, WhoAppears, WorldError, WorldItemCard};
 pub use youtube_policy::{
     GOOGLE_PERMISSIONS_URL, GOOGLE_PRIVACY_URL, PRIVACY_PAGE, YOUTUBE_TERMS_URL, privacy_policy_url,
 };
