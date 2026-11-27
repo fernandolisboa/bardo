@@ -13,7 +13,9 @@ Um produto é algo que você anuncia: um produto digital, como um app ou um curs
 <a id="library"></a>
 ## Seus produtos
 
-A lista mostra cada produto com o tipo. **Novo produto** abre um briefing vazio; escolher um produto abre ele para edição. Os produtos arquivados ficam escondidos até você marcar **Mostrar arquivados**.
+Na entrada **Produtos** de um projeto, a lista mostra os produtos do projeto e os globais, marcados como **Global**; a aba **Produtos** da [Biblioteca global](global-library.md) mostra os globais. **Novo produto** abre um briefing vazio, para o projeto na entrada dele ou para a biblioteca global na aba dela; escolher um produto abre ele para edição. Os produtos arquivados ficam escondidos até você marcar **Mostrar arquivados**. Um anúncio de um canal do projeto pode usar os produtos do projeto e os globais.
+
+Um produto global é usado por referência: salvar um que anúncios já usam muda ele em todos, em qualquer projeto, então o Bardo lista esses vídeos e pergunta antes. Para mudá-lo só neste projeto, use **Trazer para o projeto**: o Bardo faz uma cópia independente que pertence ao projeto, com as imagens, o logo, o conceito e a ficha, com um nome que você pode mudar (se o nome já existe, o Bardo sugere *Nome (Global)*). Os anúncios que já usam o produto global continuam com ele.
 
 <a id="brief"></a>
 ## O briefing

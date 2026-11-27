@@ -2445,7 +2445,7 @@ impl Bardo {
             _ => LOOK_FROM_PHOTO.to_owned(),
         };
         let frame = Outbound::of(take.mode, &take.set).sends_set_frame();
-        let template = self.current_template(TemplateKind::TakePrompt)?;
+        let template = self.video_template(TemplateKind::TakePrompt, project)?;
         let values = TemplateValues::from([
             (TemplateVariable::Look, look_text),
             (

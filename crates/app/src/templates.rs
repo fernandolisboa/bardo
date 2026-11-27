@@ -9,8 +9,9 @@
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ProfileId, RepositoryError, TemplateBody, TemplateFieldError, TemplateKind, TemplateRepository,
-    TemplateVersion, TemplateVersionId,
+    ChannelId, ProfileId, ProjectId, RepositoryError, TemplateBody, TemplateFieldError,
+    TemplateKind, TemplateRepository, TemplateSource, TemplateVersion, TemplateVersionId,
+    VideoProjectId, template_in_use,
 };
 
 use crate::{Bardo, Text};
@@ -1054,7 +1055,7 @@ fn seed_templates(
     owner: ProfileId,
 ) -> Result<(), RepositoryError> {
     for kind in TemplateKind::ALL {
-        if templates.template_versions(owner, kind)?.is_empty() {
+        if templates.template_versions(owner, None, kind)?.is_empty() {
             let first = TemplateVersion::first(owner, default_template(kind), SystemTime::now());
             templates.add_template_version(&first)?;
         }
@@ -1069,6 +1070,13 @@ pub enum TemplateError {
     Invalid(Vec<TemplateFieldError>),
     #[error("template version not found")]
     NotFound,
+    /// Saving the global template changes it in these projects, by name:
+    /// the user sees them before saving.
+    #[error("the global template is used by {0:?}")]
+    UsedByProjects(Vec<String>),
+    /// The project already has its own template of the kind.
+    #[error("the project already has its own template")]
+    AlreadyOwn,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -1083,6 +1091,8 @@ impl TemplateError {
                 })
             }
             TemplateError::NotFound => Text::TemplateNotFound,
+            TemplateError::UsedByProjects(_) => Text::TemplateGlobalUsedBy,
+            TemplateError::AlreadyOwn => Text::TemplateAlreadyOwn,
             TemplateError::Repository(_) => Text::TemplateNotSaved,
         }
     }
@@ -1095,19 +1105,33 @@ impl TemplateError {
     }
 }
 
+/// The template of a kind a project uses: its own, or the global one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateInUse {
+    pub source: TemplateSource,
+    /// Newest first: the first one is what the next generation uses.
+    pub versions: Vec<TemplateVersion>,
+}
+
 impl Bardo {
-    /// Every version of the profile's template of `kind`, newest first. The
-    /// first one is what the next generation uses.
-    pub fn template_versions(
+    /// Every version of `project`'s own template of `kind` (`None`: the
+    /// global one's), oldest first, with today's default text added as the
+    /// next version when it moved on since.
+    fn stored_template(
         &self,
+        project: Option<ProjectId>,
         kind: TemplateKind,
     ) -> Result<Vec<TemplateVersion>, TemplateError> {
-        let mut versions = self.templates.template_versions(self.profile.id, kind)?;
-        if versions.is_empty() {
+        let mut versions = self
+            .templates
+            .template_versions(self.profile.id, project, kind)?;
+        if versions.is_empty() && project.is_none() {
             // Version 1 is saved on first use, so profiles from before
             // templates existed get it too.
             seed_templates(&*self.templates, self.profile.id)?;
-            versions = self.templates.template_versions(self.profile.id, kind)?;
+            versions = self
+                .templates
+                .template_versions(self.profile.id, None, kind)?;
         }
         let next = versions.last().and_then(|current| {
             current.revise(upgraded(kind, &current.body, &versions)?, SystemTime::now())
@@ -1116,16 +1140,81 @@ impl Bardo {
             self.templates.add_template_version(&next)?;
             versions.push(next);
         }
-        versions.reverse();
         Ok(versions)
     }
 
-    /// The version the next generation of `kind` uses.
+    /// The template of `kind` that `project` uses (its own, else the
+    /// global one), or the global one for `None`.
+    pub fn template_in_use(
+        &self,
+        kind: TemplateKind,
+        project: Option<ProjectId>,
+    ) -> Result<TemplateInUse, TemplateError> {
+        let own = match project {
+            Some(project) => self.stored_template(Some(project), kind)?,
+            None => Vec::new(),
+        };
+        let global = if own.is_empty() {
+            self.stored_template(None, kind)?
+        } else {
+            Vec::new()
+        };
+        let (source, mut versions) = template_in_use(own, global);
+        versions.reverse();
+        Ok(TemplateInUse { source, versions })
+    }
+
+    /// Every version of the template of `kind` the open project uses,
+    /// newest first. The first one is what the next generation uses.
+    pub fn template_versions(
+        &self,
+        kind: TemplateKind,
+    ) -> Result<Vec<TemplateVersion>, TemplateError> {
+        Ok(self
+            .template_in_use(kind, self.open_project_id()?)?
+            .versions)
+    }
+
+    /// The version the next generation of `kind` in the open project uses.
     pub fn current_template(&self, kind: TemplateKind) -> Result<TemplateVersion, TemplateError> {
-        self.template_versions(kind)?
+        self.current_template_in(kind, self.open_project_id()?)
+    }
+
+    /// The version the next generation of `kind` for `project`'s work uses
+    /// (`None`: work of no project, which uses the global template).
+    pub fn current_template_in(
+        &self,
+        kind: TemplateKind,
+        project: Option<ProjectId>,
+    ) -> Result<TemplateVersion, TemplateError> {
+        self.template_in_use(kind, project)?
+            .versions
             .into_iter()
             .next()
             .ok_or(TemplateError::NotFound)
+    }
+
+    /// The version the next generation of `kind` for a video of `channel`
+    /// uses: its project's template, else the global one.
+    pub(crate) fn channel_template(
+        &self,
+        kind: TemplateKind,
+        channel: ChannelId,
+    ) -> Result<TemplateVersion, TemplateError> {
+        let project = self.channels.get(channel)?.map(|channel| channel.project);
+        self.current_template_in(kind, project)
+    }
+
+    /// As `channel_template`, for the video `video`.
+    pub(crate) fn video_template(
+        &self,
+        kind: TemplateKind,
+        video: VideoProjectId,
+    ) -> Result<TemplateVersion, TemplateError> {
+        match self.themes.project(video)? {
+            Some(found) => self.channel_template(kind, found.channel),
+            None => self.current_template(kind),
+        }
     }
 
     pub fn template_version(
@@ -1138,23 +1227,91 @@ impl Bardo {
             .ok_or(TemplateError::NotFound)
     }
 
-    /// Saves the text as the next version of the template. Unchanged text
-    /// adds no version and returns the current one.
-    pub fn save_template(
+    /// The active projects that use the global template of `kind`, by
+    /// name: every one without its own.
+    pub fn global_template_users(&self, kind: TemplateKind) -> Result<Vec<String>, TemplateError> {
+        let own = self
+            .templates
+            .projects_with_template(self.profile.id, kind)?;
+        Ok(self
+            .projects
+            .projects(self.profile.id)?
+            .into_iter()
+            .filter(|project| project.is_active() && !own.contains(&project.id))
+            .map(|project| project.details.name().to_owned())
+            .collect())
+    }
+
+    /// Gives `project` its own template of `kind`, starting as a copy of
+    /// the global template's latest version. Generations made before keep
+    /// pointing at the global version they used.
+    pub fn make_project_template(
+        &self,
+        kind: TemplateKind,
+        project: ProjectId,
+    ) -> Result<TemplateVersion, TemplateError> {
+        self.projects
+            .project(project)?
+            .filter(|found| found.owner == self.profile.id)
+            .ok_or(TemplateError::NotFound)?;
+        if !self
+            .templates
+            .template_versions(self.profile.id, Some(project), kind)?
+            .is_empty()
+        {
+            return Err(TemplateError::AlreadyOwn);
+        }
+        let latest = self
+            .stored_template(None, kind)?
+            .pop()
+            .ok_or(TemplateError::NotFound)?;
+        let copy = TemplateVersion::project_copy(&latest, project, SystemTime::now());
+        self.templates.add_template_version(&copy)?;
+        Ok(copy)
+    }
+
+    /// Saves the text as the next version of the template of `kind` that
+    /// `project` uses (`None`: the global one). Saving the global template
+    /// while projects use it needs `confirmed` (the user saw them, from
+    /// `TemplateError::UsedByProjects`). Unchanged text adds no version and
+    /// returns the current one.
+    pub fn save_template_in(
+        &self,
+        kind: TemplateKind,
+        project: Option<ProjectId>,
+        (instructions, prompt): (&str, &str),
+        confirmed: bool,
+    ) -> Result<TemplateVersion, TemplateError> {
+        let body = TemplateBody::new(kind, instructions, prompt).map_err(TemplateError::Invalid)?;
+        let in_use = self.template_in_use(kind, project)?;
+        let current = in_use
+            .versions
+            .into_iter()
+            .next()
+            .ok_or(TemplateError::NotFound)?;
+        let Some(next) = current.revise(body, SystemTime::now()) else {
+            return Ok(current);
+        };
+        if in_use.source == TemplateSource::Global && !confirmed {
+            let users = self.global_template_users(kind)?;
+            if !users.is_empty() {
+                return Err(TemplateError::UsedByProjects(users));
+            }
+        }
+        self.templates.add_template_version(&next)?;
+        Ok(next)
+    }
+
+    /// Saves the text as the next version of the template the open project
+    /// uses, as if the user confirmed its uses.
+    #[cfg(test)]
+    pub(crate) fn save_template(
         &self,
         kind: TemplateKind,
         instructions: &str,
         prompt: &str,
     ) -> Result<TemplateVersion, TemplateError> {
-        let body = TemplateBody::new(kind, instructions, prompt).map_err(TemplateError::Invalid)?;
-        let current = self.current_template(kind)?;
-        match current.revise(body, SystemTime::now()) {
-            Some(next) => {
-                self.templates.add_template_version(&next)?;
-                Ok(next)
-            }
-            None => Ok(current),
-        }
+        self.save_template_in(kind, self.open_project_id()?, (instructions, prompt), true)
     }
 }
 

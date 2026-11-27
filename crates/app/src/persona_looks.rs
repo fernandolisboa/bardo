@@ -491,7 +491,7 @@ impl Bardo {
     /// The persona's Look section.
     pub fn persona_look(&self, persona: PersonaId) -> Result<LookView, LookError> {
         let found = self.look_persona(persona)?;
-        let template = self.current_template(TemplateKind::LookPrompt)?;
+        let template = self.current_template_in(TemplateKind::LookPrompt, found.owner_project)?;
         // The estimate does not depend on the description's few words.
         let rendered = self.render_look_prompt(&found, "", &template)?;
         let look = self.stored_look(self.personas.look(persona));
@@ -598,7 +598,7 @@ impl Bardo {
                 return Err(LookError::MissingKey(provider));
             }
         }
-        let template = self.current_template(TemplateKind::LookPrompt)?;
+        let template = self.current_template_in(TemplateKind::LookPrompt, found.owner_project)?;
         let mut rendered = self.render_look_prompt(&found, &description, &template)?;
         rendered.instructions = guarded(&rendered.instructions);
         if let Err(estimate) = self.check_budget(&draw_calls(&rendered), consent)? {

@@ -925,11 +925,14 @@ impl Bardo {
     /// The template a project's metadata is written from: the ad metadata
     /// template for an ad, the metadata template for every other project.
     fn metadata_template(&self, project: &VideoProject) -> Result<TemplateVersion, ExportError> {
-        Ok(self.current_template(if project.is_ad() {
-            TemplateKind::AdMetadata
-        } else {
-            TemplateKind::Metadata
-        })?)
+        Ok(self.channel_template(
+            if project.is_ad() {
+                TemplateKind::AdMetadata
+            } else {
+                TemplateKind::Metadata
+            },
+            project.channel,
+        )?)
     }
 
     /// The project's metadata template filled with its facts. An ad's

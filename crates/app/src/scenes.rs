@@ -2249,11 +2249,14 @@ impl Bardo {
     /// The template a project's scenes are planned from: the ad scene
     /// plan for an ad (#278), the storyboard plan for every other project.
     fn scene_plan_template(&self, project: &VideoProject) -> Result<TemplateVersion, SceneError> {
-        Ok(self.current_template(if project.is_ad() {
-            TemplateKind::AdScenePlan
-        } else {
-            TemplateKind::ImagePrompt
-        })?)
+        Ok(self.channel_template(
+            if project.is_ad() {
+                TemplateKind::AdScenePlan
+            } else {
+                TemplateKind::ImagePrompt
+            },
+            project.channel,
+        )?)
     }
 
     /// The project's scene plan template filled with its facts and its

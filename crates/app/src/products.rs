@@ -12,9 +12,10 @@ use std::time::SystemTime;
 use bardo_domain::{
     MAX_PRODUCT_IMAGES, PRODUCT_IMAGE_MAX_BYTES, Product, ProductBrief, ProductDraft,
     ProductFieldError, ProductId, ProductImage, ProductImageError, ProductImageId,
-    ProductImageKind, ProductLogo, ProductPicture, RepositoryError,
+    ProductImageKind, ProductLogo, ProductPicture, ProjectId, RepositoryError,
 };
 
+use crate::library::{LibraryUse, usable_in};
 use crate::{AppError, Bardo, Text};
 
 #[derive(Debug, thiserror::Error)]
@@ -59,6 +60,20 @@ pub enum ProductError {
     ImageNotFound,
     #[error("the product has no logo")]
     NoLogo,
+    /// Videos of these projects use the global product, and the save was
+    /// not confirmed. Nothing was saved: show them, then save again
+    /// confirmed.
+    #[error("the global product is used in {} video(s)", .0.len())]
+    UsedIn(Vec<LibraryUse>),
+    /// The project already has a product of the name: the user picks
+    /// another, starting from the suggestion.
+    #[error("the project already has a product named so")]
+    NameClash { suggestion: String },
+    /// Only a global product can be brought into a project.
+    #[error("the product is not global")]
+    NotGlobal,
+    #[error("project not found")]
+    ProjectNotFound,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -82,6 +97,10 @@ impl ProductError {
             ProductError::Unreadable(_) => Some(Text::ProductImageUnreadable),
             ProductError::ImageNotFound => Some(Text::ProductImageNotFound),
             ProductError::NoLogo => Some(Text::ProductNoLogo),
+            ProductError::UsedIn(_) => None,
+            ProductError::NameClash { .. } => Some(Text::LibraryNameClash),
+            ProductError::NotGlobal => Some(Text::ProductNotFound),
+            ProductError::ProjectNotFound => Some(Text::ProjectNotFound),
             ProductError::Repository(_) => Some(Text::ProductNotSaved),
         }
     }
@@ -125,9 +144,44 @@ pub(crate) fn read_picture(path: &Path) -> Result<Vec<u8>, ProductError> {
 }
 
 impl Bardo {
-    /// The profile's products, archived ones included, ordered by name.
+    /// The products ads of the open project may use: its own and every
+    /// global one, archived ones included, ordered by name.
     pub fn products(&self) -> Result<Vec<Product>, AppError> {
+        let open = self.open_project_id()?;
+        Ok(self
+            .all_products()?
+            .into_iter()
+            .filter(|product| usable_in(product.owner_project, open))
+            .collect())
+    }
+
+    /// Every product of the profile, of every project and the global
+    /// library, ordered by name.
+    pub fn all_products(&self) -> Result<Vec<Product>, AppError> {
         Ok(self.products.list(self.profile.id)?)
+    }
+
+    /// What a Products screen lists: `project`'s own products and the
+    /// global ones its videos use, or the global library's for `None`,
+    /// archived ones included, ordered by name.
+    pub fn library_products(&self, project: Option<ProjectId>) -> Result<Vec<Product>, AppError> {
+        let all = self.all_products()?;
+        let Some(project) = project else {
+            return Ok(all.into_iter().filter(Product::is_global).collect());
+        };
+        let mut used: Vec<ProductId> = Vec::new();
+        for channel in self.project_channels(project)? {
+            for video in self.themes.projects(channel.id)? {
+                used.extend(video.product);
+            }
+        }
+        Ok(all
+            .into_iter()
+            .filter(|product| {
+                product.owner_project == Some(project)
+                    || (product.is_global() && used.contains(&product.id))
+            })
+            .collect())
     }
 
     fn own_product(&self, id: ProductId) -> Result<Product, ProductError> {
@@ -137,14 +191,24 @@ impl Bardo {
             .ok_or(ProductError::NotFound)
     }
 
+    /// The products `project` owns (`None`: the global library's).
+    fn products_of(&self, project: Option<ProjectId>) -> Result<Vec<Product>, RepositoryError> {
+        Ok(self
+            .products
+            .list(self.profile.id)?
+            .into_iter()
+            .filter(|other| other.owner_project == project)
+            .collect())
+    }
+
     fn ensure_product_name_free(
         &self,
+        project: Option<ProjectId>,
         name: &str,
         editing: Option<ProductId>,
     ) -> Result<(), ProductError> {
         let taken = self
-            .products
-            .list(self.profile.id)?
+            .products_of(project)?
             .iter()
             .any(|other| Some(other.id) != editing && other.brief.same_name(name));
         if taken {
@@ -154,27 +218,67 @@ impl Bardo {
         }
     }
 
+    /// Where the product is used: every video that advertises it, by
+    /// project.
+    pub fn product_usage(&self, id: ProductId) -> Result<Vec<LibraryUse>, ProductError> {
+        let product = self.own_product(id)?;
+        Ok(self
+            .videos_with_places()?
+            .into_iter()
+            .filter(|(video, ..)| video.product == Some(product.id))
+            .map(|(video, channel, project)| LibraryUse {
+                project: self.project_name(project),
+                channel,
+                video: Some(video.title),
+            })
+            .collect())
+    }
+
+    /// Adds a product to the global library.
     pub fn create_product(&self, draft: ProductDraft) -> Result<Product, ProductError> {
+        self.create_product_in(None, draft)
+    }
+
+    /// Adds a product to `project` (`None`: the global library).
+    pub fn create_product_in(
+        &self,
+        project: Option<ProjectId>,
+        draft: ProductDraft,
+    ) -> Result<Product, ProductError> {
+        if let Some(project) = project
+            && !self.own_project_exists(project)?
+        {
+            return Err(ProductError::ProjectNotFound);
+        }
         let brief = ProductBrief::validate(draft).map_err(ProductError::Invalid)?;
-        self.ensure_product_name_free(brief.name(), None)?;
-        let product = Product::new(self.profile.id, brief);
+        self.ensure_product_name_free(project, brief.name(), None)?;
+        let product = Product::new(self.profile.id, brief).owned_by(project);
         self.products.save(&product)?;
         tracing::info!("created a product");
         Ok(product)
     }
 
-    /// Saves changes to a product's brief. Its images and logo stay.
+    /// Saves changes to a product's brief. Its images and logo stay. A
+    /// global product that videos use needs `confirmed` (the user saw
+    /// them, from `ProductError::UsedIn`).
     pub fn update_product(
         &self,
         id: ProductId,
         draft: ProductDraft,
+        confirmed: bool,
     ) -> Result<Product, ProductError> {
         let mut product = self.own_product(id)?;
         let brief = ProductBrief::validate(draft).map_err(ProductError::Invalid)?;
         if brief == product.brief {
             return Ok(product);
         }
-        self.ensure_product_name_free(brief.name(), Some(id))?;
+        self.ensure_product_name_free(product.owner_project, brief.name(), Some(id))?;
+        if product.is_global() && !confirmed {
+            let usage = self.product_usage(id)?;
+            if !usage.is_empty() {
+                return Err(ProductError::UsedIn(usage));
+            }
+        }
         product.brief = brief;
         self.products.save(&product)?;
         // A fact typed since goes on the sheet, when there is one.
@@ -184,21 +288,63 @@ impl Bardo {
 
     /// A new product with the same brief, images, logo and sheet, named
     /// as a copy, to vary without touching the original. The copy is not
-    /// archived.
+    /// archived and has the original's owner.
     pub fn duplicate_product(&self, id: ProductId) -> Result<Product, ProductError> {
         let original = self.own_product(id)?;
-        let taken = self.products.list(self.profile.id)?;
+        let taken = self.products_of(original.owner_project)?;
         let name = original
             .brief
             .copy_name(&self.text(Text::ProductCopySuffix), |name| {
                 taken.iter().any(|other| other.brief.same_name(name))
             });
+        self.copy_product(&original, name, original.owner_project)
+    }
+
+    /// Makes an independent copy of a global product, owned by `project`,
+    /// with its pictures, sheet and concept image. `name` is the copy's
+    /// (`None`: the original's); a name the project already has is refused
+    /// with a suggestion, `<name> (<source>)`. Ads already made keep the
+    /// global one.
+    pub fn bring_product_into_project(
+        &self,
+        id: ProductId,
+        project: ProjectId,
+        name: Option<&str>,
+    ) -> Result<Product, ProductError> {
+        let original = self.own_product(id)?;
+        if !original.is_global() {
+            return Err(ProductError::NotGlobal);
+        }
+        if !self.own_project_exists(project)? {
+            return Err(ProductError::ProjectNotFound);
+        }
+        let name = name.map_or_else(|| original.brief.name().to_owned(), str::to_owned);
+        let taken = self.products_of(Some(project))?;
+        if taken.iter().any(|other| other.brief.same_name(&name)) {
+            let suggestion = original
+                .brief
+                .copy_name(&self.text(Text::LibraryGlobalSource), |name| {
+                    taken.iter().any(|other| other.brief.same_name(name))
+                });
+            return Err(ProductError::NameClash { suggestion });
+        }
+        self.copy_product(&original, name, Some(project))
+    }
+
+    /// A copy of `original` named `name`, owned by `project`, with its
+    /// pictures, concept image and sheet, not archived.
+    fn copy_product(
+        &self,
+        original: &Product,
+        name: String,
+        project: Option<ProjectId>,
+    ) -> Result<Product, ProductError> {
         let brief = ProductBrief::validate(ProductDraft {
             name,
             ..ProductDraft::from(&original.brief)
         })
         .map_err(ProductError::Invalid)?;
-        let copy = Product::new(self.profile.id, brief);
+        let copy = Product::new(self.profile.id, brief).owned_by(project);
         self.products.save(&copy)?;
         // The pictures come along, each with the user's confirmation. The
         // copy is made either way: copying again would make a second one.
@@ -527,11 +673,13 @@ mod tests {
             Err(ProductError::NameTaken)
         ));
         assert!(matches!(
-            app.update_product(other.id, draft("notebook")),
+            app.update_product(other.id, draft("notebook"), true),
             Err(ProductError::NameTaken)
         ));
         // A product keeps its own name, in another case too.
-        let renamed = app.update_product(first.id, draft("NoteBook")).unwrap();
+        let renamed = app
+            .update_product(first.id, draft("NoteBook"), true)
+            .unwrap();
         assert_eq!(renamed.brief.name(), "NoteBook");
     }
 
@@ -550,13 +698,14 @@ mod tests {
                     ownership: ProductOwnership::Mine,
                     ..draft("Notebook")
                 },
+                true,
             )
             .unwrap();
         assert_eq!(edited.brief.kind(), ProductKind::Idea);
         assert_eq!(edited.brief.ownership(), ProductOwnership::Mine);
         assert_eq!(app.product_images(product.id).unwrap().len(), 1);
         assert!(matches!(
-            app.update_product(ProductId::new(), draft("Other")),
+            app.update_product(ProductId::new(), draft("Other"), true),
             Err(ProductError::NotFound)
         ));
     }

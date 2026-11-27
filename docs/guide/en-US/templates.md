@@ -8,7 +8,7 @@ tour: templates
 
 # Templates
 
-Templates are the prompts Bardo sends to the AI. Change one to change how Bardo writes scripts, plans scenes, words music prompts or drafts posts, for every channel. They live on [Templates](bardo:go/templates). [Show me the screen](bardo:tour/templates).
+Templates are the prompts Bardo sends to the AI. Change one to change how Bardo writes scripts, plans scenes, words music prompts or drafts posts, for every channel of a project, or for all of them. They live on [Templates](bardo:go/templates). [Show me the screen](bardo:tour/templates).
 
 <a id="kinds"></a>
 ## Kinds of template
@@ -29,6 +29,11 @@ There is one template per kind of generation:
 - **Ad metadata**: each network's post of an ad at the Publish stage ([Before an ad goes out](uploading.md#ad-review)). Besides the channel's facts, the theme, `{{script}}` and `{{networks}}`, it reads `{{product}}`, `{{product_concept}}`, `{{ad_hook}}`, `{{brief_claims}}`, `{{offer}}`, `{{call_to_action}}` and `{{link}}` (where the ad sends viewers, from the Brief stage). After its instructions Bardo always adds the rules of every ad, and for a product of kind *idea* the rules of a concept; the brief's claims and what must never be said are always sent, even by an edit that leaves `{{brief_claims}}` out. The check of the post texts that follows is not a template.
 - **Ad scene plan**: the scene plan of an ad ([The scenes of an ad](scenes.md#ad)), in place of the image prompts template. Besides what that one reads (the channel's facts, `{{visual_style}}`, the theme, `{{narration_sentences}}` and `{{frame_shape}}`), it reads `{{product}}`, `{{product_concept}}`, `{{call_to_action}}`, `{{product_images}}` (the product's images, numbered from 0, with what each one is and its shape) and `{{scene_kinds}}` (the kinds a scene of this ad may be, which follow the product's images). After its instructions Bardo always adds the rules of every ad and the rules of an ad's scenes: only the kinds listed, only the last scene as the end card, nothing of the product drawn or redrawn for a product shot or the end card, no other brand, logo or real person in a drawn picture, and no text, caption or watermark in a picture beyond the product's own name on the product. An edit that leaves `{{product_images}}` or `{{scene_kinds}}` out does not leave them unsent: Bardo adds both after the prompt.
 - **Concept prompt**: the image prompt for the concept image of a product of kind *idea* ([A concept image for an idea](products.md#concept)). It reads `{{product}}` and `{{product_audience}}`. After its instructions, and again after its prompt, Bardo always adds an instruction no edit removes: draw an original product, with no existing brand, logo or trade dress, and no text at all. The image generator is told the same after Claude's prompt.
+
+<a id="project"></a>
+## This project's or global
+
+Each kind has a global template, and a project may have its own. On a project's **Templates** entry, the screen says which one the project uses: **This project's own template**, or **Global template** when it has none of its own. Saving the global template changes it for every project that uses it, so Bardo lists those projects and asks first. **Make it this project's own** gives the project its own template of that kind, starting as a copy of the global one's latest version; from then on the project's generations use it, and the global one stays as it is for the other projects. Generations made before keep the version they used. The **Templates** tab of the [Global library](global-library.md) edits the global templates. A channel's videos use the templates of the channel's project.
 
 <a id="versions"></a>
 ## Versions

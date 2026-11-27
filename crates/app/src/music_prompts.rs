@@ -296,7 +296,7 @@ impl Bardo {
         project: VideoProjectId,
     ) -> Result<MusicPromptView, MusicPromptError> {
         let project = self.own_music_project(project)?;
-        let template = self.current_template(TemplateKind::MusicPrompt)?;
+        let template = self.channel_template(TemplateKind::MusicPrompt, project.channel)?;
         let rendered = self.render_music_prompt(&project, &template)?;
         Ok(MusicPromptView {
             prompt: self.music_prompts.music_prompt(project.id)?,
@@ -321,7 +321,7 @@ impl Bardo {
         if self.provider_key(Provider::Claude).state == KeyState::NotSet {
             return Err(MusicPromptError::MissingKey(Provider::Claude));
         }
-        let template = self.current_template(TemplateKind::MusicPrompt)?;
+        let template = self.channel_template(TemplateKind::MusicPrompt, project.channel)?;
         let rendered = self.render_music_prompt(&project, &template)?;
         if let Err(estimate) =
             self.check_video_budget(project.id, &[music_prompt_call(&rendered)], consent)?

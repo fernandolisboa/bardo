@@ -611,6 +611,7 @@ mod tests {
                 ownership: ProductOwnership::Client,
                 ..draft()
             },
+            true,
         )
         .unwrap();
         assert_eq!(

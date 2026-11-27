@@ -10,15 +10,17 @@
 //! the form to a `PersonaDraft` and results back to the screen.
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelId, GenerationPresets, Persona, PersonaDraft, PersonaFieldError, PersonaId,
-    Voice, VoiceCategory, VoiceFlag, VoiceRef,
+    GenerationPresets, Persona, PersonaDraft, PersonaFieldError, PersonaId, Voice, VoiceCategory,
+    VoiceFlag, VoiceRef,
 };
 use std::rc::Rc;
 use std::time::Duration;
 
+use bardo_app::bardo_domain::ProjectId;
 use bardo_app::{
-    Bardo, BudgetConsent, Control, Destination, PersonaError, SamplePlayer, SpendEstimate, Text,
-    TourAnchor, VoiceSample, VoiceSampleError, VoiceSampling, VoiceStatus, persona_package_folder,
+    Bardo, BudgetConsent, Control, Destination, LibraryUse, PersonaError, SamplePlayer,
+    SpendEstimate, Text, TourAnchor, VoiceSample, VoiceSampleError, VoiceSampling, VoiceStatus,
+    persona_package_folder,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -34,6 +36,7 @@ use gpui_kit::{
 };
 
 use crate::kit::{self, Tone};
+use crate::library::{self, BringForm, LibraryScope};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::persona_look::LookSection;
 use crate::shell::tr;
@@ -152,19 +155,30 @@ enum Notice {
     /// Where it went, and whether a photo of the user stayed behind.
     Exported(String, bool),
     Imported(String),
+    /// Brought into the open project: the copy's name and the project's.
+    Brought(String, String),
     Error(Text),
 }
 
 pub struct PersonasScreen {
     bardo: Entity<Bardo>,
+    /// The open project's narrators, or the global library's.
+    scope: LibraryScope,
+    /// Whose narrators the list shows and new ones go to (`None`: the
+    /// global library), read when the screen reloads.
+    owner: Option<ProjectId>,
+    /// A project scope with no project open.
+    no_project: bool,
+    /// *Bring into the project* in progress for the edited narrator.
+    bring: Option<BringForm>,
     personas: Vec<Persona>,
     load_failed: bool,
     /// Scrolls the form, so a tour can bring its parts into view.
     form_scroll: ScrollHandle,
     /// The persona being edited; `None` while creating a new one.
     editing: Option<PersonaId>,
-    /// Channels that use the edited persona as their default.
-    usage: Vec<Channel>,
+    /// Where the edited persona is used: channels and videos, by project.
+    usage: Vec<LibraryUse>,
     name: Entity<InputState>,
     tone: Entity<TextareaState>,
     script_style: Entity<TextareaState>,
@@ -179,8 +193,8 @@ pub struct PersonasScreen {
     /// An export or import dialog that is open.
     dialog: Option<Task<()>>,
     picker_error: Option<Text>,
-    /// Channels to confirm before the pending save goes through.
-    confirm: Option<Vec<Channel>>,
+    /// Uses to confirm before the pending save goes through.
+    confirm: Option<Vec<LibraryUse>>,
     field_errors: Vec<PersonaFieldError>,
     notice: Option<Notice>,
     /// The sentence a sample reads; blank reads the default one.
@@ -205,7 +219,12 @@ pub struct PersonasScreen {
 }
 
 impl PersonasScreen {
-    pub fn new(bardo: Entity<Bardo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        bardo: Entity<Bardo>,
+        scope: LibraryScope,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let name = cx.new(|cx| InputState::new(window, cx));
         let tone = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 8));
         let script_style = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 10));
@@ -259,6 +278,10 @@ impl PersonasScreen {
 
         let mut screen = Self {
             bardo,
+            scope,
+            owner: None,
+            no_project: false,
+            bring: None,
             personas: Vec::new(),
             load_failed: false,
             form_scroll: ScrollHandle::new(),
@@ -298,15 +321,34 @@ impl PersonasScreen {
     }
 
     /// Re-reads personas and the edited persona's channels; channels may
-    /// have changed their default persona on the channels screen.
-    pub fn reload(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    /// have changed their default persona on the channels screen, and
+    /// another project may be open.
+    pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let before = self.owner;
         self.reload_list(cx);
+        let listed = self
+            .editing
+            .is_some_and(|id| self.personas.iter().any(|persona| persona.id == id));
+        if self.owner != before || (self.editing.is_some() && !listed) {
+            match self.personas.first().map(|persona| persona.id) {
+                Some(first) => self.edit(first, window, cx),
+                None => self.start_new(window, cx),
+            }
+        }
         self.reload_usage(cx);
         cx.notify();
     }
 
     fn reload_list(&mut self, cx: &mut Context<Self>) {
-        match self.bardo.read(cx).personas() {
+        let (owner, no_project) = self.scope.owner(self.bardo.read(cx));
+        self.owner = owner;
+        self.no_project = no_project;
+        if no_project {
+            self.personas.clear();
+            self.load_failed = false;
+            return;
+        }
+        match self.bardo.read(cx).narrators(owner) {
             Ok(personas) => {
                 self.personas = personas;
                 self.load_failed = false;
@@ -332,6 +374,7 @@ impl PersonasScreen {
             self.notice = None;
         }
         self.confirm = None;
+        self.bring = None;
         cx.notify();
     }
 
@@ -406,6 +449,7 @@ impl PersonasScreen {
         self.field_errors.clear();
         self.notice = None;
         self.confirm = None;
+        self.bring = None;
     }
 
     fn start_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -431,15 +475,18 @@ impl PersonasScreen {
         cx.notify();
     }
 
-    /// Saves the form. `confirmed` names the channels the user agreed to
-    /// change; the first save of a used persona confirms none and gets the
-    /// list back to show.
-    fn save(&mut self, confirmed: &[ChannelId], window: &mut Window, cx: &mut Context<Self>) {
+    /// Saves the form. `confirmed` says the user saw where the persona is
+    /// used; the first save of a used persona is not confirmed and gets
+    /// the uses back to show.
+    fn save(&mut self, confirmed: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.no_project && self.editing.is_none() {
+            return;
+        }
         let draft = self.draft(cx);
         let bardo = self.bardo.read(cx);
         let result = match self.editing {
             Some(id) => bardo.update_persona(id, draft, confirmed),
-            None => bardo.create_persona(draft),
+            None => bardo.create_persona_in(self.owner, draft),
         };
         match result {
             Ok(saved) => {
@@ -453,10 +500,10 @@ impl PersonasScreen {
                     .update(cx, |look, cx| look.show(Some(saved.id), window, cx));
                 self.notice = Some(Notice::Saved);
             }
-            Err(PersonaError::UsedByChannels(channels)) => {
+            Err(PersonaError::InUse(uses)) => {
                 self.field_errors.clear();
                 self.notice = None;
-                self.confirm = Some(channels);
+                self.confirm = Some(uses);
             }
             Err(error) => self.show_error(&error),
         }
@@ -464,13 +511,68 @@ impl PersonasScreen {
     }
 
     fn confirm_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let confirmed: Vec<ChannelId> = self
-            .confirm
-            .iter()
-            .flatten()
-            .map(|channel| channel.id)
-            .collect();
-        self.save(&confirmed, window, cx);
+        self.save(true, window, cx);
+    }
+
+    /// Opens *Bring into the project* for the edited global narrator.
+    fn start_bring(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(persona) = self.edited_persona() else {
+            return;
+        };
+        let name = persona.details.name().to_owned();
+        self.confirm = None;
+        self.notice = None;
+        self.bring = Some(BringForm::new(&name, window, cx));
+        cx.notify();
+    }
+
+    /// Copies the edited global narrator into the open project under the
+    /// typed name; a taken name comes back with a suggestion in the field.
+    fn bring_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(id), Some(form)) = (self.editing, &self.bring) else {
+            return;
+        };
+        let Some((project, project_name)) = library::open_project(self.bardo.read(cx)) else {
+            return;
+        };
+        let name = form.typed(cx);
+        match self
+            .bardo
+            .read(cx)
+            .bring_persona_into_project(id, project, Some(&name))
+        {
+            Ok(copy) => {
+                self.reload_list(cx);
+                let shown = self.personas.iter().any(|persona| persona.id == copy.id);
+                if shown {
+                    self.edit(copy.id, window, cx);
+                }
+                self.bring = None;
+                self.notice = Some(Notice::Brought(
+                    copy.details.name().to_owned(),
+                    project_name,
+                ));
+            }
+            Err(PersonaError::NameClash { suggestion }) => {
+                if let Some(form) = &mut self.bring {
+                    form.error = Some(Text::LibraryNameClash);
+                    form.name
+                        .update(cx, |input, cx| input.set_value(suggestion, window, cx));
+                }
+            }
+            Err(error) => {
+                if let Some(form) = &mut self.bring {
+                    form.error = error.form_message().or(Some(Text::PersonaNotSaved));
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// The persona being edited, as listed.
+    fn edited_persona(&self) -> Option<&Persona> {
+        let id = self.editing?;
+        self.personas.iter().find(|persona| persona.id == id)
     }
 
     fn duplicate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -553,7 +655,7 @@ impl PersonasScreen {
     }
 
     fn import_from(&mut self, path: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
-        match self.bardo.read(cx).import_persona_from(path) {
+        match self.bardo.read(cx).import_persona_from(self.owner, path) {
             Ok(imported) => {
                 self.reload_list(cx);
                 self.edit(imported.id, window, cx);
@@ -827,14 +929,20 @@ impl PersonasScreen {
                 tile.text = Some(SharedString::from(
                     persona.details.voice().name().to_owned(),
                 ));
-                tile.status = persona.voice_flag.map(|flag| {
-                    kit::status(
-                        Tone::Warning,
-                        tr(self.bardo.read(cx), Text::VoiceFlagTag(flag)),
-                        cx,
-                    )
-                    .into_any_element()
-                });
+                tile.status = persona
+                    .voice_flag
+                    .map(|flag| {
+                        kit::status(
+                            Tone::Warning,
+                            tr(self.bardo.read(cx), Text::VoiceFlagTag(flag)),
+                            cx,
+                        )
+                        .into_any_element()
+                    })
+                    .or_else(|| {
+                        (self.scope == LibraryScope::Project && persona.is_global())
+                            .then(|| library::global_tag(self.bardo.read(cx), cx))
+                    });
                 tile
             })
             .collect();
@@ -845,7 +953,14 @@ impl PersonasScreen {
             div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(tr(bardo, Text::PersonasEmpty))
+                .child(tr(
+                    bardo,
+                    if self.no_project {
+                        Text::LibraryNoProject
+                    } else {
+                        Text::PersonasEmpty
+                    },
+                ))
                 .into_any_element()
         });
         if !self.load_failed {
@@ -1360,55 +1475,53 @@ impl PersonasScreen {
             .into_any_element()
     }
 
-    fn render_confirm(&self, channels: &[Channel], cx: &mut Context<Self>) -> AnyElement {
+    fn render_confirm(&self, uses: &[LibraryUse], cx: &mut Context<Self>) -> AnyElement {
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
-        kit::card(cx)
-            .p_4()
-            .gap_2()
-            .border_color(theme.warning)
-            .child(
-                div()
-                    .font_semibold()
-                    .child(SharedString::from(bardo.text_with(
-                        Text::PersonaConfirmTitle,
-                        &[("n", &channels.len().to_string())],
-                    ))),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
-                    .child(tr(bardo, Text::PersonaConfirmHint)),
-            )
-            .children(channels.iter().map(|channel| {
-                div()
-                    .text_sm()
-                    .child(SharedString::from(format!("• {}", channel.details.name())))
-            }))
-            .child(
-                h_flex()
-                    .gap_2()
-                    .pt_1()
-                    .child(
-                        Button::new("confirm-persona-save")
-                            .warning()
-                            .label(tr(bardo, Text::ConfirmPersonaSave))
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.confirm_save(window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("cancel-persona-save")
-                            .ghost()
-                            .label(tr(bardo, Text::CancelPersonaSave))
-                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                this.confirm = None;
-                                cx.notify();
-                            })),
-                    ),
-            )
-            .into_any_element()
+        let title = SharedString::from(
+            bardo.text_with(Text::LibraryUsesTitle, &[("n", &uses.len().to_string())]),
+        );
+        let lines = uses.iter().map(library::use_line).collect();
+        library::confirm_uses(
+            "persona-save",
+            &self.bardo,
+            (title, lines),
+            |this: &mut Self, window, cx| this.confirm_save(window, cx),
+            |this: &mut Self, _, cx| {
+                this.confirm = None;
+                cx.notify();
+            },
+            cx,
+        )
+    }
+
+    /// *Bring into the project* for the edited global narrator: the button,
+    /// or its form once open. Only with a project open.
+    fn render_bring(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let persona = self.edited_persona()?;
+        if !persona.is_global() {
+            return None;
+        }
+        let bardo = self.bardo.read(cx);
+        let (_, project) = library::open_project(bardo)?;
+        Some(match &self.bring {
+            Some(form) => library::render_bring(
+                "persona-bring",
+                &self.bardo,
+                (form, &project),
+                |this: &mut Self, window, cx| this.bring_in(window, cx),
+                |this: &mut Self, _, cx| {
+                    this.bring = None;
+                    cx.notify();
+                },
+                cx,
+            ),
+            None => library::bring_button(
+                "bring-persona",
+                &self.bardo,
+                |this: &mut Self, window, cx| this.start_bring(window, cx),
+                cx,
+            ),
+        })
     }
 
     /// Why the edited persona cannot narrate, and how to fix it.
@@ -1466,7 +1579,12 @@ impl PersonasScreen {
         let confirm = self
             .confirm
             .as_deref()
-            .map(|channels| self.render_confirm(channels, cx));
+            .map(|uses| self.render_confirm(uses, cx));
+        let bring = self.render_bring(cx);
+        let global_note = self
+            .edited_persona()
+            .filter(|persona| self.scope == LibraryScope::Project && persona.is_global())
+            .map(|_| library::global_note(self.bardo.read(cx), cx));
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let scroll = Some(&self.form_scroll);
@@ -1492,9 +1610,13 @@ impl PersonasScreen {
             let text: SharedString = if self.usage.is_empty() {
                 tr(bardo, Text::PersonaUnused)
             } else {
-                let names: Vec<_> = self.usage.iter().map(|c| c.details.name()).collect();
+                let places: Vec<String> = self
+                    .usage
+                    .iter()
+                    .map(|used| library::use_line(used).trim_start_matches("• ").to_owned())
+                    .collect();
                 bardo
-                    .text_with(Text::PersonaUsedBy, &[("channels", &names.join(", "))])
+                    .text_with(Text::PersonaUsedBy, &[("channels", &places.join("; "))])
                     .into()
             };
             div()
@@ -1531,6 +1653,15 @@ impl PersonasScreen {
                         .text_with(Text::PersonaImported, &[("name", name)])
                         .into(),
                 ),
+                Notice::Brought(name, project) => (
+                    Tone::Success,
+                    bardo
+                        .text_with(
+                            Text::LibraryBrought,
+                            &[("name", name), ("project", project)],
+                        )
+                        .into(),
+                ),
                 Notice::Error(text) => (Tone::Danger, tr(bardo, *text)),
             };
             kit::notice(tone, text, cx)
@@ -1544,8 +1675,10 @@ impl PersonasScreen {
                     v_flex()
                         .gap_1()
                         .child(kit::title(tr(bardo, title)))
-                        .children(usage),
+                        .children(usage)
+                        .children(global_note),
                 )
+                .children(bring)
                 .children(flag)
                 .child(
                     kit::card(cx)
@@ -1593,9 +1726,12 @@ impl PersonasScreen {
                             Button::new("save-persona")
                                 .primary()
                                 .label(tr(bardo, action))
-                                .disabled(self.confirm.is_some())
+                                .disabled(
+                                    self.confirm.is_some()
+                                        || (self.no_project && self.editing.is_none()),
+                                )
                                 .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                    this.save(&[], window, cx)
+                                    this.save(false, window, cx)
                                 })),
                         )
                         .when(self.editing.is_some(), |row| {
@@ -1655,13 +1791,14 @@ impl Render for PersonasScreen {
                 .small()
                 .outline()
                 .label(tr(bardo, Text::ImportPersona))
-                .disabled(self.dialog.is_some())
+                .disabled(self.dialog.is_some() || self.no_project)
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.import(cx)))
                 .into_any_element(),
             Button::new("new-persona")
                 .small()
                 .primary()
                 .label(tr(bardo, Text::NewPersona))
+                .disabled(self.no_project)
                 .on_click(
                     cx.listener(|this, _: &ClickEvent, window, cx| this.start_new(window, cx)),
                 )

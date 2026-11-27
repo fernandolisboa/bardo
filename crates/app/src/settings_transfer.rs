@@ -484,6 +484,10 @@ struct ChannelEntry {
     /// By name: the persona of that name here, if there is one.
     #[serde(default)]
     default_persona: Option<String>,
+    /// The default narrator's package when it is the project's own
+    /// (`persona_package`, without its look); missing for a global one.
+    #[serde(default)]
+    narrator: Option<serde_json::Value>,
     #[serde(default)]
     clip_model: Option<ClipEntry>,
     /// Missing from files made before performed takes: the default one.
@@ -836,13 +840,18 @@ impl Bardo {
             SettingsItem::Costs,
             self.text(Text::SettingsFileCosts).into_owned(),
         );
-        for (index, persona) in self.personas().unwrap_or_default().iter().enumerate() {
+        for (index, persona) in self.narrators(None).unwrap_or_default().iter().enumerate() {
             push(
                 SettingsItem::Persona(index),
                 persona.details.name().to_owned(),
             );
         }
-        for (index, product) in self.products().unwrap_or_default().iter().enumerate() {
+        for (index, product) in self
+            .library_products(None)
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
             push(
                 SettingsItem::Product(index),
                 product.brief.name().to_owned(),
@@ -971,7 +980,7 @@ impl Bardo {
                     .collect(),
             });
         }
-        let personas = self.personas().unwrap_or_default();
+        let personas = self.narrators(None).unwrap_or_default();
         for (index, persona) in personas.iter().enumerate() {
             if has(SettingsItem::Persona(index)) {
                 // Without its look: the settings file stays small, and a
@@ -982,17 +991,26 @@ impl Bardo {
                 }
             }
         }
-        for (index, product) in self.products().unwrap_or_default().iter().enumerate() {
+        for (index, product) in self
+            .library_products(None)
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
             if has(SettingsItem::Product(index)) {
                 contents.products.push(ProductEntry::of(product));
             }
         }
         let projects = self.projects().unwrap_or_default();
+        let every_persona = self.all_personas().unwrap_or_default();
         for (index, channel) in self.all_channels().unwrap_or_default().iter().enumerate() {
             if !has(SettingsItem::Channel(index)) {
                 continue;
             }
             let details = &channel.details;
+            let narrator = details
+                .default_persona()
+                .and_then(|id| every_persona.iter().find(|persona| persona.id == id));
             let accounts = self
                 .network_accounts
                 .list(channel.id)
@@ -1022,12 +1040,13 @@ impl Bardo {
                 aesthetic_notes: details.aesthetic_notes().to_owned(),
                 language: details.language().code().to_owned(),
                 country: details.country().code().to_owned(),
-                default_persona: details.default_persona().and_then(|id| {
-                    personas
-                        .iter()
-                        .find(|persona| persona.id == id)
-                        .map(|persona| persona.details.name().to_owned())
-                }),
+                default_persona: narrator.map(|persona| persona.details.name().to_owned()),
+                // A narrator of the channel's project travels with it.
+                narrator: narrator
+                    .filter(|persona| !persona.is_global())
+                    .and_then(|persona| {
+                        serde_json::from_str(&persona_package::encode(&persona.details, None)).ok()
+                    }),
                 clip_model: details.clip_model().map(|model| ClipEntry {
                     provider: model.provider().code().to_owned(),
                     model: model.model().to_owned(),
@@ -1133,7 +1152,7 @@ impl Bardo {
                 None,
             );
         }
-        let personas = self.personas().unwrap_or_default();
+        let personas = self.narrators(None).unwrap_or_default();
         for (index, value) in contents.personas.iter().enumerate() {
             let decoded =
                 persona_package::decode(&value.to_string()).map(|package| package.details);
@@ -1151,7 +1170,7 @@ impl Bardo {
                 decoded.err().map(|_| ItemProblem::NotReadable),
             );
         }
-        let products = self.products().unwrap_or_default();
+        let products = self.library_products(None).unwrap_or_default();
         for (index, entry) in contents.products.iter().enumerate() {
             let here = products
                 .iter()
@@ -1447,8 +1466,7 @@ impl Bardo {
             .map_err(|_| failed)?
             .details;
         let existing = self
-            .personas
-            .list(self.profile.id)
+            .narrators(None)
             .map_err(|_| failed)?
             .into_iter()
             .find(|persona| persona.details.same_name(details.name()));
@@ -1467,6 +1485,34 @@ impl Bardo {
         self.personas.save(&persona).map_err(|_| failed)
     }
 
+    /// The narrator of `project` named as the packaged one, or a new one
+    /// made from the package.
+    fn project_narrator(
+        &self,
+        project: bardo_domain::ProjectId,
+        package: &serde_json::Value,
+    ) -> Result<bardo_domain::PersonaId, Text> {
+        let failed = Text::SettingsFileItemFailed;
+        let text = package.to_string();
+        let details = persona_package::decode(&text)
+            .map_err(|_| Text::SettingsFileItemNotRead)?
+            .details;
+        let here = self
+            .narrators(Some(project))
+            .map_err(|_| failed)?
+            .into_iter()
+            .find(|persona| {
+                persona.owner_project == Some(project) && persona.details.same_name(details.name())
+            });
+        match here {
+            Some(persona) => Ok(persona.id),
+            None => self
+                .import_persona_in(Some(project), &text)
+                .map(|persona| persona.id)
+                .map_err(|_| failed),
+        }
+    }
+
     /// A product of the same name here keeps its id, images, logo and
     /// sheet; its brief and whether it is archived come from the file, and
     /// the facts the file brought join the sheet as a saved brief's do.
@@ -1474,8 +1520,7 @@ impl Bardo {
         let failed = Text::SettingsFileItemFailed;
         let brief = entry.brief().ok_or(Text::SettingsFileItemNotRead)?;
         let existing = self
-            .products
-            .list(self.profile.id)
+            .library_products(None)
             .map_err(|_| failed)?
             .into_iter()
             .find(|product| product.brief.same_name(brief.name()));
@@ -1503,16 +1548,7 @@ impl Bardo {
         signed_in: &[Network],
     ) -> Result<Vec<Network>, Text> {
         let failed = Text::SettingsFileItemFailed;
-        let persona = match &entry.default_persona {
-            Some(name) => self
-                .personas()
-                .map_err(|_| failed)?
-                .into_iter()
-                .find(|persona| persona.details.same_name(name))
-                .map(|persona| persona.id),
-            None => None,
-        };
-        let draft = entry.draft(persona).ok_or(Text::SettingsFileItemNotRead)?;
+        entry.draft(None).ok_or(Text::SettingsFileItemNotRead)?;
         let existing = self
             .all_channels()
             .map_err(|_| failed)?
@@ -1521,6 +1557,24 @@ impl Bardo {
         // A channel that is already here keeps its project; a new one
         // joins the project named in the file, made when missing.
         let project = entry.project.as_deref().unwrap_or(&entry.name);
+        let owner = match &existing {
+            Some(existing) => existing.project,
+            None => self.project_named(project).map_err(|_| failed)?,
+        };
+        let persona = match (&entry.narrator, &entry.default_persona) {
+            // The project's own narrator: the one of that name the project
+            // has, else a new one from the file.
+            (Some(package), _) => Some(self.project_narrator(owner, package)?),
+            // A global one, by name.
+            (None, Some(name)) => self
+                .narrators(None)
+                .map_err(|_| failed)?
+                .into_iter()
+                .find(|persona| persona.details.same_name(name))
+                .map(|persona| persona.id),
+            (None, None) => None,
+        };
+        let draft = entry.draft(persona).ok_or(Text::SettingsFileItemNotRead)?;
         let channel = match existing {
             Some(existing) => self.update_channel(existing.id, draft),
             None => self.create_channel_in(Some(project), draft),
@@ -2016,6 +2070,88 @@ mod tests {
         other.import_settings(&file, &all);
         assert_eq!(other.channels().unwrap().len(), channels);
         assert_eq!(other.personas().unwrap().len(), personas);
+    }
+
+    #[test]
+    fn global_narrators_travel_alone_and_a_channels_project_narrator_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = Harness::new();
+        let app = source.start();
+        let brand = app
+            .create_project(bardo_domain::ProjectDraft {
+                name: "Marca".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let global = app.narrators(None).unwrap().remove(0);
+        let own = app
+            .create_persona_in(
+                Some(brand.id),
+                bardo_domain::PersonaDraft {
+                    name: "Voz da Marca".into(),
+                    ..bardo_domain::PersonaDraft::from(&global.details)
+                },
+            )
+            .unwrap();
+        app.create_channel(ChannelDraft {
+            name: "Canal".into(),
+            default_persona: Some(own.id),
+            ..ChannelDraft::default()
+        })
+        .unwrap();
+        let offered = app.settings_to_export();
+        let labels: Vec<&str> = offered
+            .iter()
+            .filter(|choice| matches!(choice.item, SettingsItem::Persona(_)))
+            .map(|choice| choice.label.as_str())
+            .collect();
+        assert!(labels.contains(&global.details.name()));
+        assert!(
+            !labels.contains(&"Voz da Marca"),
+            "a project's narrator is no global one"
+        );
+        let path = export(&app, &ticked(&offered), dir.path());
+
+        let target = Harness::new();
+        let mut other = target.start();
+        let file = open(&other, &path);
+        let all = ticked(&other.settings_to_import(&file));
+        other.import_settings(&file, &all);
+
+        let channel = other
+            .all_channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.details.same_name("Canal"))
+            .unwrap();
+        let narrator = other
+            .personas
+            .get(channel.details.default_persona().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(narrator.details.name(), "Voz da Marca");
+        assert_eq!(
+            narrator.owner_project,
+            Some(channel.project),
+            "it arrives as the channel's project's own"
+        );
+        assert!(
+            !other
+                .narrators(None)
+                .unwrap()
+                .iter()
+                .any(|persona| persona.details.same_name("Voz da Marca"))
+        );
+
+        // Importing again finds it in the project instead of adding another.
+        other.import_settings(&file, &all);
+        let named = other
+            .all_personas()
+            .unwrap()
+            .into_iter()
+            .filter(|persona| persona.details.same_name("Voz da Marca"))
+            .count();
+        assert_eq!(named, 1);
     }
 
     #[test]

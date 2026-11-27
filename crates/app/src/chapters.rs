@@ -500,7 +500,7 @@ impl Bardo {
         let project = self.chapters_project(project)?;
         let long = self.video_format(&project)? == VideoFormat::Long;
         let narration = self.narrations.narration(project.id)?;
-        let template = self.current_template(TemplateKind::Chapters)?;
+        let template = self.channel_template(TemplateKind::Chapters, project.channel)?;
         let estimate = match &narration {
             Some(narration) => {
                 let rendered = self.render_chapters_prompt(&project, narration, &template)?;
@@ -589,7 +589,7 @@ impl Bardo {
         if self.provider_key(Provider::Claude).state == KeyState::NotSet {
             return Err(ChaptersError::MissingKey(Provider::Claude));
         }
-        let template = self.current_template(TemplateKind::Chapters)?;
+        let template = self.channel_template(TemplateKind::Chapters, project.channel)?;
         let rendered = self.render_chapters_prompt(&project, &narration, &template)?;
         if let Err(estimate) =
             self.check_video_budget(project.id, &[chapters_call(&rendered)], consent)?

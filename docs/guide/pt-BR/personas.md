@@ -8,12 +8,14 @@ tour: personas
 
 # Narradores
 
-Uma persona é um narrador: uma voz da sua conta na ElevenLabs, um tom, um estilo de roteiro e os ajustes com que a ElevenLabs lê. As personas são suas, não de um canal: uma pode narrar para vários canais, e cada canal tem uma padrão ([Projetos e etapas](projects.md#narrator)). Elas ficam em [Narradores](bardo:go/narrators). [Mostre a tela para mim](bardo:tour/personas).
+Uma persona é um narrador: uma voz da sua conta na ElevenLabs, um tom, um estilo de roteiro e os ajustes com que a ElevenLabs lê. Uma persona pertence a um projeto, ou à [Biblioteca global](global-library.md) para todo projeto usar: uma pode narrar para vários canais, e cada canal tem uma padrão ([Projetos e etapas](projects.md#narrator)). Elas ficam em [Narradores](bardo:go/narrators). [Mostre a tela para mim](bardo:tour/personas).
 
 <a id="library"></a>
 ## Seus narradores
 
-A lista traz cada persona, com a voz dela. O Bardo vem com quatro, duas em inglês e duas em português; **Nova persona** cria a sua, e escolher uma a abre para edição. Salvar uma persona que alguns canais usam como padrão muda o narrador deles também, então o Bardo diz quais são esses canais e pergunta antes. Para mudar o narrador de um canal só, **Duplique** a persona e edite a cópia; a cópia fica com a aparência.
+Na entrada **Narradores** de um projeto, a lista traz as personas do projeto e as globais que os canais e vídeos dele usam, marcadas como **Global**; a aba **Narradores** da Biblioteca global traz as globais. O Bardo vem com quatro personas globais, duas em inglês e duas em português. **Nova persona** cria uma onde você está: no projeto, na entrada dele, ou na biblioteca global, na aba dela. Escolher uma a abre para edição. Um canal ou vídeo de um projeto pode usar as personas do projeto e as globais.
+
+Uma persona global é usada por referência: salvá-la muda o narrador de todo canal e vídeo que a usa, em qualquer projeto, então o Bardo lista esses lugares (*Projeto › Canal*, ou *Projeto › Canal › Vídeo*) e pergunta antes. Para mudá-la só neste projeto, use **Trazer para o projeto**: o Bardo faz uma cópia independente que pertence ao projeto, com a aparência, com um nome que você pode mudar (se o projeto já tem uma com esse nome, o Bardo sugere *Nome (Global)*). O que já usa a persona global continua com ela até você escolher a cópia. Os nomes são únicos dentro de um projeto e dentro da biblioteca global. Para mudar o narrador de um canal só, **Duplique** a persona e edite a cópia; a cópia fica com a aparência e no mesmo lugar da original.
 
 <a id="voice"></a>
 ## A voz

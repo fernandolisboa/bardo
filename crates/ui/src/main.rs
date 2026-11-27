@@ -19,6 +19,7 @@ mod icons;
 mod jobs;
 mod kit;
 mod layout;
+mod library;
 mod metrics;
 mod missed;
 mod model_picker;

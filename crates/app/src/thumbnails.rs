@@ -622,7 +622,7 @@ impl Bardo {
     /// The project's thumbnail card.
     pub fn thumbnail(&self, project: VideoProjectId) -> Result<ThumbnailView, ThumbnailError> {
         let project = self.thumbnail_project(project)?;
-        let template = self.current_template(TemplateKind::Thumbnail)?;
+        let template = self.channel_template(TemplateKind::Thumbnail, project.channel)?;
         let rendered = self.render_thumbnail_prompt(&project, &template)?;
         let thumbnail = self.stored_thumbnail(&project)?;
         let picture = thumbnail
@@ -664,7 +664,7 @@ impl Bardo {
         if self.provider_key(Provider::Claude).state == KeyState::NotSet {
             return Err(ThumbnailError::MissingKey(Provider::Claude));
         }
-        let template = self.current_template(TemplateKind::Thumbnail)?;
+        let template = self.channel_template(TemplateKind::Thumbnail, project.channel)?;
         let rendered = self.render_thumbnail_prompt(&project, &template)?;
         if let Err(estimate) =
             self.check_video_budget(project.id, &[write_call(&rendered)], consent)?

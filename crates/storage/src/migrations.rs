@@ -85,6 +85,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0081_archive_and_delete.sql"),
     include_str!("../migrations/0082_world_characters.sql"),
     include_str!("../migrations/0083_world_places_and_objects.sql"),
+    include_str!("../migrations/0084_library_owners.sql"),
 ];
 
 /// The schema version this build migrates every database to (SQLite's
@@ -801,6 +802,111 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn narrators_products_and_templates_from_before_owners_are_global() {
+        let before = MIGRATIONS
+            .iter()
+            .position(|sql| sql.contains("ALTER TABLE persona ADD COLUMN owner_project_id"))
+            .expect("the migration that gives library items an owner");
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..before] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", before as i64)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO user_profile (id, ui_language) VALUES ('p', 'en-US');
+             INSERT INTO project (id, profile_id, name, color, created_at)
+             VALUES ('space', 'p', 'Space', 'gold', 1);
+             INSERT INTO persona (id, profile_id, name, voice_provider, voice_id, voice_name,
+                 tone, script_style, stability, similarity, style, speed)
+             VALUES ('ana', 'p', 'Ana', 'elevenlabs', 'v1', 'Voice', '', '', 50, 75, 0, 100);
+             INSERT INTO channel (id, profile_id, owner_project_id, name, niche,
+                 aesthetic_notes, language, country, default_persona_id)
+             VALUES ('c', 'p', 'space', 'Space', '', '', 'en', 'US', 'ana');
+             INSERT INTO product (id, profile_id, name, kind, description, audience, facts,
+                 offer, link, call_to_action, ownership, must_say, never_say)
+             VALUES ('lamp', 'p', 'Lamp', 'physical', 'A lamp.', '', '', '', '', '', 'mine',
+                 '', '');
+             INSERT INTO template_version (id, profile_id, kind, number, instructions, prompt,
+                 created_at)
+             VALUES ('t1', 'p', 'script', 1, 'A', 'B', 1), ('t2', 'p', 'script', 2, 'A', 'C', 2);",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        for table in ["persona", "product", "template_version"] {
+            let owned: i64 = conn
+                .query_row(
+                    &format!("SELECT count(*) FROM {table} WHERE owner_project_id IS NOT NULL"),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(owned, 0, "every {table} row is global");
+        }
+        let narrator: String = conn
+            .query_row(
+                "SELECT default_persona_id FROM channel WHERE id = 'c'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(narrator, "ana", "the channel keeps its narrator");
+        let versions: Vec<(String, i64)> = conn
+            .prepare("SELECT id, number FROM template_version ORDER BY number")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(versions, [("t1".into(), 1), ("t2".into(), 2)]);
+
+        // Names and numbers are unique per owner.
+        let persona = |id: &str, project: &str| {
+            conn.execute(
+                &format!(
+                    "INSERT INTO persona (id, profile_id, owner_project_id, name, voice_provider,
+                         voice_id, voice_name, tone, script_style, stability, similarity, style,
+                         speed)
+                     VALUES ('{id}', 'p', {project}, 'ANA', 'elevenlabs', 'v1', 'Voice', '', '',
+                         50, 75, 0, 100)"
+                ),
+                [],
+            )
+        };
+        assert!(
+            persona("ana-2", "NULL").is_err(),
+            "taken in the global library"
+        );
+        assert!(persona("ana-3", "'space'").is_ok(), "free in the project");
+        assert!(persona("ana-4", "'space'").is_err(), "taken in the project");
+        assert!(
+            conn.execute(
+                "INSERT INTO template_version (id, profile_id, owner_project_id, kind, number,
+                     instructions, prompt, created_at)
+                 VALUES ('own', 'p', 'space', 'script', 1, 'A', 'B', 3)",
+                [],
+            )
+            .is_ok(),
+            "a project's own template starts at 1"
+        );
+        conn.execute("DELETE FROM channel WHERE id = 'c'", [])
+            .unwrap();
+        conn.execute("DELETE FROM project WHERE id = 'space'", [])
+            .unwrap();
+        let left: i64 = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM persona) + (SELECT count(*) FROM template_version)",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 3, "the project's own items went with it");
     }
 
     /// A database one step before projects, holding `rows`.

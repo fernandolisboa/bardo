@@ -1071,7 +1071,13 @@ impl Bardo {
             Some(id) => Some(self.angle_channel(id)?),
             None => channels.first().cloned(),
         };
-        let template = self.current_template(TemplateKind::AdAngles)?;
+        let template = self.current_template_in(
+            TemplateKind::AdAngles,
+            channel
+                .as_ref()
+                .map(|channel| channel.project)
+                .or(product.owner_project),
+        )?;
         let engine = self.decision_engine();
         let sheet = match self.sheet_for_angles(&product) {
             Ok(sheet) => Ok(sheet),
@@ -1195,6 +1201,9 @@ impl Bardo {
     ) -> Result<JobId, AdAngleError> {
         let product = self.angle_product(product)?;
         let channel = self.angle_channel(channel)?;
+        if !crate::usable_in(product.owner_project, Some(channel.project)) {
+            return Err(AdAngleError::ProductNotFound);
+        }
         let sheet = self.sheet_for_angles(&product)?;
         if self.work_busy(&Self::ad_angles_work(product.id, channel.id)) {
             return Err(AdAngleError::Busy);
@@ -1202,7 +1211,7 @@ impl Bardo {
         let engine = self.decision_engine();
         self.ensure_angle_key(Provider::Claude)?;
         self.ensure_angle_key(engine.provider())?;
-        let template = self.current_template(TemplateKind::AdAngles)?;
+        let template = self.channel_template(TemplateKind::AdAngles, channel.id)?;
         let (rendered, numbered) = self.render_angles(&template, &product, &sheet, &channel)?;
         let waiting = self
             .ads

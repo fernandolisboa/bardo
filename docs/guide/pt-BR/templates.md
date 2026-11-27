@@ -8,7 +8,7 @@ tour: templates
 
 # Modelos
 
-Os modelos são os prompts que o Bardo envia à IA. Mude um para mudar como o Bardo escreve roteiros, planeja cenas, redige prompts de música ou prepara publicações, para todos os canais. Eles ficam em [Modelos](bardo:go/templates). [Mostre a tela para mim](bardo:tour/templates).
+Os modelos são os prompts que o Bardo envia à IA. Mude um para mudar como o Bardo escreve roteiros, planeja cenas, redige prompts de música ou prepara publicações, para todos os canais de um projeto, ou de todos. Eles ficam em [Modelos](bardo:go/templates). [Mostre a tela para mim](bardo:tour/templates).
 
 <a id="kinds"></a>
 ## Tipos de modelo
@@ -29,6 +29,11 @@ Há um modelo para cada tipo de geração:
 - **Metadados de anúncio**: o post de cada rede de um anúncio, na etapa Publicação ([Antes de um anúncio ir ao ar](uploading.md#ad-review)). Além dos dados do canal, do tema, de `{{script}}` e de `{{networks}}`, ele lê `{{product}}`, `{{product_concept}}`, `{{ad_hook}}`, `{{brief_claims}}`, `{{offer}}`, `{{call_to_action}}` e `{{link}}` (para onde o anúncio leva o espectador, vindo da etapa Briefing). Depois das instruções dele, o Bardo sempre acrescenta as regras de todo anúncio e, num produto do tipo *ideia*, as regras de um conceito; as afirmações do briefing e o que nunca pode ser dito são sempre enviados, mesmo numa edição que tire `{{brief_claims}}`. A checagem dos textos do post que vem depois não é um modelo.
 - **Plano de cenas de anúncio**: o plano de cenas de um anúncio ([As cenas de um anúncio](scenes.md#ad)), no lugar do modelo de prompts de imagem. Além do que aquele lê (os dados do canal, `{{visual_style}}`, o tema, `{{narration_sentences}}` e `{{frame_shape}}`), ele lê `{{product}}`, `{{product_concept}}`, `{{call_to_action}}`, `{{product_images}}` (as imagens do produto, numeradas a partir de 0, com o que cada uma é e o formato dela) e `{{scene_kinds}}` (os tipos que uma cena deste anúncio pode ter, conforme as imagens do produto). Depois das instruções dele, o Bardo sempre acrescenta as regras de todo anúncio e as regras das cenas de um anúncio: só os tipos listados, só a última cena como cartão final, nada do produto desenhado ou redesenhado numa foto do produto ou no cartão final, nenhuma outra marca, logo ou pessoa real numa imagem desenhada, e nenhum texto, legenda ou marca d'água na imagem além do nome do próprio produto nele. Uma edição que tire `{{product_images}}` ou `{{scene_kinds}}` não deixa de enviá-los: o Bardo acrescenta os dois depois do prompt.
 - **Prompt de conceito**: o prompt de imagem da imagem de conceito de um produto do tipo *ideia* ([Uma imagem de conceito para uma ideia](products.md#concept)). Ele lê `{{product}}` e `{{product_audience}}`. Depois das instruções dele, e de novo depois do prompt, o Bardo sempre acrescenta uma instrução que nenhuma edição tira: desenhar um produto original, sem marca, logo ou identidade visual que já existam, e sem nenhum texto. O gerador de imagens recebe o mesmo aviso depois do prompt do Claude.
+
+<a id="project"></a>
+## Do projeto ou global
+
+Cada tipo tem um modelo global, e um projeto pode ter o seu. Na entrada **Modelos** de um projeto, a tela diz qual o projeto usa: **Modelo próprio deste projeto**, ou **Modelo global** quando ele não tem um seu. Salvar o modelo global muda ele em todo projeto que o usa, então o Bardo lista esses projetos e pergunta antes. **Tornar próprio deste projeto** dá ao projeto um modelo seu daquele tipo, começando como cópia da versão mais recente do global; a partir daí as gerações do projeto usam esse, e o global continua como está para os outros projetos. As gerações feitas antes ficam com a versão que usaram. A aba **Modelos** da [Biblioteca global](global-library.md) edita os modelos globais. Os vídeos de um canal usam os modelos do projeto do canal.
 
 <a id="versions"></a>
 ## Versões

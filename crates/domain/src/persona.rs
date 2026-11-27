@@ -7,7 +7,8 @@
 use std::sync::Arc;
 
 use crate::{
-    LookAsset, LookFaceMeasure, PersonaLook, ProfileId, Provider, RepositoryError, VoiceRef,
+    LookAsset, LookFaceMeasure, PersonaLook, ProfileId, ProjectId, Provider, RepositoryError,
+    VoiceRef,
 };
 
 uuid_id!(
@@ -306,6 +307,8 @@ impl VoiceFlag {
 pub struct Persona {
     pub id: PersonaId,
     pub owner: ProfileId,
+    /// The project that owns it, or `None` for the global library.
+    pub owner_project: Option<ProjectId>,
     pub details: PersonaDetails,
     /// Set while the voice is not known to be in the user's account; a
     /// flagged persona cannot narrate.
@@ -317,9 +320,23 @@ impl Persona {
         Self {
             id: PersonaId::new(),
             owner,
+            owner_project: None,
             details,
             voice_flag: None,
         }
+    }
+
+    /// The same persona, owned by `project` (`None`: the global library).
+    pub fn owned_by(self, project: Option<ProjectId>) -> Self {
+        Self {
+            owner_project: project,
+            ..self
+        }
+    }
+
+    /// Whether it is in the global library.
+    pub fn is_global(&self) -> bool {
+        self.owner_project.is_none()
     }
 
     /// Whether it can read a narration now.

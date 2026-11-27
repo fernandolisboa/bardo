@@ -1200,7 +1200,7 @@ impl Bardo {
         };
         let mut targets = Vec::new();
         if let (None, Some(narration)) = (blocked, &narration) {
-            let template = self.current_template(TemplateKind::Localization)?;
+            let template = self.channel_template(TemplateKind::Localization, project.channel)?;
             let sentences = source_sentences(narration);
             let facts = SourceFacts {
                 language: own.details.language(),
@@ -1302,7 +1302,7 @@ impl Bardo {
         if self.provider_key(Provider::Claude).state == KeyState::NotSet {
             return Err(LocalizationError::MissingKey(Provider::Claude));
         }
-        let template = self.current_template(TemplateKind::Localization)?;
+        let template = self.channel_template(TemplateKind::Localization, project.channel)?;
         let sentences = source_sentences(&narration);
         let facts = SourceFacts {
             language: own.details.language(),
@@ -1378,7 +1378,7 @@ impl Bardo {
         localization: &Localization,
         consent: BudgetConsent,
     ) -> Result<JobId, ScriptError> {
-        let template = self.current_template(TemplateKind::Localization)?;
+        let template = self.channel_template(TemplateKind::Localization, project.channel)?;
         let rendered = self.render_adaptation(project, localization, &template)?;
         if let Err(estimate) =
             self.check_video_budget(project.id, &[adaptation_call(&rendered)], consent)?
@@ -1405,7 +1405,7 @@ impl Bardo {
         project: &VideoProject,
         localization: &Localization,
     ) -> Result<(TemplateVersion, SpendEstimate), ScriptError> {
-        let template = self.current_template(TemplateKind::Localization)?;
+        let template = self.channel_template(TemplateKind::Localization, project.channel)?;
         let rendered = self.render_adaptation(project, localization, &template)?;
         let estimate = self.estimate(&[adaptation_call(&rendered)])?;
         Ok((template, estimate))

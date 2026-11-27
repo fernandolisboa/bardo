@@ -1942,6 +1942,7 @@ mod tests {
                 facts: "Refillable pages\nA5 size\nMade in Brazil".into(),
                 ..draft()
             },
+            true,
         )
         .unwrap();
         assert!(
@@ -2060,6 +2061,7 @@ mod tests {
                 facts: "Refillable pages\nA5 size\nMade in Brazil".into(),
                 ..draft()
             },
+            true,
         )
         .unwrap();
         let sheet = sheet(&app, product.id);

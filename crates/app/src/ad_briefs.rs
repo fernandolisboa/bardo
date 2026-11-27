@@ -1088,6 +1088,7 @@ mod tests {
                 kind: bardo_domain::ProductKind::Idea,
                 ..crate::ad_angles::testing::draft()
             },
+            true,
         )
         .unwrap();
         h.answer(SCRIPT.to_owned());

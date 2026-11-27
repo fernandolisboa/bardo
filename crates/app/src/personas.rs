@@ -16,11 +16,12 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, Channel, ChannelId, LookDrawing, Persona, PersonaDetails, PersonaDraft,
-    PersonaFieldError, PersonaId, PersonaLook, Provider, ProviderFailure, Redactor,
-    RepositoryError, VideoProject, VideoProjectId, Voice, VoiceFlag, VoiceLibrary, VoiceRef,
+    ApiKey, LookDrawing, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,
+    PersonaLook, ProjectId, Provider, ProviderFailure, Redactor, RepositoryError, VideoProject,
+    VideoProjectId, Voice, VoiceFlag, VoiceLibrary, VoiceRef,
 };
 
+use crate::library::{LibraryUse, usable_in};
 use crate::persona_package::{self, Package, PackageError};
 use crate::{AppError, Bardo, ProviderKeyError, Text};
 
@@ -40,11 +41,20 @@ pub enum PersonaError {
     NameTaken,
     #[error("persona not found")]
     NotFound,
-    /// The persona is the default of these channels, and the save did not
-    /// confirm all of them. Nothing was saved: show them, then save again
-    /// with them confirmed.
-    #[error("the persona is used by {} channel(s)", .0.len())]
-    UsedByChannels(Vec<Channel>),
+    /// Channels and videos use the persona, and the save was not
+    /// confirmed. Nothing was saved: show them, then save again confirmed.
+    #[error("the persona is used in {} place(s)", .0.len())]
+    InUse(Vec<LibraryUse>),
+    /// The project already has a narrator of the name: the user picks
+    /// another, starting from the suggestion.
+    #[error("the project already has a narrator named so")]
+    NameClash { suggestion: String },
+    /// Only a global narrator can be brought into a project.
+    #[error("the narrator is not global")]
+    NotGlobal,
+    /// The narrator belongs to another project.
+    #[error("the narrator belongs to another project")]
+    OtherProject,
     /// Listing voices needs the ElevenLabs key.
     #[error("no ElevenLabs key saved")]
     MissingKey,
@@ -70,8 +80,11 @@ impl PersonaError {
     /// fields, and the channel list in its own panel.
     pub fn form_message(&self) -> Option<Text> {
         match self {
-            PersonaError::Invalid(_) | PersonaError::UsedByChannels(_) => None,
+            PersonaError::Invalid(_) | PersonaError::InUse(_) => None,
             PersonaError::NameTaken => Some(Text::PersonaNameTaken),
+            PersonaError::NameClash { .. } => Some(Text::LibraryNameClash),
+            PersonaError::NotGlobal => Some(Text::PersonaNotFound),
+            PersonaError::OtherProject => Some(Text::LibraryOtherProject),
             PersonaError::NotFound => Some(Text::PersonaNotFound),
             PersonaError::MissingKey => Some(Text::VoicesMissingKey),
             PersonaError::KeyUnreadable => Some(Text::ProviderKeyStoreFailed),
@@ -159,9 +172,45 @@ pub struct VoiceList {
 }
 
 impl Bardo {
-    /// The profile's personas, ordered by name.
+    /// The narrators work in the open project may use: its own and every
+    /// global one, ordered by name.
     pub fn personas(&self) -> Result<Vec<Persona>, AppError> {
+        let open = self.open_project_id()?;
+        Ok(self
+            .all_personas()?
+            .into_iter()
+            .filter(|persona| usable_in(persona.owner_project, open))
+            .collect())
+    }
+
+    /// Every narrator of the profile, of every project and the global
+    /// library, ordered by name.
+    pub fn all_personas(&self) -> Result<Vec<Persona>, AppError> {
         Ok(self.personas.list(self.profile.id)?)
+    }
+
+    /// What a Narrators screen lists: `project`'s own narrators and the
+    /// global ones its channels and videos use, or the global library's
+    /// for `None`, ordered by name.
+    pub fn narrators(&self, project: Option<ProjectId>) -> Result<Vec<Persona>, AppError> {
+        let all = self.all_personas()?;
+        let Some(project) = project else {
+            return Ok(all.into_iter().filter(Persona::is_global).collect());
+        };
+        let mut used: Vec<PersonaId> = Vec::new();
+        for channel in self.project_channels(project)? {
+            used.extend(channel.details.default_persona());
+            for video in self.themes.projects(channel.id)? {
+                used.extend(video.persona);
+            }
+        }
+        Ok(all
+            .into_iter()
+            .filter(|persona| {
+                persona.owner_project == Some(project)
+                    || (persona.is_global() && used.contains(&persona.id))
+            })
+            .collect())
     }
 
     pub(crate) fn own_persona(&self, id: PersonaId) -> Result<Persona, PersonaError> {
@@ -171,44 +220,74 @@ impl Bardo {
             .ok_or(PersonaError::NotFound)
     }
 
-    /// The channels that use the persona as their default, by name.
-    pub fn persona_usage(&self, id: PersonaId) -> Result<Vec<Channel>, PersonaError> {
+    /// Where the persona is used: every channel whose default it is and
+    /// every video that picked it, by project.
+    pub fn persona_usage(&self, id: PersonaId) -> Result<Vec<LibraryUse>, PersonaError> {
         let persona = self.own_persona(id)?;
-        Ok(self
-            .channels
-            .list(self.profile.id)?
-            .into_iter()
-            .filter(|channel| channel.details.default_persona() == Some(persona.id))
-            .collect())
+        let mut uses = Vec::new();
+        for channel in self.channels.list(self.profile.id)? {
+            if channel.details.default_persona() == Some(persona.id) {
+                uses.push(LibraryUse {
+                    project: self.project_name(channel.project),
+                    channel: channel.details.name().to_owned(),
+                    video: None,
+                });
+            }
+        }
+        for (video, channel, project) in self.videos_with_places()? {
+            if video.persona == Some(persona.id) {
+                uses.push(LibraryUse {
+                    project: self.project_name(project),
+                    channel,
+                    video: Some(video.title.clone()),
+                });
+            }
+        }
+        Ok(uses)
     }
 
+    /// Adds a narrator to the global library.
     pub fn create_persona(&self, draft: PersonaDraft) -> Result<Persona, PersonaError> {
+        self.create_persona_in(None, draft)
+    }
+
+    /// Adds a narrator to `project` (`None`: the global library).
+    pub fn create_persona_in(
+        &self,
+        project: Option<ProjectId>,
+        draft: PersonaDraft,
+    ) -> Result<Persona, PersonaError> {
+        if let Some(project) = project
+            && !self.own_project_exists(project)?
+        {
+            return Err(PersonaError::ProjectNotFound);
+        }
         let details = PersonaDetails::validate(draft).map_err(PersonaError::Invalid)?;
-        self.ensure_persona_name_free(details.name(), None)?;
-        let persona = Persona::new(self.profile.id, details);
+        self.ensure_persona_name_free(project, details.name(), None)?;
+        let persona = Persona::new(self.profile.id, details).owned_by(project);
         self.personas.save(&persona)?;
         Ok(persona)
     }
 
-    /// Saves changes to a persona. When channels use it as their default,
-    /// `confirmed` must name every one of them (the user saw the list);
-    /// otherwise nothing is saved and the error carries the channels.
-    /// Saving without changes needs no confirmation.
+    /// Saves changes to a persona. When channels or videos use it, the
+    /// save needs `confirmed` (the user saw them); otherwise nothing is
+    /// saved and the error carries the uses. Saving without changes needs
+    /// no confirmation.
     pub fn update_persona(
         &self,
         id: PersonaId,
         draft: PersonaDraft,
-        confirmed: &[ChannelId],
+        confirmed: bool,
     ) -> Result<Persona, PersonaError> {
         let mut persona = self.own_persona(id)?;
         let details = PersonaDetails::validate(draft).map_err(PersonaError::Invalid)?;
         if details == persona.details {
             return Ok(persona);
         }
-        self.ensure_persona_name_free(details.name(), Some(id))?;
+        self.ensure_persona_name_free(persona.owner_project, details.name(), Some(id))?;
         let usage = self.persona_usage(id)?;
-        if usage.iter().any(|channel| !confirmed.contains(&channel.id)) {
-            return Err(PersonaError::UsedByChannels(usage));
+        if !usage.is_empty() && !confirmed {
+            return Err(PersonaError::InUse(usage));
         }
         // A flagged persona given another voice is judged on that voice.
         if persona.voice_flag.is_some() && !details.voice().same_voice(persona.details.voice()) {
@@ -219,11 +298,80 @@ impl Bardo {
         Ok(persona)
     }
 
+    /// Makes an independent copy of a global narrator, owned by `project`,
+    /// with its look. `name` is the copy's (`None`: the original's); a
+    /// name the project already has is refused with a suggestion,
+    /// `<name> (<source>)`. The project's channels and videos go on using
+    /// the global one until the user picks the copy.
+    pub fn bring_persona_into_project(
+        &self,
+        id: PersonaId,
+        project: ProjectId,
+        name: Option<&str>,
+    ) -> Result<Persona, PersonaError> {
+        let original = self.own_persona(id)?;
+        if !original.is_global() {
+            return Err(PersonaError::NotGlobal);
+        }
+        if !self.own_project_exists(project)? {
+            return Err(PersonaError::ProjectNotFound);
+        }
+        let name = name.map_or_else(|| original.details.name().to_owned(), str::to_owned);
+        let details = PersonaDetails::validate(PersonaDraft {
+            name,
+            ..PersonaDraft::from(&original.details)
+        })
+        .map_err(PersonaError::Invalid)?;
+        let taken: Vec<Persona> = self
+            .personas
+            .list(self.profile.id)?
+            .into_iter()
+            .filter(|other| other.owner_project == Some(project))
+            .collect();
+        if taken
+            .iter()
+            .any(|other| other.details.same_name(details.name()))
+        {
+            let suggestion = original
+                .details
+                .copy_name(&self.text(Text::LibraryGlobalSource), |name| {
+                    taken.iter().any(|other| other.details.same_name(name))
+                });
+            return Err(PersonaError::NameClash { suggestion });
+        }
+        let copy = Persona {
+            // Same voice, same flag.
+            voice_flag: original.voice_flag,
+            ..Persona::new(self.profile.id, details).owned_by(Some(project))
+        };
+        self.personas.save(&copy)?;
+        self.copy_persona_look(&original, &copy);
+        Ok(copy)
+    }
+
+    /// Copies the original's look to the copy; a drawing waiting for review
+    /// stays with the original. The copy stays either way: copying again
+    /// would make a second one.
+    fn copy_persona_look(&self, original: &Persona, copy: &Persona) {
+        let copied = self.personas.look(original.id).and_then(|look| match look {
+            Some(look) => self.personas.save_look(&look.for_persona(copy.id)),
+            None => Ok(()),
+        });
+        if let Err(error) = copied {
+            tracing::warn!(%error, "could not copy a persona's look");
+        }
+    }
+
     /// A new persona with the same voice, tone, style and presets, named
     /// as a copy, to vary without touching the original.
     pub fn duplicate_persona(&self, id: PersonaId) -> Result<Persona, PersonaError> {
         let original = self.own_persona(id)?;
-        let taken = self.personas.list(self.profile.id)?;
+        let taken: Vec<Persona> = self
+            .personas
+            .list(self.profile.id)?
+            .into_iter()
+            .filter(|other| other.owner_project == original.owner_project)
+            .collect();
         let name = original
             .details
             .copy_name(&self.text(Text::PersonaCopySuffix), |name| {
@@ -237,18 +385,10 @@ impl Bardo {
         let copy = Persona {
             // Same voice, same flag.
             voice_flag: original.voice_flag,
-            ..Persona::new(self.profile.id, details)
+            ..Persona::new(self.profile.id, details).owned_by(original.owner_project)
         };
         self.personas.save(&copy)?;
-        // Same look; a drawing waiting for review stays with the original.
-        // The copy is made either way: copying again would make a second one.
-        let copied = self.personas.look(original.id).and_then(|look| match look {
-            Some(look) => self.personas.save_look(&look.for_persona(copy.id)),
-            None => Ok(()),
-        });
-        if let Err(error) = copied {
-            tracing::warn!(%error, "could not copy a persona's look");
-        }
+        self.copy_persona_look(&original, &copy);
         Ok(copy)
     }
 
@@ -298,8 +438,27 @@ impl Bardo {
     /// flags it unavailable, and without a listing it stays unchecked
     /// until the next one (`record_voice_list`).
     pub fn import_persona(&self, package: &str) -> Result<Persona, PersonaError> {
+        self.import_persona_in(None, package)
+    }
+
+    /// As `import_persona`, into `project` (`None`: the global library).
+    pub fn import_persona_in(
+        &self,
+        project: Option<ProjectId>,
+        package: &str,
+    ) -> Result<Persona, PersonaError> {
+        if let Some(project) = project
+            && !self.own_project_exists(project)?
+        {
+            return Err(PersonaError::ProjectNotFound);
+        }
         let Package { details, look } = persona_package::decode(package)?;
-        let taken = self.personas.list(self.profile.id)?;
+        let taken: Vec<Persona> = self
+            .personas
+            .list(self.profile.id)?
+            .into_iter()
+            .filter(|other| other.owner_project == project)
+            .collect();
         let details = if taken
             .iter()
             .any(|other| other.details.same_name(details.name()))
@@ -317,7 +476,7 @@ impl Bardo {
         };
         let persona = Persona {
             voice_flag: VoiceFlag::from_lookup(self.voice_lookup(details.voice())),
-            ..Persona::new(self.profile.id, details)
+            ..Persona::new(self.profile.id, details).owned_by(project)
         };
         self.personas.save(&persona)?;
         // A packaged look waits for review like any drawing: the file may
@@ -346,7 +505,11 @@ impl Bardo {
 
     /// Reads the package file at `path`, which the user chose, and
     /// imports it.
-    pub fn import_persona_from(&self, path: &Path) -> Result<Persona, PersonaError> {
+    pub fn import_persona_from(
+        &self,
+        project: Option<ProjectId>,
+        path: &Path,
+    ) -> Result<Persona, PersonaError> {
         let unreadable = |error: std::io::Error| {
             tracing::warn!(%error, "could not read a persona package");
             PersonaError::PackageUnreadable(error.to_string())
@@ -362,7 +525,7 @@ impl Bardo {
             return Err(PackageError::NotAPackage.into());
         }
         let text = String::from_utf8(bytes).map_err(|_| PackageError::NotAPackage)?;
-        self.import_persona(&text)
+        self.import_persona_in(project, &text)
     }
 
     /// Sets the persona that narrates the project instead of the
@@ -378,7 +541,10 @@ impl Bardo {
             .filter(|project| project.owner == self.profile.id)
             .ok_or(PersonaError::ProjectNotFound)?;
         if let Some(id) = persona {
-            self.own_persona(id)?;
+            let found = self.own_persona(id)?;
+            if !usable_in(found.owner_project, self.channel_project(project.channel)?) {
+                return Err(PersonaError::OtherProject);
+            }
         }
         self.themes.set_project_persona(project.id, persona)?;
         project.persona = persona;
@@ -387,14 +553,15 @@ impl Bardo {
 
     fn ensure_persona_name_free(
         &self,
+        project: Option<ProjectId>,
         name: &str,
         editing: Option<PersonaId>,
     ) -> Result<(), PersonaError> {
-        let taken = self
-            .personas
-            .list(self.profile.id)?
-            .iter()
-            .any(|other| Some(other.id) != editing && other.details.same_name(name));
+        let taken = self.personas.list(self.profile.id)?.iter().any(|other| {
+            other.owner_project == project
+                && Some(other.id) != editing
+                && other.details.same_name(name)
+        });
         if taken {
             Err(PersonaError::NameTaken)
         } else {
@@ -576,7 +743,7 @@ mod tests {
             .collect()
     }
 
-    fn channel_with(app: &Bardo, name: &str, persona: Option<PersonaId>) -> Channel {
+    fn channel_with(app: &Bardo, name: &str, persona: Option<PersonaId>) -> bardo_domain::Channel {
         app.create_channel(ChannelDraft {
             name: name.into(),
             default_persona: persona,
@@ -629,7 +796,7 @@ mod tests {
                     tone: "Even calmer.".into(),
                     ..PersonaDraft::from(&original.details)
                 },
-                &[],
+                false,
             )
             .unwrap();
         assert_eq!(edited.details.tone(), "Even calmer.");
@@ -699,10 +866,10 @@ mod tests {
         let app = Harness::new().start();
         let mine = app.create_persona(draft("Mine")).unwrap();
         let error = app
-            .update_persona(mine.id, draft("Dramatic Storyteller (en-US)"), &[])
+            .update_persona(mine.id, draft("Dramatic Storyteller (en-US)"), false)
             .unwrap_err();
         assert!(matches!(error, PersonaError::NameTaken));
-        let renamed = app.update_persona(mine.id, draft("MINE"), &[]).unwrap();
+        let renamed = app.update_persona(mine.id, draft("MINE"), false).unwrap();
         assert_eq!(renamed.details.name(), "MINE");
     }
 
@@ -758,14 +925,20 @@ mod tests {
     fn editing_a_used_persona_shows_its_channels_before_saving() {
         let app = Harness::new().start();
         let narrator = app.personas().unwrap().remove(1);
-        let space = channel_with(&app, "Space Archives", Some(narrator.id));
-        let sea = channel_with(&app, "Deep Sea", Some(narrator.id));
+        channel_with(&app, "Space Archives", Some(narrator.id));
+        channel_with(&app, "Deep Sea", Some(narrator.id));
         channel_with(&app, "Unrelated", None);
 
         let usage = app.persona_usage(narrator.id).unwrap();
-        assert_eq!(
-            usage.iter().map(|c| c.id).collect::<Vec<_>>(),
-            [sea.id, space.id]
+        let mut channels: Vec<&str> = usage.iter().map(|used| used.channel.as_str()).collect();
+        channels.sort_unstable();
+        assert_eq!(channels, ["Deep Sea", "Space Archives"]);
+        assert!(usage.iter().all(|used| used.video.is_none()));
+        let project = app.open_project().unwrap().unwrap();
+        assert!(
+            usage
+                .iter()
+                .all(|used| used.project == project.details.name())
         );
 
         let changed = PersonaDraft {
@@ -773,12 +946,12 @@ mod tests {
             ..PersonaDraft::from(&narrator.details)
         };
         let error = app
-            .update_persona(narrator.id, changed.clone(), &[])
+            .update_persona(narrator.id, changed.clone(), false)
             .unwrap_err();
-        let PersonaError::UsedByChannels(channels) = &error else {
-            panic!("expected the channels, got {error:?}");
+        let PersonaError::InUse(uses) = &error else {
+            panic!("expected the uses, got {error:?}");
         };
-        assert_eq!(channels, &usage);
+        assert_eq!(uses, &usage);
         assert_eq!(error.form_message(), None);
         assert_eq!(
             app.personas.get(narrator.id).unwrap().unwrap(),
@@ -786,15 +959,7 @@ mod tests {
             "nothing saved before confirming"
         );
 
-        // Confirming only some of them is not enough.
-        assert!(matches!(
-            app.update_persona(narrator.id, changed.clone(), &[space.id]),
-            Err(PersonaError::UsedByChannels(_))
-        ));
-
-        let saved = app
-            .update_persona(narrator.id, changed, &[space.id, sea.id])
-            .unwrap();
+        let saved = app.update_persona(narrator.id, changed, true).unwrap();
         assert_eq!(saved.details.tone(), "Louder.");
     }
 
@@ -804,7 +969,7 @@ mod tests {
         let narrator = app.personas().unwrap().remove(1);
         channel_with(&app, "Space Archives", Some(narrator.id));
         let saved = app
-            .update_persona(narrator.id, PersonaDraft::from(&narrator.details), &[])
+            .update_persona(narrator.id, PersonaDraft::from(&narrator.details), false)
             .unwrap();
         assert_eq!(saved, narrator);
     }
@@ -821,7 +986,7 @@ mod tests {
                     name: String::new(),
                     ..PersonaDraft::from(&narrator.details)
                 },
-                &[],
+                false,
             )
             .unwrap_err();
         assert_eq!(error.field_errors(), [PersonaFieldError::NameRequired]);
@@ -1155,7 +1320,7 @@ mod tests {
                     tone: "Warmer.".into(),
                     ..PersonaDraft::from(&imported.details)
                 },
-                &[],
+                false,
             )
             .unwrap();
         assert_eq!(kept.voice_flag, Some(VoiceFlag::Unavailable));
@@ -1170,7 +1335,7 @@ mod tests {
                     voice: Some(voice("mine02", "Mine")),
                     ..PersonaDraft::from(&kept.details)
                 },
-                &[],
+                false,
             )
             .unwrap();
         assert_eq!(fixed.voice_flag, None);
@@ -1188,11 +1353,11 @@ mod tests {
         app.export_persona_to(original.id, &path).unwrap();
 
         let theirs = other_machine().start();
-        let imported = theirs.import_persona_from(&path).unwrap();
+        let imported = theirs.import_persona_from(None, &path).unwrap();
         assert_eq!(imported.details, original.details);
 
         let error = theirs
-            .import_persona_from(&dir.path().join("missing.bardo-persona"))
+            .import_persona_from(None, &dir.path().join("missing.bardo-persona"))
             .unwrap_err();
         assert!(matches!(error, PersonaError::PackageUnreadable(_)));
         assert_eq!(error.form_message(), Some(Text::PersonaPackageUnreadable));
@@ -1200,13 +1365,13 @@ mod tests {
         let huge = dir.path().join("huge.bardo-persona");
         std::fs::write(&huge, vec![b' '; 300 * 1024]).unwrap();
         assert!(matches!(
-            theirs.import_persona_from(&huge),
+            theirs.import_persona_from(None, &huge),
             Err(PersonaError::Package(PackageError::NotAPackage))
         ));
         let binary = dir.path().join("binary.bardo-persona");
         std::fs::write(&binary, [0xff, 0xfe, 0x00]).unwrap();
         assert!(matches!(
-            theirs.import_persona_from(&binary),
+            theirs.import_persona_from(None, &binary),
             Err(PersonaError::Package(PackageError::NotAPackage))
         ));
 

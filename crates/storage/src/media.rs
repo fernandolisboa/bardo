@@ -558,7 +558,7 @@ mod tests {
         let body =
             TemplateBody::new(TemplateKind::MusicPrompt, "", "Music for {{theme_title}}").unwrap();
         let version = match db
-            .template_versions(project.owner, TemplateKind::MusicPrompt)
+            .template_versions(project.owner, None, TemplateKind::MusicPrompt)
             .unwrap()
             .pop()
         {

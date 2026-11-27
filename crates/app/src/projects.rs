@@ -78,14 +78,18 @@ pub enum MoveBlock {
     /// another channel, which would stay behind: versions stay inside a
     /// project.
     VersionElsewhere,
+    /// The channel or one of its videos uses a narrator, product or
+    /// template its project owns: nothing points into another project.
+    ProjectItems,
 }
 
 impl MoveBlock {
-    pub const ALL: [MoveBlock; 4] = [
+    pub const ALL: [MoveBlock; 5] = [
         MoveBlock::ScheduledPost,
         MoveBlock::HeldOnNetwork,
         MoveBlock::ActiveJob,
         MoveBlock::VersionElsewhere,
+        MoveBlock::ProjectItems,
     ];
 
     pub fn message(self) -> Text {
@@ -346,12 +350,8 @@ impl Bardo {
         if publications.iter().any(|p| p.is_scheduled()) {
             blocks.push(MoveBlock::HeldOnNetwork);
         }
-        let videos: Vec<VideoProjectId> = self
-            .themes
-            .projects(channel.id)?
-            .into_iter()
-            .map(|video| video.id)
-            .collect();
+        let all_videos = self.themes.projects(channel.id)?;
+        let videos: Vec<VideoProjectId> = all_videos.iter().map(|video| video.id).collect();
         if self
             .jobs()
             .iter()
@@ -373,6 +373,9 @@ impl Bardo {
                 blocks.push(MoveBlock::VersionElsewhere);
                 break;
             }
+        }
+        if self.uses_project_items(&channel, &all_videos)? {
+            blocks.push(MoveBlock::ProjectItems);
         }
         Ok(blocks)
     }
@@ -396,6 +399,43 @@ impl Bardo {
         // Its videos' media follows it into the project's folder.
         let _ = self.queue_media_move();
         Ok(())
+    }
+
+    /// Whether `channel` or one of its `videos` uses a narrator, product or
+    /// template owned by the channel's project.
+    fn uses_project_items(
+        &self,
+        channel: &Channel,
+        videos: &[bardo_domain::VideoProject],
+    ) -> Result<bool, RepositoryError> {
+        let project = Some(channel.project);
+        let own_persona = |id: Option<bardo_domain::PersonaId>| -> Result<bool, RepositoryError> {
+            Ok(match id {
+                Some(id) => self
+                    .personas
+                    .get(id)?
+                    .is_some_and(|persona| persona.owner_project == project),
+                None => false,
+            })
+        };
+        if own_persona(channel.details.default_persona())? {
+            return Ok(true);
+        }
+        for video in videos {
+            if own_persona(video.persona)? {
+                return Ok(true);
+            }
+            if let Some(product) = video.product
+                && self
+                    .products
+                    .get(product)?
+                    .is_some_and(|product| product.owner_project == project)
+            {
+                return Ok(true);
+            }
+        }
+        let templated = self.templates.videos_using_templates_of(channel.project)?;
+        Ok(videos.iter().any(|video| templated.contains(&video.id)))
     }
 
     fn profile_channel(&self, id: ChannelId) -> Result<Channel, ProjectError> {

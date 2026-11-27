@@ -1179,6 +1179,12 @@ revert = "Discard changes"
 default = "Load Bardo's default"
 saved = "Saved as version {n}."
 unchanged = "Nothing changed, so no version was added."
+source_project = "This project's own template"
+source_global = "Global template"
+source_project_hint = "This project uses its own version of this template; the global one stays as it is for the other projects."
+source_global_hint = "This project uses the global template: saving here changes it for every project that uses it. Make it this project's own to change it here only."
+make_own = "Make it this project's own"
+made_own = "This project now has its own template, starting from the global one's latest version."
 
 [templates.kind]
 script = "Script"
@@ -1253,6 +1259,8 @@ required = "Write the prompt."
 too_long = "Keep it to at most 8000 characters."
 unknown_variable = "Use only the variables listed below, spelled as shown."
 unclosed_variable = "A variable is missing its closing }}."
+global_used_by = "The global template is used by these projects. Saving changes it in all of them:"
+already_own = "This project already has its own template."
 
 [age]
 just_now = "just now"
@@ -3186,7 +3194,7 @@ name = "Narrators tour"
 
 [tour.personas.library]
 title = "Your narrators"
-body = "Narrators you reuse across channels: four come with Bardo, and you can add your own. Pick one to edit it."
+body = "The narrators of this project, plus the global ones it uses, tagged Global. New ones belong to the project; the Global library's tab holds the ones every project can use. Pick one to edit it."
 
 [tour.personas.voice]
 title = "The voice"
@@ -3217,7 +3225,7 @@ name = "Products tour"
 
 [tour.products.library]
 title = "Your products"
-body = "A product is what an ad sells: an app, a course, an object, a service or just an idea. Pick one to edit it, or press New product."
+body = "A product is what an ad sells: an app, a course, an object, a service or just an idea. This list holds the project's products and the global ones, tagged Global. Pick one to edit it, or press New product."
 
 [tour.products.brief]
 title = "The brief"
@@ -3264,6 +3272,10 @@ name = "Templates tour"
 [tour.templates.kinds]
 title = "Kinds of template"
 body = "A template is a prompt Bardo sends to the AI: for the script, the scenes' image prompts, the music prompt and the post metadata. Pick the kind to edit."
+
+[tour.templates.source]
+title = "This project's or global"
+body = "A project uses its own template of a kind when it has one, else the global one. Make it this project's own to change it here without touching the other projects."
 
 [tour.templates.versions]
 title = "Versions"
@@ -4983,6 +4995,7 @@ scheduled_post = "A post waits for its time in Bardo. Send it now or cancel its 
 held_on_network = "A post waits on its network to go public at its time. Make it public or remove it on the network first."
 active_job = "A job for this channel or one of its videos is queued or running. Wait for it or cancel it in Jobs."
 version_elsewhere = "One of its videos is a localized version of, or has one in, another channel of this project. Versions stay inside one project."
+project_items = "The channel or one of its videos uses a narrator or product of this project, or was written with one of its templates. A project's own items stay in it: pick global narrators and products first; a video made with this project's templates keeps the channel here."
 
 [project_spend]
 unknown = "Removed project"
@@ -5040,7 +5053,20 @@ resume_export = "resume the export"
 post = "upload it or link the post"
 
 [library]
-hint = "Narrators, products and templates every project can use. For now they are the same ones each project shows."
+hint = "Narrators, products and templates every project can use. A project's own are on its entries."
+global_source = "Global"
+global_tag = "Global"
+global_note = "From the global library: this project uses it by reference, so editing it changes it everywhere it is used. Bring it into the project to change it here only."
+uses_title = "Used in {n} place(s). Saving changes it in all of them:"
+save_anyway = "Save anyway"
+cancel = "Cancel"
+bring = "Bring into the project"
+bring_title = "Bring into {project}"
+bring_hint = "Makes an independent copy that this project owns. The global one stays as it is, and what already uses it keeps using it until you pick the copy."
+bring_name = "Name in this project"
+bring_confirm = "Bring it"
+brought = "{name} is now in {project}."
+no_project = "Open a project to see its items. The global library is under Global library."
 
 [tour.overview]
 name = "Overview tour"
@@ -5384,3 +5410,7 @@ from_world = "From the world"
 hint = "Keeps this place as a place other videos can pick. Its first picture is drawn when a video needs it."
 save_global = "Save to global library"
 save_project = "Save to World"
+
+[library.error]
+name_clash = "This project already has one with that name. Pick another name."
+other_project = "That belongs to another project. Pick one of this project's or a global one."

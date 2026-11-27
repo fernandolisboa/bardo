@@ -1,14 +1,14 @@
 use bardo_domain::{
-    ProfileId, RepositoryError, TemplateBody, TemplateKind, TemplateRepository, TemplateVersion,
-    TemplateVersionId,
+    ProfileId, ProjectId, RepositoryError, TemplateBody, TemplateKind, TemplateRepository,
+    TemplateVersion, TemplateVersionId, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, Row, params};
 use uuid::Uuid;
 
 use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
-const SELECT_VERSION: &str =
-    "SELECT id, profile_id, kind, number, instructions, prompt, created_at FROM template_version";
+const SELECT_VERSION: &str = "SELECT id, profile_id, kind, number, instructions, prompt, created_at, owner_project_id \
+     FROM template_version";
 
 #[derive(Debug, thiserror::Error)]
 #[error("stored template is invalid: {0}")]
@@ -23,6 +23,7 @@ struct VersionRow {
     instructions: String,
     prompt: String,
     created_at: i64,
+    owner_project_id: Option<String>,
 }
 
 impl VersionRow {
@@ -35,6 +36,7 @@ impl VersionRow {
             instructions: row.get(4)?,
             prompt: row.get(5)?,
             created_at: row.get(6)?,
+            owner_project_id: row.get(7)?,
         })
     }
 
@@ -47,6 +49,11 @@ impl VersionRow {
         Ok(TemplateVersion {
             id: TemplateVersionId::from(Uuid::parse_str(&self.id).map_err(boxed)?),
             owner: ProfileId::from(Uuid::parse_str(&self.profile_id).map_err(boxed)?),
+            owner_project: self
+                .owner_project_id
+                .map(|id| Uuid::parse_str(&id).map(ProjectId::from))
+                .transpose()
+                .map_err(boxed)?,
             number: u32::try_from(self.number).map_err(boxed)?,
             body,
             created_at: from_unix_millis(self.created_at),
@@ -58,20 +65,73 @@ impl TemplateRepository for Database {
     fn template_versions(
         &self,
         owner: ProfileId,
+        project: Option<ProjectId>,
         kind: TemplateKind,
     ) -> Result<Vec<TemplateVersion>, RepositoryError> {
         let rows = self
             .conn()
             .prepare_cached(&format!(
-                "{SELECT_VERSION} WHERE profile_id = ?1 AND kind = ?2 ORDER BY number"
+                "{SELECT_VERSION} WHERE profile_id = ?1 AND kind = ?2
+                     AND owner_project_id IS ?3 ORDER BY number"
             ))
             .and_then(|mut statement| {
                 statement
-                    .query_map(params![owner.to_string(), kind.code()], VersionRow::read)?
+                    .query_map(
+                        params![
+                            owner.to_string(),
+                            kind.code(),
+                            project.map(|id| id.to_string())
+                        ],
+                        VersionRow::read,
+                    )?
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
             .map_err(boxed)?;
         rows.into_iter().map(VersionRow::into_version).collect()
+    }
+
+    fn projects_with_template(
+        &self,
+        owner: ProfileId,
+        kind: TemplateKind,
+    ) -> Result<Vec<ProjectId>, RepositoryError> {
+        let ids: Vec<String> = self
+            .conn()
+            .prepare_cached(
+                "SELECT DISTINCT owner_project_id FROM template_version
+                 WHERE profile_id = ?1 AND kind = ?2 AND owner_project_id IS NOT NULL",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_map(params![owner.to_string(), kind.code()], |row| row.get(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .map_err(boxed)?;
+        ids.iter()
+            .map(|id| Uuid::parse_str(id).map(ProjectId::from).map_err(boxed))
+            .collect()
+    }
+
+    fn videos_using_templates_of(
+        &self,
+        project: ProjectId,
+    ) -> Result<Vec<VideoProjectId>, RepositoryError> {
+        let ids: Vec<String> = self
+            .conn()
+            .prepare_cached(
+                "SELECT DISTINCT g.project_id FROM generation g
+                 JOIN template_version t ON t.id = g.template_version_id
+                 WHERE t.owner_project_id = ?1",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_map([project.to_string()], |row| row.get(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .map_err(boxed)?;
+        ids.iter()
+            .map(|id| Uuid::parse_str(id).map(VideoProjectId::from).map_err(boxed))
+            .collect()
     }
 
     fn template_version(
@@ -94,8 +154,9 @@ impl TemplateRepository for Database {
         self.conn()
             .execute(
                 "INSERT INTO template_version
-                     (id, profile_id, kind, number, instructions, prompt, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                     (id, profile_id, kind, number, instructions, prompt, created_at,
+                      owner_project_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     version.id.to_string(),
                     version.owner.to_string(),
@@ -104,6 +165,7 @@ impl TemplateRepository for Database {
                     version.body.instructions(),
                     version.body.prompt(),
                     to_unix_millis(version.created_at),
+                    version.owner_project.map(|id| id.to_string()),
                 ],
             )
             .map_err(boxed)?;
@@ -151,13 +213,14 @@ mod tests {
         db.add_template_version(&second).unwrap();
 
         assert_eq!(
-            db.template_versions(owner, TemplateKind::Script).unwrap(),
+            db.template_versions(owner, None, TemplateKind::Script)
+                .unwrap(),
             [first.clone(), second]
         );
         assert_eq!(db.template_version(first.id).unwrap(), Some(first));
         assert_eq!(db.template_version(TemplateVersionId::new()).unwrap(), None);
         assert!(
-            db.template_versions(ProfileId::new(), TemplateKind::Script)
+            db.template_versions(ProfileId::new(), None, TemplateKind::Script)
                 .unwrap()
                 .is_empty()
         );
@@ -172,10 +235,59 @@ mod tests {
         rival.number = 1;
         assert!(db.add_template_version(&rival).is_err());
         assert_eq!(
-            db.template_versions(owner, TemplateKind::Script)
+            db.template_versions(owner, None, TemplateKind::Script)
                 .unwrap()
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn a_project_template_counts_its_own_versions_and_goes_with_its_project() {
+        let (db, owner) = setup();
+        let project = crate::project::test_project(&db, owner);
+        let global = TemplateVersion::first(owner, body("Global"), time(1_800_000_000));
+        db.add_template_version(&global).unwrap();
+        let own = TemplateVersion::project_copy(&global, project, time(1_800_000_001));
+        db.add_template_version(&own).unwrap();
+        let next = own.revise(body("Own"), time(1_800_000_002)).unwrap();
+        db.add_template_version(&next).unwrap();
+
+        assert_eq!(
+            db.template_versions(owner, None, TemplateKind::Script)
+                .unwrap(),
+            std::slice::from_ref(&global),
+            "the global template has its own numbers"
+        );
+        assert_eq!(
+            db.template_versions(owner, Some(project), TemplateKind::Script)
+                .unwrap(),
+            [own, next]
+        );
+        assert_eq!(
+            db.projects_with_template(owner, TemplateKind::Script)
+                .unwrap(),
+            [project]
+        );
+        assert!(
+            db.projects_with_template(owner, TemplateKind::Thumbnail)
+                .unwrap()
+                .is_empty()
+        );
+
+        db.conn()
+            .execute("DELETE FROM project WHERE id = ?1", [project.to_string()])
+            .unwrap();
+        assert!(
+            db.template_versions(owner, Some(project), TemplateKind::Script)
+                .unwrap()
+                .is_empty(),
+            "a project's own template goes with it"
+        );
+        assert_eq!(
+            db.template_versions(owner, None, TemplateKind::Script)
+                .unwrap(),
+            [global]
         );
     }
 }
