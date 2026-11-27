@@ -184,6 +184,12 @@ pub mod refs {
     pub const CLIPS_ANIMATE: GuideRef = at("clips", "animate");
     pub const CLIPS_REVIEW: GuideRef = at("clips", "review");
     pub const CLIPS_STRETCH: GuideRef = at("clips", "stretch");
+    pub const WORLD_CHARACTERS: GuideRef = at("world", "characters");
+    pub const WORLD_APPEARANCE: GuideRef = at("world", "appearance");
+    pub const WORLD_PICTURES: GuideRef = at("world", "pictures");
+    pub const WORLD_ARCHIVE: GuideRef = at("world", "archive");
+    pub const WORLD_SAVE: GuideRef = at("world", "save");
+    pub const SCENES_WHO_APPEARS: GuideRef = at("scenes", "who-appears");
     pub const PRODUCTS_LIBRARY: GuideRef = at("products", "library");
     pub const PRODUCTS_BRIEF: GuideRef = at("products", "brief");
     pub const PRODUCTS_FACTS: GuideRef = at("products", "facts");

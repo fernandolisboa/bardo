@@ -10,6 +10,13 @@ tour: scenes
 
 As cenas dividem a narração nos planos que o vídeo mostra, cada um com uma imagem. Elas ficam na etapa [Cenas](bardo:go/videos/scenes) de um projeto, e a etapa [Clipes](clips.md) as anima. [Mostre a etapa para mim](bardo:tour/scenes).
 
+<a id="who-appears"></a>
+## Quem aparece
+
+Antes de planejar, **Quem aparece** escolhe os personagens do [mundo](world.md) que este vídeo mostra, até três, entre o Mundo do projeto e a biblioteca global, cada um com uma **instrução para este vídeo** (só nas últimas cenas, por exemplo). O plano os recebe como **elenco fixo**: o nome, a aparência como está escrita e as notas, e o Claude pode acrescentar figurantes do vídeo, mas nunca outro personagem do mundo. As cenas deles são desenhadas com a [imagem de referência](world.md#pictures) do personagem no visual do vídeo, desenhada antes se ainda não existir. Sem nenhum personagem escolhido, o plano é pedido exatamente como antes.
+
+Ele também aparece em [Temas](themes-ranking.md) logo abaixo de **Vídeo iniciado**, para você escolher ao criar o vídeo. Mudar quem aparece depois que as cenas foram planejadas marca o plano para revisão: a etapa avisa até você planejar de novo.
+
 <a id="plan"></a>
 ## Planejar e desenhar
 
@@ -109,6 +116,8 @@ Quando a mesma pessoa aparece em mais de uma cena (o chef, a detetive), o plano 
 Uma cena que mostra alguém que volta lista essa pessoa em **Pessoas nesta cena**, com o retrato. **Editar aparência** muda a descrição; o retrato deixa de corresponder a ela e sai, e a próxima cena desenhada com essa pessoa desenha um novo antes. **Desenhar retrato de novo** faz um novo retrato com a mesma aparência. Nos dois casos, as cenas já desenhadas mantêm a imagem, e o Bardo as marca: uma cena cuja imagem foi desenhada com um retrato mais antigo de alguém que aparece nela, ou sem o retrato dessa pessoa, mostra **Rosto antigo** e diz isso quando você a escolhe, e a etapa conta essas cenas em **Cenas com um rosto antigo**, também na etapa Clipes, para você ver isso antes de pagar para animar uma delas. **Desenhar todas de novo**, ali, desenha todas numa só tarefa, depois de mostrar quanto custa; cada imagem nova espera a revisão ao lado da atual. Enquanto uma imagem mostra um rosto antigo, as próximas cenas não são desenhadas a partir dela: só as imagens que batem com os retratos seguram as outras. Elas não contam como imagens que faltam, então **Gerar N imagens** não mexe nelas.
 
 O Bardo não desenha uma cena sem o retrato de cada pessoa dela que volta no vídeo: a imagem seria paga e mostraria outro rosto. Quando um retrato não pode ser desenhado (o provedor recusa, por exemplo), a pessoa diz o motivo, as cenas que a mostram ficam sem desenhar e dizem que esperam o retrato, e as outras cenas são desenhadas normalmente; a falha da tarefa lista as cenas que esperam. Um retrato cujo arquivo não pode mais ser lido é deixado de lado do mesmo jeito: a pessoa volta a não ter retrato, e ele é desenhado da próxima vez como qualquer retrato que falta. Depois que um retrato de que a cena precisa falha, o Bardo não compra os outros retratos dessa cena na mesma tarefa. Desenhe o retrato de novo, editando antes a aparência se o provedor recusou, e depois desenhe as cenas, ou tente a tarefa de novo, que faz as duas coisas. Se preferir seguir sem retrato para uma pessoa, **Desenhar sem retrato**, oferecido para todas, faz as cenas dela serem desenhadas só pela descrição: a pessoa mostra **Sem retrato**, nenhum retrato é desenhado, enviado nem cobrado para ela, o rosto dela pode mudar de uma cena para outra, e as cenas que esperavam o retrato dela deixam de esperar. **Usar um retrato** desfaz essa escolha, e as imagens desenhadas sem retrato passam a mostrar **Rosto antigo**.
+
+**Salvar em Mundo** e **Salvar na biblioteca global**, embaixo de uma pessoa que volta, a guardam como [personagem](world.md#save) com o retrato, para outros vídeos escolherem. Uma pessoa que é personagem mostra **Do mundo**.
 
 <a id="same-place"></a>
 ## O mesmo lugar de cena em cena

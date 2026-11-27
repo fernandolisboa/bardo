@@ -130,6 +130,7 @@ impl TemplateKind {
                 TemplateVariable::ThemeAngle,
                 TemplateVariable::NarrationSentences,
                 TemplateVariable::FrameShape,
+                TemplateVariable::FixedCast,
             ],
             TemplateKind::MusicPrompt => &[
                 TemplateVariable::ChannelName,
@@ -239,6 +240,7 @@ impl TemplateKind {
                 TemplateVariable::CallToAction,
                 TemplateVariable::NarrationSentences,
                 TemplateVariable::FrameShape,
+                TemplateVariable::FixedCast,
             ],
             TemplateKind::ConceptPrompt => {
                 &[TemplateVariable::Product, TemplateVariable::ProductAudience]
@@ -386,10 +388,14 @@ pub enum TemplateVariable {
     /// The link or handle an ad sends viewers to, as its Brief stage has
     /// it.
     Link,
+    /// The characters the video picked from the world (#337), the fixed
+    /// cast the scene planner must use as given: each one's name, fixed
+    /// appearance, always and never notes and the video's instruction.
+    FixedCast,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 44] = [
+    pub const ALL: [TemplateVariable; 45] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -434,6 +440,7 @@ impl TemplateVariable {
         TemplateVariable::ProductImages,
         TemplateVariable::SceneKinds,
         TemplateVariable::Link,
+        TemplateVariable::FixedCast,
     ];
 
     /// The name written between the braces.
@@ -483,6 +490,7 @@ impl TemplateVariable {
             TemplateVariable::ProductImages => "product_images",
             TemplateVariable::SceneKinds => "scene_kinds",
             TemplateVariable::Link => "link",
+            TemplateVariable::FixedCast => "fixed_cast",
         }
     }
 

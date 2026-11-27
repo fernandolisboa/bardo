@@ -586,6 +586,9 @@ pub enum CostPurpose {
     /// Claude writing a concept image's prompt for a product of kind
     /// *idea*, and the image provider drawing it (#280).
     ProductConcept,
+    /// The image provider drawing a world character's reference picture
+    /// from the World screen (#337), under the character's project.
+    WorldPicture,
 }
 
 /// The rate-table model of a post X bills without a link in its text.
@@ -636,7 +639,7 @@ fn holds_link(text: &str) -> bool {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 32] = [
+    pub const ALL: [CostPurpose; 33] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -669,6 +672,7 @@ impl CostPurpose {
         CostPurpose::ClaimsCheck,
         CostPurpose::ShotBackdrop,
         CostPurpose::ProductConcept,
+        CostPurpose::WorldPicture,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -706,6 +710,7 @@ impl CostPurpose {
             CostPurpose::ClaimsCheck => "claims_check",
             CostPurpose::ShotBackdrop => "shot_backdrop",
             CostPurpose::ProductConcept => "product_concept",
+            CostPurpose::WorldPicture => "world_picture",
         }
     }
 }

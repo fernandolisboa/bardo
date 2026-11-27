@@ -168,6 +168,7 @@ pub fn seed_showcase(bardo: &mut Bardo) -> anyhow::Result<Value> {
             bail!("the media did not move into the project folders: {moved}");
         }
     }
+    world(&db, profile, &space, &probe, &ffmpeg, now)?;
 
     Ok(json!({
         "profile": profile.to_string(),
@@ -1124,5 +1125,96 @@ fn jobs(db: &Database, profile: ProfileId, now: SystemTime) -> anyhow::Result<()
         &RetryPolicy::default(),
     )?;
     JobRepository::save(db, &failed)?;
+    Ok(())
+}
+
+/// The space channel's project world: a captain the probe video picked,
+/// with her portrait in the channel's notes, and a global narrator cat.
+fn world(
+    db: &Database,
+    profile: ProfileId,
+    channel: &Channel,
+    probe: &VideoProject,
+    ffmpeg: &Path,
+    now: SystemTime,
+) -> anyhow::Result<()> {
+    let character =
+        |owner, name: &str, appearance: &str, always: &str| -> anyhow::Result<Character> {
+            let details = CharacterDetails::validate(CharacterDraft {
+                name: name.into(),
+                appearance: appearance.into(),
+                always: always.into(),
+                never: String::new(),
+            })
+            .map_err(|error| anyhow!("a character: {error:?}"))?;
+            let character = Character::new(profile, owner, details, now);
+            WorldRepository::save_character(db, &character)?;
+            Ok(character)
+        };
+    let captain = character(
+        Some(channel.project),
+        "Captain Vega",
+        "A woman in her forties, short silver hair, navy flight jacket with a mission patch",
+        "Wears the mission patch on her left shoulder",
+    )?;
+    character(
+        None,
+        "Orbit the cat",
+        "A small grey cat with a white chest and a tiny orange space helmet",
+        "",
+    )?;
+    WorldRepository::set_picks(
+        db,
+        probe.id,
+        &[CastPick {
+            character: captain.id,
+            instruction: "Only in the opening and the last scene".into(),
+        }],
+        false,
+    )?;
+    let project = ProjectRepository::project(db, channel.project)?
+        .ok_or_else(|| anyhow!("the space project"))?;
+    let Some(folder) = project.folder else {
+        return Ok(());
+    };
+    let id = ReferencePictureId::new();
+    let file = format!("character-{id}.png");
+    let world = folder.join("World");
+    std::fs::create_dir_all(&world)?;
+    make(
+        ffmpeg,
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=0x24324a:s=600x900,drawbox=x=200:y=180:w=200:h=240:color=0xc8c8d0@1:t=fill,\
+             drawbox=x=150:y=460:w=300:h=440:color=0x1f2a5a@1:t=fill",
+            "-frames:v",
+            "1",
+        ],
+        &world.join(&file),
+    )?;
+    WorldRepository::save_picture(
+        db,
+        &ReferencePicture {
+            id,
+            character: captain.id,
+            look: Look::of(
+                StyleChoice::FromNotes,
+                channel.id,
+                channel.details.aesthetic_notes(),
+            ),
+            file,
+            provenance: PictureProvenance {
+                provider: Provider::Gemini,
+                model: "gemini-2.5-flash-image".into(),
+                prompt: captain.details.appearance().to_owned(),
+                generated_at: now,
+                job: None,
+                origin: PictureOrigin::Video,
+            },
+            kept: true,
+        },
+    )?;
     Ok(())
 }

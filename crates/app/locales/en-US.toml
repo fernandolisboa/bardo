@@ -324,6 +324,7 @@ retry = "Retry"
 waits_until = "Waits until {when}"
 
 [job.kind]
+world_picture = "Reference picture"
 move_media = "Media move"
 pack_media = "Media compression"
 unpack_media = "Media unpacking"
@@ -1196,6 +1197,7 @@ concept_prompt = "Concept prompt"
 ad_metadata = "Ad metadata"
 
 [templates.variable]
+fixed_cast = "The characters picked under Who appears, each with its appearance, notes and this video's instruction, or a line saying none was picked."
 channel_name = "The channel's name."
 channel_niche = "The channel's niche."
 channel_themes = "The channel's recurring themes."
@@ -2030,6 +2032,7 @@ ideas = "Ideas"
 channels_and_accounts = "Channels and accounts"
 
 [nav.place]
+world = "World"
 guide = "Guide"
 performance = "Performance"
 research = "Research"
@@ -3125,6 +3128,10 @@ body = "Removing the capture takes the recording and its takes out of the projec
 [tour.scenes]
 name = "Scenes tour"
 
+[tour.scenes.who]
+title = "Who appears"
+body = "Pick the world's characters this video shows, each with an instruction for it. The plan gets them as the fixed cast; changing them after planning marks the plan for review."
+
 [tour.scenes.plan]
 title = "Plan and draw"
 body = "Plan scenes turns the narration into a storyboard: scenes on its sentences that follow one another, the people and places that come back, and an image prompt for each scene. Then draw the missing images in one run, each one with the earlier ones as references; the estimate is under the button."
@@ -3140,10 +3147,6 @@ body = "The scene you picked: the narration it covers, its image and its image p
 [tour.scenes.redraw]
 title = "Draw again"
 body = "Draw again makes a new image from the prompt, in the video's visual style. It waits beside the current one until you use it or keep the current one. After the style changes, the stage says how many scenes are in another style and offers to draw them again in one run, after showing the cost."
-
-[tour.scenes.filter]
-title = "All or pending"
-body = "Pending shows only the scenes with something left, an image to draw or to review. All shows every one."
 
 [tour.scenes.replan]
 title = "After a new narration"
@@ -5060,16 +5063,16 @@ body = "The project's channels, what its work spent this month and the narrators
 name = "Global library tour"
 
 [tour.library.tabs]
-title = "Three libraries"
-body = "Narrators, products and templates, each under its tab. Switch tabs here; the project's own entries in the navigation open the same screens."
+title = "Four libraries"
+body = "Characters, narrators, products and templates, each under its tab. Switch tabs here; the project's own entries in the navigation open the same screens, except World, which keeps the project's own characters."
 
 [tour.library.items]
 title = "What each holds"
-body = "The narrators that speak your videos, the products your ads show and the instructions Claude writes from. Create and edit them as before."
+body = "The characters any project's videos can pick, the narrators that speak your videos, the products your ads show and the instructions Claude writes from. Create and edit them as before."
 
 [tour.library.projects]
-title = "Global for now"
-body = "Every project uses these same items today. A later version lets a project keep its own, with the global library shared by all."
+title = "Global and the project's own"
+body = "Narrators, products and templates are shared by every project today. Characters can be the project's own, on World, or global, here."
 
 [project_folder]
 not_found = "Folder not found"
@@ -5176,3 +5179,139 @@ forget_hint = "Shows it by its number from now on. Its amounts stay as they are.
 [themes_restart]
 start = "Start a video"
 no_video = "Its video was deleted."
+
+[world.error]
+not_found = "This character no longer exists."
+name_taken = "A character with this name already exists here. It may be among the archived ones."
+in_use = "Videos in progress use this character, so it cannot be deleted: {videos}. Archive it instead."
+not_saved = "The character could not be saved."
+
+[world]
+hint = "The characters that come back across this project's videos: a fixed appearance, notes that always or never hold, and a reference picture per look that every video in that look reuses."
+empty = "No characters yet. Add one, or save a person from a video's cast here."
+not_loaded = "The characters could not be loaded."
+new = "New character"
+show_archived = "Show archived ({n})"
+no_project = "Open a project to see its world."
+owner_project = "This project"
+owner_global = "Global library"
+
+[character]
+new_title = "New character"
+edit_title = "Edit character"
+form_hint = "What every video that picks this character keeps the same."
+name = "Name"
+name_placeholder = "e.g. Aunt Rosa"
+appearance = "Appearance"
+appearance_placeholder = "Face, hair, build and clothes: what stays the same in every scene."
+appearance_hint = "Every reference picture is drawn from this text, and the scene planner copies it as it is. A new appearance drops the pictures; the name and the notes keep them."
+always = "Always"
+always_placeholder = "What always holds, e.g. carries a red umbrella."
+never = "Never"
+never_placeholder = "What never happens, e.g. never speaks on screen."
+notes_hint = "The scene planner reads these notes, with the appearance, in every video that picks the character."
+create = "Create character"
+save = "Save changes"
+duplicate = "Duplicate"
+archive = "Archive"
+restore = "Restore"
+delete = "Delete…"
+delete_title = "Delete {name}?"
+delete_hint = "Its reference pictures go with it. Videos that showed it keep their portraits. This cannot be undone."
+confirm_delete = "Delete"
+cancel = "Cancel"
+actions_hint = "Duplicate copies the fields and the kept pictures under a new name. Archive hides the character from Who appears; videos that picked it keep it. Delete removes it with its pictures, unless a video in progress uses it."
+saved = "Saved."
+duplicated = "Duplicated as {name}."
+archived = "Archived: hidden from Who appears."
+restored = "Restored."
+deleted = "Deleted {name}."
+archived_tag = "Archived"
+drops_title = "Change the appearance?"
+drops_hint = "The reference pictures in {looks} go, and so do the portraits in {videos} videos. Each is drawn again, and paid again, when next needed."
+drops_none = "no look"
+drops_confirm = "Save and drop them"
+uses = "Used by"
+uses_none = "No video picked or shows it yet."
+use_archived = "{title} (archived)"
+copy_suffix = "copy"
+
+[world.pictures]
+title = "Reference pictures"
+hint = "One portrait per look, drawn before the first scene that needs it or here on demand. Every video in that look reuses it, with no new paid call."
+save_first = "Create the character to draw its pictures."
+none = "No pictures yet. The first video that shows it draws one for its look."
+look = "Look"
+look_notes = "{channel}'s notes"
+draw = "Draw picture"
+drawing = "Drawing…"
+waiting = "Waiting for review"
+keep = "Keep"
+discard = "Discard"
+remove = "Remove"
+remove_ask = "Remove this picture? The next video in this look draws a new one."
+kept = "Kept: videos in this look use it from now on."
+discarded = "Discarded."
+removed = "Removed."
+started = "Drawing: the picture waits here for review."
+busy = "A picture of this character is being drawn already."
+nothing_waiting = "This picture is no longer there."
+missing_key = "Add a Gemini key in Settings to draw pictures."
+over_budget = "Drawing it goes past this month's budget."
+
+[who_appears]
+title = "Who appears"
+hint = "Characters of the world this video shows. The scene planner gets them as the fixed cast, with your instruction for this video; it may add extras, but never another character of the world."
+none = "No character picked: the scene planner makes up the whole cast."
+none_available = "No characters to pick yet. Add them on World, or in the global library."
+pickable = "Can appear"
+add = "Add"
+remove = "Remove"
+instruction = "Instruction for this video"
+instruction_placeholder = "e.g. Shows up only in the last scenes."
+save = "Save instructions"
+saved = "Saved."
+changed = "Who appears changed after the scenes were planned: plan them again to use it."
+full = "Up to 3 characters per video."
+
+[who_appears.error]
+too_many = "Pick at most 3 characters."
+instruction_too_long = "Use at most 500 characters."
+
+[cast_world]
+save_project = "Save to World"
+save_global = "Save to global library"
+hint = "Keeps this person, with the portrait, as a character other videos can pick."
+from_world = "From the world"
+
+[character.error]
+name_required = "Give the character a name."
+name_too_long = "Use at most 60 characters."
+appearance_required = "Describe how the character looks."
+appearance_too_long = "Use at most 1,500 characters."
+notes_too_long = "Use at most 1,000 characters."
+
+[world.pictures.origin]
+video = "Drawn for a video"
+world = "Drawn here"
+saved = "Saved from a video's cast"
+copied = "Copied from another character"
+
+[tour.world]
+name = "World tour"
+
+[tour.world.characters]
+title = "Your characters"
+body = "The people who come back across this project's videos. Pick one to edit it, or press New character. Archived ones are hidden until you ask for them."
+
+[tour.world.character]
+title = "Appearance and notes"
+body = "The appearance is drawn into every reference picture and copied as it is into the plan. Always and Never hold in every video. A new appearance drops the pictures; the name and the notes keep them."
+
+[tour.world.actions]
+title = "Save and tidy up"
+body = "Save, duplicate under a new name, archive one no new video should pick, or delete one no video in progress uses."
+
+[tour.world.pictures]
+title = "Reference pictures"
+body = "One portrait per look: a catalog style, or a channel's notes. A video draws one before its first scene that needs it, or you draw it here and keep it once reviewed. Every later video in that look reuses it for free."

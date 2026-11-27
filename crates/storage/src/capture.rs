@@ -1729,6 +1729,9 @@ mod tests {
             let mut conn = db.conn();
             conn.execute_batch(&format!(
                 "{before}
+                 ALTER TABLE scene_plan DROP COLUMN picks_changed;
+                 ALTER TABLE scene_cast DROP COLUMN character_id;
+                 DROP TABLE video_cast_pick; DROP TABLE reference_picture; DROP TABLE character;
                  DROP TABLE deleted_work;
                  ALTER TABLE video_project DROP COLUMN archived_at;
                  ALTER TABLE video_project DROP COLUMN folder_project_id;

@@ -51,6 +51,7 @@ use crate::parts::{Header, ScreenParts, Stages};
 use crate::removal::{RemovalEvent, RemovalMode, RemovalPanel};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
+use crate::who_appears::{WhoAppearsChanged, WhoAppearsPanel};
 use crate::{guide, layout};
 
 mod ad_review;
@@ -154,6 +155,8 @@ pub struct ProjectsScreen {
     show_archived: bool,
     /// The archive or delete dialog of the open video, while open.
     removal: Option<(Entity<RemovalPanel>, Subscription)>,
+    /// Who appears in the open video, on the Scenes stage (#337).
+    who_appears: Entity<WhoAppearsPanel>,
     project: Option<VideoProjectId>,
     /// The stage on screen.
     stage: Stage,
@@ -556,6 +559,16 @@ impl ProjectsScreen {
             ),
         ];
         let mut subscriptions = subscriptions;
+        let who_appears = cx.new(|_| WhoAppearsPanel::new(bardo.clone()));
+        // A new pick marks the plan for review: the stage reads it again.
+        subscriptions.push(
+            cx.subscribe(&who_appears, |this, _, _: &WhoAppearsChanged, cx| {
+                if let Some(id) = this.project {
+                    this.load_scenes(id, cx);
+                }
+                cx.notify();
+            }),
+        );
         // Typing in the brief shows Save, and clears what the last save
         // said.
         // Typing on the end card shows Save, and clears what the last
@@ -597,6 +610,7 @@ impl ProjectsScreen {
             archived: Default::default(),
             show_archived: false,
             removal: None,
+            who_appears,
             project: None,
             stage: Stage::Script,
             selected_scene: None,
@@ -1532,12 +1546,16 @@ impl ProjectsScreen {
             self.versions = None;
             self.brief = None;
             self.end_card = None;
+            self.who_appears
+                .update(cx, |panel, cx| panel.show(None, window, cx));
             return;
         };
         self.load_brief(id, window, cx);
         self.load_narration(id, cx);
         self.load_versions(id, cx);
         self.load_scenes(id, cx);
+        self.who_appears
+            .update(cx, |panel, cx| panel.show(Some(id), window, cx));
         self.load_end_card(id, window, cx);
         self.load_music(id, window, cx);
         self.load_render(id, cx);

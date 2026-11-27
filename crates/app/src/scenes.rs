@@ -456,6 +456,39 @@ struct PlanPayload {
     /// Absent for every other plan, whose scenes are all drawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ad: Option<AdPlan>,
+    /// The characters the video picked when the plan was asked for
+    /// (#337), as the request named them: a cast member of that name is
+    /// that character, with its appearance.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    fixed: Vec<FixedMember>,
+}
+
+/// A character of the fixed cast, as the plan's request named it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct FixedMember {
+    character: String,
+    name: String,
+    appearance: String,
+}
+
+impl FixedMember {
+    /// Whether the planner's cast member `name` is this character: the
+    /// same name, ignoring case and a leading article.
+    fn is(&self, name: &str) -> bool {
+        bardo_domain::same_name(&self.name, name)
+            || bardo_domain::same_name(without_article(&self.name), without_article(name))
+    }
+}
+
+/// `name` without a leading English article.
+fn without_article(name: &str) -> &str {
+    let trimmed = name.trim();
+    for article in ["the ", "a ", "an "] {
+        if trimmed.len() > article.len() && trimmed[..article.len()].eq_ignore_ascii_case(article) {
+            return trimmed[article.len()..].trim_start();
+        }
+    }
+    trimmed
 }
 
 /// The image job's payload: the plan and which of its scenes to draw.
@@ -754,6 +787,9 @@ pub(crate) struct SceneHandler {
     pub(crate) ads: Arc<dyn bardo_domain::AdRepository>,
     /// Each ad's end card design (#281).
     pub(crate) end_cards: Arc<dyn bardo_domain::EndCardRepository>,
+    /// The world's characters (#337): a picked character's portrait comes
+    /// from its picture for the video's look, and one drawn is kept there.
+    pub(crate) world: crate::world::WorldBook,
 }
 
 impl JobHandler for SceneHandler {
@@ -855,12 +891,33 @@ impl SceneHandler {
         };
         let planned: PlannedScenes =
             serde_json::from_str(&generated.text).map_err(|e| not_usable(e.to_string()))?;
+        // A member named as a picked character is that character, with its
+        // fixed appearance whatever the answer wrote; each character once.
+        let mut taken: Vec<&str> = Vec::new();
         let cast = planned
             .cast
             .into_iter()
-            .map(|member| CastDraft {
-                name: member.name,
-                description: member.description,
+            .map(|member| {
+                let fixed = payload.fixed.iter().find(|fixed| {
+                    fixed.is(&member.name) && !taken.contains(&fixed.character.as_str())
+                });
+                match fixed {
+                    Some(fixed) => {
+                        taken.push(&fixed.character);
+                        CastDraft {
+                            name: fixed.name.clone(),
+                            description: fixed.appearance.clone(),
+                            character: uuid::Uuid::parse_str(&fixed.character)
+                                .ok()
+                                .map(bardo_domain::CharacterId::from),
+                        }
+                    }
+                    None => CastDraft {
+                        name: member.name,
+                        description: member.description,
+                        character: None,
+                    },
+                }
             })
             .collect();
         let places = planned
@@ -922,6 +979,14 @@ impl SceneHandler {
         let plan = ScenePlan::from_draft(generation, narration, draft, now)
             .map_err(|error| not_usable(error.to_string()))?;
         self.plans.save_scene_plan(&plan).map_err(unexpected)?;
+        // Picked characters take their pictures for the video's look at
+        // once, so the estimate of the images counts only what is paid.
+        if let Err(error) = self
+            .world
+            .lend_all(self.files.as_ref(), self.plans.as_ref(), project)
+        {
+            tracing::warn!("could not lend the world's portraits: {error}");
+        }
         // The replaced plan's images go with it. A file that will not go
         // (open in a viewer) only costs disk space.
         for file in current.iter().flat_map(ScenePlan::files) {
@@ -1487,14 +1552,43 @@ impl SceneHandler {
         job: JobId,
         failed: &mut Vec<JobFailure>,
     ) -> Result<(), JobFailure> {
-        let Some(plan) = self.saved_plan(project, plan_id)? else {
+        let Some(mut plan) = self.saved_plan(project, plan_id)? else {
             return Ok(());
         };
+        // A picked character with a picture for the video's look takes it,
+        // for free (#337).
+        let look = self.world.look_for(project, style);
+        if let Some(look) = &look {
+            match self
+                .world
+                .lend_portrait(self.files.as_ref(), &mut plan, member, look, Some(job))
+            {
+                Ok(Some(replaced)) => {
+                    self.plans
+                        .save_cast_member(&plan, member)
+                        .map_err(unexpected)?;
+                    for index in plan.settle_portrait_waits(style) {
+                        self.plans.save_scene(&plan, index).map_err(unexpected)?;
+                    }
+                    if let Some(replaced) = replaced {
+                        crate::proxies::remove_media(self.files.as_ref(), project, &replaced.file);
+                    }
+                    return Ok(());
+                }
+                Ok(None) => {}
+                // Its folder cannot be reached: nothing is drawn in its place.
+                Err(failure) => {
+                    failed.push(failure);
+                    return Ok(());
+                }
+            }
+        }
         let Ok(cast) = plan.cast_member(member) else {
             return Ok(());
         };
         let name = cast.name.clone();
         let description = cast.description().clone();
+        let character = cast.character();
         let prompt = cast.portrait_prompt(style);
         let request = ImageRequest {
             prompt: prompt.clone(),
@@ -1558,10 +1652,25 @@ impl SceneHandler {
                 let replaced = plan
                     .cast_mut(member, SystemTime::now())
                     .map_err(unexpected)?
-                    .set_portrait(portrait);
+                    .set_portrait(portrait.clone());
                 self.plans
                     .save_cast_member(&plan, member)
                     .map_err(unexpected)?;
+                // A picked character keeps it for the next video of this
+                // look (#337); one that cannot be kept only costs a draw
+                // later.
+                if let (Some(character), Some(look)) = (character, look) {
+                    let kept = self.world.keep_portrait(
+                        (character, description.as_str()),
+                        look,
+                        &image.bytes,
+                        &portrait.generation,
+                        bardo_domain::PictureOrigin::Video,
+                    );
+                    if let Err(error) = kept {
+                        tracing::warn!("could not keep a portrait in the world: {error}");
+                    }
+                }
                 // The scenes left undrawn for lack of it no longer wait.
                 for index in plan.settle_portrait_waits(style) {
                     self.plans.save_scene(&plan, index).map_err(unexpected)?;
@@ -1902,14 +2011,28 @@ impl Bardo {
                 None => crate::ad_scenes::unset_values(),
             });
         }
+        // The characters the video picked (#337): what the planner may
+        // use as given, and nothing else of the world.
+        let fixed = self.fixed_cast(project)?;
+        let fixed_lines = crate::world::fixed_cast_lines(&fixed);
+        values.insert(TemplateVariable::FixedCast, fixed_lines.clone());
         let rendered = template.body.render(&values).map_err(|missing| {
             // Every variable of the template has a value above.
             SceneError::Repository(RepositoryError(Box::new(missing)))
         })?;
-        Ok(match ad {
+        let (mut rendered, ad) = match ad {
             Some(ad) => (ad.request(&template.body, rendered), Some(ad)),
             None => (rendered, None),
-        })
+        };
+        // A template that does not place them still gets the picked
+        // characters; with none picked the request is as it always was.
+        if !fixed.is_empty() && !template.body.uses(TemplateVariable::FixedCast) {
+            rendered.prompt = format!(
+                "{}\n\nThe fixed cast:\n<fixed_cast>\n{fixed_lines}\n</fixed_cast>",
+                rendered.prompt.trim_end()
+            );
+        }
+        Ok((rendered, ad))
     }
 
     /// Past a budget without `consent`, the estimate to ask about.
@@ -1969,6 +2092,15 @@ impl Bardo {
             )),
             None => None,
         };
+        let fixed = self
+            .fixed_cast(&project)?
+            .into_iter()
+            .map(|(character, _)| FixedMember {
+                character: character.id.to_string(),
+                name: character.name().to_owned(),
+                appearance: character.details.appearance().to_owned(),
+            })
+            .collect();
         let payload = to_json(&PlanPayload {
             project: project.id.to_string(),
             narration: narration.id.to_string(),
@@ -1977,6 +2109,7 @@ impl Bardo {
             instructions: rendered.instructions,
             prompt: rendered.prompt,
             ad,
+            fixed,
         });
         // The same plan was asked for and answered, and is not the
         // project's plan (its job was cancelled as the answer arrived, or
@@ -2212,6 +2345,13 @@ impl Bardo {
         self.scenes_idle(plan.project)?;
         self.scenes_current(plan)?;
         self.require_key(Provider::Gemini)?;
+        // Picked characters take their world pictures first, for free.
+        self.lend_world_portraits(plan.project)?;
+        let lent = self.own_plan(plan.project)?;
+        let plan = match lent.id == plan.id {
+            true => &lent,
+            false => plan,
+        };
         let style = self.video_style(&project)?;
         let first = plan
             .missing_portraits(&scenes, style)
@@ -2366,9 +2506,13 @@ impl Bardo {
         // A job drawing the scenes would draw some with the old look.
         self.scenes_idle(plan.project)?;
         let description = ScenePrompt::new(description).map_err(SceneError::Invalid)?;
-        let (changed, dropped) = plan
-            .cast_mut(member, SystemTime::now())?
-            .edit_description(description);
+        let cast = plan.cast_mut(member, SystemTime::now())?;
+        let (changed, dropped) = cast.edit_description(description);
+        // A world character's look is edited on the World screen: edited
+        // here, the member becomes this video's own (#337).
+        if changed {
+            cast.unlink();
+        }
         if changed {
             self.scene_plans.save_cast_member(&plan, member)?;
         }
@@ -2519,6 +2663,8 @@ pub(crate) mod tests {
         /// Where the background agent is registered.
         pub(crate) agent_task: Arc<bardo_storage::MemoryAgentTask>,
         pub(crate) files: Arc<MemoryProjectFiles>,
+        /// The worlds' folders: reference pictures.
+        pub(crate) world_files: Arc<bardo_storage::MemoryWorldFiles>,
         pub(crate) text: Arc<FakeTextGenerator>,
         /// Research on the web.
         pub(crate) researcher: Arc<crate::product_sheets::testing::FakeResearcher>,
@@ -2600,6 +2746,7 @@ pub(crate) mod tests {
                 backups: None,
                 releases: Arc::default(),
                 installers: Arc::new(bardo_storage::MemoryInstallers::default()),
+                world_files: Arc::default(),
                 installer_runner: Arc::new(bardo_storage::MemoryInstallerRunner::default()),
             }
         }
@@ -2690,6 +2837,7 @@ pub(crate) mod tests {
                 agent_task: Arc::clone(&self.agent_task) as _,
                 installers: Arc::clone(&self.installers),
                 installer_runner: Arc::clone(&self.installer_runner),
+                world_files: Arc::clone(&self.world_files) as _,
                 ..repositories
             };
             let mut app = Bardo::start_with(
@@ -3070,6 +3218,7 @@ pub(crate) mod tests {
             instructions: "Plan the scenes.".into(),
             prompt: "Every sentence.".into(),
             ad: None,
+            fixed: Vec::new(),
         };
         let job = Job::new(app.profile.id, JobKind::ScenePlan, to_json(&payload));
         let job = wait_done(&app, app.jobs.enqueue(job).unwrap());

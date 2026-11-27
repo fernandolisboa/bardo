@@ -213,10 +213,14 @@ pub enum JobKind {
     /// folders (#336), checks them, removes the archive and brings the
     /// project back. Starts over on resume.
     UnpackMedia,
+    /// Draws a world character's reference picture for one look from the
+    /// World screen (#337); it waits for the user's review. A picture
+    /// drawn is not drawn again on resume.
+    WorldPicture,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 44] = [
+    pub const ALL: [JobKind; 45] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -261,6 +265,7 @@ impl JobKind {
         JobKind::MoveMedia,
         JobKind::PackMedia,
         JobKind::UnpackMedia,
+        JobKind::WorldPicture,
     ];
 
     /// Stable name stored in the database.
@@ -310,6 +315,7 @@ impl JobKind {
             JobKind::MoveMedia => "move_media",
             JobKind::PackMedia => "pack_media",
             JobKind::UnpackMedia => "unpack_media",
+            JobKind::WorldPicture => "world_picture",
         }
     }
 }

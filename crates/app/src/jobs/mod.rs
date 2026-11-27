@@ -77,6 +77,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) updates: crate::updates::UpdateDownloadHandler,
     pub(crate) move_media: crate::folders::MoveMediaHandler,
     pub(crate) pack_media: crate::removal::PackMediaHandler,
+    pub(crate) world_pictures: crate::world::WorldPictureHandler,
 }
 
 /// The handler of every job kind Bardo ships.
@@ -120,6 +121,7 @@ pub(crate) fn built_in_handlers(
         updates,
         move_media,
         pack_media,
+        world_pictures,
     } = built_in;
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -171,6 +173,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::MoveMedia, Arc::new(move_media));
     handlers.insert(JobKind::UnpackMedia, Arc::new(pack_media.unpacking()));
     handlers.insert(JobKind::PackMedia, Arc::new(pack_media));
+    handlers.insert(JobKind::WorldPicture, Arc::new(world_pictures));
     handlers
 }
 
@@ -2219,6 +2222,8 @@ mod tests {
             scripts: Arc::clone(db) as _,
             personas: Arc::clone(db) as _,
             products: Arc::clone(db) as _,
+            world: Arc::clone(db) as _,
+            world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
             ads: Arc::clone(db) as _,
             end_cards: Arc::clone(db) as _,
             ad_exports: Arc::clone(db) as _,

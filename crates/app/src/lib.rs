@@ -80,6 +80,7 @@ mod tours;
 mod updates;
 mod uploads;
 mod voice_samples;
+mod world;
 mod youtube_policy;
 
 use std::borrow::Cow;
@@ -260,6 +261,7 @@ pub use uploads::{
     UploadReviewError, UploadState, upload_state,
 };
 pub use voice_samples::{SampleAudio, SamplePlayer, VoiceSample, VoiceSampleError, VoiceSampling};
+pub use world::{CharacterCard, PictureView, WhoAppears, WorldError};
 pub use youtube_policy::{
     GOOGLE_PERMISSIONS_URL, GOOGLE_PRIVACY_URL, PRIVACY_PAGE, YOUTUBE_TERMS_URL, privacy_policy_url,
 };
@@ -373,6 +375,11 @@ pub struct Repositories {
     pub trash: Arc<dyn bardo_domain::Trash>,
     /// The folders of this computer that decide where media goes.
     pub places: bardo_domain::FolderPlaces,
+    /// The world's characters, their pictures and who appears in each
+    /// video (issue #337). Shared with the job queue.
+    pub world: Arc<dyn bardo_domain::WorldRepository>,
+    /// The world's picture files. Shared with the job queue.
+    pub world_files: Arc<dyn bardo_domain::WorldFiles>,
     /// Voice samples heard on the Personas screen, kept on this machine.
     pub voice_samples: Arc<dyn VoiceSampleStore>,
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
@@ -437,6 +444,7 @@ impl Repositories {
                 places.clone(),
             )),
             places,
+            world_files: Arc::new(bardo_storage::LocalWorldFiles),
             ..Self::shared_with_files(db, Arc::from(secrets), files)
         }
     }
@@ -493,6 +501,8 @@ impl Repositories {
             project_folders: bardo_storage::MemoryProjectFolders::for_database(&db),
             removals: Arc::clone(&db) as _,
             trash: Arc::new(bardo_storage::MemoryTrash::default()),
+            world: Arc::clone(&db) as _,
+            world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
             research: db,
             files,
             places: test_places(),
@@ -751,6 +761,8 @@ pub struct Bardo {
     settings_offer: Option<settings_transfer::SettingsOffer>,
     /// The base folder, project folders and the media move.
     folder_book: folders::FolderBook,
+    /// The world's characters and their pictures (issue #337).
+    world_book: world::WorldBook,
 }
 
 impl Bardo {
@@ -835,6 +847,8 @@ impl Bardo {
             removals,
             trash,
             places,
+            world,
+            world_files,
             voice_samples,
             secrets,
             connection_secrets,
@@ -1004,8 +1018,26 @@ impl Bardo {
             media: Arc::clone(&providers.media),
             vision: Arc::clone(&providers.vision),
         };
+        let world_book = world::WorldBook {
+            world,
+            files: world_files,
+            projects: Arc::clone(&projects),
+            channels: Arc::clone(&channels),
+            themes: Arc::clone(&themes),
+            folders: Arc::clone(&folders),
+            places: places.clone(),
+            owner: profile.id,
+        };
+        let world_picture_handler = world::WorldPictureHandler {
+            owner: profile.id,
+            book: world_book.clone(),
+            images: Arc::clone(&providers.images),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let scene_handler = SceneHandler {
             owner: profile.id,
+            world: world_book.clone(),
             plans: Arc::clone(&scene_plans),
             narrations: Arc::clone(&narrations),
             files: Arc::clone(&files),
@@ -1251,6 +1283,7 @@ impl Bardo {
                     },
                     move_media: move_media_handler,
                     pack_media: pack_media_handler,
+                    world_pictures: world_picture_handler,
                 }),
                 &cost_book,
             ),
@@ -1330,6 +1363,7 @@ impl Bardo {
             settings_offer: (first_start && role == RunnerRole::App)
                 .then(settings_transfer::SettingsOffer::default),
             folder_book,
+            world_book,
         })
         .inspect(|bardo| {
             if bardo.role == RunnerRole::App {
@@ -3692,6 +3726,8 @@ mod tests {
             project_folders: bardo_storage::MemoryProjectFolders::for_database(&db),
             removals: Arc::clone(&db) as _,
             trash: Arc::new(bardo_storage::MemoryTrash::default()),
+            world: Arc::clone(&db) as _,
+            world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
             places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
             research: db,

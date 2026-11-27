@@ -26,6 +26,9 @@ pub enum Destination {
     Themes,
     /// The project's videos and their stages.
     Videos,
+    /// The project's world: the characters its videos pick, with their
+    /// reference pictures.
+    World,
     /// The narrators (personas) that speak the videos.
     Narrators,
     /// The products to advertise, with their briefs and pictures.
@@ -34,7 +37,7 @@ pub enum Destination {
     Channels,
     Accounts,
     Performance,
-    /// The global library: narrators, products and templates every
+    /// The global library: characters, narrators, products and templates every
     /// project can use, under tabs.
     Library,
     Jobs,
@@ -51,6 +54,7 @@ pub enum NavEntry {
     /// Research and Themes.
     Ideas,
     Videos,
+    World,
     Narrators,
     Products,
     Templates,
@@ -67,6 +71,7 @@ impl NavEntry {
             NavEntry::Overview => &[Destination::Overview],
             NavEntry::Ideas => &[Destination::Research, Destination::Themes],
             NavEntry::Videos => &[Destination::Videos],
+            NavEntry::World => &[Destination::World],
             NavEntry::Narrators => &[Destination::Narrators],
             NavEntry::Products => &[Destination::Products],
             NavEntry::Templates => &[Destination::Templates],
@@ -85,13 +90,16 @@ impl NavEntry {
 /// A tab of the global library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LibraryTab {
+    /// The global library's characters.
+    World,
     Narrators,
     Products,
     Templates,
 }
 
 impl LibraryTab {
-    pub const ALL: [LibraryTab; 3] = [
+    pub const ALL: [LibraryTab; 4] = [
+        LibraryTab::World,
         LibraryTab::Narrators,
         LibraryTab::Products,
         LibraryTab::Templates,
@@ -100,6 +108,7 @@ impl LibraryTab {
     /// The tab's name in links (`bardo:go/library/products`).
     pub fn code(self) -> &'static str {
         match self {
+            LibraryTab::World => "world",
             LibraryTab::Narrators => "narrators",
             LibraryTab::Products => "products",
             LibraryTab::Templates => "templates",
@@ -114,6 +123,7 @@ impl LibraryTab {
     /// until a project owns its own.
     pub fn place(self) -> Destination {
         match self {
+            LibraryTab::World => Destination::World,
             LibraryTab::Narrators => Destination::Narrators,
             LibraryTab::Products => Destination::Products,
             LibraryTab::Templates => Destination::Templates,
@@ -127,11 +137,12 @@ impl LibraryTab {
 }
 
 impl Destination {
-    pub const ALL: [Destination; 15] = [
+    pub const ALL: [Destination; 16] = [
         Destination::Overview,
         Destination::Research,
         Destination::Themes,
         Destination::Videos,
+        Destination::World,
         Destination::Narrators,
         Destination::Products,
         Destination::Templates,
@@ -153,6 +164,7 @@ impl Destination {
                 NavEntry::Overview,
                 NavEntry::Ideas,
                 NavEntry::Videos,
+                NavEntry::World,
                 NavEntry::Narrators,
                 NavEntry::Products,
                 NavEntry::Templates,
@@ -198,6 +210,7 @@ impl Destination {
             Destination::Research => "research",
             Destination::Themes => "themes",
             Destination::Videos => "videos",
+            Destination::World => "world",
             Destination::Narrators => "narrators",
             Destination::Products => "products",
             Destination::Templates => "templates",

@@ -168,9 +168,11 @@ impl CostRepository for Database {
                      audio_seconds, posts, searches, cache_write_tokens, cache_read_tokens, \
                      owner_project_id, project_name, channel_name, video_title) \
                      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
-                     ?16, ?17, ?18, ?19, ?20, ?21, origin.project_id, origin.project_name, \
+                     ?16, ?17, ?18, ?19, ?20, ?21, COALESCE(origin.project_id, whole.id), \
+                     COALESCE(origin.project_name, whole.name), \
                      origin.channel_name, origin.video_title \
                      FROM (SELECT 1) LEFT JOIN {} origin ON 1 \
+                     LEFT JOIN project whole ON whole.id = ?22 \
                      WHERE 1 ON CONFLICT (id) DO NOTHING",
                     origin_of("?13", "?12"),
                 ),
@@ -196,6 +198,9 @@ impl CostRepository for Database {
                     sql_count(usage.searches),
                     sql_count(usage.cache_write_tokens),
                     sql_count(usage.cache_read_tokens),
+                    // Paid work with no channel (a world picture drawn from
+                    // the World screen) names its project itself.
+                    record.origin.project.map(|id| id.to_string()),
                 ],
             )
             .map_err(boxed)?;

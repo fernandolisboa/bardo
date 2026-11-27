@@ -147,6 +147,8 @@ pub enum Control {
     ScenesPlan,
     /// Scenes: All and Pending over the scenes.
     ScenesFilter,
+    /// Scenes: Who appears, the world's characters the video picked.
+    WhoAppears,
     /// Scenes: a version's scenes, placed on its own narration.
     ScenesPlace,
     /// Scenes: drawing a scene's image again, or the new one to review.
@@ -184,6 +186,12 @@ pub enum Control {
     PersonaShare,
     /// Personas: the look, drawn or a photo of the user.
     PersonaLook,
+    /// World: a character's name, appearance and notes.
+    WorldCharacter,
+    /// World: a character's reference pictures, one per look.
+    WorldPictures,
+    /// World: Save, Duplicate, Archive and Delete.
+    WorldActions,
     /// Products: the brief, what the product is and who it is for.
     ProductBrief,
     /// Products: the facts the ad may state, one per line.
@@ -594,7 +602,7 @@ pub const LIBRARY: Tour = {
     const PAGE: &str = "global-library";
     Tour {
         id: TourId::Library,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "tabs", control(Control::LibraryTabs))
@@ -870,9 +878,13 @@ pub const SCENES: Tour = {
     const TOOLBAR: WhenMissing = WhenMissing::LightPart(TourAnchor::Toolbar);
     Tour {
         id: TourId::Scenes,
-        version: 10,
+        version: 11,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
+            // Before the plan: the characters it gets as fixed cast.
+            at_stage(AT, "who", control(Control::WhoAppears))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "who-appears"),
             at_stage(AT, "plan", control(Control::ScenesPlan))
                 .missing(TOOLBAR)
                 .learn(PAGE, "plan"),
@@ -884,9 +896,6 @@ pub const SCENES: Tour = {
             at_stage(AT, "redraw", control(Control::SceneRedraw))
                 .missing(WhenMissing::LightPart(TourAnchor::Inspector))
                 .learn(PAGE, "redraw"),
-            at_stage(AT, "filter", control(Control::ScenesFilter))
-                .missing(WhenMissing::Skip)
-                .learn(PAGE, "filter"),
             at_stage(AT, "replan", control(Control::ScenesPlan))
                 .missing(TOOLBAR)
                 .learn(PAGE, "fit"),
@@ -958,6 +967,31 @@ pub const PERSONAS: Tour = {
             on(AT, "look", control(Control::PersonaLook))
                 .missing(FORM)
                 .learn(PAGE, "look"),
+        ],
+    }
+};
+
+/// World: the characters, one's appearance and notes, its reference
+/// pictures and keeping the world tidy, in the order the form shows them.
+pub const WORLD: Tour = {
+    const AT: Destination = Destination::World;
+    const PAGE: &str = "world";
+    const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
+    Tour {
+        id: TourId::World,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "characters", TourAnchor::Collection).learn(PAGE, "characters"),
+            on(AT, "character", control(Control::WorldCharacter))
+                .missing(FORM)
+                .learn(PAGE, "appearance"),
+            on(AT, "actions", control(Control::WorldActions))
+                .missing(FORM)
+                .learn(PAGE, "archive"),
+            on(AT, "pictures", control(Control::WorldPictures))
+                .missing(FORM)
+                .learn(PAGE, "pictures"),
         ],
     }
 };
@@ -1632,7 +1666,7 @@ pub const STORAGE: Tour = {
 
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 35] = [
+    pub const ALL: [&'static Tour; 36] = [
         &WELCOME,
         &OVERVIEW,
         &LIBRARY,
@@ -1647,6 +1681,7 @@ impl Tour {
         &SCENES,
         &CLIPS,
         &PERSONAS,
+        &WORLD,
         &PRODUCTS,
         &PRODUCT_SHEET,
         &PRODUCT_ANGLES,
@@ -1686,6 +1721,7 @@ impl Tour {
             TourId::Scenes => &SCENES,
             TourId::Clips => &CLIPS,
             TourId::Personas => &PERSONAS,
+            TourId::World => &WORLD,
             TourId::Products => &PRODUCTS,
             TourId::ProductSheet => &PRODUCT_SHEET,
             TourId::ProductAngles => &PRODUCT_ANGLES,
@@ -2734,6 +2770,7 @@ mod tests {
             (Destination::Videos, TourId::Projects),
             (Destination::Narrators, TourId::Personas),
             (Destination::Products, TourId::Products),
+            (Destination::World, TourId::World),
             (Destination::Templates, TourId::Templates),
             (Destination::Channels, TourId::Channels),
             (Destination::Accounts, TourId::Accounts),
@@ -2918,7 +2955,7 @@ mod tests {
         // No scene picked, so no inspector: the scene step goes. A picked
         // scene with nothing to draw again lights the inspector instead,
         // and with no inspector either the card centres.
-        let mut run = TourRun::new(&SCENES, 2, Destination::Videos);
+        let mut run = TourRun::new(&SCENES, 3, Destination::Videos);
         assert_eq!(
             run.spot(|anchor| anchor != TourAnchor::Inspector),
             Spot::Skip

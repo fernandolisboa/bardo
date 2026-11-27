@@ -80,6 +80,9 @@ pub struct ThemesScreen {
     error: Option<Text>,
     /// The title of the project the last approval started.
     started: Option<String>,
+    /// Who appears in the video the last approval started (#337), shown
+    /// under its notice.
+    who_appears: Entity<crate::who_appears::WhoAppearsPanel>,
     /// Approved ideas whose video was deleted, which may start another
     /// (#336).
     without_video: std::collections::HashSet<ThemeId>,
@@ -138,6 +141,7 @@ impl ThemesScreen {
             ),
         ];
         let revision = bardo.read(cx).jobs_revision();
+        let who_appears = cx.new(|_| crate::who_appears::WhoAppearsPanel::new(bardo.clone()));
         let mut screen = Self {
             bardo,
             channels: Vec::new(),
@@ -151,6 +155,7 @@ impl ThemesScreen {
             angle,
             error: None,
             started: None,
+            who_appears,
             without_video: Default::default(),
             budget_ask: None,
             revision,
@@ -364,11 +369,13 @@ impl ThemesScreen {
         cx.notify();
     }
 
-    fn approve(&mut self, id: ThemeId, cx: &mut Context<Self>) {
+    fn approve(&mut self, id: ThemeId, window: &mut Window, cx: &mut Context<Self>) {
         match self.bardo.read(cx).approve_theme(id) {
             Ok(project) => {
                 self.error = None;
                 self.started = Some(project.title);
+                self.who_appears
+                    .update(cx, |panel, cx| panel.show(Some(project.id), window, cx));
             }
             Err(error) => self.error = Some(error.message()),
         }
@@ -377,11 +384,13 @@ impl ThemesScreen {
     }
 
     /// Starts another video from an approved idea whose video was deleted.
-    fn start_again(&mut self, id: ThemeId, cx: &mut Context<Self>) {
+    fn start_again(&mut self, id: ThemeId, window: &mut Window, cx: &mut Context<Self>) {
         match self.bardo.read(cx).restart_theme(id) {
             Ok(project) => {
                 self.error = None;
                 self.started = Some(project.title);
+                self.who_appears
+                    .update(cx, |panel, cx| panel.show(Some(project.id), window, cx));
             }
             Err(error) => self.error = Some(error.message()),
         }
@@ -791,8 +800,8 @@ impl ThemesScreen {
                                 .primary()
                                 .small()
                                 .label(tr(bardo, Text::ThemeStartAgain))
-                                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                    this.start_again(id, cx)
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.start_again(id, window, cx)
                                 })),
                         )
                         .child(
@@ -814,8 +823,8 @@ impl ThemesScreen {
                                 .primary()
                                 .small()
                                 .label(tr(bardo, Text::ApproveTheme))
-                                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                    this.approve(id, cx)
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.approve(id, window, cx)
                                 })),
                         )
                         .child(
@@ -1107,6 +1116,12 @@ impl Render for ThemesScreen {
             })
             .into_iter()
             .collect();
+        // The video just started: who appears in it, before its scenes.
+        if self.started.is_some() {
+            parts
+                .notices
+                .push(self.who_appears.clone().into_any_element());
+        }
         parts.collection = Some(self.collection(cx));
         parts.inspector = Some(Inspector::new(vec![
             self.render_controls(cx).into_any_element(),

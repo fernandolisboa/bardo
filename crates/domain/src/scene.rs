@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    AspectRatio, BackdropId, ClipModelRef, ComposedShot, Generation, GenerationId, JobFailureKind,
-    KindChange, Narration, NarrationId, ProductImageId, ProductPictures, ProfileId,
+    AspectRatio, BackdropId, CharacterId, ClipModelRef, ComposedShot, Generation, GenerationId,
+    JobFailureKind, KindChange, Narration, NarrationId, ProductImageId, ProductPictures, ProfileId,
     RepositoryError, SceneKind, SceneKindError, ShotBackdropDrawing, ShotLook, StretchLimit,
     StyleChoice, VideoProjectId, spoken_words,
 };
@@ -165,6 +165,10 @@ pub const MAX_CAST_NAME_CHARS: usize = 60;
 pub struct CastDraft {
     pub name: String,
     pub description: String,
+    /// The world's character this member is (#337): one the video picked,
+    /// with its fixed appearance as the description. `None` for an extra
+    /// the planner made up.
+    pub character: Option<CharacterId>,
 }
 
 /// A recurring character of the video: the planner names them once with a
@@ -186,6 +190,10 @@ pub struct CastMember {
     /// (#269): no portrait is drawn or sent for them, and their face may
     /// change from scene to scene.
     described_only: bool,
+    /// The world's character this member is (#337), whose reference
+    /// picture for the video's look is their portrait. `None` for an extra
+    /// of this video only.
+    character: Option<CharacterId>,
 }
 
 /// Every stored field of a cast member, for adapters that rebuild one.
@@ -207,6 +215,7 @@ impl CastMember {
             portrait: record.portrait,
             failure: record.failure,
             described_only: false,
+            character: None,
         }
     }
 
@@ -215,6 +224,23 @@ impl CastMember {
     pub fn with_described_only(mut self, described_only: bool) -> Self {
         self.described_only = described_only;
         self
+    }
+
+    /// The member as the world's `character`, as an adapter rebuilds it.
+    pub fn with_character(mut self, character: Option<CharacterId>) -> Self {
+        self.character = character;
+        self
+    }
+
+    /// The world's character this member is, if any.
+    pub fn character(&self) -> Option<CharacterId> {
+        self.character
+    }
+
+    /// Makes the member this video's own: it no longer follows a world
+    /// character. Returns whether it did.
+    pub fn unlink(&mut self) -> bool {
+        self.character.take().is_some()
     }
 
     /// A planned member, or `None` when the name or the description is not
@@ -234,6 +260,7 @@ impl CastMember {
             portrait: None,
             failure: None,
             described_only: false,
+            character: draft.character,
         })
     }
 
@@ -1559,6 +1586,8 @@ impl ScenePlan {
             .filter_map(|(index, draft)| Some((index, CastMember::planned(draft)?)))
             .collect();
         usable.retain(|(index, _)| starts.iter().any(|start| start.cast.contains(index)));
+        // The characters the video picked stay before any extra.
+        usable.sort_by_key(|(_, member)| member.character.is_none());
         usable.truncate(MAX_CAST);
         // The usable places, likewise.
         let mut somewhere: Vec<(usize, Place)> = places
@@ -2729,6 +2758,7 @@ mod tests {
         CastDraft {
             name: name.into(),
             description: description.into(),
+            character: None,
         }
     }
 
@@ -2783,6 +2813,33 @@ mod tests {
             plan.scenes()[0].planned_motion().map(ScenePrompt::as_str),
             Some("Slow push in.")
         );
+    }
+
+    #[test]
+    fn picked_characters_stay_before_extras_when_the_cast_is_cut() {
+        let n = narration(STORY, 0);
+        let mut cast: Vec<_> = (0..MAX_CAST)
+            .map(|i| member(&format!("extra {i}"), "A person."))
+            .collect();
+        let ana = CharacterId::new();
+        cast.push(CastDraft {
+            character: Some(ana),
+            ..member("Ana", "A baker in her sixties.")
+        });
+        let all: Vec<usize> = (0..=MAX_CAST).collect();
+        let plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            cast,
+            vec![cast_draft(0, "A crowd.", all)],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(plan.cast().len(), MAX_CAST);
+        assert_eq!(plan.cast()[0].name, "Ana");
+        assert_eq!(plan.cast()[0].character(), Some(ana));
+        assert!(plan.cast()[1..].iter().all(|m| m.character().is_none()));
+        assert!(plan.scene_cast(0).contains(&0), "Ana is still shown");
     }
 
     #[test]

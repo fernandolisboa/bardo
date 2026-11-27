@@ -324,6 +324,7 @@ retry = "Tentar de novo"
 waits_until = "Aguarda até {when}"
 
 [job.kind]
+world_picture = "Imagem de referência"
 move_media = "Mudança de mídia"
 pack_media = "Compactação de mídia"
 unpack_media = "Descompactação de mídia"
@@ -1196,6 +1197,7 @@ concept_prompt = "Prompt de conceito"
 ad_metadata = "Metadados de anúncio"
 
 [templates.variable]
+fixed_cast = "Os personagens escolhidos em Quem aparece, cada um com aparência, notas e a instrução deste vídeo, ou uma linha dizendo que nenhum foi escolhido."
 channel_name = "O nome do canal."
 channel_niche = "O nicho do canal."
 channel_themes = "Os temas recorrentes do canal."
@@ -2030,6 +2032,7 @@ ideas = "Ideias"
 channels_and_accounts = "Canais e contas"
 
 [nav.place]
+world = "Mundo"
 guide = "Guia"
 performance = "Desempenho"
 research = "Pesquisa"
@@ -3125,6 +3128,10 @@ body = "Remover a captura tira a gravação e suas tomadas do projeto. A narraç
 [tour.scenes]
 name = "Tour das Cenas"
 
+[tour.scenes.who]
+title = "Quem aparece"
+body = "Escolha os personagens do mundo que este vídeo mostra, cada um com uma instrução para ele. O plano os recebe como elenco fixo; mudá-los depois de planejar marca o plano para revisão."
+
 [tour.scenes.plan]
 title = "Planeje e desenhe"
 body = "Planejar cenas transforma a narração num storyboard: cenas pelas frases, uma continuando a outra, as pessoas e os lugares que voltam e um prompt de imagem para cada cena. Depois desenhe as imagens que faltam de uma vez, cada uma com as anteriores como referência; a estimativa fica sob o botão."
@@ -3140,10 +3147,6 @@ body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o pro
 [tour.scenes.redraw]
 title = "Desenhe de novo"
 body = "Desenhar de novo faz uma nova imagem a partir do prompt, no estilo visual do vídeo. Ela espera ao lado da atual até você usá-la ou manter a atual. Depois de trocar o estilo, a etapa diz quantas cenas estão em outro estilo e oferece desenhá-las de novo de uma vez, depois de mostrar o custo."
-
-[tour.scenes.filter]
-title = "Todas ou pendentes"
-body = "Pendentes mostra só as cenas com algo por fazer, uma imagem para desenhar ou revisar. Todas mostra cada uma."
 
 [tour.scenes.replan]
 title = "Depois de uma nova narração"
@@ -5060,16 +5063,16 @@ body = "Os canais do projeto, o que o trabalho dele gastou neste mês e os narra
 name = "Tour da biblioteca global"
 
 [tour.library.tabs]
-title = "Três bibliotecas"
-body = "Narradores, produtos e modelos, cada um na sua aba. Troque de aba aqui; as entradas do projeto na navegação abrem as mesmas telas."
+title = "Quatro bibliotecas"
+body = "Personagens, narradores, produtos e modelos, cada um na sua aba. Troque de aba aqui; as entradas do projeto na navegação abrem as mesmas telas, menos Mundo, que guarda os personagens do próprio projeto."
 
 [tour.library.items]
 title = "O que cada uma guarda"
-body = "Os narradores que falam nos seus vídeos, os produtos que seus anúncios mostram e as instruções a partir das quais o Claude escreve. Crie e edite como antes."
+body = "Os personagens que os vídeos de qualquer projeto podem escolher, os narradores que falam nos seus vídeos, os produtos que seus anúncios mostram e as instruções a partir das quais o Claude escreve. Crie e edite como antes."
 
 [tour.library.projects]
-title = "Global por enquanto"
-body = "Hoje todo projeto usa estes mesmos itens. Uma versão futura deixa cada projeto ter os seus, com a biblioteca global compartilhada por todos."
+title = "Globais e do projeto"
+body = "Narradores, produtos e modelos são compartilhados por todos os projetos hoje. Personagens podem ser do projeto, em Mundo, ou globais, aqui."
 
 [project_folder]
 not_found = "Pasta não encontrada"
@@ -5176,3 +5179,139 @@ forget_hint = "Mostra pelo número daqui em diante. Os valores continuam como es
 [themes_restart]
 start = "Começar um vídeo"
 no_video = "O vídeo dela foi excluído."
+
+[world.error]
+not_found = "Este personagem não existe mais."
+name_taken = "Já existe um personagem com este nome aqui. Ele pode estar entre os arquivados."
+in_use = "Vídeos em andamento usam este personagem, então ele não pode ser excluído: {videos}. Arquive-o em vez disso."
+not_saved = "Não foi possível salvar o personagem."
+
+[world]
+hint = "Os personagens que voltam nos vídeos deste projeto: uma aparência fixa, notas que sempre ou nunca valem e uma imagem de referência por visual, reaproveitada por todo vídeo nesse visual."
+empty = "Nenhum personagem ainda. Adicione um, ou salve aqui uma pessoa do elenco de um vídeo."
+not_loaded = "Não foi possível carregar os personagens."
+new = "Novo personagem"
+show_archived = "Mostrar arquivados ({n})"
+no_project = "Abra um projeto para ver o mundo dele."
+owner_project = "Este projeto"
+owner_global = "Biblioteca global"
+
+[character]
+new_title = "Novo personagem"
+edit_title = "Editar personagem"
+form_hint = "O que todo vídeo que escolhe este personagem mantém igual."
+name = "Nome"
+name_placeholder = "ex.: Tia Rosa"
+appearance = "Aparência"
+appearance_placeholder = "Rosto, cabelo, porte e roupas: o que fica igual em toda cena."
+appearance_hint = "Toda imagem de referência é desenhada a partir deste texto, e o planejador de cenas o copia como está. Uma nova aparência descarta as imagens; o nome e as notas as mantêm."
+always = "Sempre"
+always_placeholder = "O que sempre vale, ex.: carrega um guarda-chuva vermelho."
+never = "Nunca"
+never_placeholder = "O que nunca acontece, ex.: nunca fala em cena."
+notes_hint = "O planejador de cenas lê estas notas, com a aparência, em todo vídeo que escolhe o personagem."
+create = "Criar personagem"
+save = "Salvar alterações"
+duplicate = "Duplicar"
+archive = "Arquivar"
+restore = "Restaurar"
+delete = "Excluir…"
+delete_title = "Excluir {name}?"
+delete_hint = "As imagens de referência vão junto. Os vídeos que o mostraram mantêm seus retratos. Isso não pode ser desfeito."
+confirm_delete = "Excluir"
+cancel = "Cancelar"
+actions_hint = "Duplicar copia os campos e as imagens mantidas com um novo nome. Arquivar esconde o personagem de Quem aparece; os vídeos que o escolheram continuam com ele. Excluir o remove com suas imagens, a menos que um vídeo em andamento o use."
+saved = "Salvo."
+duplicated = "Duplicado como {name}."
+archived = "Arquivado: escondido de Quem aparece."
+restored = "Restaurado."
+deleted = "{name} excluído."
+archived_tag = "Arquivado"
+drops_title = "Mudar a aparência?"
+drops_hint = "As imagens de referência em {looks} são descartadas, assim como os retratos em {videos} vídeos. Cada uma é desenhada de novo, e paga de novo, quando for preciso."
+drops_none = "nenhum visual"
+drops_confirm = "Salvar e descartar"
+uses = "Usado por"
+uses_none = "Nenhum vídeo o escolheu ou mostra ainda."
+use_archived = "{title} (arquivado)"
+copy_suffix = "cópia"
+
+[world.pictures]
+title = "Imagens de referência"
+hint = "Um retrato por visual, desenhado antes da primeira cena que precisa dele ou aqui, sob demanda. Todo vídeo nesse visual o reaproveita, sem nova chamada paga."
+save_first = "Crie o personagem para desenhar as imagens dele."
+none = "Nenhuma imagem ainda. O primeiro vídeo que o mostrar desenha uma para o seu visual."
+look = "Visual"
+look_notes = "Notas de {channel}"
+draw = "Desenhar imagem"
+drawing = "Desenhando…"
+waiting = "Aguardando revisão"
+keep = "Manter"
+discard = "Descartar"
+remove = "Remover"
+remove_ask = "Remover esta imagem? O próximo vídeo neste visual desenha uma nova."
+kept = "Mantida: os vídeos neste visual a usam daqui em diante."
+discarded = "Descartada."
+removed = "Removida."
+started = "Desenhando: a imagem aguarda revisão aqui."
+busy = "Uma imagem deste personagem já está sendo desenhada."
+nothing_waiting = "Esta imagem não está mais aqui."
+missing_key = "Adicione uma chave do Gemini em Configurações para desenhar imagens."
+over_budget = "Desenhá-la passa do orçamento deste mês."
+
+[who_appears]
+title = "Quem aparece"
+hint = "Personagens do mundo que este vídeo mostra. O planejador de cenas os recebe como elenco fixo, com a sua instrução para este vídeo; ele pode acrescentar figurantes, mas nunca outro personagem do mundo."
+none = "Nenhum personagem escolhido: o planejador de cenas cria todo o elenco."
+none_available = "Nenhum personagem para escolher ainda. Adicione-os em Mundo, ou na biblioteca global."
+pickable = "Podem aparecer"
+add = "Adicionar"
+remove = "Remover"
+instruction = "Instrução para este vídeo"
+instruction_placeholder = "ex.: Aparece só nas últimas cenas."
+save = "Salvar instruções"
+saved = "Salvo."
+changed = "Quem aparece mudou depois que as cenas foram planejadas: planeje de novo para usar a mudança."
+full = "Até 3 personagens por vídeo."
+
+[who_appears.error]
+too_many = "Escolha no máximo 3 personagens."
+instruction_too_long = "Use no máximo 500 caracteres."
+
+[cast_world]
+save_project = "Salvar em Mundo"
+save_global = "Salvar na biblioteca global"
+hint = "Guarda esta pessoa, com o retrato, como um personagem que outros vídeos podem escolher."
+from_world = "Do mundo"
+
+[character.error]
+name_required = "Dê um nome ao personagem."
+name_too_long = "Use no máximo 60 caracteres."
+appearance_required = "Descreva a aparência do personagem."
+appearance_too_long = "Use no máximo 1.500 caracteres."
+notes_too_long = "Use no máximo 1.000 caracteres."
+
+[world.pictures.origin]
+video = "Desenhada para um vídeo"
+world = "Desenhada aqui"
+saved = "Salva do elenco de um vídeo"
+copied = "Copiada de outro personagem"
+
+[tour.world]
+name = "Tour do Mundo"
+
+[tour.world.characters]
+title = "Seus personagens"
+body = "As pessoas que voltam nos vídeos deste projeto. Escolha um para editar, ou clique em Novo personagem. Os arquivados ficam escondidos até você pedir."
+
+[tour.world.character]
+title = "Aparência e notas"
+body = "A aparência é desenhada em toda imagem de referência e copiada como está para o plano. Sempre e Nunca valem em todo vídeo. Uma nova aparência descarta as imagens; o nome e as notas as mantêm."
+
+[tour.world.actions]
+title = "Salvar e organizar"
+body = "Salve, duplique com um novo nome, arquive um que nenhum vídeo novo deve escolher, ou exclua um que nenhum vídeo em andamento usa."
+
+[tour.world.pictures]
+title = "Imagens de referência"
+body = "Um retrato por visual: um estilo do catálogo, ou as notas de um canal. Um vídeo desenha um antes da primeira cena que precisa dele, ou você o desenha aqui e o mantém depois de revisar. Todo vídeo seguinte nesse visual o reaproveita de graça."
