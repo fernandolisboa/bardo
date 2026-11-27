@@ -12,13 +12,16 @@
 //! shows a picked character in a look that has a picture copies it into its
 //! folder for free; one that has none draws it as any cast portrait
 //! (ADR-0035) and keeps it in the world. Deleting that video leaves it.
+//! Two videos drawn at once never both pay for it: the second waits, then
+//! takes the picture the first kept.
 //!
 //! **Editing a character's appearance** drops its pictures in every look and
 //! the portraits of the videos that show it, whose drawn scenes then read
 //! *old portrait*; its name and notes keep them.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::SystemTime;
 
 use bardo_domain::{
@@ -51,6 +54,53 @@ pub(crate) struct WorldBook {
     pub(crate) folders: Arc<dyn FolderRepository>,
     pub(crate) places: FolderPlaces,
     pub(crate) owner: ProfileId,
+    /// The portraits being drawn now, so two jobs never pay for the same.
+    pub(crate) desk: Arc<PortraitDesk>,
+}
+
+/// The character portraits being drawn now, by character and look. Jobs
+/// run side by side (two videos showing the same character in the same
+/// look): the second waits for the first, then takes the picture it kept
+/// instead of paying for its own. Within one process: the background agent
+/// draws nothing.
+#[derive(Default)]
+pub(crate) struct PortraitDesk {
+    drawing: Mutex<HashSet<(CharacterId, Look)>>,
+    free: Condvar,
+}
+
+impl PortraitDesk {
+    /// Waits until nobody draws `character` in `look`, then holds it until
+    /// the hold is dropped.
+    pub(crate) fn hold(&self, character: CharacterId, look: &Look) -> PortraitHold<'_> {
+        let key = (character, look.clone());
+        let mut drawing = self.drawing.lock().unwrap_or_else(PoisonError::into_inner);
+        while drawing.contains(&key) {
+            drawing = self
+                .free
+                .wait(drawing)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        drawing.insert(key.clone());
+        PortraitHold { desk: self, key }
+    }
+}
+
+/// A portrait one job draws; dropping it lets the next one look.
+pub(crate) struct PortraitHold<'a> {
+    desk: &'a PortraitDesk,
+    key: (CharacterId, Look),
+}
+
+impl Drop for PortraitHold<'_> {
+    fn drop(&mut self) {
+        self.desk
+            .drawing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.key);
+        self.desk.free.notify_all();
+    }
 }
 
 impl WorldBook {
@@ -1507,6 +1557,38 @@ mod tests {
         draw(&app, &third);
         assert_eq!(portraits_asked(&h), 2, "a new look draws a new portrait");
         assert_eq!(kept_pictures(&app, rosa.id).len(), 2);
+    }
+
+    #[test]
+    fn two_videos_drawn_at_once_pay_for_a_shared_portrait_once() {
+        let h = Harness::new();
+        let app = h.start();
+        let first = h.narrated_project(&app);
+        let rosa = character(&app, owner(&app), "Rosa", ROSA);
+        pick(&app, &first, &[(&rosa, "")]);
+        plan(&h, &app, &first);
+        let second = video_on(&app, &first, "The second probe");
+        narrate(&h, &app, &second);
+        pick(&app, &second, &[(&rosa, "")]);
+        plan(&h, &app, &second);
+
+        // Each call takes a while, so both jobs reach her portrait together.
+        *h.images.delay.lock().unwrap() = std::time::Duration::from_millis(150);
+        let one = app
+            .generate_scene_images(first.id, BudgetConsent::Ask)
+            .unwrap();
+        let two = app
+            .generate_scene_images(second.id, BudgetConsent::Ask)
+            .unwrap();
+        done(&app, one);
+        done(&app, two);
+
+        assert_eq!(portraits_asked(&h), 1, "one paid call for her portrait");
+        assert_eq!(kept_pictures(&app, rosa.id).len(), 1);
+        for video in [&first, &second] {
+            let planned = app.scenes(video.id).unwrap().plan.unwrap();
+            assert!(planned.cast()[0].portrait().is_some(), "both show her");
+        }
     }
 
     #[test]

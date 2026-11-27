@@ -1027,6 +1027,7 @@ impl Bardo {
             folders: Arc::clone(&folders),
             places: places.clone(),
             owner: profile.id,
+            desk: Arc::default(),
         };
         let world_picture_handler = world::WorldPictureHandler {
             owner: profile.id,
