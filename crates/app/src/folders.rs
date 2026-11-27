@@ -20,7 +20,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
@@ -120,6 +120,9 @@ pub(crate) struct FolderWatch {
     removals: Arc<dyn RemovalRepository>,
     disk: Arc<dyn ProjectFolders>,
     state: RwLock<Unreachable>,
+    /// One check at a time: a check that read the disk before a change
+    /// must never write its stale answer over a later check's.
+    checking: Mutex<()>,
 }
 
 impl FolderWatch {
@@ -136,6 +139,7 @@ impl FolderWatch {
     /// Reads every project's folder again. True when what is reachable
     /// changed.
     pub(crate) fn check(&self) -> Result<bool, RepositoryError> {
+        let _one_at_a_time = self.checking.lock().unwrap_or_else(|p| p.into_inner());
         let projects: HashSet<ProjectId> = self
             .projects
             .projects(self.owner)?
@@ -249,6 +253,7 @@ impl FolderBook {
             removals: Arc::clone(&removals),
             disk: Arc::clone(&disk),
             state: RwLock::default(),
+            checking: Mutex::default(),
         });
         watch.refresh();
         Self {
