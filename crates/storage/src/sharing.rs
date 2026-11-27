@@ -414,13 +414,42 @@ pub(crate) fn drop_mirrors(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 /// Writes the triggers again, as the tables are now, in one transaction:
-/// another process writing meanwhile always finds them.
+/// another process writing meanwhile always finds them. When the triggers
+/// in place are already these (the usual start), nothing is written, so a
+/// start neither waits for another process's write lock nor makes it
+/// prepare its statements again.
 pub(crate) fn install_mirrors(conn: &mut Connection) -> rusqlite::Result<()> {
+    let marker = fingerprint_trigger(&mirror_triggers(conn)?);
+    if has_trigger(conn, &marker)? {
+        return Ok(());
+    }
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     drop_mirrors(&tx)?;
     let sql = mirror_triggers(&tx)?;
+    let marker = fingerprint_trigger(&sql);
     tx.execute_batch(&sql)?;
+    // A trigger that never fires, named after the text of the others.
+    tx.execute_batch(&format!(
+        "CREATE TRIGGER {marker} BEFORE DELETE ON template_share WHEN 0 BEGIN SELECT 1; END;"
+    ))?;
     tx.commit()
+}
+
+fn has_trigger(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ?1)",
+        [name],
+        |row| row.get(0),
+    )
+}
+
+/// The marker trigger's name for these triggers: FNV-1a of their text,
+/// stable across builds.
+fn fingerprint_trigger(sql: &str) -> String {
+    let hash = sql.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    });
+    format!("{TRIGGER_PREFIX}fingerprint_{hash:016x}")
 }
 
 /// Takes the database back to before migration 85, for the tests that
@@ -1796,6 +1825,35 @@ mod tests {
                 .image,
             "original"
         );
+    }
+
+    #[test]
+    fn a_start_with_the_triggers_in_place_writes_nothing() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::migrations::run(&mut conn).unwrap();
+        install_mirrors(&mut conn).unwrap();
+        let cookie = |conn: &rusqlite::Connection| -> i64 {
+            conn.pragma_query_value(None, "schema_version", |row| row.get(0))
+                .unwrap()
+        };
+        let before = cookie(&conn);
+        install_mirrors(&mut conn).unwrap();
+        assert_eq!(cookie(&conn), before, "the schema was written again");
+        // Triggers that differ from these are written again.
+        conn.execute_batch("DROP TRIGGER bardo_mirror_persona_update;")
+            .unwrap();
+        let marker: String = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE name LIKE 'bardo_mirror_fingerprint_%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        conn.execute_batch(&format!("DROP TRIGGER {marker};"))
+            .unwrap();
+        install_mirrors(&mut conn).unwrap();
+        assert!(has_trigger(&conn, "bardo_mirror_persona_update").unwrap());
+        assert!(has_trigger(&conn, &marker).unwrap());
     }
 
     #[test]
