@@ -5487,6 +5487,7 @@ name_clash = "This project already has one with that name. Pick another name."
 other_project = "That belongs to another project. Pick one of this project's or a global one."
 
 [loose]
+delete_hint = "Removes the loose video from Bardo. It was never published, and its costs keep its name."
 not_saved = "The video could not be saved. Try again."
 not_found = "That loose video is no longer there."
 move_busy = "A job of this video is queued or running. Let it finish, or cancel it on Jobs, then move the video."
@@ -5519,7 +5520,7 @@ move_confirm = "Move the video"
 move_no_channels = "No project has a channel yet. Create one in a project first."
 moved = "Moved. The video is now among the project's videos."
 differs_language = "This video is in {video}; the channel speaks {channel}. The video stays in {video}."
-differs_country = "This video aims at {video}; the channel at {channel}. The video keeps {video}."
+differs_country = "This video's country is {video}; the channel's is {channel}. The video keeps {video}."
 overview = "No project is open. Your loose videos are under Videos."
 open_videos = "Show the loose videos"
 

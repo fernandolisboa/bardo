@@ -169,6 +169,14 @@ pub fn seed_showcase(bardo: &mut Bardo) -> anyhow::Result<Value> {
         }
     }
     world(&db, profile, &space, &probe, &ffmpeg, now)?;
+    // A loose video under No project, from the channel's settings (#341).
+    bardo
+        .start_loose_video(bardo_app::LooseVideoDraft {
+            title: "Why the Moon drifts away".into(),
+            angle: "a few centimetres a year, measured with mirrors".into(),
+            copy_from: Some(space.id),
+        })
+        .map_err(|error| anyhow!("the loose video: {error}"))?;
 
     Ok(json!({
         "profile": profile.to_string(),

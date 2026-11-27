@@ -5487,6 +5487,7 @@ name_clash = "Este projeto já tem um item com esse nome. Escolha outro nome."
 other_project = "Isso pertence a outro projeto. Escolha um deste projeto ou um global."
 
 [loose]
+delete_hint = "Remove o vídeo avulso do Bardo. Ele nunca foi publicado, e os custos dele mantêm o nome."
 not_saved = "Não foi possível salvar o vídeo. Tente de novo."
 not_found = "Esse vídeo avulso não existe mais."
 move_busy = "Um trabalho deste vídeo está na fila ou rodando. Deixe terminar, ou cancele em Trabalhos, e depois mova o vídeo."
@@ -5519,7 +5520,7 @@ move_confirm = "Mover o vídeo"
 move_no_channels = "Nenhum projeto tem canal ainda. Crie um em um projeto primeiro."
 moved = "Movido. O vídeo agora está entre os vídeos do projeto."
 differs_language = "Este vídeo está em {video}; o canal fala {channel}. O vídeo continua em {video}."
-differs_country = "Este vídeo mira {video}; o canal, {channel}. O vídeo continua com {video}."
+differs_country = "O país deste vídeo é {video}; o do canal, {channel}. O vídeo mantém {video}."
 overview = "Nenhum projeto está aberto. Seus vídeos avulsos ficam em Vídeos."
 open_videos = "Mostrar os vídeos avulsos"
 

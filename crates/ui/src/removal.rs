@@ -223,6 +223,14 @@ impl RemovalPanel {
                     ],
                 )
             }
+            // A loose video has no idea to give back (#341).
+            (RemovalMode::Delete, Removable::Video(id))
+                if bardo
+                    .loose_videos()
+                    .is_ok_and(|videos| videos.iter().any(|video| video.id == id)) =>
+            {
+                bardo.text(Text::DeleteLooseVideoHint).into_owned()
+            }
             (RemovalMode::Delete, Removable::Video(_)) => {
                 bardo.text(Text::DeleteVideoHint).into_owned()
             }

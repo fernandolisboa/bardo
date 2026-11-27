@@ -682,6 +682,7 @@ impl ThemesScreen {
                     Some(form) => self.render_own_idea(form, cx),
                     None => v_flex()
                         .gap_2()
+                        .items_start()
                         .child(
                             Button::new("own-idea")
                                 .outline()

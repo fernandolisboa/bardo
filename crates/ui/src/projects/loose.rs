@@ -363,7 +363,10 @@ impl ProjectsScreen {
             kit::field(
                 tr(bardo, Text::LooseMoveChannel),
                 None,
-                Select::new(&form.channel).small().into_any_element(),
+                Select::new(&form.channel)
+                    .small()
+                    .placeholder(tr(bardo, Text::LooseMoveChannel))
+                    .into_any_element(),
                 None,
             )
             .into_any_element()
