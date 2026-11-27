@@ -702,7 +702,7 @@ pub const PROJECTS: Tour = {
     const HEADER: WhenMissing = WhenMissing::LightPart(TourAnchor::Header);
     Tour {
         id: TourId::Projects,
-        version: 5,
+        version: 6,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "switcher", control(Control::ProjectSwitcher))

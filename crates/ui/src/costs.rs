@@ -85,6 +85,8 @@ pub struct CostsScreen {
     new_price: Entity<InputState>,
     add_error: Option<Text>,
     revision: u64,
+    /// *Deleted projects* is open (#336).
+    deleted_open: bool,
     /// The page's scroll, so a tour brings what it lights into view.
     scroll: ScrollHandle,
     _poll: Task<()>,
@@ -149,6 +151,7 @@ impl CostsScreen {
             new_price,
             add_error: None,
             revision,
+            deleted_open: false,
             scroll: ScrollHandle::new(),
             _poll: poll,
             _subscriptions: subscriptions,
@@ -804,7 +807,127 @@ impl CostsScreen {
     }
 
     /// The month's spend by project, with the filter for the lists below.
-    fn by_project(&self, view: &CostsView, cx: &App) -> AnyElement {
+    /// Forgets a deleted project's or video's name: it shows by its number
+    /// from now on.
+    fn forget_name(&mut self, deleted: &bardo_app::DeletedName, cx: &mut Context<Self>) {
+        self.error = self
+            .bardo
+            .read(cx)
+            .forget_deleted_name(deleted.id)
+            .err()
+            .map(|_| Text::RemovalNotSaved);
+        self.load(cx);
+        cx.notify();
+    }
+
+    /// *Forget the name* of a deleted project or video whose name is kept.
+    fn forget_button(
+        &self,
+        deleted: Option<&bardo_app::DeletedName>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let deleted = deleted.filter(|deleted| deleted.name.is_some())?.clone();
+        let bardo = self.bardo.read(cx);
+        Some(
+            Button::new(SharedString::from(format!(
+                "forget-name-{}",
+                deleted.short_id
+            )))
+            .ghost()
+            .xsmall()
+            .label(tr(bardo, Text::ForgetName))
+            .tooltip(tr(bardo, Text::ForgetNameHint))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.forget_name(&deleted, cx);
+            }))
+            .into_any_element(),
+        )
+    }
+
+    /// One collapsible line *Deleted projects*, with each one's kept name
+    /// and amount when open (#336).
+    fn deleted_projects(&self, view: &CostsView, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if view.deleted_projects.is_empty() {
+            return None;
+        }
+        let total = view
+            .deleted_projects
+            .iter()
+            .fold(bardo_app::bardo_domain::Money::ZERO, |sum, row| {
+                sum.saturating_add(row.amount)
+            });
+        let open = self.deleted_open;
+        let rows: Vec<AnyElement> = if open {
+            view.deleted_projects
+                .iter()
+                .map(|row| {
+                    let forget = self.forget_button(row.deleted.as_ref(), cx);
+                    let bardo = self.bardo.read(cx);
+                    let name = row.deleted.as_ref().map_or_else(
+                        || tr(bardo, Text::CostsUnknownProject),
+                        |deleted| {
+                            SharedString::from(bardo.deleted_name_text(
+                                deleted,
+                                bardo_app::bardo_domain::DeletedKind::Project,
+                            ))
+                        },
+                    );
+                    let money = bardo.money(row.amount);
+                    h_flex()
+                        .gap_2()
+                        .py_1()
+                        .pl_4()
+                        .items_center()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(spend_line(cx, name, None, money)),
+                        )
+                        .children(forget)
+                        .into_any_element()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let bardo = self.bardo.read(cx);
+        let line = spend_line(
+            cx,
+            tr(bardo, Text::DeletedProjects),
+            None,
+            bardo.money(total),
+        );
+        Some(
+            v_flex()
+                .child(
+                    h_flex()
+                        .id("costs-deleted-projects")
+                        .gap_2()
+                        .py_1()
+                        .items_center()
+                        .cursor_pointer()
+                        .child(
+                            gpui_kit::component::Icon::new(if open {
+                                IconName::ChevronDown
+                            } else {
+                                IconName::ChevronRight
+                            })
+                            .size(px(12.)),
+                        )
+                        .child(div().flex_1().min_w_0().child(line))
+                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.deleted_open = !this.deleted_open;
+                            cx.notify();
+                        })),
+                )
+                .children(rows)
+                .into_any_element(),
+        )
+    }
+
+    fn by_project(&self, view: &CostsView, cx: &mut Context<Self>) -> AnyElement {
+        let deleted = self.deleted_projects(view, cx);
         let bardo = self.bardo.read(cx);
         let rows = view.projects.iter().map(|row| {
             let name = match (&row.name, row.project) {
@@ -834,6 +957,7 @@ impl CostsScreen {
                 .gap_2()
                 .child(section_title(cx, tr(bardo, Text::CostsByProject)))
                 .children(rows)
+                .children(deleted)
                 .child(kit::field(
                     tr(bardo, Text::FilterProjectLabel),
                     None,
@@ -846,11 +970,17 @@ impl CostsScreen {
 
     /// Spend by project, then by channel (with bars) and the videos that
     /// cost the most.
-    fn breakdown(&self, cx: &App) -> Vec<AnyElement> {
+    fn breakdown(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(view) = self.view.as_ref() else {
             return Vec::new();
         };
         let projects = self.by_project(view, cx);
+        // A deleted video's kept name, and Forget the name (#336).
+        let forgets: Vec<Option<AnyElement>> = view
+            .videos
+            .iter()
+            .map(|row| self.forget_button(row.deleted.as_ref(), cx))
+            .collect();
         let bardo = self.bardo.read(cx);
         let t = look(cx).tokens;
         if view.channels.is_empty() && view.videos.is_empty() {
@@ -906,20 +1036,35 @@ impl CostsScreen {
                         ),
                 )
         });
-        let videos = view.videos.iter().map(|row: &SpendRow| {
-            div()
-                .py_1()
-                .border_t(t.border_width)
-                .border_color(t.border)
-                .child(spend_line(
-                    cx,
-                    row.name
-                        .clone()
-                        .map_or_else(|| tr(bardo, Text::CostsUnknownVideo), SharedString::from),
-                    row.channel.clone().map(SharedString::from),
-                    bardo.money(row.amount),
-                ))
-        });
+        let videos =
+            view.videos
+                .iter()
+                .zip(forgets)
+                .map(|(row, forget): (&SpendRow, _)| {
+                    let name = match &row.deleted {
+                        Some(deleted) => SharedString::from(bardo.deleted_name_text(
+                            deleted,
+                            bardo_app::bardo_domain::DeletedKind::Video,
+                        )),
+                        None => row
+                            .name
+                            .clone()
+                            .map_or_else(|| tr(bardo, Text::CostsUnknownVideo), SharedString::from),
+                    };
+                    h_flex()
+                        .gap_2()
+                        .py_1()
+                        .items_center()
+                        .border_t(t.border_width)
+                        .border_color(t.border)
+                        .child(div().flex_1().min_w_0().child(spend_line(
+                            cx,
+                            name,
+                            row.channel.clone().map(SharedString::from),
+                            bardo.money(row.amount),
+                        )))
+                        .children(forget)
+                });
         // The aside scrolls apart from the page in Studio, so the tour
         // lights these where they are, without scrolling.
         vec![

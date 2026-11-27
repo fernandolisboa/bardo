@@ -168,6 +168,73 @@ pub enum Text {
     CostsByProject,
     ProjectColorName(ProjectColor),
     MoveChannelBlock(crate::MoveBlock),
+    // Archive and delete (#336).
+    RemovalNotFound,
+    RemovalBlocked,
+    RemovalWrongState,
+    RemovalNotSaved,
+    JobWaitsArchived,
+    DeleteNameMismatch,
+    DeleteFolderNotRemoved,
+    DeleteNotDisconnected,
+    SwitcherArchiveProject,
+    SwitcherDeleteProject,
+    /// Placeholders: `{n}`.
+    SwitcherArchivedProjects,
+    SwitcherBack,
+    /// Placeholders: `{name}`.
+    ArchiveProjectTitle,
+    ArchiveProjectHint,
+    ArchiveCompress,
+    ArchiveCompressHint,
+    ArchiveConfirm,
+    /// Placeholders: `{name}`.
+    ArchiveVideoTitle,
+    ArchiveVideoHint,
+    ArchivedProjectsTitle,
+    ArchivedProjectsEmpty,
+    ArchivedProjectsHint,
+    ArchivedPacked,
+    ArchivedBusy,
+    Unarchive,
+    UnarchiveUnpacking,
+    DeleteAction,
+    /// Placeholders: `{name}`.
+    DeleteProjectTitle,
+    /// Placeholders: `{name}`.
+    DeleteVideoTitle,
+    /// Placeholders: `{videos}`, `{connected}`.
+    DeleteProjectHint,
+    DeleteVideoHint,
+    /// Placeholders: `{size}`, `{folder}`.
+    DeleteFolderRecycle,
+    /// Placeholders: `{size}`, `{folder}`, `{reason}`.
+    DeleteFolderPermanent,
+    DeleteNoFolder,
+    /// Placeholders: `{name}`.
+    DeleteTypeName,
+    DeletePermanently,
+    DeletePermanentlyHint,
+    DeleteConfirm,
+    DeleteRunning,
+    VideosShowArchived,
+    VideosArchivedEmpty,
+    ArchiveVideoAction,
+    ArchivedTag,
+    VideoArchivedNotice,
+    DeletedProjects,
+    /// Placeholders: `{name}`, `{date}`.
+    DeletedOn,
+    /// Placeholders: `{id}`.
+    DeletedProjectForgotten,
+    /// Placeholders: `{id}`.
+    DeletedVideoForgotten,
+    ForgetName,
+    ForgetNameHint,
+    ThemeStartAgain,
+    ThemeNoVideo,
+    RemovalBlock(bardo_domain::RemovalBlock),
+    PermanentReasonText(bardo_domain::PermanentReason),
     ChannelPersona,
     ChannelPersonaNone,
     ChannelPersonaHint,
@@ -2346,6 +2413,8 @@ pub enum Text {
     ScheduleFailed,
     ScheduleNotAllowed,
     DateTimeFormat,
+    /// A day without its time, e.g. `October 4, 2026`.
+    DateFormat,
     TimeFormat,
     TimeAm,
     TimePm,
@@ -3301,6 +3370,76 @@ impl Text {
                 crate::MoveBlock::HeldOnNetwork => "move_channel_block.held_on_network",
                 crate::MoveBlock::ActiveJob => "move_channel_block.active_job",
                 crate::MoveBlock::VersionElsewhere => "move_channel_block.version_elsewhere",
+            },
+            Text::RemovalNotFound => "removal.not_found",
+            Text::RemovalBlocked => "removal.blocked",
+            Text::RemovalWrongState => "removal.wrong_state",
+            Text::RemovalNotSaved => "removal.not_saved",
+            Text::JobWaitsArchived => "removal.job_waits",
+            Text::DeleteNameMismatch => "delete.name_mismatch",
+            Text::DeleteFolderNotRemoved => "delete.folder_not_removed",
+            Text::DeleteNotDisconnected => "delete.not_disconnected",
+            Text::SwitcherArchiveProject => "switcher_removal.archive",
+            Text::SwitcherDeleteProject => "switcher_removal.delete",
+            Text::SwitcherArchivedProjects => "switcher_removal.archived",
+            Text::SwitcherBack => "switcher_removal.back",
+            Text::ArchiveProjectTitle => "archive.project_title",
+            Text::ArchiveProjectHint => "archive.project_hint",
+            Text::ArchiveCompress => "archive.compress",
+            Text::ArchiveCompressHint => "archive.compress_hint",
+            Text::ArchiveConfirm => "archive.confirm",
+            Text::ArchiveVideoTitle => "archive.video_title",
+            Text::ArchiveVideoHint => "archive.video_hint",
+            Text::ArchivedProjectsTitle => "archived.title",
+            Text::ArchivedProjectsEmpty => "archived.empty",
+            Text::ArchivedProjectsHint => "archived.hint",
+            Text::ArchivedPacked => "archived.packed",
+            Text::ArchivedBusy => "archived.busy",
+            Text::Unarchive => "archived.unarchive",
+            Text::UnarchiveUnpacking => "archived.unpacking",
+            Text::DeleteAction => "delete.action",
+            Text::DeleteProjectTitle => "delete.project_title",
+            Text::DeleteVideoTitle => "delete.video_title",
+            Text::DeleteProjectHint => "delete.project_hint",
+            Text::DeleteVideoHint => "delete.video_hint",
+            Text::DeleteFolderRecycle => "delete.folder_recycle",
+            Text::DeleteFolderPermanent => "delete.folder_permanent",
+            Text::DeleteNoFolder => "delete.no_folder",
+            Text::DeleteTypeName => "delete.type_name",
+            Text::DeletePermanently => "delete.permanently",
+            Text::DeletePermanentlyHint => "delete.permanently_hint",
+            Text::DeleteConfirm => "delete.confirm",
+            Text::DeleteRunning => "delete.running",
+            Text::VideosShowArchived => "videos_removal.show_archived",
+            Text::VideosArchivedEmpty => "videos_removal.archived_empty",
+            Text::ArchiveVideoAction => "videos_removal.archive",
+            Text::ArchivedTag => "videos_removal.archived_tag",
+            Text::VideoArchivedNotice => "videos_removal.archived_notice",
+            Text::DeletedProjects => "costs_deleted.projects",
+            Text::DeletedOn => "costs_deleted.deleted_on",
+            Text::DeletedProjectForgotten => "costs_deleted.project_forgotten",
+            Text::DeletedVideoForgotten => "costs_deleted.video_forgotten",
+            Text::ForgetName => "costs_deleted.forget",
+            Text::ForgetNameHint => "costs_deleted.forget_hint",
+            Text::ThemeStartAgain => "themes_restart.start",
+            Text::ThemeNoVideo => "themes_restart.no_video",
+            Text::RemovalBlock(block) => match block {
+                bardo_domain::RemovalBlock::ScheduledPost => "removal_block.scheduled_post",
+                bardo_domain::RemovalBlock::HeldOnNetwork => "removal_block.held_on_network",
+                bardo_domain::RemovalBlock::ActiveJob => "removal_block.active_job",
+                bardo_domain::RemovalBlock::MediaToMove => "removal_block.media_to_move",
+            },
+            Text::PermanentReasonText(reason) => match reason {
+                bardo_domain::PermanentReason::RemovableDrive => {
+                    "delete.permanent_reason.removable_drive"
+                }
+                bardo_domain::PermanentReason::NetworkDrive => {
+                    "delete.permanent_reason.network_drive"
+                }
+                bardo_domain::PermanentReason::LargerThanBin => {
+                    "delete.permanent_reason.larger_than_bin"
+                }
+                bardo_domain::PermanentReason::BinOff => "delete.permanent_reason.bin_off",
             },
             Text::AppTagline => "app.tagline",
             Text::UiLanguageLabel => "settings.ui_language",
@@ -6024,6 +6163,7 @@ impl Text {
             Text::MissedNotMissed => "missed.not_missed",
             Text::MissedNotUpdated => "missed.not_updated",
             Text::DateTimeFormat => "date_time.format",
+            Text::DateFormat => "date_time.date",
             Text::TimeFormat => "date_time.time",
             Text::TimeAm => "date_time.am",
             Text::TimePm => "date_time.pm",
@@ -6846,6 +6986,18 @@ impl Catalog {
         )
     }
 
+    /// A day on this computer's calendar, e.g. `October 4, 2026`.
+    pub fn date_here(&self, local: &LocalTime) -> String {
+        self.format(
+            Text::DateFormat,
+            &[
+                ("month", &self.get(Text::MonthName(local.month))),
+                ("day", &local.day.to_string()),
+                ("year", &local.year.to_string()),
+            ],
+        )
+    }
+
     /// The time of day on a wall clock, e.g. `6:00 PM` or `18:00`.
     pub fn time(&self, local: &LocalTime) -> String {
         let (hour12, after_noon) = local.twelve_hour();
@@ -7032,6 +7184,58 @@ mod tests {
             Text::FilterNoProject,
             Text::FilterProjectLabel,
             Text::CostsByProject,
+            Text::RemovalNotFound,
+            Text::RemovalBlocked,
+            Text::RemovalWrongState,
+            Text::RemovalNotSaved,
+            Text::JobWaitsArchived,
+            Text::DeleteNameMismatch,
+            Text::DeleteFolderNotRemoved,
+            Text::DeleteNotDisconnected,
+            Text::SwitcherArchiveProject,
+            Text::SwitcherDeleteProject,
+            Text::SwitcherArchivedProjects,
+            Text::SwitcherBack,
+            Text::ArchiveProjectTitle,
+            Text::ArchiveProjectHint,
+            Text::ArchiveCompress,
+            Text::ArchiveCompressHint,
+            Text::ArchiveConfirm,
+            Text::ArchiveVideoTitle,
+            Text::ArchiveVideoHint,
+            Text::ArchivedProjectsTitle,
+            Text::ArchivedProjectsEmpty,
+            Text::ArchivedProjectsHint,
+            Text::ArchivedPacked,
+            Text::ArchivedBusy,
+            Text::Unarchive,
+            Text::UnarchiveUnpacking,
+            Text::DeleteAction,
+            Text::DeleteProjectTitle,
+            Text::DeleteVideoTitle,
+            Text::DeleteProjectHint,
+            Text::DeleteVideoHint,
+            Text::DeleteFolderRecycle,
+            Text::DeleteFolderPermanent,
+            Text::DeleteNoFolder,
+            Text::DeleteTypeName,
+            Text::DeletePermanently,
+            Text::DeletePermanentlyHint,
+            Text::DeleteConfirm,
+            Text::DeleteRunning,
+            Text::VideosShowArchived,
+            Text::VideosArchivedEmpty,
+            Text::ArchiveVideoAction,
+            Text::ArchivedTag,
+            Text::VideoArchivedNotice,
+            Text::DeletedProjects,
+            Text::DeletedOn,
+            Text::DeletedProjectForgotten,
+            Text::DeletedVideoForgotten,
+            Text::ForgetName,
+            Text::ForgetNameHint,
+            Text::ThemeStartAgain,
+            Text::ThemeNoVideo,
             Text::AppTagline,
             Text::UiLanguageLabel,
             Text::LanguageNotSaved,
@@ -8105,6 +8309,16 @@ mod tests {
         texts.extend(ChannelFieldError::ALL.map(Text::ChannelFieldError));
         texts.extend(ProjectColor::ALL.map(Text::ProjectColorName));
         texts.extend(crate::MoveBlock::ALL.map(Text::MoveChannelBlock));
+        texts.extend(bardo_domain::RemovalBlock::ALL.map(Text::RemovalBlock));
+        texts.extend(
+            [
+                bardo_domain::PermanentReason::RemovableDrive,
+                bardo_domain::PermanentReason::NetworkDrive,
+                bardo_domain::PermanentReason::LargerThanBin,
+                bardo_domain::PermanentReason::BinOff,
+            ]
+            .map(Text::PermanentReasonText),
+        );
         texts.extend(crate::LocateError::ALL.map(Text::LocateRefused));
         texts.extend(PersonaFieldError::ALL.map(Text::PersonaFieldError));
         texts.extend(Network::ALL.map(Text::NetworkName));
@@ -9833,6 +10047,7 @@ mod tests {
         texts.push(Text::MissedNotMissed);
         texts.push(Text::MissedNotUpdated);
         texts.push(Text::DateTimeFormat);
+        texts.push(Text::DateFormat);
         texts.push(Text::TimeFormat);
         texts.push(Text::TimeAm);
         texts.push(Text::TimePm);

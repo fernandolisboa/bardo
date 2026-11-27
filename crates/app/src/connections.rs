@@ -1517,6 +1517,11 @@ impl Bardo {
         })
     }
 
+    /// Whether the account holds a connection (tokens Bardo keeps).
+    pub(crate) fn has_connection(&self, id: NetworkAccountId) -> bool {
+        matches!(self.connection_book.connections.states.get(id), Ok(Some(_)))
+    }
+
     /// Prepares renewing the profile's connections that are due, for the
     /// app's start.
     pub fn connection_renewal(&self) -> ConnectionRenewal {
@@ -2786,6 +2791,25 @@ mod tests {
             app.connection_state(&account).unwrap(),
             ConnectionState::NotConnected
         );
+    }
+
+    #[test]
+    fn deleting_a_project_disconnects_its_accounts_as_disconnect_does() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.ready();
+        connect(&mut app, &account).unwrap();
+        let project = app.open_project().unwrap().unwrap();
+        let target = crate::Removable::Project(project.id);
+        assert_eq!(app.delete_preview(target).unwrap().connected, 1);
+        let name = project.name().to_owned();
+        app.deletion(target, &name, false).unwrap().run().unwrap();
+        assert_eq!(
+            harness.sign_in.calls().last(),
+            Some(&Call::Revoke("1//fake-refresh-0001".into()))
+        );
+        assert_eq!(harness.tokens(&app, &account), None);
+        assert_eq!(harness.state(&account), None);
+        assert!(app.projects().unwrap().is_empty());
     }
 
     #[test]

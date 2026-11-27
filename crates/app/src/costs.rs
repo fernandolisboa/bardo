@@ -1019,6 +1019,8 @@ pub struct SpendRow {
     /// For a video, its channel's name.
     pub channel: Option<String>,
     pub amount: Money,
+    /// For a video the user deleted: its kept name and when (#336).
+    pub deleted: Option<crate::DeletedName>,
 }
 
 /// Spend on one project. `name` is the project's name now, or the name
@@ -1031,6 +1033,8 @@ pub struct ProjectSpendRow {
     /// `None` when the project is gone or there is none.
     pub color: Option<ProjectColor>,
     pub amount: Money,
+    /// For a project the user deleted: its kept name and when (#336).
+    pub deleted: Option<crate::DeletedName>,
 }
 
 /// One line of the rate table.
@@ -1051,8 +1055,11 @@ pub struct CostsView {
     /// Every paid provider, in settings order.
     pub providers: Vec<ProviderSpend>,
     /// Every project that spent this month, most spent first, whatever
-    /// the filter.
+    /// the filter; deleted ones are in `deleted_projects`.
     pub projects: Vec<ProjectSpendRow>,
+    /// The deleted projects that spent this month, most spent first: one
+    /// line *Deleted projects* that opens (#336).
+    pub deleted_projects: Vec<ProjectSpendRow>,
     /// The filter `channels` and `videos` were read with.
     pub filter: ProjectFilter,
     /// Most spent first.
@@ -1192,21 +1199,49 @@ impl Bardo {
                 .filter(|record| filter.keeps(record.origin.project)),
         );
         let known = self.projects().unwrap_or_default();
-        let projects = spend
+        let deletions = self.deleted_work();
+        let deletion = |id: uuid::Uuid| {
+            deletions
+                .iter()
+                .find(|deleted| deleted.id == id)
+                .map(crate::DeletedName::from)
+        };
+        let (deleted_projects, projects): (Vec<ProjectSpendRow>, Vec<ProjectSpendRow>) = spend
             .owners
             .iter()
             .map(|(id, name, amount)| {
                 let now = id.and_then(|id| known.iter().find(|project| project.id == id));
+                let deleted = match (id, now) {
+                    (Some(id), None) => deletion(id.as_uuid()),
+                    _ => None,
+                };
                 ProjectSpendRow {
                     project: *id,
-                    name: now
-                        .map(|project| project.name().to_owned())
-                        .or_else(|| name.clone()),
+                    name: match &deleted {
+                        Some(deleted) => deleted.name.clone(),
+                        None => now
+                            .map(|project| project.name().to_owned())
+                            .or_else(|| name.clone()),
+                    },
                     color: now.map(|project| project.details.color()),
                     amount: *amount,
+                    deleted,
                 }
             })
-            .collect();
+            .partition(|row| row.deleted.is_some());
+        // The names records kept, the latest of each, for what is gone.
+        let mut kept_titles: std::collections::HashMap<VideoProjectId, String> =
+            std::collections::HashMap::new();
+        let mut kept_channels: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for record in &records {
+            if let (Some(video), Some(title)) = (record.project, &record.origin.video_title) {
+                kept_titles.insert(video, title.clone());
+            }
+            if let (Some(channel), Some(name)) = (record.channel, &record.origin.channel_name) {
+                kept_channels.insert(channel.to_string(), name.clone());
+            }
+        }
         let budgets = book.costs.budgets(self.profile.id)?;
         let providers = Provider::paid()
             .map(|provider| {
@@ -1228,30 +1263,49 @@ impl Bardo {
                 Some(id) => self
                     .channels
                     .get(*id)?
-                    .map(|channel| channel.details.name().to_owned()),
+                    .map(|channel| channel.details.name().to_owned())
+                    .or_else(|| kept_channels.get(&id.to_string()).cloned()),
                 None => None,
             };
             channels.push(SpendRow {
                 name,
                 channel: None,
                 amount: *amount,
+                deleted: None,
             });
         }
         let mut videos = Vec::new();
-        for (project, amount) in &kept.projects {
-            let project = self.themes.project(*project)?;
-            let channel = match &project {
-                Some(project) => self
-                    .channels
-                    .get(project.channel)?
-                    .map(|channel| channel.details.name().to_owned()),
-                None => None,
+        for (video, amount) in &kept.projects {
+            let project = self.themes.project(*video)?;
+            let row = match project {
+                Some(project) => SpendRow {
+                    channel: self
+                        .channels
+                        .get(project.channel)?
+                        .map(|channel| channel.details.name().to_owned()),
+                    name: Some(project.title),
+                    amount: *amount,
+                    deleted: None,
+                },
+                None => {
+                    let deleted = deletion(video.as_uuid());
+                    let forgotten = deleted.as_ref().is_some_and(|d| d.name.is_none());
+                    let record = records
+                        .iter()
+                        .rfind(|record| record.project == Some(*video));
+                    SpendRow {
+                        name: if forgotten {
+                            None
+                        } else {
+                            kept_titles.get(video).cloned()
+                        },
+                        channel: record.and_then(|record| record.origin.channel_name.clone()),
+                        amount: *amount,
+                        deleted,
+                    }
+                }
             };
-            videos.push(SpendRow {
-                name: project.map(|project| project.title),
-                channel,
-                amount: *amount,
-            });
+            videos.push(row);
         }
 
         let changes = book.costs.rate_changes(self.profile.id)?;
@@ -1278,6 +1332,7 @@ impl Bardo {
             total: spend.total,
             providers,
             projects,
+            deleted_projects,
             filter,
             channels,
             videos,
@@ -1449,6 +1504,7 @@ pub(crate) mod tests {
             total: providers.iter().map(|p| p.spent).sum(),
             providers,
             projects: Vec::new(),
+            deleted_projects: Vec::new(),
             filter: ProjectFilter::All,
             channels: Vec::new(),
             videos: Vec::new(),

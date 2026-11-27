@@ -324,6 +324,14 @@ impl JobsPanel {
                     .child(tr(bardo, Text::JobWaitsForFolder))
                     .into_any_element(),
             ),
+            // A job held back while its project or video is archived (#336).
+            (JobState::Queued, None) if bardo.waits_archived(job) => Some(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(tr(bardo, Text::JobWaitsArchived))
+                    .into_any_element(),
+            ),
             // A job that waits for its time (a scheduled post) says when.
             (JobState::Queued, None) => job.run_at().map(|at| {
                 div()

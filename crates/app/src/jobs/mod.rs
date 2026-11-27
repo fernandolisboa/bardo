@@ -76,6 +76,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) restores: RestoreHandler,
     pub(crate) updates: crate::updates::UpdateDownloadHandler,
     pub(crate) move_media: crate::folders::MoveMediaHandler,
+    pub(crate) pack_media: crate::removal::PackMediaHandler,
 }
 
 /// The handler of every job kind Bardo ships.
@@ -118,6 +119,7 @@ pub(crate) fn built_in_handlers(
         restores,
         updates,
         move_media,
+        pack_media,
     } = built_in;
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -167,6 +169,8 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Restore, Arc::new(restores));
     handlers.insert(JobKind::UpdateDownload, Arc::new(updates));
     handlers.insert(JobKind::MoveMedia, Arc::new(move_media));
+    handlers.insert(JobKind::UnpackMedia, Arc::new(pack_media.unpacking()));
+    handlers.insert(JobKind::PackMedia, Arc::new(pack_media));
     handlers
 }
 
@@ -2240,6 +2244,8 @@ mod tests {
             files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
             folders: Arc::clone(db) as _,
             project_folders: bardo_storage::MemoryProjectFolders::for_database(db),
+            removals: Arc::clone(db) as _,
+            trash: Arc::new(bardo_storage::MemoryTrash::default()),
             places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
             research: Arc::clone(db) as _,

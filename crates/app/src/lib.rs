@@ -56,6 +56,7 @@ mod projects;
 mod provider_keys;
 mod proxies;
 mod publications;
+mod removal;
 mod render;
 mod research;
 mod retention;
@@ -211,6 +212,7 @@ pub use publications::{
     ChannelMetricsView, ChannelPost, MetricsError, MetricsStatus, OwnerAccess, PublicationError,
     PublishedPost,
 };
+pub use removal::{ArchivedProject, DeletePreview, DeletedName, Deletion, Removable, RemovalError};
 pub use render::{
     CheckFound, RenderChecks, RenderError, RenderReview, RenderSummary, RenderTarget,
     render_job_files,
@@ -365,6 +367,10 @@ pub struct Repositories {
     pub folders: Arc<dyn bardo_domain::FolderRepository>,
     /// Project folders on disk: made, recognized and moved.
     pub project_folders: Arc<dyn bardo_domain::ProjectFolders>,
+    /// Archived videos, and what was deleted (issue #336).
+    pub removals: Arc<dyn bardo_domain::RemovalRepository>,
+    /// The Recycle Bin, where a deleted folder goes.
+    pub trash: Arc<dyn bardo_domain::Trash>,
     /// The folders of this computer that decide where media goes.
     pub places: bardo_domain::FolderPlaces,
     /// Voice samples heard on the Personas screen, kept on this machine.
@@ -424,6 +430,7 @@ impl Repositories {
             installers: Arc::new(LocalInstallers::new(updates_dir(&paths.local))),
             installer_runner: Arc::new(ProcessInstallerRunner),
             project_folders: Arc::new(bardo_storage::LocalProjectFolders::new()),
+            trash: Arc::new(bardo_storage::SystemTrash),
             backups: Arc::new(LocalBackups::with_places(
                 Arc::clone(&db),
                 paths,
@@ -484,6 +491,8 @@ impl Repositories {
             youtube_data: Arc::clone(&db) as _,
             folders: Arc::clone(&db) as _,
             project_folders: bardo_storage::MemoryProjectFolders::for_database(&db),
+            removals: Arc::clone(&db) as _,
+            trash: Arc::new(bardo_storage::MemoryTrash::default()),
             research: db,
             files,
             places: test_places(),
@@ -823,6 +832,8 @@ impl Bardo {
             files,
             folders,
             project_folders,
+            removals,
+            trash,
             places,
             voice_samples,
             secrets,
@@ -1179,6 +1190,8 @@ impl Bardo {
             places,
             Arc::clone(&projects),
             Arc::clone(&channels),
+            removals,
+            trash,
         );
         let move_media_handler = Self::move_media_handler(
             profile.id,
@@ -1187,6 +1200,7 @@ impl Bardo {
             Arc::clone(&jobs),
             job_settings.tick,
         );
+        let pack_media_handler = Self::pack_media_handler(&folder_book, Arc::clone(&projects));
         let program = std::env::current_exe().unwrap_or_default();
         let runner = match role {
             RunnerRole::App => crate::jobs::Runner::app(),
@@ -1236,6 +1250,7 @@ impl Bardo {
                         installers: Arc::clone(&installers),
                     },
                     move_media: move_media_handler,
+                    pack_media: pack_media_handler,
                 }),
                 &cost_book,
             ),
@@ -3675,6 +3690,8 @@ mod tests {
             files: Arc::new(MemoryProjectFiles::default()),
             folders: Arc::clone(&db) as _,
             project_folders: bardo_storage::MemoryProjectFolders::for_database(&db),
+            removals: Arc::clone(&db) as _,
+            trash: Arc::new(bardo_storage::MemoryTrash::default()),
             places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
             research: db,

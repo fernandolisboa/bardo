@@ -197,6 +197,223 @@ impl ProjectFolders for LocalProjectFolders {
         }
         Ok(FolderMove::Copied)
     }
+
+    fn size(&self, path: &Path) -> io::Result<u64> {
+        match fs::metadata(path) {
+            Ok(meta) if meta.is_dir() => Ok(files_under(path)?.iter().map(|(_, size)| size).sum()),
+            Ok(meta) => Ok(meta.len()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(0),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn pack(
+        &self,
+        videos: &Path,
+        archive: &Path,
+        progress: &mut dyn FnMut(u64, u64) -> bool,
+    ) -> Result<(), FolderMoveError> {
+        let mut packed: Vec<(String, PathBuf, u64)> = Vec::new();
+        let mut folders = Vec::new();
+        if videos.exists() {
+            for entry in fs::read_dir(videos)? {
+                let entry = entry?;
+                if !entry.file_type()?.is_dir() {
+                    continue;
+                }
+                let folder = entry.path();
+                let name = entry.file_name().to_string_lossy().into_owned();
+                for (relative, size) in files_under(&folder)? {
+                    packed.push((zip_entry(&name, &relative), folder.join(relative), size));
+                }
+                folders.push(folder);
+            }
+        }
+        packed.sort();
+        // Read twice: once written, once checked.
+        let total: u64 = packed.iter().map(|(_, _, size)| size).sum::<u64>() * 2;
+        let mut done = 0;
+        let partial = with_suffix(archive, ".partial");
+        let written = write_archive(&partial, &packed, &mut done, total, progress)
+            .and_then(|()| check_archive(&partial, &packed, &mut done, total, progress));
+        if let Err(error) = written {
+            let _ = fs::remove_file(&partial);
+            return Err(error);
+        }
+        fs::rename(&partial, archive)?;
+        // Every file is in the archive and read back whole: the folders can
+        // go. One that cannot (a file left open) stays beside the archive,
+        // and unpacking writes over it.
+        for folder in folders {
+            if let Err(error) = fs::remove_dir_all(&folder) {
+                tracing::warn!("could not remove all of {}: {error}", folder.display());
+            }
+        }
+        Ok(())
+    }
+
+    fn unpack(
+        &self,
+        archive: &Path,
+        videos: &Path,
+        progress: &mut dyn FnMut(u64, u64) -> bool,
+    ) -> Result<(), FolderMoveError> {
+        let mut zip =
+            zip::ZipArchive::new(io::BufReader::new(File::open(archive)?)).map_err(zip_failure)?;
+        let mut entries: Vec<(usize, PathBuf, u64)> = Vec::new();
+        for index in 0..zip.len() {
+            let entry = zip.by_index_raw(index).map_err(zip_failure)?;
+            if entry.is_dir() {
+                continue;
+            }
+            let relative = entry.enclosed_name().ok_or_else(|| {
+                FolderMoveError::Mismatch(
+                    entry
+                        .name()
+                        .map(|name| name.into_owned())
+                        .unwrap_or_default(),
+                )
+            })?;
+            entries.push((index, relative, entry.size()));
+        }
+        let total: u64 = entries.iter().map(|(_, _, size)| size).sum();
+        let mut done = 0;
+        for (index, relative, size) in &entries {
+            let target = videos.join(relative);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let partial = with_suffix(&target, COPYING);
+            let mut entry = zip.by_index(*index).map_err(zip_failure)?;
+            let mut out = File::create(&partial)?;
+            // Reading an entry to its end checks its CRC.
+            let copied = copy_reader(&mut entry, &mut out, &mut done, total, progress);
+            match copied {
+                Ok(true) => {}
+                Ok(false) => {
+                    let _ = fs::remove_file(&partial);
+                    return Err(FolderMoveError::Stopped);
+                }
+                Err(error) => {
+                    let _ = fs::remove_file(&partial);
+                    return Err(error.into());
+                }
+            }
+            out.sync_all()?;
+            drop(out);
+            if fs::metadata(&partial)?.len() != *size {
+                let _ = fs::remove_file(&partial);
+                return Err(FolderMoveError::Mismatch(relative.display().to_string()));
+            }
+            fs::rename(&partial, &target)?;
+        }
+        drop(zip);
+        fs::remove_file(archive)?;
+        Ok(())
+    }
+}
+
+/// `path` with `suffix` added to its file name.
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+/// The archive entry of a file in a video's folder: `<folder>/<path>`,
+/// with forward slashes as zip wants.
+fn zip_entry(folder: &str, relative: &Path) -> String {
+    let parts: Vec<String> = std::iter::once(folder.to_owned())
+        .chain(
+            relative
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy().into_owned()),
+        )
+        .collect();
+    parts.join("/")
+}
+
+fn zip_failure(error: zip::result::ZipError) -> FolderMoveError {
+    match error {
+        zip::result::ZipError::Io(error) => FolderMoveError::Io(error),
+        other => FolderMoveError::Io(io::Error::new(io::ErrorKind::InvalidData, other)),
+    }
+}
+
+/// Copies `from` into `to` in chunks: false when told to stop.
+fn copy_reader(
+    from: &mut dyn Read,
+    to: &mut dyn Write,
+    done: &mut u64,
+    total: u64,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> io::Result<bool> {
+    let mut buffer = vec![0; CHUNK];
+    loop {
+        let read = from.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(true);
+        }
+        to.write_all(&buffer[..read])?;
+        *done += read as u64;
+        if !progress(*done, total) {
+            return Ok(false);
+        }
+    }
+}
+
+/// Writes `files` (entry, path, size) into a new zip at `path`, stored:
+/// media is compressed already.
+fn write_archive(
+    path: &Path,
+    files: &[(String, PathBuf, u64)],
+    done: &mut u64,
+    total: u64,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Result<(), FolderMoveError> {
+    use zip::write::SimpleFileOptions;
+    let mut zip = zip::ZipWriter::new(io::BufWriter::new(File::create(path)?));
+    let stored = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for (entry, file, size) in files {
+        // Zip64 for anything near the 4 GB a plain entry holds.
+        zip.start_file(entry.as_str(), stored.large_file(*size >= 1 << 31))
+            .map_err(zip_failure)?;
+        if !copy_reader(&mut File::open(file)?, &mut zip, done, total, progress)? {
+            return Err(FolderMoveError::Stopped);
+        }
+    }
+    let out = zip.finish().map_err(zip_failure)?;
+    out.into_inner()
+        .map_err(|error| error.into_error())?
+        .sync_all()?;
+    Ok(())
+}
+
+/// Reads every entry of the zip at `path` back (which checks its CRC) and
+/// checks it holds each of `files` at its size.
+fn check_archive(
+    path: &Path,
+    files: &[(String, PathBuf, u64)],
+    done: &mut u64,
+    total: u64,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Result<(), FolderMoveError> {
+    let mut zip =
+        zip::ZipArchive::new(io::BufReader::new(File::open(path)?)).map_err(zip_failure)?;
+    for (entry, _, size) in files {
+        let mut read = zip.by_name(entry).map_err(|error| match error {
+            zip::result::ZipError::FileNotFound => FolderMoveError::Mismatch(entry.clone()),
+            other => zip_failure(other),
+        })?;
+        let before = *done;
+        if !copy_reader(&mut read, &mut io::sink(), done, total, progress)? {
+            return Err(FolderMoveError::Stopped);
+        }
+        if *done - before != *size {
+            return Err(FolderMoveError::Mismatch(entry.clone()));
+        }
+    }
+    Ok(())
 }
 
 /// Project folders in memory, for tests: a folder is a set of file names.
@@ -211,6 +428,13 @@ struct MemoryFolders {
     manifests: HashMap<PathBuf, ProjectManifest>,
     /// Files of a video folder, by folder.
     files: HashMap<PathBuf, Vec<String>>,
+    /// What a packed archive holds: each video folder's path with its
+    /// files.
+    archives: HashMap<PathBuf, Vec<(PathBuf, Vec<String>)>>,
+    /// Sizes set by a test; otherwise a folder weighs a byte per file.
+    sizes: HashMap<PathBuf, u64>,
+    /// The next pack or unpack fails its check.
+    fail_check: bool,
 }
 
 /// Which database a set of memory folders goes with: a file by its path,
@@ -308,6 +532,25 @@ impl MemoryProjectFolders {
         state.folders.insert(folder.to_owned());
         state.manifests.insert(folder.to_owned(), manifest);
     }
+
+    /// `size` reports `bytes` for `path`.
+    pub fn set_size(&self, path: &Path, bytes: u64) {
+        self.state().sizes.insert(path.to_owned(), bytes);
+    }
+
+    /// The next pack or unpack finds a file that does not match: nothing
+    /// is removed.
+    pub fn fail_next_check(&self) {
+        self.state().fail_check = true;
+    }
+
+    /// The video folders a packed archive holds, by path.
+    pub fn archive(&self, archive: &Path) -> Option<Vec<PathBuf>> {
+        self.state()
+            .archives
+            .get(archive)
+            .map(|folders| folders.iter().map(|(path, _)| path.clone()).collect())
+    }
 }
 
 impl ProjectFolders for MemoryProjectFolders {
@@ -347,6 +590,77 @@ impl ProjectFolders for MemoryProjectFolders {
         state.folders.insert(to.to_owned());
         state.files.insert(to.to_owned(), files);
         Ok(FolderMove::Renamed)
+    }
+
+    fn size(&self, path: &Path) -> io::Result<u64> {
+        let state = self.state();
+        if let Some(bytes) = state.sizes.get(path) {
+            return Ok(*bytes);
+        }
+        Ok(state
+            .files
+            .iter()
+            .filter(|(folder, _)| folder.starts_with(path))
+            .map(|(_, files)| files.len() as u64)
+            .sum())
+    }
+
+    fn pack(
+        &self,
+        videos: &Path,
+        archive: &Path,
+        progress: &mut dyn FnMut(u64, u64) -> bool,
+    ) -> Result<(), FolderMoveError> {
+        let mut state = self.state();
+        if !progress(1, 2) {
+            return Err(FolderMoveError::Stopped);
+        }
+        if std::mem::take(&mut state.fail_check) {
+            return Err(FolderMoveError::Mismatch("a packed file".into()));
+        }
+        let packed: Vec<PathBuf> = state
+            .folders
+            .iter()
+            .filter(|folder| folder.parent() == Some(videos))
+            .cloned()
+            .collect();
+        let held = packed
+            .into_iter()
+            .map(|folder| {
+                state.folders.remove(&folder);
+                let files = state.files.remove(&folder).unwrap_or_default();
+                (folder, files)
+            })
+            .collect();
+        state.archives.insert(archive.to_owned(), held);
+        state.folders.insert(archive.to_owned());
+        progress(2, 2);
+        Ok(())
+    }
+
+    fn unpack(
+        &self,
+        archive: &Path,
+        _videos: &Path,
+        progress: &mut dyn FnMut(u64, u64) -> bool,
+    ) -> Result<(), FolderMoveError> {
+        let mut state = self.state();
+        if !state.archives.contains_key(archive) {
+            return Err(io::Error::from(io::ErrorKind::NotFound).into());
+        }
+        if !progress(1, 2) {
+            return Err(FolderMoveError::Stopped);
+        }
+        if std::mem::take(&mut state.fail_check) {
+            return Err(FolderMoveError::Mismatch("an unpacked file".into()));
+        }
+        for (folder, files) in state.archives.remove(archive).unwrap_or_default() {
+            state.folders.insert(folder.clone());
+            state.files.insert(folder, files);
+        }
+        state.folders.remove(archive);
+        progress(2, 2);
+        Ok(())
     }
 }
 
@@ -502,5 +816,101 @@ mod tests {
         assert_eq!(moved, FolderMove::Copied);
         assert!(!from.exists());
         assert!(to.join("render-1.mp4").exists());
+    }
+
+    /// A project's `Videos` folder with two videos' media.
+    fn videos(root: &Path) -> PathBuf {
+        let videos = root.join("Space").join("Videos");
+        for (name, bytes) in [("Apollo-01234567", 3 * CHUNK + 5), ("Mir-89abcdef", 10)] {
+            let folder = videos.join(name);
+            fs::create_dir_all(folder.join("clips")).unwrap();
+            fs::write(folder.join("script.json"), name.as_bytes()).unwrap();
+            fs::write(folder.join("clips").join("1.mp4"), vec![3u8; bytes]).unwrap();
+        }
+        videos
+    }
+
+    #[test]
+    fn packed_videos_unpack_as_they_were() {
+        let dir = tempfile::tempdir().unwrap();
+        let videos = videos(dir.path());
+        let archive = dir.path().join("Space").join("Videos.zip");
+        let folders = LocalProjectFolders::new();
+        let before = folders.size(&videos).unwrap();
+        assert_eq!(before, 3 * CHUNK as u64 + 5 + 10 + 15 + 12);
+        let mut last = (0, 0);
+        folders
+            .pack(&videos, &archive, &mut |done, total| {
+                last = (done, total);
+                true
+            })
+            .unwrap();
+        assert_eq!(last.0, last.1);
+        assert!(archive.is_file());
+        assert!(!videos.join("Apollo-01234567").exists());
+        assert!(!videos.join("Mir-89abcdef").exists());
+        folders.unpack(&archive, &videos, &mut |_, _| true).unwrap();
+        assert!(!archive.exists());
+        assert_eq!(folders.size(&videos).unwrap(), before);
+        assert_eq!(
+            fs::read(videos.join("Mir-89abcdef").join("script.json")).unwrap(),
+            b"Mir-89abcdef"
+        );
+        assert_eq!(
+            fs::read(videos.join("Apollo-01234567").join("clips").join("1.mp4"))
+                .unwrap()
+                .len(),
+            3 * CHUNK + 5
+        );
+    }
+
+    #[test]
+    fn a_pack_stopped_or_failing_its_check_removes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let videos = videos(dir.path());
+        let archive = dir.path().join("Space").join("Videos.zip");
+        let folders = LocalProjectFolders::new();
+        let stopped = folders.pack(&videos, &archive, &mut |done, total| done < total / 2);
+        assert!(matches!(stopped, Err(FolderMoveError::Stopped)));
+        assert!(!archive.exists());
+        assert!(!with_suffix(&archive, ".partial").exists());
+        assert!(videos.join("Apollo-01234567").join("script.json").exists());
+
+        // An archive that does not hold a file whole fails the check.
+        let partial = dir.path().join("check.zip");
+        let mut files = Vec::new();
+        for (relative, size) in files_under(&videos).unwrap() {
+            let name = relative.to_string_lossy().replace('\\', "/");
+            files.push((name, videos.join(&relative), size));
+        }
+        let mut done = 0;
+        write_archive(&partial, &files, &mut done, u64::MAX, &mut |_, _| true).unwrap();
+        files[0].2 += 1;
+        let mut done = 0;
+        let checked = check_archive(&partial, &files, &mut done, u64::MAX, &mut |_, _| true);
+        assert!(matches!(checked, Err(FolderMoveError::Mismatch(_))));
+        files.push(("missing/file".into(), videos.clone(), 1));
+        files[0].2 -= 1;
+        let mut done = 0;
+        let checked = check_archive(&partial, &files, &mut done, u64::MAX, &mut |_, _| true);
+        assert!(matches!(checked, Err(FolderMoveError::Mismatch(name)) if name == "missing/file"));
+    }
+
+    #[test]
+    fn an_unpack_cut_short_keeps_the_archive_and_starts_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let videos = videos(dir.path());
+        let archive = dir.path().join("Space").join("Videos.zip");
+        let folders = LocalProjectFolders::new();
+        folders.pack(&videos, &archive, &mut |_, _| true).unwrap();
+        let stopped = folders.unpack(&archive, &videos, &mut |done, _| done < CHUNK as u64);
+        assert!(matches!(stopped, Err(FolderMoveError::Stopped)));
+        assert!(archive.exists());
+        folders.unpack(&archive, &videos, &mut |_, _| true).unwrap();
+        assert!(!archive.exists());
+        assert_eq!(
+            fs::read(videos.join("Apollo-01234567").join("script.json")).unwrap(),
+            b"Apollo-01234567"
+        );
     }
 }

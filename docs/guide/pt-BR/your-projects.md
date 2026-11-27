@@ -27,6 +27,28 @@ Clique em um projeto para abri-lo. O Bardo lembra o projeto aberto e abre nele d
 
 **Novo projeto…**, no fim do seletor, pede um nome, uma cor e uma pasta: a pasta base por padrão, ou outro lugar em **Escolher…**. O formulário mostra a pasta que vai criar ([A pasta de um projeto](storage.md#project-folder)). Os nomes não se repetem entre os seus projetos, com maiúsculas ou não. O projeto novo abre sem canal, e todas as telas pedem um: crie o primeiro canal dele em [Canais](channels.md).
 
+<a id="archive"></a>
+## Arquivar um projeto
+
+**Arquivar projeto…** no seletor guarda o projeto aberto: ele sai do seletor, de Recentes e de Favoritos, e fica só para leitura, então nenhuma tarefa dele roda e nada dele é publicado. As publicações dele continuam sincronizando as métricas, e as contas das redes continuam conectadas. Outro projeto abre no lugar.
+
+**Compactar mídia** junta as pastas dos vídeos em **Videos.zip** na pasta do projeto, numa tarefa ([Tarefas](jobs.md)); o Bardo relê o arquivo para conferi-lo antes de remover as pastas. A pasta **World** nunca é compactada.
+
+**Projetos arquivados**, no fim do seletor, lista os arquivados, marcados com **Mídia compactada** quando for o caso. **Desarquivar** traz um de volta, com a estrela se ele tinha; um compactado é descompactado antes, e volta quando essa tarefa termina.
+
+<a id="delete"></a>
+## Excluir um projeto
+
+**Excluir projeto…** no seletor (ou a lixeira ao lado de um projeto arquivado) pede que você digite o nome do projeto. Ele remove o projeto com os canais, ideias e vídeos, desconecta as contas das redes como **Desconectar** faz ([Contas das redes](network-accounts.md)) e manda a pasta para a Lixeira. O diálogo avisa antes quando a pasta será excluída de vez: num drive removível ou de rede, quando a Lixeira do drive está desativada, ou quando a pasta é maior do que essa Lixeira comporta. **Excluir de vez** pula a Lixeira de propósito. Uma pasta que o Bardo não alcança fica como está, e só os registros saem.
+
+Nada é excluído nas redes, e [Custos](costs.md#deleted) guarda o gasto do projeto com o nome dele até você esquecê-lo.
+
+Arquivar e excluir são recusados enquanto algo está pendente, e o diálogo lista o que resolver antes:
+
+- uma publicação esperando o horário no Bardo ([agendamento](uploading.md)),
+- uma publicação esperando na rede para ficar pública mais tarde,
+- uma tarefa do projeto, de um dos canais ou vídeos dele, na fila ou em andamento ([Tarefas](jobs.md)).
+
 <a id="move"></a>
 ## Mover um canal
 

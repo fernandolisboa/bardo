@@ -1180,6 +1180,42 @@ impl Bardo {
         self.themes.start_project(&theme, &project)?;
         Ok(project)
     }
+
+    /// The channel's approved themes with no video: the user deleted it
+    /// (#336), and the theme may start another.
+    pub fn themes_without_video(
+        &self,
+        channel: ChannelId,
+    ) -> Result<std::collections::HashSet<ThemeId>, ThemeError> {
+        let started: std::collections::HashSet<ThemeId> = self
+            .themes
+            .projects(channel)?
+            .iter()
+            .map(|video| video.theme)
+            .collect();
+        Ok(self
+            .themes
+            .themes(channel)?
+            .into_iter()
+            .filter(|theme| theme.status() == ThemeStatus::Approved && !started.contains(&theme.id))
+            .map(|theme| theme.id)
+            .collect())
+    }
+
+    /// Starts a new video from an approved theme whose video the user
+    /// deleted (#336). A theme that has a video, or is not approved,
+    /// starts nothing.
+    pub fn restart_theme(&self, id: ThemeId) -> Result<VideoProject, ThemeError> {
+        let theme = self.own_theme(id)?;
+        if !self.themes_without_video(theme.channel)?.contains(&id) {
+            return Err(ThemeError::ThemeNotFound);
+        }
+        let project = theme
+            .start_again(SystemTime::now())
+            .ok_or(ThemeError::ThemeNotFound)?;
+        self.themes.start_project(&theme, &project)?;
+        Ok(project)
+    }
 }
 
 #[cfg(test)]
@@ -1273,6 +1309,8 @@ mod tests {
                 files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
                 folders: Arc::clone(&self.db) as _,
                 project_folders: bardo_storage::MemoryProjectFolders::for_database(&self.db),
+                removals: Arc::clone(&self.db) as _,
+                trash: Arc::new(bardo_storage::MemoryTrash::default()),
                 places: crate::test_places(),
                 voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
                 research: Arc::clone(&self.db) as _,

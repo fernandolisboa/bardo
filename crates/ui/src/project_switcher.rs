@@ -5,6 +5,10 @@
 //! the recent ones and all the others by name, then *New project…*,
 //! whose name and color form opens the new project.
 //!
+//! For the open project it also offers *Archive project…* and *Delete
+//! project…*, and *Archived projects* lists the archived ones to bring
+//! back or delete (issue #336, the dialog in `removal`).
+//!
 //! The list and its rules live in `bardo_app` (`project_list`,
 //! `switch_project`, `create_project`); this file draws them and tells
 //! the shell when the open project changed, so the screens re-read it.
@@ -13,11 +17,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use bardo_app::bardo_domain::{Project, ProjectColor, ProjectDraft, ProjectId};
-use bardo_app::{Bardo, Control, Text, TourAnchor};
+use bardo_app::{ArchivedProject, Bardo, Control, Removable, Text, TourAnchor};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::popover::Popover;
-use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, ClickEvent, Entity, EventEmitter, PathPromptOptions, SharedString,
@@ -26,6 +30,7 @@ use gpui_kit::{
 
 use crate::appearance::look;
 use crate::kit;
+use crate::removal::{RemovalEvent, RemovalMode, RemovalPanel};
 use crate::shell::tr;
 
 /// Width of the open popover.
@@ -58,6 +63,10 @@ pub struct ProjectSwitcher {
     problem: Option<Text>,
     /// A folder dialog in flight.
     picking: Option<Task<()>>,
+    /// *Archived projects* is open instead of the list.
+    archived: bool,
+    /// The archive or delete dialog, while open.
+    removal: Option<(Entity<RemovalPanel>, Subscription)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -99,6 +108,8 @@ impl ProjectSwitcher {
             form: None,
             problem: None,
             picking: None,
+            archived: false,
+            removal: None,
             _subscriptions: subscriptions,
         }
     }
@@ -114,6 +125,8 @@ impl ProjectSwitcher {
         self.open = open;
         self.form = None;
         self.problem = None;
+        self.archived = false;
+        self.removal = None;
         if open {
             // A drive plugged in or out since: the list says so.
             self.bardo.read(cx).check_folders();
@@ -302,6 +315,68 @@ impl ProjectSwitcher {
                 cx.notify();
             }
         }
+    }
+
+    /// Opens the archive or delete dialog for `project`.
+    fn start_removal(
+        &mut self,
+        project: ProjectId,
+        name: String,
+        mode: RemovalMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let bardo = self.bardo.clone();
+        let target = Removable::Project(project);
+        let panel = cx.new(|cx| RemovalPanel::new(bardo, target, mode, name, window, cx));
+        let subscription = cx.subscribe_in(
+            &panel,
+            window,
+            |this, _, event: &RemovalEvent, window, cx| match event {
+                RemovalEvent::Done(_) => {
+                    this.removal = None;
+                    if this.archived {
+                        cx.notify();
+                    } else {
+                        this.set_open(false, window, cx);
+                    }
+                    // The open project may have changed.
+                    cx.emit(ProjectSwitched);
+                }
+                RemovalEvent::Cancelled => {
+                    this.removal = None;
+                    cx.notify();
+                }
+            },
+        );
+        self.problem = None;
+        self.removal = Some((panel, subscription));
+        cx.notify();
+    }
+
+    fn show_archived(&mut self, shown: bool, cx: &mut Context<Self>) {
+        self.archived = shown;
+        self.problem = None;
+        cx.notify();
+    }
+
+    fn unarchive(&mut self, id: ProjectId, cx: &mut Context<Self>) {
+        let unarchived = self.bardo.update(cx, |bardo, cx| {
+            let unarchived = bardo.unarchive_project(id);
+            cx.notify();
+            unarchived
+        });
+        match unarchived {
+            // Back now: it is in the list again.
+            Ok(None) => {
+                self.problem = None;
+                cx.emit(ProjectSwitched);
+            }
+            // Back once its media is unpacked.
+            Ok(Some(_)) => self.problem = Some(Text::UnarchiveUnpacking),
+            Err(error) => self.problem = Some(error.message()),
+        }
+        cx.notify();
     }
 
     /// The button the popover hangs from: the open project's color and
@@ -604,6 +679,54 @@ impl ProjectSwitcher {
                         }),
                 )
         });
+        let open_name = open.and_then(|id| {
+            bardo
+                .projects()
+                .ok()?
+                .into_iter()
+                .find(|project| project.id == id)
+                .map(|project| (id, project.name().to_owned()))
+        });
+        let removal_part = open_name.map(|(id, name)| {
+            let archive_name = name.clone();
+            h_flex()
+                .gap_1()
+                .flex_wrap()
+                .child(
+                    Button::new("project-archive")
+                        .ghost()
+                        .small()
+                        .icon(IconName::Inbox)
+                        .label(tr(bardo, Text::SwitcherArchiveProject))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.start_removal(
+                                id,
+                                archive_name.clone(),
+                                RemovalMode::Archive,
+                                window,
+                                cx,
+                            );
+                        })),
+                )
+                .child(
+                    Button::new("project-delete")
+                        .ghost()
+                        .small()
+                        .icon(IconName::Delete)
+                        .label(tr(bardo, Text::SwitcherDeleteProject))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.start_removal(id, name.clone(), RemovalMode::Delete, window, cx);
+                        })),
+                )
+        });
+        let archived_count = bardo
+            .archived_projects()
+            .map(|archived| archived.len())
+            .unwrap_or(0);
+        let archived_label = SharedString::from(bardo.text_with(
+            Text::SwitcherArchivedProjects,
+            &[("n", &archived_count.to_string())],
+        ));
         v_flex()
             .gap_2()
             .child(Input::new(&self.search).small().cleanable(true))
@@ -628,14 +751,145 @@ impl ProjectSwitcher {
             .children(problem)
             .child(div().h(t.border_width).bg(t.border))
             .children(folder_part)
+            .children(removal_part)
             .child(
-                Button::new("project-new")
+                h_flex()
+                    .gap_1()
+                    .flex_wrap()
+                    .child(
+                        Button::new("project-new")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Plus)
+                            .label(new_label)
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.start_new(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("project-archived")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Inbox)
+                            .label(archived_label)
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.show_archived(true, cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// *Archived projects*: each with its color and name, whether its
+    /// media is compressed, and *Unarchive* and *Delete…*.
+    fn render_archived(&self, cx: &mut Context<Self>) -> AnyElement {
+        let t = look(cx).tokens;
+        let bardo = self.bardo.read(cx);
+        let archived = bardo.archived_projects().unwrap_or_default();
+        let rows: Vec<AnyElement> = archived
+            .into_iter()
+            .map(|archived| self.archived_row(archived, cx))
+            .collect();
+        let bardo = self.bardo.read(cx);
+        let empty = rows.is_empty().then(|| {
+            div()
+                .px_2()
+                .text_sm()
+                .text_color(t.text2)
+                .child(tr(bardo, Text::ArchivedProjectsEmpty))
+        });
+        let problem = self
+            .problem
+            .map(|problem| kit::notice(kit::Tone::Info, tr(bardo, problem), cx));
+        v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        Button::new("project-archived-back")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::ChevronLeft)
+                            .tooltip(tr(bardo, Text::SwitcherBack))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.show_archived(false, cx);
+                            })),
+                    )
+                    .child(kit::section_heading(tr(bardo, Text::ArchivedProjectsTitle))),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(t.text2)
+                    .child(tr(bardo, Text::ArchivedProjectsHint)),
+            )
+            .child(
+                v_flex()
+                    .id("project-archived-list")
+                    .max_h(px(380.))
+                    .overflow_y_scroll()
+                    .gap_1()
+                    .children(rows)
+                    .children(empty),
+            )
+            .children(problem)
+            .into_any_element()
+    }
+
+    fn archived_row(&self, archived: ArchivedProject, cx: &mut Context<Self>) -> AnyElement {
+        let t = look(cx).tokens;
+        let bardo = self.bardo.read(cx);
+        let ArchivedProject {
+            project,
+            packed,
+            busy,
+        } = archived;
+        let (id, name) = (project.id, project.name().to_owned());
+        let key = id.to_string();
+        let state = if busy {
+            Some(tr(bardo, Text::ArchivedBusy))
+        } else if packed {
+            Some(tr(bardo, Text::ArchivedPacked))
+        } else {
+            None
+        };
+        h_flex()
+            .px_2()
+            .py_1()
+            .gap_2()
+            .items_center()
+            .rounded(t.radius)
+            .text_sm()
+            .child(kit::project_swatch(project.details.color(), px(10.)))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().truncate().child(SharedString::from(name.clone())))
+                    .children(state.map(|state| div().text_xs().text_color(t.text2).child(state))),
+            )
+            .child(
+                Button::new(SharedString::from(format!("project-unarchive-{key}")))
                     .ghost()
-                    .small()
-                    .icon(IconName::Plus)
-                    .label(new_label)
-                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                        this.start_new(window, cx);
+                    .xsmall()
+                    .icon(IconName::Undo)
+                    .label(tr(bardo, Text::Unarchive))
+                    .disabled(busy)
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.unarchive(id, cx);
+                    })),
+            )
+            .child(
+                Button::new(SharedString::from(format!("project-delete-{key}")))
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Delete)
+                    .tooltip(tr(bardo, Text::DeleteAction))
+                    .disabled(busy)
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.start_removal(id, name.clone(), RemovalMode::Delete, window, cx);
                     })),
             )
             .into_any_element()
@@ -784,9 +1038,11 @@ impl ProjectSwitcher {
 
     /// The popover's content: the list, or the new project form.
     fn render_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let body = match &self.form {
-            Some(form) => self.render_form(form, cx),
-            None => self.render_list(cx),
+        let body = match (&self.removal, &self.form) {
+            (Some((panel, _)), _) => panel.clone().into_any_element(),
+            (None, Some(form)) => self.render_form(form, cx),
+            (None, None) if self.archived => self.render_archived(cx),
+            (None, None) => self.render_list(cx),
         };
         div().w(px(WIDTH)).child(body).into_any_element()
     }

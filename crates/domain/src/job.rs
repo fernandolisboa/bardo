@@ -205,10 +205,18 @@ pub enum JobKind {
     /// to another project. Holds the job runner and the background agent
     /// meanwhile; a video moved is not moved again on resume.
     MoveMedia,
+    /// Packs an archived project's video folders into `Videos.zip` in its
+    /// folder (#336), checks it, then removes the folders. Starts over on
+    /// resume.
+    PackMedia,
+    /// Unpacks an archived project's `Videos.zip` back into its video
+    /// folders (#336), checks them, removes the archive and brings the
+    /// project back. Starts over on resume.
+    UnpackMedia,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 42] = [
+    pub const ALL: [JobKind; 44] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -251,6 +259,8 @@ impl JobKind {
         JobKind::ProductConcept,
         JobKind::PlacementExport,
         JobKind::MoveMedia,
+        JobKind::PackMedia,
+        JobKind::UnpackMedia,
     ];
 
     /// Stable name stored in the database.
@@ -298,6 +308,8 @@ impl JobKind {
             JobKind::ProductConcept => "product_concept",
             JobKind::PlacementExport => "placement_export",
             JobKind::MoveMedia => "move_media",
+            JobKind::PackMedia => "pack_media",
+            JobKind::UnpackMedia => "unpack_media",
         }
     }
 }

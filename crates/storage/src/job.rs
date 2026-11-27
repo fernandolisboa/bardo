@@ -118,9 +118,14 @@ impl JobRepository for Database {
                                       retry_at, run_at, paid_call, owner_project_id, project_name,
                                       channel_name, video_title)
                      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?16,
-                            origin.project_id, origin.project_name, origin.channel_name,
+                            COALESCE(origin.project_id, whole.id),
+                            COALESCE(origin.project_name, whole.name), origin.channel_name,
                             origin.video_title
                      FROM (SELECT 1) LEFT JOIN {} origin ON 1
+                     -- A job for a whole project (packing its media) names
+                     -- it as `owner_project`.
+                     LEFT JOIN project whole ON whole.id =
+                         CASE WHEN json_valid(?4) THEN json_extract(?4, '$.owner_project') END
                      WHERE 1
                      ON CONFLICT (id) DO UPDATE SET
                          state = excluded.state,

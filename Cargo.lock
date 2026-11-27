@@ -627,7 +627,7 @@ dependencies = [
  "dirs 6.0.0",
  "getrandom 0.3.4",
  "image",
- "jiff",
+ "jiff 0.2.37",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -646,7 +646,7 @@ dependencies = [
 name = "bardo-domain"
 version = "0.4.0"
 dependencies = [
- "jiff",
+ "jiff 0.2.37",
  "serde_json",
  "thiserror 2.0.21",
  "uuid",
@@ -688,7 +688,7 @@ dependencies = [
  "base64 0.22.1",
  "form_urlencoded",
  "getrandom 0.3.4",
- "jiff",
+ "jiff 0.2.37",
  "serde_json",
  "sha2 0.10.9",
 ]
@@ -699,16 +699,19 @@ version = "0.4.0"
 dependencies = [
  "bardo-domain",
  "dirs 6.0.0",
- "jiff",
+ "jiff 0.2.37",
  "keyring-core",
  "rusqlite",
  "serde",
+ "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
+ "trash",
  "uuid",
  "windows-native-keyring-store",
+ "windows-registry 0.6.1",
  "zeroize",
  "zip",
 ]
@@ -3924,9 +3927,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ab1baf72f08796de0260609515130699b890ac25f30e610ad894bc5856cafdb"
 dependencies = [
  "defmt",
- "jiff-core",
- "jiff-static",
+ "jiff-core 0.1.1",
+ "jiff-static 0.2.37",
  "jiff-tzdb-platform",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
+ "windows-link 0.2.1",
+]
+
+[[package]]
+name = "jiff"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "107f2e89536b6818514025f6787b0d94d819e54fe3b40365275fc753de485b3f"
+dependencies = [
+ "jiff-core 1.0.2",
+ "jiff-static 1.0.3",
  "log",
  "portable-atomic",
  "portable-atomic-util",
@@ -3945,15 +3963,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "jiff-core"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d44c923edf2bf456a982253f1a9ee1f6e89e421dffd0065d9b9a581da0def58f"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "jiff-static"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "378268a1116ad67ae6228701118ac9f491d78fda38a40a1f1a9e1348de6f7212"
 dependencies = [
- "jiff-core",
+ "jiff-core 0.1.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "jiff-static"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4996f71e569e3a3e32b925c28ef8f0027dc30bb1d594b33eeda409eea185f5c8"
+dependencies = [
+ "jiff-core 1.0.2",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -7943,6 +7982,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "trash"
+version = "5.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7363f9516b65bd2e855f4e6c3338b1a98efc2773c25349c958908897e1170ded"
+dependencies = [
+ "jiff 1.0.3",
+ "libc",
+ "log",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+ "once_cell",
+ "percent-encoding",
+ "scopeguard",
+ "urlencoding",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+]
+
+[[package]]
 name = "triomphe"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8132,6 +8190,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "usvg"

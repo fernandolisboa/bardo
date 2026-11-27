@@ -467,6 +467,8 @@ mod tests {
                 files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
                 folders: Arc::clone(&self.db) as _,
                 project_folders: bardo_storage::MemoryProjectFolders::for_database(&self.db),
+                removals: Arc::clone(&self.db) as _,
+                trash: Arc::new(bardo_storage::MemoryTrash::default()),
                 places: crate::test_places(),
                 voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
                 research: Arc::clone(&self.db) as _,

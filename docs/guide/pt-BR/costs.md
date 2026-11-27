@@ -55,3 +55,8 @@ Uma geração que chamaria um modelo sem preço pergunta antes de começar e diz
 ## Gasto por projeto
 
 **Por projeto** mostra quanto cada [projeto](your-projects.md) gastou no mês, com a cor dele; chamadas feitas para nenhum projeto, como a amostra de voz de uma persona, contam como **Fora de projetos**. O filtro **Projeto** embaixo escolhe de quem são os canais e vídeos que **Por canal** e **Vídeos mais caros** mostram. Ele começa no projeto aberto; os números do topo e os orçamentos continuam sendo do perfil inteiro, porque os provedores cobram o perfil. Um custo guarda os nomes do projeto, do canal e do vídeo para que foi, como eram quando foi pago.
+
+<a id="deleted"></a>
+## Projetos e vídeos excluídos
+
+Um projeto ou vídeo que você [excluiu](your-projects.md#delete) guarda os custos, com o nome que tinha: **<nome> (excluído em <data>)**. Os projetos excluídos ficam juntos numa linha, **Projetos excluídos**, que abre para listá-los; um vídeo excluído aparece em **Vídeos mais caros**. **Esquecer o nome** passa a mostrá-lo como **Projeto excluído nº <número>** (ou **Vídeo excluído nº <número>**). Os valores nunca mudam, então o total do mês é o mesmo antes e depois de uma exclusão.
