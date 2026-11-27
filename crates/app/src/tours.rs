@@ -548,7 +548,7 @@ pub struct Tour {
 /// lives. Every step lights the navigation, which every screen shows.
 pub const WELCOME: Tour = Tour {
     id: TourId::Welcome,
-    version: 3,
+    version: 4,
     place: None,
     steps: &[
         TourStep::centered("intro").learn("what-bardo-is", "flow"),

@@ -78,6 +78,8 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) move_media: crate::folders::MoveMediaHandler,
     pub(crate) pack_media: crate::removal::PackMediaHandler,
     pub(crate) world_pictures: crate::world::WorldPictureHandler,
+    pub(crate) project_exports: crate::packages::ProjectExportHandler,
+    pub(crate) project_imports: crate::packages::ProjectImportHandler,
 }
 
 /// The handler of every job kind Bardo ships.
@@ -122,6 +124,8 @@ pub(crate) fn built_in_handlers(
         move_media,
         pack_media,
         world_pictures,
+        project_exports,
+        project_imports,
     } = built_in;
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -174,6 +178,8 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::UnpackMedia, Arc::new(pack_media.unpacking()));
     handlers.insert(JobKind::PackMedia, Arc::new(pack_media));
     handlers.insert(JobKind::WorldPicture, Arc::new(world_pictures));
+    handlers.insert(JobKind::ProjectExport, Arc::new(project_exports));
+    handlers.insert(JobKind::ProjectImport, Arc::new(project_imports));
     handlers
 }
 
@@ -2224,6 +2230,7 @@ mod tests {
             products: Arc::clone(db) as _,
             world: Arc::clone(db) as _,
             sharing: Arc::clone(db) as _,
+            packages: Arc::new(bardo_storage::LocalPackages::new(Arc::clone(db))),
             world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
             ads: Arc::clone(db) as _,
             end_cards: Arc::clone(db) as _,

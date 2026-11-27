@@ -44,6 +44,7 @@ mod narrations;
 mod navigation;
 mod network_accounts;
 mod overview;
+mod packages;
 mod performed_takes;
 mod persona_looks;
 mod persona_package;
@@ -194,6 +195,9 @@ pub use network_accounts::NetworkAccountError;
 pub use overview::{
     IdeasWaiting, NextAction, NextStep, OverviewView, Posts, StepEstimates, StepKind,
     VideoInProgress, next_step,
+};
+pub use packages::{
+    FolderOpened, OpenFolderError, PackageChoice, PackageOffer, PackageProblem, package_text,
 };
 pub use performed_takes::{
     PerformedBlock, PerformedStep, PerformedTakeView, PerformedView, REFUSED as TAKE_REFUSED,
@@ -391,6 +395,9 @@ pub struct Repositories {
     pub sharing: Arc<dyn bardo_domain::SharingRepository>,
     /// The world's picture files. Shared with the job queue.
     pub world_files: Arc<dyn bardo_domain::WorldFiles>,
+    /// Project packages written, read and brought in (#342). Shared with
+    /// the job queue.
+    pub packages: Arc<dyn bardo_domain::ProjectPackages>,
     /// Voice samples heard on the Personas screen, kept on this machine.
     pub voice_samples: Arc<dyn VoiceSampleStore>,
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
@@ -514,6 +521,7 @@ impl Repositories {
             trash: Arc::new(bardo_storage::MemoryTrash::default()),
             world: Arc::clone(&db) as _,
             sharing: Arc::clone(&db) as _,
+            packages: Arc::new(bardo_storage::LocalPackages::new(Arc::clone(&db))),
             world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
             research: db,
             files,
@@ -862,6 +870,7 @@ impl Bardo {
             world,
             sharing,
             world_files,
+            packages,
             voice_samples,
             secrets,
             connection_secrets,
@@ -1239,6 +1248,7 @@ impl Bardo {
             Arc::clone(&channels),
             removals,
             trash,
+            packages,
         );
         let move_media_handler = Self::move_media_handler(
             profile.id,
@@ -1248,6 +1258,8 @@ impl Bardo {
             job_settings.tick,
         );
         let pack_media_handler = Self::pack_media_handler(&folder_book, Arc::clone(&projects));
+        let (project_export_handler, project_import_handler) =
+            Self::package_handlers(profile.id, &folder_book, Arc::clone(&projects));
         let program = std::env::current_exe().unwrap_or_default();
         let runner = match role {
             RunnerRole::App => crate::jobs::Runner::app(),
@@ -1299,6 +1311,8 @@ impl Bardo {
                     move_media: move_media_handler,
                     pack_media: pack_media_handler,
                     world_pictures: world_picture_handler,
+                    project_exports: project_export_handler,
+                    project_imports: project_import_handler,
                 }),
                 &cost_book,
             ),
@@ -3743,6 +3757,7 @@ mod tests {
             trash: Arc::new(bardo_storage::MemoryTrash::default()),
             world: Arc::clone(&db) as _,
             sharing: Arc::clone(&db) as _,
+            packages: Arc::new(bardo_storage::LocalPackages::new(Arc::clone(&db))),
             world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
             places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),

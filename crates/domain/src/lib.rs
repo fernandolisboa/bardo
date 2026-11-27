@@ -85,6 +85,7 @@ mod narration;
 mod network;
 mod network_account;
 mod owner_metrics;
+mod package;
 mod performance;
 mod performed;
 mod performed_cut;
@@ -312,6 +313,11 @@ pub use owner_metrics::{
     AnalyticsError, AnalyticsErrorKind, Earnings, Monetization, MoneyReport, OwnerAnalytics,
     OwnerMetrics, OwnerReading, ReportPeriod, RetentionCurve, RetentionPoint, Share, VideoReport,
     dollars, read_owner_metrics, rpm, whole,
+};
+pub use package::{
+    FolderImport, PACKAGE_EXTENSION, PACKAGE_FORMAT, PROJECT_RECORDS, PackageContents,
+    PackageError, PackageExport, PackageImport, PackageImported, PackageManifest, ProjectPackages,
+    free_name, package_file_name, rewrite_ids,
 };
 pub use performance::{
     EvidenceScope, FIRST_WEEK, FIRST_WEEK_LATEST_SYNC, FIRST_WEEK_MIN_AGE, FirstWeek,

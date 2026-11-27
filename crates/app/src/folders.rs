@@ -230,6 +230,9 @@ pub(crate) struct FolderBook {
     pub(crate) removals: Arc<dyn RemovalRepository>,
     /// Where a deleted folder goes.
     pub(crate) trash: Arc<dyn Trash>,
+    /// Project packages, and the records a deleted project leaves in its
+    /// folder (#342).
+    pub(crate) packages: Arc<dyn bardo_domain::ProjectPackages>,
 }
 
 impl FolderBook {
@@ -243,6 +246,7 @@ impl FolderBook {
         channels: Arc<dyn ChannelRepository>,
         removals: Arc<dyn RemovalRepository>,
         trash: Arc<dyn Trash>,
+        packages: Arc<dyn bardo_domain::ProjectPackages>,
     ) -> Self {
         let watch = Arc::new(FolderWatch {
             owner,
@@ -263,6 +267,7 @@ impl FolderBook {
             watch,
             removals,
             trash,
+            packages,
         }
     }
 }

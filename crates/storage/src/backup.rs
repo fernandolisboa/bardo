@@ -731,11 +731,11 @@ impl<'a, 'b> Copier<'a, 'b> {
 
 /// One file of the project folders a backup carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct MediaFile {
-    path: PathBuf,
+pub(crate) struct MediaFile {
+    pub(crate) path: PathBuf,
     /// Its name in the backup, `projects/<project>/<file>`.
-    entry: String,
-    bytes: u64,
+    pub(crate) entry: String,
+    pub(crate) bytes: u64,
 }
 
 /// The project folders' files a backup carries: everything but the
@@ -750,7 +750,7 @@ fn media_files(root: &Path) -> Result<Vec<MediaFile>, BackupError> {
     Ok(files)
 }
 
-fn walk(dir: &Path, entry: &str, files: &mut Vec<MediaFile>) -> Result<(), BackupError> {
+pub(crate) fn walk(dir: &Path, entry: &str, files: &mut Vec<MediaFile>) -> Result<(), BackupError> {
     let mut names = Vec::new();
     for item in fs::read_dir(dir)? {
         let item = item?;
@@ -854,14 +854,9 @@ fn zip_time(at: SystemTime) -> zip::DateTime {
     .unwrap_or_default()
 }
 
-/// Copies the database to `to` as it is at one moment, with SQLite's
-/// online backup API, while other connections (the app, the agent) keep
-/// writing. Then cleans the copy, leaves out the YouTube data a backup may
-/// not keep, takes it out of WAL, vacuums it (no page of deleted data
-/// survives) and checks it.
-fn snapshot(db: &Database, to: &Path) -> Result<(), BackupError> {
-    let _ = fs::remove_file(to);
-    let mut copy = Connection::open(to).map_err(database_error)?;
+/// Copies every page of the database into `copy` in one step: one moment
+/// of it, read without making the app's statements wait when it is a file.
+pub(crate) fn copy_whole(db: &Database, copy: &mut Connection) -> Result<(), BackupError> {
     {
         let own;
         let shared;
@@ -878,7 +873,7 @@ fn snapshot(db: &Database, to: &Path) -> Result<(), BackupError> {
                 &shared
             }
         };
-        let backup = Backup::new(source, &mut copy).map_err(database_error)?;
+        let backup = Backup::new(source, copy).map_err(database_error)?;
         // All pages in one step: the copy is one moment of the database.
         let deadline = Instant::now() + BUSY_TIMEOUT;
         loop {
@@ -892,6 +887,18 @@ fn snapshot(db: &Database, to: &Path) -> Result<(), BackupError> {
             }
         }
     }
+    Ok(())
+}
+
+/// Copies the database to `to` as it is at one moment, with SQLite's
+/// online backup API, while other connections (the app, the agent) keep
+/// writing. Then cleans the copy, leaves out the YouTube data a backup may
+/// not keep, takes it out of WAL, vacuums it (no page of deleted data
+/// survives) and checks it.
+fn snapshot(db: &Database, to: &Path) -> Result<(), BackupError> {
+    let _ = fs::remove_file(to);
+    let mut copy = Connection::open(to).map_err(database_error)?;
+    copy_whole(db, &mut copy)?;
     clean(&copy, None)?;
     crate::youtube_data::strip_for_backup(&copy).map_err(database_error)?;
     copy.pragma_update(None, "journal_mode", "DELETE")

@@ -9,6 +9,11 @@
 //! project…*, and *Archived projects* lists the archived ones to bring
 //! back or delete (issue #336, the dialog in `removal`).
 //!
+//! *Export project…* writes the open project's package, *Import a project
+//! package…* brings one in as a new project after a dialog that names it
+//! and shows what it holds, and *Open a project from a folder…* relinks a
+//! moved project or brings a deleted one back (issue #342).
+//!
 //! The list and its rules live in `bardo_app` (`project_list`,
 //! `switch_project`, `create_project`); this file draws them and tells
 //! the shell when the open project changed, so the screens re-read it.
@@ -16,9 +21,15 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use bardo_app::bardo_domain::{Project, ProjectColor, ProjectDraft, ProjectId};
-use bardo_app::{ArchivedProject, Bardo, Control, Removable, Text, TourAnchor};
+use bardo_app::bardo_domain::{
+    Project, ProjectColor, ProjectDraft, ProjectId, TemplateKind, package_file_name,
+};
+use bardo_app::{
+    ArchivedProject, Bardo, Control, FolderOpened, PackageChoice, PackageOffer, Removable, Text,
+    TourAnchor,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex};
@@ -53,12 +64,32 @@ struct NewProject {
     _subscription: Subscription,
 }
 
+/// The import dialog, once a package was picked and read.
+struct ImportForm {
+    offer: PackageOffer,
+    /// The id the new project will have, so its folder is shown as it
+    /// will be made.
+    id: ProjectId,
+    name: Entity<InputState>,
+    color: ProjectColor,
+    place: Option<PathBuf>,
+    /// The carried global templates ticked to come in as the project's
+    /// own.
+    templates: Vec<TemplateKind>,
+    error: Option<Text>,
+    _subscription: Subscription,
+}
+
 pub struct ProjectSwitcher {
     bardo: Entity<Bardo>,
     open: bool,
     search: Entity<InputState>,
     query: String,
     form: Option<NewProject>,
+    /// The import dialog, while open.
+    import: Option<ImportForm>,
+    /// What the last export, import or open did, when it went well.
+    notice: Option<String>,
     /// What went wrong with the last switch, star, move or locate.
     problem: Option<Text>,
     /// A folder dialog in flight.
@@ -106,6 +137,8 @@ impl ProjectSwitcher {
             search,
             query: String::new(),
             form: None,
+            import: None,
+            notice: None,
             problem: None,
             picking: None,
             archived: false,
@@ -124,6 +157,8 @@ impl ProjectSwitcher {
         }
         self.open = open;
         self.form = None;
+        self.import = None;
+        self.notice = None;
         self.problem = None;
         self.archived = false;
         self.removal = None;
@@ -279,11 +314,23 @@ impl ProjectSwitcher {
         prompt: Text,
         window: &mut Window,
         cx: &mut Context<Self>,
-        chosen: impl FnOnce(&mut Self, PathBuf, &mut Context<Self>) + 'static,
+        chosen: impl FnOnce(&mut Self, PathBuf, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        self.ask_path(false, prompt, window, cx, chosen);
+    }
+
+    /// Asks for a file (`file`) or a folder, then hands it to `chosen`.
+    fn ask_path(
+        &mut self,
+        file: bool,
+        prompt: Text,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        chosen: impl FnOnce(&mut Self, PathBuf, &mut Window, &mut Context<Self>) + 'static,
     ) {
         let asked = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
+            files: file,
+            directories: !file,
             multiple: false,
             prompt: Some(tr(self.bardo.read(cx), prompt)),
         });
@@ -293,10 +340,10 @@ impl ProjectSwitcher {
                 Ok(Ok(None)) | Err(_) => None,
                 Ok(Err(_)) => Some(Err(())),
             };
-            let _ = this.update(cx, |this, cx| {
+            let _ = this.update_in(cx, |this, window, cx| {
                 this.picking = None;
                 match picked {
-                    Some(Ok(folder)) => chosen(this, folder, cx),
+                    Some(Ok(path)) => chosen(this, path, window, cx),
                     Some(Err(())) => this.problem = Some(Text::FileDialogFailed),
                     None => {}
                 }
@@ -307,12 +354,21 @@ impl ProjectSwitcher {
 
     /// Picks where the new project's folder goes.
     fn choose_place(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.ask_folder(Text::ProjectFolderChoose, window, cx, |this, place, _| {
-            if let Some(form) = &mut this.form {
-                form.place = Some(place);
-                form.error = None;
-            }
-        });
+        self.ask_folder(
+            Text::ProjectFolderChoose,
+            window,
+            cx,
+            |this, place, _, _| {
+                if let Some(form) = &mut this.form {
+                    form.place = Some(place.clone());
+                    form.error = None;
+                }
+                if let Some(form) = &mut this.import {
+                    form.place = Some(place);
+                    form.error = None;
+                }
+            },
+        );
     }
 
     /// Points a project whose folder cannot be found at its folder.
@@ -322,7 +378,7 @@ impl ProjectSwitcher {
             Text::LocateFolderPrompt,
             window,
             cx,
-            move |this, folder, cx| {
+            move |this, folder, _, cx| {
                 let located = this.bardo.update(cx, |bardo, cx| {
                     let located = bardo.locate_project_folder(id, &folder);
                     cx.notify();
@@ -372,6 +428,192 @@ impl ProjectSwitcher {
                 cx.notify();
             }
         }
+    }
+
+    /// Asks where to save the open project's package, then queues writing
+    /// it.
+    fn export(&mut self, project: ProjectId, name: &str, cx: &mut Context<Self>) {
+        self.problem = None;
+        self.notice = None;
+        let chosen =
+            cx.prompt_for_new_path(&bardo_app::backup_folder(), Some(&package_file_name(name)));
+        let name = name.to_owned();
+        self.picking = Some(cx.spawn(async move |this, cx| {
+            let chosen = chosen.await;
+            let _ = this.update(cx, |this, cx| {
+                this.picking = None;
+                match chosen {
+                    Ok(Ok(Some(path))) => {
+                        let started = this.bardo.update(cx, |bardo, cx| {
+                            let started = bardo.export_project_package(project, path);
+                            cx.notify();
+                            started
+                        });
+                        match started {
+                            Ok(_) => {
+                                let bardo = this.bardo.read(cx);
+                                this.notice = Some(
+                                    bardo.text_with(Text::PackageExportStarted, &[("name", &name)]),
+                                );
+                            }
+                            Err(error) => this.problem = Some(error.message()),
+                        }
+                    }
+                    Ok(Ok(None)) | Err(_) => {}
+                    Ok(Err(_)) => this.problem = Some(Text::FileDialogFailed),
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Asks for a package, reads it, and opens the import dialog.
+    fn start_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.problem = None;
+        self.notice = None;
+        self.ask_path(
+            true,
+            Text::PackageImportPrompt,
+            window,
+            cx,
+            |this, package, window, cx| {
+                let offer = this.bardo.read(cx).inspect_package(&package);
+                match offer {
+                    Ok(offer) => this.open_import(offer, window, cx),
+                    Err(error) => this.problem = Some(error.message()),
+                }
+            },
+        );
+    }
+
+    fn open_import(&mut self, offer: PackageOffer, window: &mut Window, cx: &mut Context<Self>) {
+        let placeholder = tr(self.bardo.read(cx), Text::ProjectNamePlaceholder);
+        let typed = offer.name.clone();
+        let name = cx.new(|cx| {
+            let mut input = InputState::new(window, cx).placeholder(placeholder);
+            input.set_value(typed, window, cx);
+            input
+        });
+        let subscription = cx.subscribe_in(
+            &name,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => this.import(window, cx),
+                InputEvent::Change => {
+                    if let Some(form) = &mut this.import {
+                        form.error = None;
+                    }
+                    cx.notify();
+                }
+                _ => {}
+            },
+        );
+        name.update(cx, |name, cx| name.focus(window, cx));
+        self.import = Some(ImportForm {
+            color: offer.manifest.color,
+            offer,
+            id: ProjectId::new(),
+            name,
+            place: None,
+            templates: Vec::new(),
+            error: None,
+            _subscription: subscription,
+        });
+    }
+
+    fn tick_template(&mut self, kind: TemplateKind, ticked: bool, cx: &mut Context<Self>) {
+        if let Some(form) = &mut self.import {
+            form.templates.retain(|other| *other != kind);
+            if ticked {
+                form.templates.push(kind);
+            }
+        }
+        cx.notify();
+    }
+
+    fn cancel_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.import = None;
+        self.search
+            .update(cx, |search, cx| search.focus(window, cx));
+        cx.notify();
+    }
+
+    /// Queues the import chosen in the dialog.
+    fn import(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(form) = &self.import else {
+            return;
+        };
+        let choice = PackageChoice {
+            id: form.id,
+            package: form.offer.package.clone(),
+            name: form.name.read(cx).value().trim().to_owned(),
+            color: form.color,
+            place: form.place.clone(),
+            templates: form.templates.clone(),
+        };
+        let name = choice.name.clone();
+        let queued = self.bardo.update(cx, |bardo, cx| {
+            let queued = bardo.import_package(choice);
+            cx.notify();
+            queued
+        });
+        match queued {
+            Ok(_) => {
+                self.import = None;
+                let bardo = self.bardo.read(cx);
+                self.notice = Some(bardo.text_with(Text::PackageImportStarted, &[("name", &name)]));
+            }
+            Err(error) => {
+                if let Some(form) = &mut self.import {
+                    form.error = Some(error.message());
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Asks for a project's folder, then relinks it or brings it back,
+    /// and opens it.
+    fn open_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.problem = None;
+        self.notice = None;
+        self.ask_folder(Text::OpenFolderPrompt, window, cx, |this, folder, _, cx| {
+            let opened = this.bardo.update(cx, |bardo, cx| {
+                let opened = bardo.open_project_folder(&folder);
+                cx.notify();
+                opened
+            });
+            let (id, said) = match opened {
+                Ok(FolderOpened::Relinked(id)) => (id, Text::FolderRelinked),
+                Ok(FolderOpened::Imported(imported)) => (imported.project, Text::FolderReopened),
+                Err(error) => {
+                    this.problem = Some(error.message());
+                    return;
+                }
+            };
+            // It opens, and the list stays up to say what happened. An
+            // archived one stays archived: Unarchive opens it.
+            let bardo = this.bardo.read(cx);
+            let Some(project) = bardo
+                .projects()
+                .ok()
+                .and_then(|all| all.into_iter().find(|project| project.id == id))
+            else {
+                this.problem = Some(Text::ProjectNotFoundAny);
+                return;
+            };
+            let name = project.name().to_owned();
+            if !project.is_active() {
+                this.notice = Some(bardo.text_with(Text::FolderOpenedArchived, &[("name", &name)]));
+                return;
+            }
+            if let Err(error) = bardo.switch_project(id) {
+                this.problem = Some(error.message());
+                return;
+            }
+            this.notice = Some(bardo.text_with(said, &[("name", &name)]));
+            cx.emit(ProjectSwitched);
+        });
     }
 
     /// Opens the archive or delete dialog for `project`.
@@ -707,6 +949,10 @@ impl ProjectSwitcher {
         let problem = self
             .problem
             .map(|problem| kit::notice(kit::Tone::Danger, tr(bardo, problem), cx));
+        let notice = self
+            .notice
+            .clone()
+            .map(|notice| kit::notice(kit::Tone::Info, notice, cx));
         let new_label = tr(bardo, Text::SwitcherNewProject);
         let folder = open.and_then(|id| Some((id, bardo.project_folder(id)?)));
         let folder_part = folder.map(|(id, folder)| {
@@ -762,9 +1008,29 @@ impl ProjectSwitcher {
         });
         let removal_part = open_name.map(|(id, name)| {
             let archive_name = name.clone();
+            let export_name = name.clone();
+            let exporting = bardo.project_export_job(id).is_some();
             h_flex()
                 .gap_1()
                 .flex_wrap()
+                .child(
+                    Button::new("project-export")
+                        .ghost()
+                        .small()
+                        .icon(IconName::ArrowUp)
+                        .label(tr(
+                            bardo,
+                            if exporting {
+                                Text::SwitcherExporting
+                            } else {
+                                Text::SwitcherExportProject
+                            },
+                        ))
+                        .disabled(exporting || self.picking.is_some())
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.export(id, &export_name, cx);
+                        })),
+                )
                 .child(
                     Button::new("project-archive")
                         .ghost()
@@ -823,6 +1089,7 @@ impl ProjectSwitcher {
                     })),
             )
             .children(problem)
+            .children(notice)
             .child(div().h(t.border_width).bg(t.border))
             .children(folder_part)
             .children(removal_part)
@@ -848,6 +1115,28 @@ impl ProjectSwitcher {
                             .label(archived_label)
                             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                 this.show_archived(true, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("project-import")
+                            .ghost()
+                            .small()
+                            .icon(IconName::ArrowDown)
+                            .label(tr(bardo, Text::SwitcherImportPackage))
+                            .disabled(self.picking.is_some())
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.start_import(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("project-open-folder")
+                            .ghost()
+                            .small()
+                            .icon(IconName::FolderOpen)
+                            .label(tr(bardo, Text::SwitcherOpenFolder))
+                            .disabled(self.picking.is_some())
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.open_folder(window, cx);
                             })),
                     ),
             )
@@ -1110,11 +1399,187 @@ impl ProjectSwitcher {
             .into_any_element()
     }
 
+    /// The import dialog: the new project's name, color and folder, what
+    /// the package holds, and which of its global templates come in as
+    /// the project's own.
+    fn render_import(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(form) = &self.import else {
+            return div().into_any_element();
+        };
+        let t = look(cx).tokens;
+        let bardo = self.bardo.read(cx);
+        let manifest = &form.offer.manifest;
+        let error = form.error.map(|error| {
+            div()
+                .text_xs()
+                .text_color(t.danger)
+                .child(tr(bardo, error))
+                .into_any_element()
+        });
+        let typed = form.name.read(cx).value().to_string();
+        let folder = bardo.new_project_folder(
+            if typed.trim().is_empty() {
+                "…"
+            } else {
+                typed.trim()
+            },
+            form.id,
+            form.place.as_deref(),
+        );
+        let swatches: Vec<AnyElement> = ProjectColor::ALL
+            .into_iter()
+            .map(|color| {
+                let picked = form.color == color;
+                div()
+                    .id(SharedString::from(format!(
+                        "project-import-color-{}",
+                        color.code()
+                    )))
+                    .p(px(3.))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(if picked {
+                        t.focus
+                    } else {
+                        gpui_kit::transparent_black()
+                    })
+                    .cursor_pointer()
+                    .child(kit::project_swatch(color, px(16.)))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        if let Some(form) = &mut this.import {
+                            form.color = color;
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+        let templates: Vec<AnyElement> = manifest
+            .contents
+            .global_templates
+            .iter()
+            .map(|&kind| {
+                Checkbox::new(SharedString::from(format!(
+                    "project-import-template-{}",
+                    kind.code()
+                )))
+                .label(tr(bardo, Text::TemplateKindName(kind)))
+                .checked(form.templates.contains(&kind))
+                .on_click(cx.listener(move |this, ticked: &bool, _, cx| {
+                    this.tick_template(kind, *ticked, cx);
+                }))
+                .into_any_element()
+            })
+            .collect();
+        let templates_field = (!templates.is_empty()).then(|| {
+            kit::field(
+                tr(bardo, Text::ImportPackageTemplates),
+                None,
+                v_flex()
+                    .gap_1()
+                    .children(templates)
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(t.text2)
+                            .child(tr(bardo, Text::ImportPackageTemplatesHint)),
+                    )
+                    .into_any_element(),
+                None,
+            )
+        });
+        let title = bardo.text_with(Text::ImportPackageTitle, &[("name", &manifest.name)]);
+        v_flex()
+            .id("project-import")
+            .gap_3()
+            .max_h(px(520.))
+            .overflow_y_scroll()
+            .child(kit::section_heading(title))
+            .child(
+                v_flex()
+                    .gap_1()
+                    .text_xs()
+                    .text_color(t.text2)
+                    .child(SharedString::from(bardo.package_from_text(manifest)))
+                    .child(SharedString::from(bardo.package_contents_text(manifest)))
+                    .child(tr(bardo, Text::ImportPackageHint)),
+            )
+            .child(kit::field(
+                tr(bardo, Text::ProjectNameLabel),
+                None,
+                Input::new(&form.name).small().into_any_element(),
+                error,
+            ))
+            .child(kit::field(
+                tr(bardo, Text::ProjectColorLabel),
+                None,
+                h_flex()
+                    .gap_1()
+                    .flex_wrap()
+                    .children(swatches)
+                    .into_any_element(),
+                None,
+            ))
+            .child(kit::field(
+                tr(bardo, Text::ProjectFolderLabel),
+                None,
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_xs()
+                            .text_color(t.text2)
+                            .truncate()
+                            .child(SharedString::from(folder.display().to_string())),
+                    )
+                    .child(
+                        Button::new("project-import-folder")
+                            .ghost()
+                            .xsmall()
+                            .label(tr(bardo, Text::ProjectFolderChoose))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.choose_place(window, cx);
+                            })),
+                    )
+                    .into_any_element(),
+                None,
+            ))
+            .children(templates_field)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .justify_end()
+                    .child(
+                        Button::new("project-import-cancel")
+                            .ghost()
+                            .small()
+                            .label(tr(bardo, Text::ProjectFormCancel))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.cancel_import(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("project-import-confirm")
+                            .primary()
+                            .small()
+                            .label(tr(bardo, Text::ImportPackageConfirm))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.import(window, cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
     /// The popover's content: the list, or the new project form.
     fn render_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let body = match (&self.removal, &self.form) {
             (Some((panel, _)), _) => panel.clone().into_any_element(),
             (None, Some(form)) => self.render_form(form, cx),
+            (None, None) if self.import.is_some() => self.render_import(cx),
             (None, None) if self.archived => self.render_archived(cx),
             (None, None) => self.render_list(cx),
         };

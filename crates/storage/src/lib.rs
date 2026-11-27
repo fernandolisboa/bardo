@@ -27,6 +27,7 @@ mod media;
 mod migrations;
 mod narration;
 mod network_account;
+mod package;
 mod persona;
 mod product;
 mod product_sheet;
@@ -77,6 +78,7 @@ pub use installers::{
     updates_dir,
 };
 pub use migrations::{BrokenReferences, MigrationError, SCHEMA_VERSION};
+pub use package::{LocalPackages, PACKAGE_MANIFEST};
 pub use project_folders::{LocalProjectFolders, MemoryProjectFolders, folder_places};
 #[cfg(windows)]
 pub use secrets::CredentialManager;

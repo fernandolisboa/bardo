@@ -2972,7 +2972,10 @@ pub(crate) mod tests {
     pub(crate) const ELEVENLABS_KEY: &str = "sk_test_elevenlabs_key_0001";
     pub(crate) const GEMINI_KEY: &str = "AIzaSyTest-gemini-key-0001";
     const HIGGSFIELD_KEY: &str = "hf-key-id-0001:hf-key-secret-0001";
-    const PATIENCE: Duration = Duration::from_secs(10);
+    /// How long a job may take before a test fails: as generous as
+    /// `testing::arriving`, since a loaded Windows CI runner can stall the
+    /// worker threads for over ten seconds (a backup and restore did).
+    const PATIENCE: Duration = Duration::from_secs(60);
     pub(crate) const SCRIPT: &str = "Era uma vez, em 1969, uma sonda. Ela partiu para longe. \
                           O sinal sumiu em março. Ninguém sabe por quê.";
 
