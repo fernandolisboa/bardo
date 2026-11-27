@@ -329,6 +329,8 @@ world_picture = "Imagem de referência"
 move_media = "Mudança de mídia"
 pack_media = "Compactação de mídia"
 unpack_media = "Descompactação de mídia"
+project_export = "Exportação de projeto"
+project_import = "Importação de projeto"
 placement_export = "Exportação para anúncios"
 render = "Render final"
 countdown = "Contagem de teste"
@@ -2921,7 +2923,7 @@ body = "Em dois minutos, este tour mostra onde fica cada coisa. Avance com Próx
 
 [tour.welcome.projects]
 title = "Seus projetos"
-body = "Um projeto reúne os canais de uma marca, com as ideias e os vídeos deles. O seletor ao lado do logo abre outro projeto, deixa à mão seus favoritos e os recentes e cria projetos novos. As telas mostram o projeto aberto."
+body = "Um projeto reúne os canais de uma marca, com as ideias e os vídeos deles. O seletor ao lado do logo abre outro projeto, deixa à mão seus favoritos e os recentes cria projetos novos e exporta, importa ou reabre um projeto pela pasta dele. As telas mostram o projeto aberto."
 
 [tour.welcome.project]
 title = "Seu projeto"
@@ -5234,6 +5236,7 @@ unarchive = "Desarquivar"
 unpacking = "Descompactando a mídia primeiro. Ele volta quando essa tarefa terminar."
 
 [delete]
+records_not_written = "Não foi possível gravar os registros do projeto na pasta dele, então nada foi excluído. Confira o espaço no disco ou escolha Excluir de vez."
 action = "Excluir…"
 project_title = "Excluir {name}"
 video_title = "Excluir {name}"
@@ -5535,3 +5538,37 @@ channel = "Canal"
 save = "Adicionar a ideia"
 cancel = "Cancelar"
 saved = "Ideia adicionada. Ranqueie as ideias para ver onde ela fica."
+
+[package]
+export_busy = "Um pacote deste projeto já está sendo gravado. Acompanhe em Tarefas."
+not_a_package = "Este arquivo não é um pacote de projeto."
+newer = "Um Bardo mais novo gravou este pacote. Atualize o Bardo para importá-lo."
+damaged = "Este pacote está danificado e não pode ser importado."
+folder_not_empty = "A pasta do novo projeto já tem arquivos. Escolha outro lugar."
+not_read = "Não foi possível ler ou gravar o pacote. Confira o arquivo e o espaço no disco e tente de novo."
+
+[open_folder]
+not_a_project = "Esta pasta não tem bardo-project.json: não é a pasta de um projeto."
+other_copy = "Esta pasta pertence a outra cópia do Bardo ou a outro perfil. Exporte o projeto lá e importe o pacote aqui."
+no_records = "O projeto desta pasta não está no Bardo e a pasta não tem os registros para trazê-lo de volta."
+
+[switcher_package]
+export = "Exportar projeto…"
+exporting = "Exportando…"
+import = "Importar pacote de projeto…"
+open_folder = "Abrir projeto de uma pasta…"
+import_prompt = "Importar"
+open_folder_prompt = "Abrir"
+export_started = "Exportando {name}. Acompanhe em Tarefas."
+import_started = "Importando {name}. Ele aparece nesta lista quando a tarefa terminar: acompanhe em Tarefas."
+relinked = "{name} usa esta pasta agora."
+reopened = "{name} voltou como um projeto novo."
+
+[package_import]
+title = "Importar {name}"
+hint = "Ele entra como um projeto novo, com pasta própria e ids novos. Os canais vêm sem as conexões com as redes: entre de novo em Contas de rede. Posts que este perfil já tem ficam de fora."
+from = "Exportado pelo Bardo {version} em {date}."
+contents = "{channels} canais · {videos} vídeos · {world} itens do mundo · {narrators} narradores · {products} produtos · {size} de mídia"
+templates = "Modelos globais que ele usou"
+templates_hint = "Os marcados entram como modelos do próprio projeto e valem mais que os globais dentro dele. Os outros continuam os globais; os textos já escritos guardam o que os gerou."
+confirm = "Importar"

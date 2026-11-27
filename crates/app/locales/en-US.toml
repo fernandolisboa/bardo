@@ -329,6 +329,8 @@ world_picture = "Reference picture"
 move_media = "Media move"
 pack_media = "Media compression"
 unpack_media = "Media unpacking"
+project_export = "Project export"
+project_import = "Project import"
 placement_export = "Export for ads"
 render = "Final render"
 countdown = "Test countdown"
@@ -2921,7 +2923,7 @@ body = "In two minutes this tour shows where everything is. Use Next or the arro
 
 [tour.welcome.projects]
 title = "Your projects"
-body = "A project holds the channels of one brand, with their ideas and videos. The switcher by the logo opens another project, keeps your favorites and recent ones at hand, and creates new projects. The screens show the open project."
+body = "A project holds the channels of one brand, with their ideas and videos. The switcher by the logo opens another project, keeps your favorites and recent ones at hand, creates new projects, and exports, imports or reopens a project from its folder. The screens show the open project."
 
 [tour.welcome.project]
 title = "Your project"
@@ -5234,6 +5236,7 @@ unarchive = "Unarchive"
 unpacking = "Unpacking its media first. It comes back when that job ends."
 
 [delete]
+records_not_written = "The project's records could not be written into its folder, so nothing was deleted. Check the room on the drive, or choose Delete permanently."
 action = "Delete…"
 project_title = "Delete {name}"
 video_title = "Delete {name}"
@@ -5535,3 +5538,37 @@ channel = "Channel"
 save = "Add the idea"
 cancel = "Cancel"
 saved = "Idea added. Rank the ideas to see where it stands."
+
+[package]
+export_busy = "A package of this project is being written already. Follow it in Jobs."
+not_a_package = "This file is no project package."
+newer = "A newer Bardo wrote this package. Update Bardo to import it."
+damaged = "This package is damaged and cannot be imported."
+folder_not_empty = "The new project's folder already holds files. Choose another place."
+not_read = "The package could not be read or written. Check the file and the room on the drive, then try again."
+
+[open_folder]
+not_a_project = "This folder has no bardo-project.json: it is no project's folder."
+other_copy = "This folder belongs to another copy of Bardo or another profile. Export the project there and import its package here."
+no_records = "This folder's project is not in Bardo and the folder holds no records to bring it back."
+
+[switcher_package]
+export = "Export project…"
+exporting = "Exporting…"
+import = "Import a project package…"
+open_folder = "Open a project from a folder…"
+import_prompt = "Import"
+open_folder_prompt = "Open"
+export_started = "Exporting {name}. Follow it in Jobs."
+import_started = "Importing {name}. It shows in this list once its job ends: follow it in Jobs."
+relinked = "{name} uses this folder now."
+reopened = "{name} is back as a new project."
+
+[package_import]
+title = "Import {name}"
+hint = "It comes in as a new project, with a folder of its own and new ids. Its channels come without network connections: sign in again on Network accounts. Posts this profile already has are left out."
+from = "Exported by Bardo {version} on {date}."
+contents = "{channels} channels · {videos} videos · {world} world items · {narrators} narrators · {products} products · {size} of media"
+templates = "Global templates it used"
+templates_hint = "Ticked ones come in as the project's own templates and win over the global ones inside it. The others stay the global ones; the texts already written keep what they were written with."
+confirm = "Import"

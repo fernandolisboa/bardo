@@ -217,10 +217,18 @@ pub enum JobKind {
     /// World screen (#337); it waits for the user's review. A picture
     /// drawn is not drawn again on resume.
     WorldPicture,
+    /// Writes a project package (#342): the project's records, the global
+    /// items it uses and its media, in one `.bardo-project` file. Starts
+    /// over on resume.
+    ProjectExport,
+    /// Brings a project package in as a new project (#342): its folder
+    /// and media first, then its records in one transaction. Starts over
+    /// on resume, unless the records went in already.
+    ProjectImport,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 45] = [
+    pub const ALL: [JobKind; 47] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -266,6 +274,8 @@ impl JobKind {
         JobKind::PackMedia,
         JobKind::UnpackMedia,
         JobKind::WorldPicture,
+        JobKind::ProjectExport,
+        JobKind::ProjectImport,
     ];
 
     /// Stable name stored in the database.
@@ -316,6 +326,8 @@ impl JobKind {
             JobKind::PackMedia => "pack_media",
             JobKind::UnpackMedia => "unpack_media",
             JobKind::WorldPicture => "world_picture",
+            JobKind::ProjectExport => "project_export",
+            JobKind::ProjectImport => "project_import",
         }
     }
 }

@@ -1315,6 +1315,7 @@ mod tests {
                 products: Arc::clone(&self.db) as _,
                 world: Arc::clone(&self.db) as _,
                 sharing: Arc::clone(&self.db) as _,
+                packages: Arc::new(bardo_storage::LocalPackages::new(Arc::clone(&self.db))),
                 world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
                 ads: Arc::clone(&self.db) as _,
                 end_cards: Arc::clone(&self.db) as _,

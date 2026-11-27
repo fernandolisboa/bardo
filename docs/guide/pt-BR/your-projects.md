@@ -46,6 +46,8 @@ Clique em um projeto para abri-lo. O Bardo lembra o projeto aberto e abre nele d
 
 **Excluir projeto…** no seletor (ou a lixeira ao lado de um projeto arquivado) pede que você digite o nome do projeto. Ele remove o projeto com os canais, ideias e vídeos, desconecta as contas das redes como **Desconectar** faz ([Contas das redes](network-accounts.md)) e manda a pasta para a Lixeira. O diálogo avisa antes quando a pasta será excluída de vez: num drive removível ou de rede, quando a Lixeira do drive está desativada, ou quando a pasta é maior do que essa Lixeira comporta. **Excluir de vez** pula a Lixeira de propósito. Uma pasta que o Bardo não alcança fica como está, e só os registros saem.
 
+Antes de a pasta de um projeto ir para a Lixeira, o Bardo grava nela os registros do projeto, em **bardo-project.db**. Restaurada da Lixeira, a pasta abre de novo com **Abrir projeto de uma pasta…** ([Abrir um projeto de uma pasta](#open-folder)). Se os registros não puderem ser gravados, nada é excluído. Uma pasta excluída de vez não leva registros.
+
 Nada é excluído nas redes, e [Custos](costs.md#deleted) guarda o gasto do projeto com o nome dele até você esquecê-lo.
 
 Arquivar e excluir são recusados enquanto algo está pendente, e o diálogo lista o que resolver antes:
@@ -53,6 +55,38 @@ Arquivar e excluir são recusados enquanto algo está pendente, e o diálogo lis
 - uma publicação esperando o horário no Bardo ([agendamento](uploading.md)),
 - uma publicação esperando na rede para ficar pública mais tarde,
 - uma tarefa do projeto, de um dos canais ou vídeos dele, na fila ou em andamento ([Tarefas](jobs.md)).
+
+<a id="export"></a>
+## Exportar um projeto
+
+**Exportar projeto…** no seletor grava o projeto aberto num único arquivo **.bardo-project**, onde você escolher, como uma tarefa com progresso e **Cancelar** ([Tarefas](jobs.md)). O pacote leva:
+
+- os canais, ideias, vídeos, mundo, narradores, produtos e modelos do projeto, com as publicações como histórico;
+- cópias dos narradores, produtos, personagens e modelos globais que o projeto usa, para ele abrir completo em outro lugar;
+- a mídia dos vídeos e do mundo dele.
+
+Ele nunca leva chaves de API, credenciais de app, logins nas redes ou tokens, custos, tarefas não terminadas, nem os números que o YouTube deixa os apps guardarem só por um tempo ([Dados e chaves](data-and-keys.md#credentials)). Exporte para levar um projeto a outro computador ou perfil, ou para guardar a cópia de um projeto à parte de um [backup](backup.md) completo.
+
+<a id="import"></a>
+## Importar um pacote de projeto
+
+**Importar pacote de projeto…** pede um arquivo **.bardo-project**, mostra o que ele traz, quando e por qual versão do Bardo foi gravado, e pede o nome, a cor e a pasta do projeto novo. O nome é o do pacote, numerado quando você já tem um projeto com esse nome. **Importar** traz o projeto como uma tarefa; ele aparece no seletor quando a tarefa termina.
+
+- Ele sempre entra como um **projeto novo**, com pasta própria e ids novos: importar um pacote no perfil de onde ele saiu cria um segundo projeto ao lado do primeiro.
+- Os canais vêm sem as conexões com as redes: conecte de novo em [Contas de rede](network-accounts.md). Um canal com um nome que você já usa ganha o nome do projeto depois dele.
+- As publicações vêm como histórico. Uma publicação que este perfil já tem (a mesma rede e o mesmo post) fica de fora, para nada contar duas vezes em [Desempenho](performance-metrics.md).
+- Os narradores, produtos e personagens globais que ele trouxe viram do projeto. Os modelos globais também, só quando marcados no diálogo; os outros continuam os globais deste perfil, e os textos já escritos guardam o que os gerou ([Modelos](templates.md)).
+- Um pacote gravado por um Bardo mais novo é recusado: atualize o Bardo antes ([Atualizações](about.md#updates)).
+
+<a id="open-folder"></a>
+## Abrir um projeto de uma pasta
+
+**Abrir projeto de uma pasta…** pede a pasta de um projeto (a que tem **bardo-project.json**) e abre o projeto dela:
+
+- um projeto que o Bardo conhece, cuja pasta você moveu, passa a usar o lugar novo, como **Localizar…** faz ([Pasta não encontrada](storage.md#not-found));
+- a pasta de um projeto excluído, restaurada da Lixeira, volta como um projeto novo a partir dos registros que guarda, com a mídia onde está.
+
+Uma pasta de outra cópia do Bardo ou de outro perfil é recusada: exporte o projeto lá e importe o pacote aqui.
 
 <a id="move"></a>
 ## Mover um canal

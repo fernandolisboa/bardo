@@ -46,6 +46,8 @@ Click a project to open it. Bardo remembers the open project, and opens on it th
 
 **Delete project…** in the switcher (or the bin beside an archived project) asks you to type the project's name. It removes the project with its channels, ideas and videos, disconnects its network accounts as **Disconnect** does ([Network accounts](network-accounts.md)), and sends its folder to the Recycle Bin. The dialog says beforehand when the folder will be deleted permanently instead: on a removable or network drive, when the drive's Recycle Bin is off, or when the folder is larger than that bin holds. **Delete permanently** skips the bin on purpose. A folder Bardo cannot reach is left alone, and only the records go.
 
+Before a project's folder goes to the Recycle Bin, Bardo writes the project's records into it, in **bardo-project.db**. Restored from the bin, the folder opens again with **Open a project from a folder…** ([Opening a project from a folder](#open-folder)). If the records cannot be written, nothing is deleted. A folder deleted permanently takes no records along.
+
 Nothing is deleted on the networks, and [Costs](costs.md#deleted) keeps the project's spending under its name until you forget it.
 
 Archiving and deleting are refused while something is pending, and the dialog lists what to clear first:
@@ -53,6 +55,38 @@ Archiving and deleting are refused while something is pending, and the dialog li
 - a post waiting in Bardo for its time ([schedule](uploading.md)),
 - a post waiting on its network to go public later,
 - a job for the project, one of its channels or videos, queued or running ([Jobs](jobs.md)).
+
+<a id="export"></a>
+## Exporting a project
+
+**Export project…** in the switcher writes the open project to one **.bardo-project** file, wherever you choose, as a job with progress and **Cancel** ([Jobs](jobs.md)). The package holds:
+
+- the project's channels, ideas, videos, world, narrators, products and templates, with its posts as history;
+- copies of the global narrators, products, characters and templates the project uses, so it opens complete elsewhere;
+- the media of its videos and of its world.
+
+It never holds API keys, app credentials, network sign-ins or tokens, costs, unfinished jobs, or the numbers YouTube lets apps keep only for a while ([Data and keys](data-and-keys.md#credentials)). Export it to move a project to another computer or profile, or to keep a copy of one project apart from a full [backup](backup.md).
+
+<a id="import"></a>
+## Importing a project package
+
+**Import a project package…** asks for a **.bardo-project** file, then shows what it holds, when and by which version of Bardo it was written, and asks for the new project's name, color and folder. The name is the package's own, numbered when you have a project of that name. **Import** brings it in as a job; the project shows in the switcher when the job ends.
+
+- It always comes in as a **new project**, with a folder of its own and new ids: importing a package into the profile it came from makes a second project beside the first.
+- Its channels come without network connections: connect them again on [Network accounts](network-accounts.md). A channel whose name you already use gets the project's name after it.
+- Its posts come as history. A post this profile already has (the same network and post) is left out, so nothing counts twice in [Performance](performance-metrics.md).
+- The global narrators, products and characters it carried become the project's own. Its global templates do too only when ticked in the dialog; the others stay this profile's global ones, and the texts already written keep what they were written with ([Templates](templates.md)).
+- A package written by a newer Bardo is refused: update Bardo first ([Updates](about.md#updates)).
+
+<a id="open-folder"></a>
+## Opening a project from a folder
+
+**Open a project from a folder…** asks for a project's folder (the one with **bardo-project.json**) and opens its project:
+
+- a project Bardo knows, whose folder you moved, points at the new place, as **Locate…** does ([Folder not found](storage.md#not-found));
+- a deleted project's folder, restored from the Recycle Bin, comes back as a new project from the records it holds, with its media where it is.
+
+A folder from another copy of Bardo or another profile is refused: export the project there and import its package here.
 
 <a id="move"></a>
 ## Moving a channel

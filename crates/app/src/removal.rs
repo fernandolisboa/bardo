@@ -66,6 +66,11 @@ pub enum RemovalError {
     /// removed.
     #[error("the folder could not be removed: {0}")]
     FolderNotRemoved(std::io::Error),
+    /// The project's records could not be written into its folder before
+    /// it went to the bin; nothing was removed. *Delete permanently* needs
+    /// no records.
+    #[error("the records could not be written: {0}")]
+    RecordsNotWritten(bardo_domain::PackageError),
     /// A network account's tokens could not be removed; the records stay,
     /// so the user can try again.
     #[error("an account could not be disconnected")]
@@ -93,6 +98,7 @@ impl RemovalError {
             RemovalError::FolderNotFound => Text::FolderNotFound,
             RemovalError::FolderNotRemoved(_) => Text::DeleteFolderNotRemoved,
             RemovalError::NotDisconnected => Text::DeleteNotDisconnected,
+            RemovalError::RecordsNotWritten(_) => Text::DeleteRecordsNotWritten,
             RemovalError::Repository(_) => Text::RemovalNotSaved,
         }
     }
@@ -187,6 +193,9 @@ pub struct Deletion {
     disconnections: Vec<Disconnection>,
     trash: Arc<dyn bardo_domain::Trash>,
     removals: Arc<dyn bardo_domain::RemovalRepository>,
+    /// Writes a project's records into its folder before it goes to the
+    /// bin (#342).
+    packages: Arc<dyn bardo_domain::ProjectPackages>,
 }
 
 impl Deletion {
@@ -199,6 +208,15 @@ impl Deletion {
     /// an account whose tokens stay keeps the records, so it can be tried
     /// again.
     pub fn run(self) -> Result<(), RemovalError> {
+        // A project's folder going to the bin takes its records along, so
+        // restored it opens again (*Open a project from a folder*).
+        if let (Removable::Project(project), Some(folder), Discard::Recycle) =
+            (self.target, &self.folder, self.discard)
+        {
+            self.packages
+                .write_records(project, folder)
+                .map_err(RemovalError::RecordsNotWritten)?;
+        }
         if let Some(folder) = &self.folder {
             self.trash
                 .discard(folder, self.discard)
@@ -649,6 +667,7 @@ impl Bardo {
             disconnections,
             trash: Arc::clone(&self.folder_book.trash),
             removals: Arc::clone(&self.folder_book.removals),
+            packages: Arc::clone(&self.folder_book.packages),
         })
     }
 
