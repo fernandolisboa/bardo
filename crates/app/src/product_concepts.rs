@@ -37,6 +37,9 @@ use crate::{Bardo, KeyState, TemplateError, Text};
 pub enum ConceptError {
     #[error("product not found")]
     NotFound,
+    /// A linked copy is read-only (#340).
+    #[error("a linked copy")]
+    Linked,
     /// Only a product of kind *idea* with no image of its own gets one.
     #[error("a concept image is only drawn for an idea with no image")]
     NotOffered,
@@ -64,6 +67,7 @@ impl ConceptError {
     pub fn message(&self) -> Text {
         match self {
             ConceptError::NotFound => Text::ProductNotFound,
+            ConceptError::Linked => Text::SharingLinkedReadOnly,
             ConceptError::NotOffered => Text::ConceptNotOffered,
             ConceptError::MissingKey(Provider::Claude) => Text::ConceptMissingClaudeKey,
             ConceptError::MissingKey(_) => Text::ConceptMissingImageKey,
@@ -453,6 +457,16 @@ fn job_of(job: &Job) -> Option<(String, bool)> {
 }
 
 impl Bardo {
+    /// The product, refused when it is a linked copy: what changes its
+    /// concept image.
+    fn concept_to_change(&self, product: ProductId) -> Result<Product, ConceptError> {
+        let found = self.concept_product(product)?;
+        if self.is_linked_copy(bardo_domain::LibraryItem::Product(product)) {
+            return Err(ConceptError::Linked);
+        }
+        Ok(found)
+    }
+
     fn concept_product(&self, product: ProductId) -> Result<Product, ConceptError> {
         self.products
             .get(product)?
@@ -550,7 +564,7 @@ impl Bardo {
         product: ProductId,
         consent: BudgetConsent,
     ) -> Result<JobId, ConceptError> {
-        let found = self.concept_product(product)?;
+        let found = self.concept_to_change(product)?;
         if !may_draw_concept(found.brief.kind(), self.products.image_count(product)?) {
             return Err(ConceptError::NotOffered);
         }
@@ -582,7 +596,7 @@ impl Bardo {
     /// Makes the drawing waiting for review the product's concept image,
     /// in place of the one kept before.
     pub fn keep_product_concept(&self, product: ProductId) -> Result<ProductConcept, ConceptError> {
-        self.concept_product(product)?;
+        self.concept_to_change(product)?;
         if !self.products.keep_pending_concept(product)? {
             return Err(ConceptError::NothingWaiting);
         }
@@ -610,7 +624,7 @@ impl Bardo {
 
     /// Drops the drawing waiting for review; the kept one stays.
     pub fn discard_product_concept(&self, product: ProductId) -> Result<(), ConceptError> {
-        self.concept_product(product)?;
+        self.concept_to_change(product)?;
         if !self.products.remove_pending_concept(product)? {
             return Err(ConceptError::NothingWaiting);
         }

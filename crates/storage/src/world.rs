@@ -588,6 +588,14 @@ impl MemoryWorldFiles {
             .push(folder.to_path_buf());
     }
 
+    /// Makes `folder` reachable again, as a drive plugged back in.
+    pub fn plug(&self, folder: &Path) {
+        self.unreachable
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retain(|gone| gone != folder);
+    }
+
     /// Makes `folder` refuse writes while it stays reachable, as a full
     /// disk or a denied permission.
     pub fn refuse_writes(&self, folder: &Path) {

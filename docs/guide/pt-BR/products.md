@@ -126,3 +126,8 @@ Os ângulos de anúncio aparecem aqui e não em [Temas](themes-ranking.md), e um
 ## Duplicar, arquivar e excluir
 
 **Duplicar** salva as alterações que você fez e depois copia o briefing, as imagens, a imagem de conceito mantida, o logo e a ficha com um novo nome, para uma variação do mesmo produto. **Arquivar** esconde da lista e de novos anúncios um produto que você não anuncia mais; **Restaurar** traz ele de volta. **Excluir…** remove o produto com as imagens, a imagem de conceito, o logo e a ficha depois que você confirma, e é recusado enquanto algum vídeo usa o produto (arquive em vez disso), enquanto uma execução preenche a ficha, enquanto os ângulos dele são propostos ou ranqueados, ou enquanto a imagem de conceito dele é desenhada.
+
+<a id="sharing"></a>
+## Compartilhar com outros projetos
+
+Abaixo das ações, **Compartilhamento** marca um produto como **Compartilhável** para seus outros projetos, exporta uma cópia para um deles, torna o produto global ou o salva em arquivo com as imagens e o logo; **Importar de outro projeto** e **Abrir arquivo de item…**, no topo, trazem um para cá. Uma cópia vinculada segue toda mudança do original, inclusive a ficha e a imagem de conceito mantida, e não pode ser editada aqui. Veja [Compartilhar entre projetos](global-library.md#sharing).

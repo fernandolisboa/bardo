@@ -1243,6 +1243,7 @@ mod tests {
             // As the database was before migration 64 (and the ones after),
             // then migrated.
             let mut conn = s.db.conn();
+            crate::sharing::undo_for_tests(&conn);
             conn.execute_batch(
                 "DROP INDEX template_version_number;
                  ALTER TABLE template_version DROP COLUMN owner_project_id;

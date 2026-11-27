@@ -8,12 +8,13 @@
 //! Rules, storage and the drawing job live in `bardo_app`; this file maps
 //! the form to a `WorldItemDraft` and results back to the screen.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    Look, ProjectId, ReferencePictureId, StyleChoice, WorldItemDetails, WorldItemDraft,
-    WorldItemFieldError, WorldItemId, WorldKind,
+    LibraryItem, LibraryKind, Look, ProjectId, ReferencePictureId, Sharing, StyleChoice,
+    WorldItemDetails, WorldItemDraft, WorldItemFieldError, WorldItemId, WorldKind,
 };
 use bardo_app::{
     Bardo, BudgetConsent, Control, Destination, PictureView, SpendEstimate, Text, TourAnchor,
@@ -37,6 +38,7 @@ use gpui_kit::{
 
 use crate::kit::{self, Tone};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
+use crate::sharing::{self, ImportPanel, SharingEvent, SharingPanel};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 use crate::{guide, layout};
@@ -243,6 +245,12 @@ pub struct WorldScreen {
     /// The file dialog of an import is open.
     dialog: Option<Task<()>>,
     revision: u64,
+    /// The edited item's sharing, below its actions.
+    sharing: Entity<SharingPanel>,
+    /// *Import from another project* and *Open item file…*.
+    import: Entity<ImportPanel>,
+    /// How the listed items take part in sharing, for their tags.
+    shared: HashMap<LibraryItem, Sharing>,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -264,7 +272,23 @@ impl WorldScreen {
         let belongs = cx.new(|cx| {
             SelectState::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(true)
         });
+        let sharing = cx.new(|_| SharingPanel::new(bardo.clone(), "world-sharing"));
+        let import = cx.new(|_| {
+            ImportPanel::new(
+                bardo.clone(),
+                "world-import",
+                LibraryKind::World(WorldKind::Character),
+            )
+        });
+        // Linked copies made while a folder could not be reached catch up.
+        bardo.read(cx).follow_world_pictures();
         let subscriptions = vec![
+            cx.subscribe_in(&sharing, window, |this, _, event, window, cx| {
+                this.shared_changed(*event, window, cx)
+            }),
+            cx.subscribe_in(&import, window, |this, _, event, window, cx| {
+                this.shared_changed(*event, window, cx)
+            }),
             cx.subscribe(&name, |this, _, event, cx| {
                 this.edited(NAME_ERRORS, event, cx)
             }),
@@ -337,6 +361,9 @@ impl WorldScreen {
             importing: None,
             dialog: None,
             revision,
+            sharing,
+            import,
+            shared: HashMap::new(),
             _poll: poll,
             _subscriptions: subscriptions,
         };
@@ -395,7 +422,32 @@ impl WorldScreen {
         self.no_project = self.scope == WorldScope::Project && self.owner.is_none();
     }
 
+    /// A sharing change: the list re-reads, and shows an arrived item.
+    fn shared_changed(&mut self, event: SharingEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event {
+            SharingEvent::Changed => self.reload(window, cx),
+            SharingEvent::Show(LibraryItem::World(id)) => {
+                self.reload_list(cx);
+                self.edit(id, window, cx);
+            }
+            SharingEvent::Show(_) => self.reload(window, cx),
+        }
+    }
+
+    /// The import offers the open tab's kind, into the shown owner.
+    fn sync_sharing(&mut self, cx: &mut Context<Self>) {
+        let (owner, kind) = (self.owner, LibraryKind::World(self.kind));
+        let project_scope = self.scope == WorldScope::Project;
+        self.import.update(cx, |import, cx| {
+            import.set_owner(owner, project_scope, cx);
+            import.set_kind(kind, cx);
+        });
+        self.shared = sharing::sharing_map(self.bardo.read(cx), owner, kind);
+        self.sharing.update(cx, |sharing, cx| sharing.refresh(cx));
+    }
+
     fn reload_list(&mut self, cx: &mut Context<Self>) {
+        self.sync_sharing(cx);
         let bardo = self.bardo.read(cx);
         if self.no_project {
             self.cards.clear();
@@ -655,6 +707,7 @@ impl WorldScreen {
         }
         self.kind = kind;
         self.relabel(window, cx);
+        self.sync_sharing(cx);
         match self.first_listed() {
             Some(first) => self.edit(first, window, cx),
             None => self.start_new(window, cx),
@@ -710,6 +763,8 @@ impl WorldScreen {
         self.reset_feedback();
         self.fill(&WorldItemDraft::default(), window, cx);
         self.refresh_owners(window, cx);
+        self.sharing
+            .update(cx, |sharing, cx| sharing.show(None, cx));
         cx.notify();
     }
 
@@ -720,7 +775,11 @@ impl WorldScreen {
         if character.kind != self.kind {
             self.kind = character.kind;
             self.relabel(window, cx);
+            self.sync_sharing(cx);
         }
+        let shown = (LibraryItem::World(id), character.name().to_owned());
+        self.sharing
+            .update(cx, |sharing, cx| sharing.show(Some(shown), cx));
         self.filled = Some(character.details.clone());
         self.editing = Some(id);
         self.reset_feedback();
@@ -1054,10 +1113,17 @@ impl WorldScreen {
                             .object_fit(ObjectFit::Cover)
                             .into_any_element()
                     });
-                tile.status = card.character.is_archived().then(|| {
-                    kit::status(Tone::Neutral, tr(bardo, Text::CharacterArchivedTag), cx)
-                        .into_any_element()
-                });
+                tile.status = card
+                    .character
+                    .is_archived()
+                    .then(|| {
+                        kit::status(Tone::Neutral, tr(bardo, Text::CharacterArchivedTag), cx)
+                            .into_any_element()
+                    })
+                    .or_else(|| {
+                        let shared = self.shared.get(&LibraryItem::World(id))?;
+                        sharing::sharing_tag(bardo, shared, cx)
+                    });
                 tile
             })
             .collect();
@@ -1111,7 +1177,10 @@ impl WorldScreen {
             bardo,
             Text::WorldPictureOrigin(view.picture.provenance.origin),
         );
-        let actions: AnyElement = if !kept {
+        let actions: AnyElement = if self.sharing.read(cx).is_linked() {
+            // A linked copy's pictures are its original's.
+            div().into_any_element()
+        } else if !kept {
             h_flex()
                 .flex_wrap()
                 .gap_1()
@@ -1233,8 +1302,8 @@ impl WorldScreen {
         let bardo = self.bardo.read(cx);
         let drawing = card.drawing;
         // A picture is drawn from the saved appearance, so edits are saved
-        // first.
-        let dirty = self.dirty(cx);
+        // first; a linked copy's come from its original.
+        let dirty = self.dirty(cx) || self.sharing.read(cx).is_linked();
         v_flex()
             .gap_2()
             .child(
@@ -1550,6 +1619,8 @@ impl WorldScreen {
             .map(|(looks, videos)| self.render_drops(&looks, videos, cx));
         let [name_error, appearance_error, notes_error] =
             [NAME_ERRORS, APPEARANCE_ERRORS, NOTES_ERRORS].map(|fields| self.error_for(fields, cx));
+        let linked = self.sharing.read(cx).is_linked();
+        let has_sharing = self.sharing.read(cx).has_content();
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let scroll = Some(&self.form_scroll);
@@ -1588,6 +1659,7 @@ impl WorldScreen {
                 Button::new("save-character")
                     .primary()
                     .label(tr(bardo, action))
+                    .disabled(linked)
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.save(false, window, cx);
                     })),
@@ -1651,6 +1723,7 @@ impl WorldScreen {
                                 .child(tr(bardo, texts.form_hint)),
                         ),
                     )
+                    .child(self.import.clone())
                     .child(
                         kit::card(cx).p_4().gap_4().child(kit::anchor_in(
                             TourAnchor::Control(Control::WorldCharacter),
@@ -1701,6 +1774,13 @@ impl WorldScreen {
                         actions,
                         scroll,
                     ))
+                    .when(has_sharing, |form| {
+                        form.child(kit::anchor_in(
+                            TourAnchor::Control(Control::LibrarySharing),
+                            self.sharing.clone(),
+                            scroll,
+                        ))
+                    })
                     .child(kit::anchor_in(
                         TourAnchor::Control(Control::WorldPictures),
                         pictures,

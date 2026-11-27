@@ -46,6 +46,8 @@ use crate::{AppError, Bardo, BudgetConsent, SpendEstimate, Text};
 #[derive(Clone)]
 pub(crate) struct WorldBook {
     pub(crate) world: Arc<dyn WorldRepository>,
+    /// Linked copies follow their originals' pictures (#340).
+    pub(crate) sharing: Arc<dyn bardo_domain::SharingRepository>,
     pub(crate) files: Arc<dyn WorldFiles>,
     pub(crate) projects: Arc<dyn ProjectRepository>,
     pub(crate) channels: Arc<dyn ChannelRepository>,
@@ -252,6 +254,23 @@ impl WorldBook {
                     format!("the world folder {} cannot be reached", folder.display()),
                 ));
             }
+            // A linked copy's file not copied yet: it comes from the
+            // original's folder now, or the portrait is drawn (and kept by
+            // the original); the copy's row is never let go.
+            Err(_) if self.original_of(character).is_some() => {
+                if self.follow_into(character) == crate::PictureFollowing::WaitingForFolder {
+                    // Nothing paid is drawn again while the original's
+                    // folder is away.
+                    return Err(JobFailure::new(
+                        JobFailureKind::Files,
+                        "the original's world folder cannot be reached".to_owned(),
+                    ));
+                }
+                match self.files.read(&folder, &picture.file) {
+                    Ok(bytes) => bytes,
+                    Err(_) => return Ok(None),
+                }
+            }
             // Gone: let go, so the next portrait is drawn and kept.
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 tracing::warn!("a world picture's file is gone and is let go: {error}");
@@ -363,6 +382,13 @@ impl WorldBook {
         extension: &str,
         provenance: PictureProvenance,
     ) -> Result<Option<ReferencePicture>, RepositoryError> {
+        // A linked copy is read-only: its original keeps the picture, which
+        // then comes back to the copy (#340).
+        if let Some(original) = self.original_of(item.id)
+            && let Some(original) = self.world.character(original)?
+        {
+            return self.keep_drawn(&original, look, bytes, extension, provenance);
+        }
         if self.usable(item, &look)?.is_some() {
             return Ok(None);
         }
@@ -395,6 +421,8 @@ impl WorldBook {
         drawn: &Generation,
         origin: PictureOrigin,
     ) -> Result<(), RepositoryError> {
+        // A linked copy is read-only: its original keeps the portrait.
+        let character = self.original_of(character).unwrap_or(character);
         let Some(found) = self.world.character(character)? else {
             return Ok(());
         };
@@ -456,7 +484,137 @@ impl WorldBook {
         for other in replaced {
             let _ = self.files.remove(&folder, &other.file);
         }
+        if picture.kept {
+            // Its linked copies got the row in the same write; the file
+            // follows now.
+            self.follow_pictures(picture.item);
+        }
         Ok(())
+    }
+
+    /// The original a linked copy follows, when `item` is one.
+    pub(crate) fn original_of(&self, item: WorldItemId) -> Option<WorldItemId> {
+        match self.sharing.sharing(bardo_domain::LibraryItem::World(item)) {
+            Ok(sharing) => match sharing.following.and_then(|following| following.original) {
+                Some(bardo_domain::LibraryItem::World(original)) => Some(original),
+                _ => None,
+            },
+            Err(error) => {
+                tracing::warn!("could not read a world item's sharing: {error}");
+                None
+            }
+        }
+    }
+
+    /// Copies the kept pictures' files of `from` that `to` (a copy of it)
+    /// lacks into `to`'s folder. `Updating` while one could not be copied.
+    fn fill(&self, from: &WorldItem, to: &WorldItem) -> crate::PictureFollowing {
+        let source = self.folder(from.owner_project);
+        let target = self.folder(to.owner_project);
+        if !self.files.reachable(&source) || !self.files.reachable(&target) {
+            return crate::PictureFollowing::WaitingForFolder;
+        }
+        let Ok(pictures) = self.world.pictures(to.id) else {
+            return crate::PictureFollowing::Updating;
+        };
+        let mut state = crate::PictureFollowing::Current;
+        for picture in pictures.iter().filter(|picture| picture.kept) {
+            if self.files.read(&target, &picture.file).is_ok() {
+                continue;
+            }
+            let copied = self
+                .files
+                .read(&source, &picture.file)
+                .and_then(|bytes| self.files.write(&target, &picture.file, &bytes));
+            if let Err(error) = copied {
+                tracing::warn!("a followed world picture was not copied yet: {error}");
+                state = crate::PictureFollowing::Updating;
+            }
+        }
+        state
+    }
+
+    /// Brings a linked copy's picture files over from its original's
+    /// folder, and says whether they all arrived.
+    pub(crate) fn follow_into(&self, copy: WorldItemId) -> crate::PictureFollowing {
+        let Some(original) = self.original_of(copy) else {
+            return crate::PictureFollowing::Current;
+        };
+        match (
+            self.world.character(original).ok().flatten(),
+            self.world.character(copy).ok().flatten(),
+        ) {
+            (Some(from), Some(to)) => self.fill(&from, &to),
+            _ => crate::PictureFollowing::Current,
+        }
+    }
+
+    /// Copies the pictures of `from` into its copy `to`, right after it
+    /// was made.
+    pub(crate) fn copy_pictures(&self, from: WorldItemId, to: WorldItemId) {
+        if let (Ok(Some(from)), Ok(Some(to))) =
+            (self.world.character(from), self.world.character(to))
+            && self.fill(&from, &to) != crate::PictureFollowing::Current
+        {
+            tracing::warn!("a copied world item's pictures wait for their folders");
+        }
+    }
+
+    /// Sends the item's new pictures to every linked copy of it; `false`
+    /// when some could not be copied yet.
+    pub(crate) fn follow_pictures(&self, original: WorldItemId) -> bool {
+        let Ok(copies) = self
+            .sharing
+            .linked_copies(bardo_domain::LibraryItem::World(original))
+        else {
+            return false;
+        };
+        let mut all = true;
+        for copy in copies {
+            if let bardo_domain::LibraryItem::World(copy) = copy {
+                all &= self.follow_into(copy) == crate::PictureFollowing::Current;
+            }
+        }
+        all
+    }
+
+    /// Copies the item's kept pictures' files from `from`'s world folder to
+    /// `to`'s, before the item moves there. Fails when one cannot be.
+    pub(crate) fn move_pictures(
+        &self,
+        item: WorldItemId,
+        from: Option<ProjectId>,
+        to: Option<ProjectId>,
+    ) -> Result<(), ()> {
+        let (source, target) = (self.folder(from), self.folder(to));
+        let pictures = self.world.pictures(item).map_err(|_| ())?;
+        if pictures.is_empty() {
+            return Ok(());
+        }
+        if !self.files.reachable(&source) || !self.files.reachable(&target) {
+            return Err(());
+        }
+        for picture in &pictures {
+            let bytes = match self.files.read(&source, &picture.file) {
+                Ok(bytes) => bytes,
+                // Gone already: the next use draws it again.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => return Err(()),
+            };
+            self.files
+                .write(&target, &picture.file, &bytes)
+                .map_err(|_| ())?;
+        }
+        Ok(())
+    }
+
+    /// Removes the item's picture files from `owner`'s folder, once they
+    /// moved elsewhere.
+    pub(crate) fn forget_files(&self, item: WorldItemId, owner: Option<ProjectId>) {
+        let folder = self.folder(owner);
+        for picture in self.world.pictures(item).unwrap_or_default() {
+            let _ = self.files.remove(&folder, &picture.file);
+        }
     }
 
     /// Removes the picture and its file.
@@ -541,6 +699,9 @@ fn as_cast(character: &WorldItem) -> Option<CastMember> {
 pub enum WorldError {
     #[error("not found")]
     NotFound,
+    /// A linked copy is read-only (#340).
+    #[error("a linked copy")]
+    Linked,
     #[error("field: {0:?}")]
     Field(WorldItemFieldError),
     /// Another item of the same owner has the name.
@@ -606,6 +767,7 @@ impl WorldError {
     pub fn message(&self) -> Text {
         match self {
             WorldError::NotFound => Text::WorldNotFound,
+            WorldError::Linked => Text::SharingLinkedReadOnly,
             WorldError::Field(error) => Text::WorldItemFieldError(*error),
             WorldError::NameTaken => Text::WorldNameTaken,
             WorldError::InUse(_) => Text::CharacterInUse,
@@ -895,6 +1057,16 @@ impl Bardo {
     }
 
     /// The character, when it is the profile's.
+    /// The item, refused when it is a linked copy (#340): what an edit of
+    /// it or its pictures needs.
+    fn item_to_change(&self, id: WorldItemId) -> Result<WorldItem, WorldError> {
+        let found = self.own_item(id)?;
+        if self.is_linked_copy(bardo_domain::LibraryItem::World(id)) {
+            return Err(WorldError::Linked);
+        }
+        Ok(found)
+    }
+
     fn own_item(&self, id: WorldItemId) -> Result<WorldItem, WorldError> {
         self.world_book
             .world
@@ -955,7 +1127,7 @@ impl Bardo {
         draft: WorldItemDraft,
         confirmed: bool,
     ) -> Result<WorldItem, WorldError> {
-        let mut character = self.own_item(id)?;
+        let mut character = self.item_to_change(id)?;
         let details = WorldItemDetails::validate(draft).map_err(WorldError::Field)?;
         self.name_free(
             (character.owner_project, character.kind),
@@ -1141,6 +1313,11 @@ impl Bardo {
         if !busy.is_empty() {
             return Err(WorldError::InUse(busy));
         }
+        // Its linked copies become independent: they keep its pictures,
+        // so the files reach them before they go.
+        if !self.world_book.follow_pictures(id) {
+            return Err(WorldError::FolderNotFound);
+        }
         let pictures = self.world_book.world.pictures(id)?;
         self.world_book.world.delete_character(id)?;
         let folder = self.world_book.folder(character.owner_project);
@@ -1185,7 +1362,7 @@ impl Bardo {
         look: Look,
         consent: BudgetConsent,
     ) -> Result<JobId, WorldError> {
-        let character = self.own_item(id)?;
+        let character = self.item_to_change(id)?;
         let busy = self.jobs().into_iter().any(|job| {
             job.kind() == JobKind::WorldPicture
                 && job.state().is_active()
@@ -1227,7 +1404,7 @@ impl Bardo {
         character: WorldItemId,
         picture: ReferencePictureId,
     ) -> Result<(), WorldError> {
-        let found = self.own_item(character)?;
+        let found = self.item_to_change(character)?;
         let pictures = self.world_book.world.pictures(character)?;
         let mut waiting = pictures
             .iter()
@@ -1260,7 +1437,7 @@ impl Bardo {
         character: WorldItemId,
         picture: ReferencePictureId,
     ) -> Result<(), WorldError> {
-        let found = self.own_item(character)?;
+        let found = self.item_to_change(character)?;
         let picture = self
             .world_book
             .world
@@ -1522,7 +1699,7 @@ impl Bardo {
         object: WorldItemId,
         character: Option<WorldItemId>,
     ) -> Result<WorldItem, WorldError> {
-        let mut found = self.own_item(object)?;
+        let mut found = self.item_to_change(object)?;
         if found.kind != WorldKind::Object {
             return Err(WorldError::NotFound);
         }
@@ -1577,7 +1754,7 @@ impl Bardo {
         path: &std::path::Path,
         confirmed: bool,
     ) -> Result<ReferencePicture, WorldError> {
-        let found = self.own_item(item)?;
+        let found = self.item_to_change(item)?;
         if !found.kind.imports() {
             return Err(WorldError::NotFound);
         }

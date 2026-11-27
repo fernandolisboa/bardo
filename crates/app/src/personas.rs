@@ -71,6 +71,9 @@ pub enum PersonaError {
     ExportFailed(String),
     #[error("video project not found")]
     ProjectNotFound,
+    /// A linked copy is read-only (#340).
+    #[error("the narrator is a linked copy")]
+    Linked,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -96,6 +99,7 @@ impl PersonaError {
             }
             PersonaError::ExportFailed(_) => Some(Text::PersonaExportFailed),
             PersonaError::ProjectNotFound => Some(Text::ProjectNotFound),
+            PersonaError::Linked => Some(Text::SharingLinkedReadOnly),
             PersonaError::Repository(_) => Some(Text::PersonaNotSaved),
         }
     }
@@ -283,6 +287,9 @@ impl Bardo {
         let details = PersonaDetails::validate(draft).map_err(PersonaError::Invalid)?;
         if details == persona.details {
             return Ok(persona);
+        }
+        if self.is_linked_copy(bardo_domain::LibraryItem::Narrator(id)) {
+            return Err(PersonaError::Linked);
         }
         self.ensure_persona_name_free(persona.owner_project, details.name(), Some(id))?;
         let usage = self.persona_usage(id)?;

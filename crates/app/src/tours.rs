@@ -219,6 +219,10 @@ pub enum Control {
     ProductAngleReview,
     /// Products: approving, editing or discarding an ad angle.
     ProductAngleActions,
+    /// World, Narrators, Products and Templates: the edited item's
+    /// sharing: Shareable, what a linked copy follows, Export to another
+    /// project, Make global and Save to file (#340).
+    LibrarySharing,
     /// Templates: one button per kind of template.
     TemplateKinds,
     /// Templates: whose template the open project uses, its own or the
@@ -950,7 +954,7 @@ pub const PERSONAS: Tour = {
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Personas,
-        version: 3,
+        version: 4,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "library", TourAnchor::Collection).learn(PAGE, "library"),
@@ -985,7 +989,7 @@ pub const WORLD: Tour = {
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::World,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "kinds", control(Control::WorldKinds)).learn(PAGE, "kinds"),
@@ -996,6 +1000,9 @@ pub const WORLD: Tour = {
             on(AT, "actions", control(Control::WorldActions))
                 .missing(FORM)
                 .learn(PAGE, "archive"),
+            on(AT, "sharing", control(Control::LibrarySharing))
+                .missing(FORM)
+                .learn(PAGE, "sharing"),
             on(AT, "pictures", control(Control::WorldPictures))
                 .missing(FORM)
                 .learn(PAGE, "pictures"),
@@ -1012,7 +1019,7 @@ pub const PRODUCTS: Tour = {
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Products,
-        version: 3,
+        version: 4,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "library", TourAnchor::Collection).learn(PAGE, "library"),
@@ -1102,7 +1109,7 @@ pub const TEMPLATES: Tour = {
     const EDITOR: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Templates,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "kinds", control(Control::TemplateKinds))
@@ -1123,6 +1130,10 @@ pub const TEMPLATES: Tour = {
             on(AT, "save", control(Control::TemplateActions))
                 .missing(EDITOR)
                 .learn(PAGE, "save"),
+            // Only on a project's entry, like the source.
+            on(AT, "sharing", control(Control::LibrarySharing))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "sharing"),
         ],
     }
 };

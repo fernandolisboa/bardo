@@ -126,3 +126,8 @@ Ad angles show here and not on [Themes](themes-ranking.md), and an ad project do
 ## Duplicating, archiving and deleting
 
 **Duplicate** saves the changes you have made, then copies the brief, the images, the kept concept image, the logo and the sheet under a new name, for a variant of the same product. **Archive** hides a product you no longer advertise from the list and from new ads; **Restore** brings it back. **Delete…** removes the product with its images, concept image, logo and sheet after you confirm, and is refused while any video uses the product (archive it instead), while a run fills its sheet, while its angles are being proposed or ranked, or while its concept image is being drawn.
+
+<a id="sharing"></a>
+## Sharing with other projects
+
+Below the actions, **Sharing** marks a product **Shareable** for your other projects, exports a copy to one of them, makes it global or saves it to a file with its pictures and logo; **Import from another project** and **Open item file…** at the top bring one in. A linked copy follows every change of its original, its sheet and kept concept image included, and cannot be edited here. See [Sharing between projects](global-library.md#sharing).

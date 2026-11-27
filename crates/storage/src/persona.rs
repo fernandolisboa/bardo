@@ -706,6 +706,10 @@ mod tests {
                 "voice_flag",
                 "realistic_voice",
                 "owner_project_id",
+                "shareable",
+                "linked_from",
+                "follows_name",
+                "follows_project",
             ]
         );
     }

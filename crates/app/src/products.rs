@@ -74,6 +74,9 @@ pub enum ProductError {
     NotGlobal,
     #[error("project not found")]
     ProjectNotFound,
+    /// A linked copy is read-only (#340).
+    #[error("the product is a linked copy")]
+    Linked,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -101,6 +104,7 @@ impl ProductError {
             ProductError::NameClash { .. } => Some(Text::LibraryNameClash),
             ProductError::NotGlobal => Some(Text::ProductNotFound),
             ProductError::ProjectNotFound => Some(Text::ProjectNotFound),
+            ProductError::Linked => Some(Text::SharingLinkedReadOnly),
             ProductError::Repository(_) => Some(Text::ProductNotSaved),
         }
     }
@@ -182,6 +186,16 @@ impl Bardo {
                     || (product.is_global() && used.contains(&product.id))
             })
             .collect())
+    }
+
+    /// The product, refused when it is a linked copy (#340): what an edit
+    /// of its brief, images or logo needs.
+    fn editable_product(&self, id: ProductId) -> Result<Product, ProductError> {
+        let found = self.own_product(id)?;
+        if self.is_linked_copy(bardo_domain::LibraryItem::Product(id)) {
+            return Err(ProductError::Linked);
+        }
+        Ok(found)
     }
 
     fn own_product(&self, id: ProductId) -> Result<Product, ProductError> {
@@ -272,6 +286,7 @@ impl Bardo {
         if brief == product.brief {
             return Ok(product);
         }
+        self.editable_product(id)?;
         self.ensure_product_name_free(product.owner_project, brief.name(), Some(id))?;
         if product.is_global() && !confirmed {
             let usage = self.product_usage(id)?;
@@ -457,7 +472,7 @@ impl Bardo {
         path: &Path,
         confirmed: bool,
     ) -> Result<ProductImage, ProductError> {
-        self.own_product(id)?;
+        self.editable_product(id)?;
         if !confirmed {
             return Err(ProductError::NotConfirmed);
         }
@@ -482,7 +497,7 @@ impl Bardo {
         image: ProductImageId,
         kind: ProductImageKind,
     ) -> Result<(), ProductError> {
-        self.own_product(id)?;
+        self.editable_product(id)?;
         // Only a drawing Bardo made is a concept image: no imported
         // picture is found to mark as one.
         if !ProductImageKind::ALL.contains(&kind) {
@@ -501,7 +516,7 @@ impl Bardo {
         id: ProductId,
         image: ProductImageId,
     ) -> Result<(), ProductError> {
-        self.own_product(id)?;
+        self.editable_product(id)?;
         if self.products.remove_image(id, image)? {
             Ok(())
         } else {
@@ -517,7 +532,7 @@ impl Bardo {
         path: &Path,
         confirmed: bool,
     ) -> Result<ProductLogo, ProductError> {
-        self.own_product(id)?;
+        self.editable_product(id)?;
         if !confirmed {
             return Err(ProductError::NotConfirmed);
         }
@@ -541,7 +556,7 @@ impl Bardo {
     }
 
     pub fn remove_product_logo(&self, id: ProductId) -> Result<(), ProductError> {
-        self.own_product(id)?;
+        self.editable_product(id)?;
         if self.products.remove_logo(id)? {
             self.refresh_end_cards_of(id);
             Ok(())

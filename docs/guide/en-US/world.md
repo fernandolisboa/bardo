@@ -67,6 +67,11 @@ Every later video in the same look gets the kept picture for free: the estimate 
 - **Archive** hides the item from [Who appears](scenes.md#who-appears); videos that already picked it keep it. **Restore** brings it back.
 - **Delete** removes the item with its pictures. It is refused while a video in progress uses it, and the message names those videos: archive the item, or archive or delete those videos first. Videos that showed it keep their pictures; their cast member or place becomes one of the video's own, and its objects stop belonging to a deleted character.
 
+<a id="sharing"></a>
+## Sharing with other projects
+
+Under the actions, **Sharing** marks an item **Shareable** for your other projects, exports a copy to one of them, makes it global or saves it to a file; **Import from another project** and **Open item file…** at the top bring one in. A linked copy follows every change of its original and its pictures arrive just after. See [Sharing between projects](global-library.md#sharing).
+
 <a id="save"></a>
 ## Saving a video's person to the world
 

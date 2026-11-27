@@ -112,6 +112,7 @@ mod scene_kind;
 mod scene_plan_size;
 mod schedule;
 mod script;
+mod sharing;
 mod shot_look;
 mod speech;
 mod staging;
@@ -417,6 +418,9 @@ pub use schedule::{
 pub use script::{
     GeneratedScript, NoPendingScript, Script, ScriptFieldError, ScriptRecord, ScriptRepository,
     ScriptText,
+};
+pub use sharing::{
+    CopyKind, Following, LibraryItem, LibraryKind, ShareableItem, Sharing, SharingRepository,
 };
 pub use shot_look::{
     BackdropDirection, BackdropId, DeviceKind, ProductLayout, ShotBackdrop, ShotBackdropDrawing,

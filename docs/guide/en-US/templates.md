@@ -59,3 +59,8 @@ Write a variable as `{{name}}`; each generation replaces it with the project's v
 ## Saving and starting over
 
 **Save as new version** keeps your text as the next version; when nothing changed, no version is added. **Discard changes** goes back to the current version. **Load Bardo's default** puts the text Bardo shipped with into the editor, to save as a new version if you want it back.
+
+<a id="sharing"></a>
+## Sharing with other projects
+
+When a project has its own template, **Sharing** under the editor marks it **Shareable** for your other projects, exports it to one of them, makes it global or saves it to a file. **Import from another project** at the top brings another project's template in: a linked one takes each new version of the original and cannot be saved here; an independent one copies only the latest version, as the next version of this project's own. See [Sharing between projects](global-library.md#sharing).

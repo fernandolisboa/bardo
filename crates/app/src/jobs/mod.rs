@@ -2223,6 +2223,7 @@ mod tests {
             personas: Arc::clone(db) as _,
             products: Arc::clone(db) as _,
             world: Arc::clone(db) as _,
+            sharing: Arc::clone(db) as _,
             world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
             ads: Arc::clone(db) as _,
             end_cards: Arc::clone(db) as _,

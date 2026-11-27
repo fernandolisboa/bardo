@@ -72,7 +72,7 @@ impl TemplateRepository for Database {
             .conn()
             .prepare_cached(&format!(
                 "{SELECT_VERSION} WHERE profile_id = ?1 AND kind = ?2
-                     AND owner_project_id IS ?3 ORDER BY number"
+                     AND owner_project_id IS ?3 AND retired_at IS NULL ORDER BY number"
             ))
             .and_then(|mut statement| {
                 statement
@@ -99,7 +99,8 @@ impl TemplateRepository for Database {
             .conn()
             .prepare_cached(
                 "SELECT DISTINCT owner_project_id FROM template_version
-                 WHERE profile_id = ?1 AND kind = ?2 AND owner_project_id IS NOT NULL",
+                 WHERE profile_id = ?1 AND kind = ?2 AND owner_project_id IS NOT NULL
+                     AND retired_at IS NULL",
             )
             .and_then(|mut statement| {
                 statement
@@ -170,6 +171,28 @@ impl TemplateRepository for Database {
             )
             .map_err(boxed)?;
         Ok(())
+    }
+
+    fn last_template_number(
+        &self,
+        owner: ProfileId,
+        project: Option<ProjectId>,
+        kind: TemplateKind,
+    ) -> Result<u32, RepositoryError> {
+        let number: i64 = self
+            .conn()
+            .query_row(
+                "SELECT IFNULL(MAX(number), 0) FROM template_version
+                 WHERE profile_id = ?1 AND owner_project_id IS ?2 AND kind = ?3",
+                params![
+                    owner.to_string(),
+                    project.map(|id| id.to_string()),
+                    kind.code()
+                ],
+                |row| row.get(0),
+            )
+            .map_err(boxed)?;
+        u32::try_from(number).map_err(boxed)
     }
 }
 

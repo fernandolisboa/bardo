@@ -1727,6 +1727,7 @@ mod tests {
         // migrated.
         let migrate = |before: &str| {
             let mut conn = db.conn();
+            crate::sharing::undo_for_tests(&conn);
             conn.execute_batch(&format!(
                 "{before}
                  DROP INDEX template_version_number;

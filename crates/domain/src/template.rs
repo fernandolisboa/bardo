@@ -778,7 +778,8 @@ pub fn template_in_use(
 /// Persistence port for template versions. Shared with job worker threads.
 pub trait TemplateRepository: Send + Sync {
     /// Every version of the template of `kind` that `project` owns, or of
-    /// the global one for `None`, oldest first.
+    /// the global one for `None`, oldest first. Versions retired when the
+    /// template was made global (#340) are not its template any more.
     fn template_versions(
         &self,
         owner: ProfileId,
@@ -808,6 +809,15 @@ pub trait TemplateRepository: Send + Sync {
     /// Adds a version. Fails when its number is already taken, so two
     /// saves racing cannot both become the same version.
     fn add_template_version(&self, version: &TemplateVersion) -> Result<(), RepositoryError>;
+
+    /// The highest number the template of `kind` that `project` owns ever
+    /// took, retired versions included; 0 for none.
+    fn last_template_number(
+        &self,
+        owner: ProfileId,
+        project: Option<ProjectId>,
+        kind: TemplateKind,
+    ) -> Result<u32, RepositoryError>;
 }
 
 impl<T: TemplateRepository + ?Sized> TemplateRepository for Arc<T> {
@@ -844,6 +854,15 @@ impl<T: TemplateRepository + ?Sized> TemplateRepository for Arc<T> {
 
     fn add_template_version(&self, version: &TemplateVersion) -> Result<(), RepositoryError> {
         (**self).add_template_version(version)
+    }
+
+    fn last_template_number(
+        &self,
+        owner: ProfileId,
+        project: Option<ProjectId>,
+        kind: TemplateKind,
+    ) -> Result<u32, RepositoryError> {
+        (**self).last_template_number(owner, project, kind)
     }
 }
 
