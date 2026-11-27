@@ -59,6 +59,15 @@ impl<T: Clone + PartialEq> SearchableListItem for Choice<T> {
 
 type ChoiceSelect<T> = Entity<SelectState<SearchableVec<Choice<T>>>>;
 
+/// *Write my own idea*, while open (#341).
+struct OwnIdea {
+    title: Entity<InputState>,
+    angle: Entity<InputState>,
+    /// Which channel the idea is for, when the project has more than one.
+    channel: ChoiceSelect<ChannelId>,
+    error: Option<Text>,
+}
+
 /// The idea being edited, and what was wrong with the last save.
 struct Editing {
     id: ThemeId,
@@ -89,6 +98,10 @@ pub struct ThemesScreen {
     /// A run held back at a budget: whether it only ranks, and what it
     /// would cost.
     budget_ask: Option<(bool, SpendEstimate)>,
+    /// *Write my own idea*, while open.
+    own_idea: Option<OwnIdea>,
+    /// The last idea the user wrote was added.
+    own_saved: bool,
     revision: u64,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -158,6 +171,8 @@ impl ThemesScreen {
             who_appears,
             without_video: Default::default(),
             budget_ask: None,
+            own_idea: None,
+            own_saved: false,
             revision,
             _poll: poll,
             _subscriptions: subscriptions,
@@ -209,6 +224,8 @@ impl ThemesScreen {
 
     fn select(&mut self, id: ChannelId, window: &mut Window, cx: &mut Context<Self>) {
         self.budget_ask = None;
+        self.own_idea = None;
+        self.own_saved = false;
         self.selected = Some(id);
         self.niche = None;
         self.editing = None;
@@ -398,6 +415,145 @@ impl ThemesScreen {
         cx.notify();
     }
 
+    /// Opens *Write my own idea*, for the channel on screen.
+    fn start_own_idea(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bardo = self.bardo.read(cx);
+        let title_placeholder = tr(bardo, Text::LooseIdeaTitlePlaceholder);
+        let angle_placeholder = tr(bardo, Text::LooseIdeaAnglePlaceholder);
+        let choices = SearchableVec::new(
+            self.channels
+                .iter()
+                .map(|channel| Choice {
+                    value: channel.id,
+                    title: SharedString::from(channel.details.name().to_owned()),
+                })
+                .collect::<Vec<_>>(),
+        );
+        let selected = self.selected;
+        let title = cx.new(|cx| InputState::new(window, cx).placeholder(title_placeholder));
+        let angle = cx.new(|cx| InputState::new(window, cx).placeholder(angle_placeholder));
+        let channel = cx.new(|cx| {
+            let mut select = SelectState::new(choices, None, window, cx);
+            if let Some(id) = selected {
+                select.set_selected_value(&id, window, cx);
+            }
+            select
+        });
+        title.update(cx, |title, cx| title.focus(window, cx));
+        self.own_saved = false;
+        self.own_idea = Some(OwnIdea {
+            title,
+            angle,
+            channel,
+            error: None,
+        });
+        cx.notify();
+    }
+
+    /// Adds the typed idea to the channel's ideas in the niche on screen.
+    fn save_own_idea(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(form) = &self.own_idea else {
+            return;
+        };
+        let Some(channel) = form
+            .channel
+            .read(cx)
+            .selected_value()
+            .copied()
+            .or(self.selected)
+        else {
+            return;
+        };
+        let title = form.title.read(cx).value().to_string();
+        let angle = form.angle.read(cx).value().to_string();
+        // The niche on screen, when the idea is for the channel on screen.
+        let niche = if Some(channel) == self.selected {
+            self.niche.clone().unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let written = self
+            .bardo
+            .read(cx)
+            .write_theme(channel, &niche, &title, &angle);
+        match written {
+            Ok(_) => {
+                self.own_idea = None;
+                self.own_saved = true;
+                if Some(channel) != self.selected {
+                    self.channel_select.update(cx, |select, cx| {
+                        select.set_selected_value(&channel, window, cx);
+                    });
+                    self.select(channel, window, cx);
+                    self.own_saved = true;
+                } else {
+                    self.load(cx);
+                    self.sync_niches(window, cx);
+                }
+            }
+            Err(error) => {
+                if let Some(form) = &mut self.own_idea {
+                    form.error = Some(error.message());
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn render_own_idea(&self, form: &OwnIdea, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let error = form
+            .error
+            .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element());
+        v_flex()
+            .gap_2()
+            .p_3()
+            .rounded(look(cx).tokens.radius)
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(kit::section_heading(tr(bardo, Text::OwnIdeaTitle)))
+            .child(muted(cx, tr(bardo, Text::OwnIdeaHint)))
+            .when(self.channels.len() > 1, |form_el| {
+                form_el.child(field(
+                    tr(bardo, Text::OwnIdeaChannel),
+                    Select::new(&form.channel).small().into_any_element(),
+                ))
+            })
+            .child(field(
+                tr(bardo, Text::ThemeTitle),
+                Input::new(&form.title).into_any_element(),
+            ))
+            .child(field(
+                tr(bardo, Text::ThemeAngle),
+                Input::new(&form.angle).into_any_element(),
+            ))
+            .children(error)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("own-idea-save")
+                            .primary()
+                            .small()
+                            .label(tr(bardo, Text::OwnIdeaSave))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.save_own_idea(window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("own-idea-cancel")
+                            .ghost()
+                            .small()
+                            .label(tr(bardo, Text::OwnIdeaCancel))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.own_idea = None;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn render_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let bardo = self.bardo.read(cx);
         let view = self.view.as_ref();
@@ -520,6 +676,32 @@ impl ThemesScreen {
                     .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
             )
             .children(self.render_job(cx))
+            .child(kit::anchor(
+                TourAnchor::Control(Control::OwnIdea),
+                match &self.own_idea {
+                    Some(form) => self.render_own_idea(form, cx),
+                    None => v_flex()
+                        .gap_2()
+                        .items_start()
+                        .child(
+                            Button::new("own-idea")
+                                .outline()
+                                .small()
+                                .label(tr(self.bardo.read(cx), Text::OwnIdea))
+                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                    this.start_own_idea(window, cx)
+                                })),
+                        )
+                        .when(self.own_saved, |column| {
+                            column.child(kit::notice(
+                                Tone::Success,
+                                tr(self.bardo.read(cx), Text::OwnIdeaSaved),
+                                cx,
+                            ))
+                        })
+                        .into_any_element(),
+                },
+            ))
     }
 
     /// Progress of a running job, or why the last one stopped.

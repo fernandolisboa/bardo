@@ -247,6 +247,21 @@ impl Bardo {
                 });
             }
         }
+        // Loose videos (#341): their own pick, or the narrator their
+        // settings hold.
+        for video in self.themes.loose_projects(self.profile.id)? {
+            let held = self
+                .themes
+                .video_settings(video.id)?
+                .and_then(|settings| settings.details.default_persona());
+            if video.persona == Some(persona.id) || held == Some(persona.id) {
+                uses.push(LibraryUse {
+                    project: self.text(Text::LooseSwitcherRow).into_owned(),
+                    channel: String::new(),
+                    video: Some(video.title.clone()),
+                });
+            }
+        }
         Ok(uses)
     }
 
@@ -572,7 +587,12 @@ impl Bardo {
             .ok_or(PersonaError::ProjectNotFound)?;
         if let Some(id) = persona {
             let found = self.own_persona(id)?;
-            if !usable_in(found.owner_project, self.channel_project(project.channel)?) {
+            // A loose video (no channel) uses global narrators only.
+            let owner = match project.channel {
+                Some(channel) => self.channel_project(channel)?,
+                None => None,
+            };
+            if !usable_in(found.owner_project, owner) {
                 return Err(PersonaError::OtherProject);
             }
         }

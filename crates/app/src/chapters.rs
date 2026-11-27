@@ -486,8 +486,7 @@ impl Bardo {
             return Ok(true);
         };
         let footer = self
-            .network_accounts
-            .list(project.channel)?
+            .channel_accounts(project.channel)?
             .into_iter()
             .find(|account| account.network == Network::YouTube)
             .map(|account| account.details.metadata().description_footer().to_owned())

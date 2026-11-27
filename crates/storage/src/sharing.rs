@@ -453,12 +453,20 @@ fn fingerprint_trigger(sql: &str) -> String {
 }
 
 /// Takes the database back to before migration 85, for the tests that
-/// rewind further to check an older migration.
+/// rewind further to check an older migration. Migration 86's columns go
+/// too; its table rebuild (optional channel and theme) stays, as an older
+/// database's rows all fit it.
 #[cfg(test)]
 pub(crate) fn undo_for_tests(conn: &Connection) {
     drop_mirrors(conn).unwrap();
     conn.execute_batch(
-        "DROP TABLE template_share;
+        "DROP TABLE video_settings;
+         DROP TRIGGER network_account_renders;
+         DROP INDEX render_account;
+         DROP INDEX video_project_loose;
+         ALTER TABLE video_project DROP COLUMN loose_folder;
+         ALTER TABLE user_profile DROP COLUMN loose_opened_at;
+         DROP TABLE template_share;
          ALTER TABLE template_version DROP COLUMN retired_at;
          ALTER TABLE reference_picture DROP COLUMN copied_from;
          ALTER TABLE product_concept DROP COLUMN copied_from;
@@ -1265,6 +1273,7 @@ fn repoint_uses(
         "persona" => &[
             "UPDATE channel SET default_persona_id = ?2 WHERE default_persona_id = ?1",
             "UPDATE video_project SET persona_id = ?2 WHERE persona_id = ?1",
+            "UPDATE video_settings SET default_persona_id = ?2 WHERE default_persona_id = ?1",
         ],
         "product" => &[
             "UPDATE video_project SET product_id = ?2 WHERE product_id = ?1",

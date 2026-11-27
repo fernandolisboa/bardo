@@ -29,6 +29,9 @@ pub struct OpenVideo {
 /// Open Ideas › Themes.
 pub struct OpenIdeas;
 
+/// Open Videos, on the loose videos (#341).
+pub struct OpenLooseVideos;
+
 pub struct OverviewScreen {
     bardo: Entity<Bardo>,
     view: Option<OverviewView>,
@@ -41,6 +44,7 @@ pub struct OverviewScreen {
 
 impl EventEmitter<OpenVideo> for OverviewScreen {}
 impl EventEmitter<OpenIdeas> for OverviewScreen {}
+impl EventEmitter<OpenLooseVideos> for OverviewScreen {}
 
 impl OverviewScreen {
     pub fn new(bardo: Entity<Bardo>, cx: &mut Context<Self>) -> Self {
@@ -387,6 +391,33 @@ impl Render for OverviewScreen {
                 ],
                 Vec::new(),
             ),
+            // No project is open: the loose videos are under Videos.
+            Some(_) if self.bardo.read(cx).loose_open() => {
+                let bardo = self.bardo.read(cx);
+                (
+                    vec![
+                        v_flex()
+                            .gap_2()
+                            .items_start()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(look(cx).tokens.text2)
+                                    .child(tr(bardo, Text::LooseOverview)),
+                            )
+                            .child(
+                                Button::new("overview-loose-videos")
+                                    .small()
+                                    .label(tr(bardo, Text::LooseOpenVideos))
+                                    .on_click(cx.listener(|_, _: &ClickEvent, _, cx| {
+                                        cx.emit(OpenLooseVideos);
+                                    })),
+                            )
+                            .into_any_element(),
+                    ],
+                    Vec::new(),
+                )
+            }
             Some(view) if view.channels.is_empty() => (
                 vec![
                     div()

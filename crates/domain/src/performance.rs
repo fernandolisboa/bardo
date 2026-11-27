@@ -442,9 +442,9 @@ mod tests {
             let project = VideoProject {
                 id: VideoProjectId::new(),
                 owner: self.owner,
-                channel: self.channel,
+                channel: Some(self.channel),
                 niche: Niche::new(niche).unwrap(),
-                theme: ThemeId::new(),
+                theme: Some(ThemeId::new()),
                 title: title.into(),
                 created_at: at(0),
                 persona: None,

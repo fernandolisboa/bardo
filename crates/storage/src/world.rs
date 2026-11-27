@@ -832,7 +832,7 @@ mod tests {
         let ana = character(&w, Some(w.project), "Ana");
         let clay = Look::Style(VisualStyle::ClayStopMotion);
         let notes = Look::Notes {
-            channel: ChannelId::new(),
+            channel: Some(ChannelId::new()),
             notes: "warm".into(),
         };
         let first = picture(ana.id, clay.clone(), true);

@@ -509,9 +509,16 @@ impl Bardo {
     /// The folder of a video's media, for *Show folder*: in its project's
     /// folder, or the old projects folder before the move.
     pub fn video_folder(&self, video: VideoProjectId) -> PathBuf {
-        match self.folder_book.folders.video_folder(video) {
-            Ok(Some(folder)) => folder.path(),
-            Ok(None) => None,
+        let folders = &self.folder_book.folders;
+        let found = folders.video_folder(video).and_then(|folder| {
+            match folder.and_then(|folder| folder.path()) {
+                Some(path) => Ok(Some(path)),
+                // A loose video's (#341).
+                None => folders.loose_folder(video),
+            }
+        });
+        match found {
+            Ok(found) => found,
             Err(error) => {
                 tracing::warn!("could not read where the video's media is: {error}");
                 None
@@ -707,7 +714,10 @@ impl MoveMediaHandler {
                 continue;
             };
             let from = match &video.from {
-                None => self.old_media.join(video.video.to_string()),
+                None => match &video.from_loose {
+                    Some(loose) => loose.clone(),
+                    None => self.old_media.join(video.video.to_string()),
+                },
                 Some(from) => match self.reachable(from.project)? {
                     Some(folder) => folder.join(VIDEOS_DIR).join(&from.name),
                     None => continue,

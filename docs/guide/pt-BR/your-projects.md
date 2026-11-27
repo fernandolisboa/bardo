@@ -22,6 +22,11 @@ A barra de título mostra o projeto aberto ao lado do logo do Bardo: a cor, o no
 
 Clique em um projeto para abri-lo. O Bardo lembra o projeto aberto e abre nele da próxima vez. **Mostrar pasta** abre a pasta do projeto aberto no Explorer. Um projeto cuja pasta não é encontrada aparece com **Pasta não encontrada**, e **Localizar…** ([Pasta não encontrada](storage.md#not-found)). A estrela ao lado de um projeto o coloca nos favoritos ou tira de lá. O seletor não aparece com o editor aberto: feche o editor para trocar.
 
+<a id="no-project"></a>
+## Sem projeto
+
+**Sem projeto**, depois dos projetos no seletor, abre os vídeos avulsos: vídeos sem projeto e sem canal, para um teste rápido ([Vídeos avulsos](projects.md#loose-videos)). Ele mostra quantos são. Enquanto está aberto, a barra de título diz **Sem projeto**, Vídeos lista os vídeos avulsos e as outras telas do projeto pedem para abrir um projeto. O Bardo lembra dele como de qualquer projeto, e abre nele da próxima vez.
+
 <a id="new"></a>
 ## Um projeto novo
 

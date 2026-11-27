@@ -381,7 +381,7 @@ mod tests {
 
     /// Connects the project's account on `network`.
     fn connect(h: &Harness, app: &Bardo, project: &VideoProject, network: Network) {
-        let account = NetworkAccountRepository::list(&*h.db, project.channel)
+        let account = NetworkAccountRepository::list(&*h.db, project.channel.unwrap())
             .unwrap()
             .into_iter()
             .find(|account| account.network == network)

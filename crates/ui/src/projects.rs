@@ -60,6 +60,7 @@ mod capture;
 mod claims;
 mod end_card;
 mod export;
+mod loose;
 mod music;
 mod narration_ask;
 mod placements;
@@ -146,6 +147,12 @@ pub struct ProjectsScreen {
     /// What saving the cap said.
     spend_cap_note: Option<(Tone, Text)>,
     channel: Option<ChannelId>,
+    /// *No project* is open: the list is the loose videos (#341).
+    loose: bool,
+    /// *New loose video*, while open.
+    loose_form: Option<loose::LooseForm>,
+    /// *Move to a project*, while open.
+    move_form: Option<loose::MoveForm>,
     projects: Vec<VideoProject>,
     /// The listed projects that are concepts (#280), read as they load.
     concepts: std::collections::HashSet<VideoProjectId>,
@@ -605,6 +612,9 @@ impl ProjectsScreen {
             spend_cap_input,
             spend_cap_note: None,
             channel: None,
+            loose: false,
+            loose_form: None,
+            move_form: None,
             projects: Vec::new(),
             concepts: Default::default(),
             archived: Default::default(),
@@ -751,6 +761,34 @@ impl ProjectsScreen {
         self.error = None;
         self.notice = None;
         self.channels = self.bardo.read(cx).channels().unwrap_or_default();
+        let loose = self.bardo.read(cx).loose_open();
+        if loose != self.loose {
+            self.loose = loose;
+            self.loose_form = None;
+            self.move_form = None;
+            self.project = None;
+            self.show_archived = false;
+        }
+        if loose {
+            self.channel = None;
+            self.load_projects(cx);
+            let keep = self
+                .project
+                .filter(|id| self.projects.iter().any(|p| p.id == *id));
+            match keep {
+                Some(_) => {
+                    self.load(window, cx);
+                    self.fill_narrator(window, cx);
+                    self.fill_format(window, cx);
+                }
+                None => {
+                    let first = self.projects.first().map(|project| project.id);
+                    self.select_project(first, window, cx);
+                }
+            }
+            cx.notify();
+            return;
+        }
         let choices = SearchableVec::new(
             self.channels
                 .iter()
@@ -801,6 +839,20 @@ impl ProjectsScreen {
             return;
         }
         let bardo = self.bardo.read(cx);
+        if self.loose {
+            if bardo
+                .loose_videos()
+                .is_ok_and(|videos| videos.iter().any(|v| v.id == project))
+            {
+                let archived = bardo.archived_videos().contains(&project);
+                if archived != self.show_archived {
+                    self.show_archived = archived;
+                    self.load_projects(cx);
+                }
+                self.select_project(Some(project), window, cx);
+            }
+            return;
+        }
         let Some(channel) = self
             .channels
             .iter()
@@ -838,12 +890,14 @@ impl ProjectsScreen {
     }
 
     fn load_projects(&mut self, cx: &mut Context<Self>) {
-        let Some(channel) = self.channel else {
-            return;
+        let listed = match (self.loose, self.channel) {
+            (true, _) => self.bardo.read(cx).loose_videos().map_err(|_| ()),
+            (false, Some(channel)) => self.bardo.read(cx).video_projects(channel).map_err(|_| ()),
+            (false, None) => return,
         };
         let archived = self.bardo.read(cx).archived_videos();
         let show_archived = self.show_archived;
-        match self.bardo.read(cx).video_projects(channel) {
+        match listed {
             // The list shows the archived videos, or the others (#336).
             Ok(projects) => {
                 self.projects = projects
@@ -880,6 +934,7 @@ impl ProjectsScreen {
     ) {
         self.project = id;
         self.removal = None;
+        self.move_form = None;
         self.loaded = None;
         self.page_scroll.set_offset(point(px(0.), px(0.)));
         // The cap box is filled again from the next project's own cap.
@@ -1130,6 +1185,16 @@ impl ProjectsScreen {
         }
     }
 
+    /// The settings the video's stages read: its own when it holds them
+    /// (a loose video, or one that was), else its channel's.
+    fn settings_of(
+        &self,
+        project: &VideoProject,
+        cx: &App,
+    ) -> Option<bardo_app::bardo_domain::ChannelDetails> {
+        self.bardo.read(cx).video_details(project).ok().flatten()
+    }
+
     /// The narrator choices: the channel's default (named), then every
     /// persona; selects the project's own persona or the default.
     fn fill_narrator(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1139,10 +1204,8 @@ impl ProjectsScreen {
         let bardo = self.bardo.read(cx);
         let personas = bardo.personas().unwrap_or_default();
         let channel_default = self
-            .channels
-            .iter()
-            .find(|channel| channel.id == project.channel)
-            .and_then(|channel| channel.details.default_persona())
+            .settings_of(&project, cx)
+            .and_then(|details| details.default_persona())
             .and_then(|id| personas.iter().find(|persona| persona.id == id));
         let default_title = match channel_default {
             Some(persona) => SharedString::from(bardo.text_with(
@@ -1180,10 +1243,8 @@ impl ProjectsScreen {
         };
         let bardo = self.bardo.read(cx);
         let channel_format = self
-            .channels
-            .iter()
-            .find(|channel| channel.id == project.channel)
-            .map(|channel| channel.details.format())
+            .settings_of(&project, cx)
+            .map(|details| details.format())
             .unwrap_or_default();
         let channel_title = SharedString::from(bardo.text_with(
             Text::ProjectFormatChannel,
@@ -1219,10 +1280,8 @@ impl ProjectsScreen {
         };
         let bardo = self.bardo.read(cx);
         let channel_style = self
-            .channels
-            .iter()
-            .find(|channel| channel.id == project.channel)
-            .map(|channel| channel.details.style())
+            .settings_of(&project, cx)
+            .map(|details| details.style())
             .unwrap_or_default();
         // "Channel's: From the channel's notes" would read twice over, and
         // right above the same words as a choice of the video's own.
@@ -1982,9 +2041,33 @@ impl ProjectsScreen {
         let compact = crate::layout::room(cx).window < COMPACT_BAR_BELOW;
         let mode = self.render_mode(compact, cx);
         let archived_toggle = self.archived_toggle(cx);
+        let loose_actions = self.loose.then(|| {
+            let current = self.project;
+            let movable =
+                current.is_some_and(|id| !self.archived.contains(&id)) && self.view.is_some();
+            (
+                self.new_loose_button(cx),
+                movable.then(|| self.move_button(cx)),
+            )
+        });
         let bardo = self.bardo.read(cx);
         let Some(project) = self.view.as_ref().map(|view| &view.project) else {
             let mut header = Header::new(tr(bardo, Text::DestinationName(Destination::Videos)));
+            if let Some((new, _)) = loose_actions {
+                // No project is open: the loose videos (#341).
+                header = Header::new(tr(bardo, Text::LooseTitle));
+                header.meta = Some(tr(bardo, Text::LooseHint));
+                header.actions.push(new);
+                header.actions.push(archived_toggle);
+                header.info = guide::header_tours(
+                    bardo,
+                    (Destination::Videos, self.has_content()),
+                    self.stage_content(),
+                    None,
+                    cx,
+                );
+                return header;
+            }
             header.actions.push(archived_toggle);
             header.trail = vec![
                 div()
@@ -2078,17 +2161,22 @@ impl ProjectsScreen {
             )
             .min_w_0(),
         );
-        header.trail = vec![
-            tr(bardo, Text::DestinationName(Destination::Videos)).into_any_element(),
-            div()
-                .w(px(200.))
-                .child(kit::channel_pick(
-                    Select::new(&self.channel_select).xsmall(),
-                    &self.channels,
-                    cx,
-                ))
-                .into_any_element(),
-        ];
+        header.trail = if self.loose {
+            // A loose video has no channel to pick (#341).
+            vec![tr(bardo, Text::LooseTitle).into_any_element()]
+        } else {
+            vec![
+                tr(bardo, Text::DestinationName(Destination::Videos)).into_any_element(),
+                div()
+                    .w(px(200.))
+                    .child(kit::channel_pick(
+                        Select::new(&self.channel_select).xsmall(),
+                        &self.channels,
+                        cx,
+                    ))
+                    .into_any_element(),
+            ]
+        };
         let mut meta = format!(
             "{} · {}",
             project.niche.label(),
@@ -2142,6 +2230,10 @@ impl ProjectsScreen {
                     this.start_removal(RemovalMode::Archive, window, cx);
                 }))
         };
+        if let Some((new, movable)) = loose_actions {
+            header.actions.push(new);
+            header.actions.extend(movable);
+        }
         header.actions.push(
             h_flex()
                 .gap_1()
@@ -3503,7 +3595,7 @@ fn muted(cx: &App, text: SharedString) -> AnyElement {
 impl Render for ProjectsScreen {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.advance_control(window, cx);
-        if self.channels.is_empty() {
+        if self.channels.is_empty() && !self.loose {
             let bardo = self.bardo.read(cx);
             let mut parts = ScreenParts::new(Header::place(bardo, Destination::Videos, cx));
             parts
@@ -3524,12 +3616,17 @@ impl Render for ProjectsScreen {
                         bardo,
                         if self.show_archived {
                             Text::VideosArchivedEmpty
+                        } else if self.loose {
+                            Text::LooseEmpty
                         } else {
                             Text::ProjectsEmpty
                         },
                     ),
                 )),
                 None => {}
+            }
+            if let Some(card) = self.loose_card(cx) {
+                parts.notices.insert(0, card);
             }
             return layout::screen(parts, cx);
         };
@@ -3579,11 +3676,20 @@ impl Render for ProjectsScreen {
                     .into_any_element(),
             );
         }
+        // A loose video exports files and is never published (#341).
+        if self.loose && current == Stage::Publish {
+            parts.notices.push(
+                kit::notice(Tone::Info, tr(bardo, Text::LooseExportOnly), cx).into_any_element(),
+            );
+        }
         if let Some((panel, _)) = &self.removal {
             parts.notices.insert(
                 0,
                 kit::card(cx).p_4().child(panel.clone()).into_any_element(),
             );
+        }
+        if let Some(card) = self.loose_card(cx) {
+            parts.notices.insert(0, card);
         }
         layout::screen(parts, cx)
     }

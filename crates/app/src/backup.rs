@@ -877,7 +877,7 @@ mod tests {
 
     fn reels_account(s: &Setup) -> NetworkAccountId {
         s.app
-            .network_accounts(s.project.channel)
+            .network_accounts(s.project.channel.unwrap())
             .unwrap()
             .into_iter()
             .find(|account| account.network == Network::InstagramReels)
@@ -998,7 +998,7 @@ mod tests {
 
         assert!(
             s.app
-                .video_projects(s.project.channel)
+                .video_projects(s.project.channel.unwrap())
                 .unwrap()
                 .iter()
                 .any(|project| project.id == s.project.id),
@@ -1146,7 +1146,7 @@ mod tests {
                     network: Network::InstagramReels,
                     handle: s
                         .app
-                        .network_accounts(s.project.channel)
+                        .network_accounts(s.project.channel.unwrap())
                         .unwrap()
                         .into_iter()
                         .find(|found| found.id == account)

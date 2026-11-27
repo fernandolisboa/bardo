@@ -281,6 +281,37 @@ pub struct NetworkAccount {
 }
 
 impl NetworkAccount {
+    /// What a loose video (#341), which has no channel and no account,
+    /// renders and exports for on `network`: the network's built-in preset
+    /// and metadata defaults, no handle. It is never saved, and nothing
+    /// publishes through it. Its id is the same for the same video and
+    /// network, so its render and export are found again.
+    pub fn file_target(owner: ProfileId, video: crate::VideoProjectId, network: Network) -> Self {
+        let index = Network::ALL
+            .iter()
+            .position(|other| *other == network)
+            .unwrap_or_default() as u128;
+        // Apart from every other video's, and from every account's (random
+        // ids): the video's id with its last bits turned for the network.
+        let id = uuid::Uuid::from_u128(video.as_uuid().as_u128() ^ (0xF11E_0000 | (index + 1)));
+        Self {
+            id: NetworkAccountId::from(id),
+            owner,
+            channel: ChannelId::from(video.as_uuid()),
+            network,
+            details: NetworkAccountDetails {
+                handle: String::new(),
+                metadata: MetadataDefaults {
+                    language: None,
+                    tags: Vec::new(),
+                    description_footer: String::new(),
+                    visibility: network.visibilities()[0],
+                },
+                overrides: PresetOverrides::default(),
+            },
+        }
+    }
+
     pub fn new(
         owner: ProfileId,
         channel: ChannelId,
@@ -348,6 +379,33 @@ impl<T: NetworkAccountRepository + ?Sized> NetworkAccountRepository for Arc<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_loose_video_renders_for_each_network_with_its_built_in_preset() {
+        let owner = ProfileId::new();
+        let video = crate::VideoProjectId::new();
+        let targets: Vec<NetworkAccount> = Network::ALL
+            .into_iter()
+            .map(|network| NetworkAccount::file_target(owner, video, network))
+            .collect();
+        let ids: HashSet<NetworkAccountId> = targets.iter().map(|target| target.id).collect();
+        assert_eq!(ids.len(), Network::ALL.len());
+        for target in &targets {
+            assert_eq!(
+                NetworkAccount::file_target(owner, video, target.network),
+                *target,
+                "the same video and network give the same target"
+            );
+            assert_ne!(target.id.as_uuid(), video.as_uuid());
+            assert_eq!(target.details.handle(), "");
+            assert_eq!(
+                target.render_preset(VideoFormat::Long),
+                target.network.render_preset(VideoFormat::Long)
+            );
+        }
+        let other = NetworkAccount::file_target(owner, crate::VideoProjectId::new(), Network::X);
+        assert!(!ids.contains(&other.id));
+    }
     use crate::{Bitrate, Loudness, MaxDuration};
 
     fn draft(handle: &str) -> NetworkAccountDraft {

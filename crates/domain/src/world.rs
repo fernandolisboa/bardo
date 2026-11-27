@@ -314,13 +314,18 @@ impl WorldItem {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Look {
     Style(VisualStyle),
-    Notes { channel: ChannelId, notes: String },
+    /// From a channel's notes; `channel` is `None` for a loose video's
+    /// own notes (#341).
+    Notes {
+        channel: Option<ChannelId>,
+        notes: String,
+    },
 }
 
 impl Look {
     /// The look of a video drawn in `style`, for its channel and the
     /// channel's notes as they are now.
-    pub fn of(style: StyleChoice, channel: ChannelId, notes: &str) -> Self {
+    pub fn of(style: StyleChoice, channel: Option<ChannelId>, notes: &str) -> Self {
         match style {
             StyleChoice::Catalog(style) => Look::Style(style),
             StyleChoice::FromNotes => Look::Notes {
@@ -353,7 +358,7 @@ impl Look {
     ) -> Option<Self> {
         if code == StyleChoice::NOTES_CODE {
             return Some(Look::Notes {
-                channel: channel?,
+                channel,
                 notes: notes.unwrap_or_default(),
             });
         }
@@ -366,7 +371,7 @@ impl Look {
     pub fn channel(&self) -> Option<ChannelId> {
         match self {
             Look::Style(_) => None,
-            Look::Notes { channel, .. } => Some(*channel),
+            Look::Notes { channel, .. } => *channel,
         }
     }
 
@@ -633,18 +638,18 @@ mod tests {
         let channel = ChannelId::new();
         let clay = StyleChoice::Catalog(VisualStyle::ClayStopMotion);
         assert_eq!(
-            Look::of(clay, channel, "warm"),
+            Look::of(clay, Some(channel), "warm"),
             Look::Style(VisualStyle::ClayStopMotion)
         );
-        let notes = Look::of(StyleChoice::FromNotes, channel, " warm light ");
+        let notes = Look::of(StyleChoice::FromNotes, Some(channel), " warm light ");
         assert_eq!(notes.notes(), Some("warm light"));
         assert_ne!(
             notes,
-            Look::of(StyleChoice::FromNotes, channel, "cold light")
+            Look::of(StyleChoice::FromNotes, Some(channel), "cold light")
         );
         assert_ne!(
             notes,
-            Look::of(StyleChoice::FromNotes, ChannelId::new(), "warm light")
+            Look::of(StyleChoice::FromNotes, Some(ChannelId::new()), "warm light")
         );
         for look in [notes.clone(), Look::Style(VisualStyle::ClayStopMotion)] {
             assert_eq!(

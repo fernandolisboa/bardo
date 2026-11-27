@@ -654,11 +654,22 @@ impl LocalizationHandler {
             .get(channel)
             .map_err(unexpected)?
             .ok_or_else(|| source_gone("the channel was removed"))?;
-        let source_channel = self
+        // A loose video (#341) has no project, so no other channel to be
+        // made for.
+        let source_channel_id = source
+            .channel
+            .ok_or_else(|| source_gone("a loose video has no versions"))?;
+        let mut source_channel = self
             .channels
-            .get(source.channel)
+            .get(source_channel_id)
             .map_err(unexpected)?
             .ok_or_else(|| source_gone("the project's channel was removed"))?;
+        // A video that was loose keeps its own language and country (#341).
+        if let Some(details) =
+            crate::loose::details_of(&*self.themes, &*self.channels, &source).map_err(unexpected)?
+        {
+            source_channel.details = details;
+        }
         let narration = self
             .narrations
             .narration(source.id)
@@ -676,7 +687,7 @@ impl LocalizationHandler {
         // Asked again from the Jobs screen, the job skips `make_version`:
         // the channel must still take a version.
         let versions = self.localizations.versions(source.id).map_err(unexpected)?;
-        if versions.iter().any(|made| made.channel == target.id) {
+        if versions.iter().any(|made| made.channel == Some(target.id)) {
             return Err(source_gone(
                 "that channel already has a version of this project",
             ));
@@ -691,10 +702,10 @@ impl LocalizationHandler {
                 .themes
                 .project(id)
                 .map_err(unexpected)?
-                .map(|project| project.channel),
+                .and_then(|project| project.channel),
             None => None,
         };
-        if target.id == source.channel
+        if target.id == source_channel_id
             || Some(target.id) == came_from
             || !other_audience(
                 &target,
@@ -729,12 +740,21 @@ impl LocalizationHandler {
                 serde_json::from_str(&generated.text).map_err(|e| not_usable(&e.to_string()))?;
             let adaptation =
                 join_adapted(&adapted.sentences, &gaps).map_err(|e| not_usable(&e.to_string()))?;
-            let angle = self
-                .themes
-                .theme(source.theme)
-                .map_err(unexpected)?
-                .map(|theme| theme.idea().angle().to_owned())
-                .unwrap_or_default();
+            let angle = match source.theme {
+                Some(theme) => self
+                    .themes
+                    .theme(theme)
+                    .map_err(unexpected)?
+                    .map(|theme| theme.idea().angle().to_owned())
+                    .unwrap_or_default(),
+                // A loose video's angle lives in its own settings (#341).
+                None => self
+                    .themes
+                    .video_settings(source.id)
+                    .map_err(unexpected)?
+                    .map(|settings| settings.angle)
+                    .unwrap_or_default(),
+            };
             let idea = ThemeIdea::new(&adapted.title, &angle)
                 .or_else(|_| ThemeIdea::new(&adapted.title, ""))
                 .map_err(|e| not_usable(&format!("the title is not usable ({e:?})")))?;
@@ -807,7 +827,7 @@ impl LocalizationHandler {
             );
             let (cut, _) = project_cut(
                 &source,
-                Some(&source_channel),
+                Some(&source_channel.details),
                 &plan,
                 &narration,
                 timeline.as_ref(),
@@ -985,7 +1005,7 @@ impl LocalizationHandler {
             .themes
             .project(project)
             .map_err(unexpected)?
-            .map(|project| project.channel);
+            .and_then(|project| project.channel);
         let generated = self.ask(payload, job, channel, Some(project), stop)?;
         self.bill(CostRecordId::new(), &generated, job, channel, Some(project));
         let adapted: Adapted =
@@ -1102,7 +1122,7 @@ impl Bardo {
     fn planned_version(source: &VideoProject, channel: &Channel) -> VideoProject {
         VideoProject {
             id: VideoProjectId::new(),
-            channel: channel.id,
+            channel: Some(channel.id),
             persona: None,
             ..source.clone()
         }
@@ -1117,7 +1137,7 @@ impl Bardo {
                 .localization(project)?
                 .and_then(|localization| localization.source)
             {
-                Some(id) => self.themes.project(id)?.map(|project| project.channel),
+                Some(id) => self.themes.project(id)?.and_then(|project| project.channel),
                 None => None,
             },
         )
@@ -1142,8 +1162,8 @@ impl Bardo {
                 Some(VersionSource {
                     project: from.as_ref().map(|project| project.id),
                     title: localization.source_title.clone(),
-                    channel: match &from {
-                        Some(project) => channel_name(project.channel)?,
+                    channel: match from.as_ref().and_then(|project| project.channel) {
+                        Some(channel) => channel_name(channel)?,
                         None => None,
                     },
                     language: localization.source_language,
@@ -1155,7 +1175,10 @@ impl Bardo {
 
         let mut made = Vec::new();
         for version in self.localizations.versions(project.id)? {
-            let Some(channel) = self.channels.get(version.channel)? else {
+            let Some(channel) = version.channel else {
+                continue;
+            };
+            let Some(channel) = self.channels.get(channel)? else {
                 continue;
             };
             made.push(MadeVersion {
@@ -1166,10 +1189,26 @@ impl Bardo {
             });
         }
 
-        let own = self
+        // A loose video (#341) has no project, so no channel to be made
+        // for.
+        let Some(own_channel) = project.channel else {
+            return Ok(VersionsView {
+                source,
+                made,
+                targets: Vec::new(),
+                blocked: Some(VersionBlock::NoChannel),
+                job: None,
+                job_channel: None,
+            });
+        };
+        let mut own = self
             .channels
-            .get(project.channel)?
+            .get(own_channel)?
             .ok_or(LocalizationError::ProjectNotFound)?;
+        // A video that was loose keeps its own language and country (#341).
+        if let Some(details) = self.video_details(&project)? {
+            own.details = details;
+        }
         let came_from = self.came_from(project.id)?;
         let narration = self.narrations.narration(project.id)?;
         let plan = self.scene_plans.scene_plan(project.id)?;
@@ -1178,11 +1217,13 @@ impl Bardo {
             .list(self.profile.id)?
             .into_iter()
             .filter(|channel| {
-                channel.id != project.channel
+                channel.id != own.id
                     && channel.project == own.project
                     && Some(channel.id) != came_from
                     && other_audience(channel, own.details.language(), own.details.country())
-                    && !made.iter().any(|made| made.project.channel == channel.id)
+                    && !made
+                        .iter()
+                        .any(|made| made.project.channel == Some(channel.id))
             })
             .collect();
         let blocked = match (&narration, &plan) {
@@ -1265,10 +1306,15 @@ impl Bardo {
             .get(channel)?
             .filter(|channel| channel.owner == self.profile.id)
             .ok_or(LocalizationError::ChannelNotFound)?;
-        let own = self
-            .channels
-            .get(project.channel)?
-            .ok_or(LocalizationError::ProjectNotFound)?;
+        let mut own = match project.channel {
+            Some(channel) => self.channels.get(channel)?,
+            None => None,
+        }
+        .ok_or(LocalizationError::ChannelNotFound)?;
+        // A video that was loose keeps its own language and country (#341).
+        if let Some(details) = self.video_details(&project)? {
+            own.details = details;
+        }
         // Versions stay inside the project: another project's channel is
         // never offered.
         if target.project != own.project {
@@ -1284,7 +1330,7 @@ impl Bardo {
             .localizations
             .versions(project.id)?
             .iter()
-            .any(|version| version.channel == target.id)
+            .any(|version| version.channel == Some(target.id))
         {
             return Err(LocalizationError::AlreadyMade);
         }
@@ -1641,7 +1687,7 @@ mod tests {
         assert!(after.targets.is_empty());
         assert_eq!(after.blocked, Some(VersionBlock::NoChannel));
         let version = &after.made[0].project;
-        assert_eq!(version.channel, channel.id);
+        assert_eq!(version.channel, Some(channel.id));
         assert_eq!(version.title, "The Probe That Never Came Home");
         // The source's channel makes long videos; the English one short.
         assert_eq!(version.format, Some(bardo_domain::VideoFormat::Long));
@@ -1746,7 +1792,7 @@ mod tests {
             Err(LocalizationError::SameAudience)
         ));
         assert!(matches!(
-            app.make_version(source.id, source.channel, BudgetConsent::Ask),
+            app.make_version(source.id, source.channel.unwrap(), BudgetConsent::Ask),
             Err(LocalizationError::SameAudience)
         ));
 
@@ -1764,7 +1810,7 @@ mod tests {
         // Nor is the version made again for the channel it came from.
         let version = app.versions(source.id).unwrap().made[0].project.id;
         assert!(matches!(
-            app.make_version(version, source.channel, BudgetConsent::Ask),
+            app.make_version(version, source.channel.unwrap(), BudgetConsent::Ask),
             Err(LocalizationError::SameAudience)
         ));
     }
@@ -1780,7 +1826,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        for moving in [source.channel, channel.id] {
+        for moving in [source.channel.unwrap(), channel.id] {
             assert_eq!(
                 app.move_channel_blocks(moving).unwrap(),
                 [crate::MoveBlock::VersionElsewhere]

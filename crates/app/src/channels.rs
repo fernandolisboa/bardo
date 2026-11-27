@@ -27,6 +27,10 @@ pub enum ChannelError {
     /// The chosen take model is not one the providers offer.
     #[error("take model not offered")]
     TakeModelNotOffered,
+    /// *No project* is open while the profile has projects: a new channel
+    /// has no project to join.
+    #[error("no project is open")]
+    NeedsProject,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -42,6 +46,7 @@ impl ChannelError {
             ChannelError::PersonaNotFound => Some(Text::ChannelPersonaNotFound),
             ChannelError::ClipModelNotOffered => Some(Text::ChannelClipModelNotOffered),
             ChannelError::TakeModelNotOffered => Some(Text::ChannelTakeModelNotOffered),
+            ChannelError::NeedsProject => Some(Text::ChannelNeedsProject),
             ChannelError::Repository(_) => Some(Text::ChannelNotSaved),
         }
     }
@@ -96,6 +101,7 @@ impl Bardo {
             None => self.project_for_new_channel(details.name()),
         }
         .map_err(|error| match error {
+            crate::ProjectError::NotFound => ChannelError::NeedsProject,
             crate::ProjectError::Repository(error) => ChannelError::Repository(error),
             other => ChannelError::Repository(RepositoryError(other.to_string().into())),
         })?;

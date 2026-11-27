@@ -309,7 +309,7 @@ impl Bardo {
         let archived = self.archived_videos();
         for channel in &channels {
             let projects = self.themes.projects(channel.id)?;
-            let started: HashSet<_> = projects.iter().map(|video| video.theme).collect();
+            let started: HashSet<_> = projects.iter().filter_map(|video| video.theme).collect();
             for theme in self.themes.themes(channel.id)? {
                 match theme.status() {
                     ThemeStatus::Suggested if theme.ranking().is_some() => ideas.ranked += 1,
@@ -346,7 +346,12 @@ impl Bardo {
                     title: video.title.clone(),
                     channel: channel.id,
                     channel_name: channel.details.name().to_owned(),
-                    format: video.format(channel.details.format()),
+                    // A video moved in from the loose ones keeps its own
+                    // settings (#341).
+                    format: video.format(
+                        crate::loose::details_of(&*self.themes, &*self.channels, &video)?
+                            .map_or(channel.details.format(), |details| details.format()),
+                    ),
                     is_ad: video.is_ad(),
                     status,
                     next,

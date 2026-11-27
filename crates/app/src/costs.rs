@@ -815,7 +815,7 @@ impl CostBook {
 
     fn channel_of(&self, project: VideoProjectId) -> Option<ChannelId> {
         match self.themes.project(project) {
-            Ok(found) => found.map(|project| project.channel),
+            Ok(found) => found.and_then(|project| project.channel),
             Err(error) => {
                 tracing::warn!("could not find the channel of project {project}: {error}");
                 None
@@ -1305,10 +1305,13 @@ impl Bardo {
             let project = self.themes.project(*video)?;
             let row = match project {
                 Some(project) => SpendRow {
-                    channel: self
-                        .channels
-                        .get(project.channel)?
-                        .map(|channel| channel.details.name().to_owned()),
+                    channel: match project.channel {
+                        Some(channel) => self
+                            .channels
+                            .get(channel)?
+                            .map(|channel| channel.details.name().to_owned()),
+                        None => None,
+                    },
                     name: Some(project.title),
                     amount: *amount,
                     deleted: None,
@@ -1681,7 +1684,7 @@ pub(crate) mod tests {
             assert_eq!(record.provider, Provider::Claude);
             assert_eq!(record.model, bardo_ai::claude::MODEL);
             assert_eq!(record.job, Some(id));
-            assert_eq!(record.channel, Some(project.channel));
+            assert_eq!(record.channel, project.channel);
             // The prompt is known; the answer is what a plan of this
             // narration usually takes, thought included.
             let request = asked.last().unwrap();
@@ -1806,7 +1809,7 @@ pub(crate) mod tests {
             let records = costs(&h, project.id, CostPurpose::Script);
             assert_eq!(records.len(), 1, "what it may have cost is in Costs");
             assert_eq!(records[0].job, Some(id));
-            assert_eq!(records[0].channel, Some(project.channel));
+            assert_eq!(records[0].channel, project.channel);
             assert_eq!(records[0].provider, Provider::Claude);
             assert!(records[0].usage.output_tokens > 0, "{:?}", records[0].usage);
 

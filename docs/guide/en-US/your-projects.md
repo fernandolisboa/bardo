@@ -22,6 +22,11 @@ The title bar shows the open project beside the Bardo logo: its color, its name 
 
 Click a project to open it. Bardo remembers the open project, and opens on it the next time. **Show folder** opens the open project's folder in Explorer. A project whose folder cannot be found is marked **Folder not found**, with **Locate…** ([Folder not found](storage.md#not-found)). The star beside a project adds it to the favorites or takes it out. The switcher is not shown while the editor is open: close the editor to switch.
 
+<a id="no-project"></a>
+## No project
+
+**No project**, after the projects in the switcher, opens the loose videos: videos with no project and no channel, for a quick try ([Loose videos](projects.md#loose-videos)). It shows how many there are. While it is open, the title bar says **No project**, Videos lists the loose videos and the other project screens ask you to open a project. Bardo remembers it like any project, and opens on it the next time.
+
 <a id="new"></a>
 ## A new project
 

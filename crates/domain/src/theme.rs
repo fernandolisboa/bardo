@@ -10,6 +10,7 @@ use std::time::SystemTime;
 use crate::{
     ChannelId, Confidence, JobId, Money, Niche, PerformanceReason, PersonaId, ProductId,
     ProductionMode, ProfileId, RepositoryError, Score, StyleChoice, VideoFormat, VideoLength,
+    VideoSettings,
 };
 
 uuid_id!(
@@ -361,9 +362,9 @@ impl Theme {
         VideoProject {
             id: VideoProjectId::new(),
             owner: self.owner,
-            channel: self.channel,
+            channel: Some(self.channel),
             niche: self.niche.clone(),
-            theme: self.id,
+            theme: Some(self.id),
             title: self.idea.title.clone(),
             created_at: now,
             persona: None,
@@ -395,10 +396,13 @@ pub fn rank_themes(themes: &mut [Theme]) {
 pub struct VideoProject {
     pub id: VideoProjectId,
     pub owner: ProfileId,
-    pub channel: ChannelId,
+    /// Its channel; `None` for a loose video (#341), which holds what a
+    /// channel would give it in its own [`VideoSettings`].
+    pub channel: Option<ChannelId>,
     pub niche: Niche,
-    /// The approved theme it started from.
-    pub theme: ThemeId,
+    /// The approved theme it started from; `None` for a loose video, which
+    /// started from an idea typed for it.
+    pub theme: Option<ThemeId>,
     /// The working title, copied from the theme when approved.
     pub title: String,
     pub created_at: SystemTime,
@@ -507,6 +511,32 @@ impl SpendCap {
 }
 
 impl VideoProject {
+    /// A loose video (#341): no project, no channel, no theme; its title
+    /// is the idea's, and its niche the one its settings came with.
+    pub fn loose(owner: ProfileId, idea: &ThemeIdea, niche: Niche, now: SystemTime) -> Self {
+        Self {
+            id: VideoProjectId::new(),
+            owner,
+            channel: None,
+            niche,
+            theme: None,
+            title: idea.title().to_owned(),
+            created_at: now,
+            persona: None,
+            format: None,
+            production: None,
+            spend_cap: SpendCap::Default,
+            length: None,
+            style: None,
+            product: None,
+        }
+    }
+
+    /// Whether it is a loose video: no channel, so nothing publishes it.
+    pub fn is_loose(&self) -> bool {
+        self.channel.is_none()
+    }
+
     /// Whether the video advertises a product.
     pub fn is_ad(&self) -> bool {
         self.product.is_some()
@@ -615,9 +645,50 @@ pub trait ThemeRepository: Send + Sync {
         id: VideoProjectId,
         style: Option<StyleChoice>,
     ) -> Result<(), RepositoryError>;
+
+    /// Saves a new loose video (#341) with its settings, its media to go
+    /// in `<folder>\<slug>-<short id>`, all or none.
+    fn start_loose(
+        &self,
+        project: &VideoProject,
+        settings: &VideoSettings,
+        folder: &std::path::Path,
+    ) -> Result<(), RepositoryError>;
+
+    /// The owner's loose videos, newest first.
+    fn loose_projects(&self, owner: ProfileId) -> Result<Vec<VideoProject>, RepositoryError>;
+
+    /// The settings a video holds itself: a loose video's, and a video
+    /// that was loose before it moved; `None` for every other video.
+    fn video_settings(&self, id: VideoProjectId) -> Result<Option<VideoSettings>, RepositoryError>;
+
+    /// Gives a loose video to `channel`; it keeps its settings, and its
+    /// media follows by the media move.
+    fn move_loose(&self, id: VideoProjectId, channel: ChannelId) -> Result<(), RepositoryError>;
 }
 
 impl<T: ThemeRepository + ?Sized> ThemeRepository for Arc<T> {
+    fn start_loose(
+        &self,
+        project: &VideoProject,
+        settings: &VideoSettings,
+        folder: &std::path::Path,
+    ) -> Result<(), RepositoryError> {
+        (**self).start_loose(project, settings, folder)
+    }
+
+    fn loose_projects(&self, owner: ProfileId) -> Result<Vec<VideoProject>, RepositoryError> {
+        (**self).loose_projects(owner)
+    }
+
+    fn video_settings(&self, id: VideoProjectId) -> Result<Option<VideoSettings>, RepositoryError> {
+        (**self).video_settings(id)
+    }
+
+    fn move_loose(&self, id: VideoProjectId, channel: ChannelId) -> Result<(), RepositoryError> {
+        (**self).move_loose(id, channel)
+    }
+
     fn themes(&self, channel: ChannelId) -> Result<Vec<Theme>, RepositoryError> {
         (**self).themes(channel)
     }
@@ -851,10 +922,10 @@ mod tests {
         let mut theme = theme("The lost cosmonauts");
         let project = theme.approve(at(99)).unwrap();
         assert_eq!(theme.status(), ThemeStatus::Approved);
-        assert_eq!(project.channel, theme.channel);
+        assert_eq!(project.channel, Some(theme.channel));
         assert_eq!(project.owner, theme.owner);
         assert_eq!(project.niche, theme.niche);
-        assert_eq!(project.theme, theme.id);
+        assert_eq!(project.theme, Some(theme.id));
         assert_eq!(project.title, "The lost cosmonauts");
         assert_eq!(project.created_at, at(99));
         assert_eq!(project.persona, None, "follows the channel's persona");

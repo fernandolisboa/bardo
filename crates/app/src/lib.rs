@@ -35,6 +35,7 @@ mod library;
 mod localization;
 pub mod logging;
 mod look_framing;
+mod loose;
 mod media_import;
 mod music_prompts;
 mod music_tracks;
@@ -180,6 +181,7 @@ pub use localization::{
     LocalizationError, MadeVersion, VersionBlock, VersionScenes, VersionSource, VersionTarget,
     VersionsView,
 };
+pub use loose::{LooseError, LooseVideoDraft};
 pub use media_import::{MediaImport, MediaImportError};
 pub use music_prompts::{MusicPromptError, MusicPromptView};
 pub use music_tracks::{GeneratedTrack, MusicTrackError, MusicTrackPlayer, MusicTracksView};

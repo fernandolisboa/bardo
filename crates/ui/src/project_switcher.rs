@@ -159,6 +159,63 @@ impl ProjectSwitcher {
         }
     }
 
+    /// Opens *No project*: the loose videos (#341).
+    fn open_loose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.bardo.read(cx).loose_open() {
+            self.set_open(false, window, cx);
+            return;
+        }
+        match self.bardo.read(cx).open_loose_videos() {
+            Ok(()) => {
+                self.set_open(false, window, cx);
+                cx.emit(ProjectSwitched);
+            }
+            Err(_) => {
+                self.problem = Some(Text::LooseNotSaved);
+                cx.notify();
+            }
+        }
+    }
+
+    /// *No project*, after the projects: how many loose videos there are.
+    fn loose_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let t = look(cx).tokens;
+        let bardo = self.bardo.read(cx);
+        let selected = bardo.loose_open();
+        h_flex()
+            .id("project-row-loose")
+            .px_2()
+            .py_1()
+            .gap_2()
+            .items_center()
+            .rounded(t.radius)
+            .cursor_pointer()
+            .text_sm()
+            .when(selected, |row| row.bg(t.selected))
+            .when(!selected, |row| row.hover(|row| row.bg(t.hover)))
+            .child(Icon::new(IconName::Inbox).size(px(12.)))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .truncate()
+                            .when(selected, |name| {
+                                name.font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            })
+                            .child(tr(bardo, Text::LooseSwitcherRow)),
+                    )
+                    .child(div().text_xs().text_color(t.text2).truncate().child(
+                        SharedString::from(loose_count_text(bardo, bardo.loose_video_count())),
+                    )),
+            )
+            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                this.open_loose(window, cx);
+            }))
+            .into_any_element()
+    }
+
     fn star(&mut self, id: ProjectId, starred: bool, cx: &mut Context<Self>) {
         self.problem = self
             .bardo
@@ -385,6 +442,7 @@ impl ProjectSwitcher {
         let bardo = self.bardo.read(cx);
         let label = match open {
             Some(project) => SharedString::from(project.name().to_owned()),
+            None if bardo.loose_open() => tr(bardo, Text::LooseSwitcherRow),
             None => tr(bardo, Text::SwitcherNoProject),
         };
         Button::new("project-switcher")
@@ -412,6 +470,19 @@ impl ProjectSwitcher {
     /// How many channels the open project has, beside the button.
     fn channel_count(&self, cx: &App) -> Option<AnyElement> {
         let bardo = self.bardo.read(cx);
+        if bardo.loose_open() {
+            return Some(
+                div()
+                    .text_xs()
+                    .text_color(look(cx).tokens.text2)
+                    .whitespace_nowrap()
+                    .child(SharedString::from(loose_count_text(
+                        bardo,
+                        bardo.loose_video_count(),
+                    )))
+                    .into_any_element(),
+            );
+        }
         let open = bardo.open_project().ok().flatten()?;
         let count = bardo
             .project_channels(open.id)
@@ -623,6 +694,8 @@ impl ProjectSwitcher {
                 )
             })
             .collect();
+        // *No project* closes the list, unless a search narrows it.
+        let loose = self.query.trim().is_empty().then(|| self.loose_row(cx));
         let bardo = self.bardo.read(cx);
         let empty = if none_at_all {
             Some(tr(bardo, Text::SwitcherEmpty))
@@ -739,6 +812,7 @@ impl ProjectSwitcher {
                     .children(self.group(Text::SwitcherFavorites, favorites, cx))
                     .children(self.group(Text::SwitcherRecent, recent, cx))
                     .children(self.group(Text::SwitcherAll, all, cx))
+                    .children(loose)
                     .children(empty.map(|text| {
                         div()
                             .px_2()
@@ -1045,6 +1119,15 @@ impl ProjectSwitcher {
             (None, None) => self.render_list(cx),
         };
         div().w(px(WIDTH)).child(body).into_any_element()
+    }
+}
+
+/// "No loose video", "1 loose video", "3 loose videos".
+fn loose_count_text(bardo: &Bardo, count: usize) -> String {
+    match count {
+        0 => bardo.text(Text::LooseCountNone).into_owned(),
+        1 => bardo.text(Text::LooseCountOne).into_owned(),
+        n => bardo.text_with(Text::LooseCountMany, &[("n", &n.to_string())]),
     }
 }
 

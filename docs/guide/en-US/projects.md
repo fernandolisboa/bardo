@@ -105,3 +105,17 @@ Nothing is thrown away when an earlier stage changes. What was made from it show
 ## What it has cost
 
 The line under the project's name shows its niche, when it was started and, once something was paid for, what the project has cost so far: every call to a provider for this video, from the script to the clips. Each generation shows its estimate before you start it, and a call that would go past a budget or the video's [cap](#mode) asks first. [Costs](bardo:go/costs) breaks the spending down by provider, channel and video; see [Your API keys](api-keys.md#budgets) for budgets.
+
+<a id="loose-videos"></a>
+## Loose videos
+
+A loose video has no project and no channel: a quick try at an idea before it earns a place in a project. Pick **No project** at the end of the [project switcher](your-projects.md#no-project) and Videos lists the loose videos, with **Show archived**, **Archive…** and **Delete…** as for any video.
+
+**New loose video** asks for the idea, a title and an optional angle, and for **Settings from**: a channel whose settings the video copies (language, country, narrator, format, style, models and the rest a channel gives its videos), or **A new channel's defaults**. The video keeps those settings as its own; changing the channel later does not change it. Only global items appear in it: a narrator that belongs to a project is left out, and [Who appears](world.md) offers only the global library.
+
+A loose video goes through every stage, from the script to the render, and exports a folder per network on Publish. With no account behind it, each network is listed as **File**, with that network's built-in preset; it is never uploaded or scheduled, and its post cannot be linked. Its folder is in **Global\Loose videos** in the base folder ([A project's folder](storage.md#project-folder)).
+
+<a id="move-to-a-project"></a>
+## Move to a project
+
+**Move to a project…** beside a loose video's name picks a channel among the active projects' channels, listed as **Project › Channel**. When the video's language or country differ from the channel's, Bardo says so before you move it: the video keeps its own. **Move the video** gives it the channel. It takes the channel's network accounts, so it can be uploaded and scheduled like any other video, keeps the settings it had as its own, and its folder moves into the project's folder in a job ([Jobs](jobs.md)). A loose video does not move while one of its jobs is queued or running, nor into an archived project.

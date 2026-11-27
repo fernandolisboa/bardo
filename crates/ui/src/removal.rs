@@ -223,8 +223,8 @@ impl RemovalPanel {
                     ],
                 )
             }
-            (RemovalMode::Delete, Removable::Video(_)) => {
-                bardo.text(Text::DeleteVideoHint).into_owned()
+            (RemovalMode::Delete, Removable::Video(id)) => {
+                bardo.text(bardo.delete_video_hint(id)).into_owned()
             }
         }
     }

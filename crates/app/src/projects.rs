@@ -133,32 +133,42 @@ impl Bardo {
     }
 
     /// The project the work screens show: the active one opened last.
-    /// `None` only while the profile has no active project.
+    /// `None` while the profile has no active project, or while *No
+    /// project* is open (`loose_open`).
     pub fn open_project(&self) -> Result<Option<Project>, AppError> {
-        Ok(self
-            .projects()?
-            .into_iter()
-            .filter(Project::is_active)
-            .max_by_key(|project| project.opened_at))
+        Ok(self.open_project_record()?)
     }
 
     pub(crate) fn open_project_id(&self) -> Result<Option<ProjectId>, RepositoryError> {
-        Ok(self
+        Ok(self.open_project_record()?.map(|project| project.id))
+    }
+
+    /// The active project opened last, unless *No project* (the loose
+    /// videos, #341) was opened after it.
+    fn open_project_record(&self) -> Result<Option<Project>, RepositoryError> {
+        let open = self
             .projects
             .projects(self.profile.id)?
             .into_iter()
             .filter(Project::is_active)
-            .max_by_key(|project| project.opened_at)
-            .map(|project| project.id))
+            .max_by_key(|project| project.opened_at);
+        let loose = self.projects.loose_opened(self.profile.id)?;
+        Ok(open.filter(|project| match (loose, project.opened_at) {
+            (Some(loose), Some(opened)) => opened > loose,
+            (Some(_), None) => false,
+            (None, _) => true,
+        }))
     }
 
     /// Opens a project the profile has never opened, so the app opens on
     /// one: after the upgrade that made projects, the first by name.
     pub(crate) fn open_some_project(&self) -> Result<(), RepositoryError> {
         let projects = self.projects.projects(self.profile.id)?;
-        if projects
-            .iter()
-            .any(|p| p.is_active() && p.opened_at.is_some())
+        // No project (the loose videos, #341) chosen is a choice too.
+        if self.projects.loose_opened(self.profile.id)?.is_some()
+            || projects
+                .iter()
+                .any(|p| p.is_active() && p.opened_at.is_some())
         {
             return Ok(());
         }
@@ -228,10 +238,13 @@ impl Bardo {
     }
 
     /// The project a new channel joins: the open one, or, when the profile
-    /// has none yet, a new project of the channel's name, opened.
+    /// has none yet, a new project of the channel's name, opened. While
+    /// *No project* is open over existing projects there is none to join
+    /// ([`ProjectError::NotFound`]): the user picks one first.
     pub(crate) fn project_for_new_channel(&self, name: &str) -> Result<ProjectId, ProjectError> {
         match self.open_project_id()? {
             Some(open) => Ok(open),
+            None if self.projects()?.iter().any(Project::is_active) => Err(ProjectError::NotFound),
             None => self.add_project_named(name),
         }
     }
@@ -368,7 +381,7 @@ impl Bardo {
                 .localizations
                 .versions(*video)?
                 .iter()
-                .any(|version| version.channel != channel.id);
+                .any(|version| version.channel != Some(channel.id));
             if source_elsewhere || version_elsewhere {
                 blocks.push(MoveBlock::VersionElsewhere);
                 break;
@@ -455,7 +468,10 @@ impl Bardo {
             .localization(video)?
             .and_then(|localization| localization.source)
         {
-            Some(source) => Ok(self.themes.project(source)?.map(|project| project.channel)),
+            Some(source) => Ok(self
+                .themes
+                .project(source)?
+                .and_then(|project| project.channel)),
             None => Ok(None),
         }
     }

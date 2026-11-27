@@ -768,8 +768,8 @@ mod tests {
         assert_eq!(start.theme.niche, niche);
 
         let project = &start.project;
-        assert_eq!(project.theme, start.theme.id);
-        assert_eq!(project.channel, angle.channel);
+        assert_eq!(project.theme, Some(start.theme.id));
+        assert_eq!(project.channel, Some(angle.channel));
         assert_eq!(project.owner, angle.owner);
         assert_eq!(project.niche, niche);
         assert_eq!(project.title, "A desk you can see");

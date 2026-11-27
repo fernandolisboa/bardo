@@ -24,6 +24,11 @@ Ideas are written for one channel and one niche. The niches to choose from are t
 
 A ranking is made from YouTube data, so it goes with that data 30 days after it was made: the idea stays, waiting to be ranked again ([Privacy policy](privacy.md#kept)).
 
+<a id="own-idea"></a>
+## Write my own idea
+
+**Write my own idea** adds an idea you type, a title and an optional angle, to the niche's ideas. When the project has more than one channel, it asks which channel the idea is for. The idea starts unranked: **Rank again** ranks it like any other, and you approve, edit or discard it the same way ([Approve, edit or discard](#review)). For a quick try with no channel at all, start a [loose video](projects.md#loose-videos) instead.
+
 <a id="ranking"></a>
 ## Priority and confidence
 

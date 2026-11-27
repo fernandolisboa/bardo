@@ -36,18 +36,18 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, AssetSource, Capture, CaptureId, CaptureRepository, ChannelId, ChannelRepository,
-    ClipHandle, ClipModelRef, CostPurpose, DEFAULT_TAKE_CAP, FaceLandmarks, ImageFormat, Job,
-    JobFailure, JobFailureKind, JobId, JobKind, JobRepository, JobState, LookAssetKind, LookFace,
-    LookSource, MAX_TAKE_PROMPT, MIN_TAKE_CAP, MediaAsset, MediaAssetId, MediaAssetRepository,
-    MediaKind, Metered, Money, Outbound, PerformedClip, PersonaId, PersonaLook, PersonaRepository,
+    ApiKey, AssetSource, Capture, CaptureId, CaptureRepository, ChannelRepository, ClipHandle,
+    ClipModelRef, CostPurpose, DEFAULT_TAKE_CAP, FaceLandmarks, ImageFormat, Job, JobFailure,
+    JobFailureKind, JobId, JobKind, JobRepository, JobState, LookAssetKind, LookFace, LookSource,
+    MAX_TAKE_PROMPT, MIN_TAKE_CAP, MediaAsset, MediaAssetId, MediaAssetRepository, MediaKind,
+    Metered, Money, Outbound, PerformedClip, PersonaId, PersonaLook, PersonaRepository,
     PictureSize, Preflight, PreflightOverride, ProfileId, ProjectFiles, Provider, ProviderFailure,
     ProviderFailureKind, RepositoryError, SecretStore, StagedFile, StagedUpload, StagingRepository,
     TakeGenerator, TakeInput, TakeMode, TakeModel, TakePrompt, TakePromptError, TakeRequest,
     TakeResult, TakeSpend, TakeStatus, TakeStep, TakeStretch, TemplateKind, TemplateUsed,
     TemplateValues, TemplateVariable, TemplateVersionId, TextEffort, TextFormat, TextGenerator,
-    TextImage, TextRequest, ThemeRepository, VideoProjectId, preflight, take_model_of,
-    take_prompt_text,
+    TextImage, TextRequest, ThemeRepository, VideoProject, VideoProjectId, preflight,
+    take_model_of, take_prompt_text,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
@@ -1237,11 +1237,11 @@ impl TakeRun<'_> {
                     .and_then(|take| take.model.clone())
             });
         let channel = match handler.projects.project(self.project).map_err(unexpected)? {
-            Some(project) => handler
-                .channels
-                .get(project.channel)
-                .map_err(unexpected)?
-                .and_then(|channel| channel.details.take_model().cloned()),
+            Some(project) => {
+                crate::loose::details_of(&*handler.projects, &*handler.channels, &project)
+                    .map_err(unexpected)?
+                    .and_then(|details| details.take_model().cloned())
+            }
             None => return Ok(false),
         };
         let models: Vec<TakeModel> = handler
@@ -1864,22 +1864,22 @@ impl Bardo {
             .any(|offered| offered.id == *model)
     }
 
-    /// The take model a channel picked, if any.
+    /// The take model a video's channel (or a loose video's settings)
+    /// picked, if any.
     fn channel_take_ref(
         &self,
-        channel: ChannelId,
+        video: &VideoProject,
     ) -> Result<Option<ClipModelRef>, RepositoryError> {
         Ok(self
-            .channels
-            .get(channel)?
-            .and_then(|channel| channel.details.take_model().cloned()))
+            .video_details(video)?
+            .and_then(|details| details.take_model().cloned()))
     }
 
     /// The take model of a new capture's takes: the channel's, else the
     /// default.
-    pub(crate) fn capture_take_model(&self, channel: ChannelId) -> Option<TakeModel> {
+    pub(crate) fn capture_take_model(&self, video: &VideoProject) -> Option<TakeModel> {
         let models = self.take_models();
-        let channel = self.channel_take_ref(channel).ok().flatten();
+        let channel = self.channel_take_ref(video).ok().flatten();
         take_model_of(&models, channel.as_ref(), None).cloned()
     }
 
@@ -1894,7 +1894,7 @@ impl Bardo {
             .project(capture.project)?
             .ok_or(CaptureError::ProjectNotFound)?;
         let models = self.take_models();
-        let channel = self.channel_take_ref(project.channel)?;
+        let channel = self.channel_take_ref(&project)?;
         let own = capture
             .takes
             .as_slice()
@@ -2014,13 +2014,12 @@ impl Bardo {
         controls: &[ControlVideoView],
     ) -> Result<PerformedView, CaptureError> {
         let project = capture.project;
-        let channel = self
+        let video = self
             .themes
             .project(project)?
-            .ok_or(CaptureError::ProjectNotFound)?
-            .channel;
+            .ok_or(CaptureError::ProjectNotFound)?;
         let models = self.take_models();
-        let channel_ref = self.channel_take_ref(channel)?;
+        let channel_ref = self.channel_take_ref(&video)?;
         let channel_model = take_model_of(&models, channel_ref.as_ref(), None).cloned();
         let look = self.performer_look(project)?;
         let look_print_now = look
@@ -3777,7 +3776,14 @@ mod tests {
     fn a_channel_model_that_does_not_take_the_mode_blocks_and_new_captures_start_in_its_mode() {
         let (s, project, _) = ready();
         with_look(&s);
-        let channel = s.app.themes.project(project).unwrap().unwrap().channel;
+        let channel = s
+            .app
+            .themes
+            .project(project)
+            .unwrap()
+            .unwrap()
+            .channel
+            .unwrap();
         let details = s.app.channels.get(channel).unwrap().unwrap().details;
         s.app
             .update_channel(

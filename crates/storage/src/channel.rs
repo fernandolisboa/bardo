@@ -1,7 +1,7 @@
 use bardo_domain::{
     Channel, ChannelDetails, ChannelDraft, ChannelId, ChannelRepository, ClipFit, ClipModelRef,
     MotionDefault, PersonaId, ProfileId, ProjectId, Provider, RepositoryError, StretchLimit,
-    StyleChoice, Transition, TransitionKind,
+    StyleChoice, Transition, TransitionKind, VideoSettings,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -76,10 +76,29 @@ impl ChannelRow {
         language: &str,
         country: &str,
     ) -> Result<Channel, RepositoryError> {
+        let themes = themes(conn, &self.id).map_err(boxed)?;
+        let id = ChannelId::from(Uuid::parse_str(&self.id).map_err(boxed)?);
+        let owner = ProfileId::from(Uuid::parse_str(&self.profile_id).map_err(boxed)?);
+        let project = ProjectId::from(Uuid::parse_str(&self.project_id).map_err(boxed)?);
+        Ok(Channel {
+            id,
+            owner,
+            project,
+            details: self.into_details(language, country, themes)?,
+        })
+    }
+
+    /// The settings the row holds, through domain validation.
+    fn into_details(
+        self,
+        language: &str,
+        country: &str,
+        themes: Vec<String>,
+    ) -> Result<ChannelDetails, RepositoryError> {
         let mut draft = self.draft;
         draft.language = language.parse().map_err(boxed)?;
         draft.country = country.parse().map_err(boxed)?;
-        draft.themes = themes(conn, &self.id).map_err(boxed)?;
+        draft.themes = themes;
         draft.default_persona = self
             .default_persona
             .map(|id| Uuid::parse_str(&id).map(PersonaId::from))
@@ -107,15 +126,83 @@ impl ChannelRow {
             kind.parse::<TransitionKind>().map_err(boxed)?,
             u32::try_from(frames).map_err(boxed)?,
         );
-        let details = ChannelDetails::validate(draft)
-            .map_err(|errors| boxed(InvalidRow(format!("{errors:?}"))))?;
-        Ok(Channel {
-            id: ChannelId::from(Uuid::parse_str(&self.id).map_err(boxed)?),
-            owner: ProfileId::from(Uuid::parse_str(&self.profile_id).map_err(boxed)?),
-            project: ProjectId::from(Uuid::parse_str(&self.project_id).map_err(boxed)?),
-            details,
-        })
+        ChannelDetails::validate(draft).map_err(|errors| boxed(InvalidRow(format!("{errors:?}"))))
     }
+}
+
+/// A video's own settings (#341): the channel's columns, read as a
+/// channel's are, with no themes.
+const SELECT_SETTINGS: &str = "SELECT project_id, project_id, name, niche, aesthetic_notes, \
+     language, country, default_persona_id, clip_provider, clip_model, caption_style, \
+     transition, transition_frames, video_format, motion, motion_strength, caption_highlight, \
+     thumbnail_look, take_provider, take_model, production_mode, visual_style, clip_fit, \
+     clip_stretch_percent, project_id, angle \
+     FROM video_settings WHERE project_id = ?1";
+
+/// The settings `video` holds itself, if any.
+pub(crate) fn video_settings(
+    conn: &Connection,
+    video: &str,
+) -> Result<Option<VideoSettings>, RepositoryError> {
+    let row = conn
+        .query_row(SELECT_SETTINGS, [video], |row| {
+            Ok((ChannelRow::read(row)?, row.get::<_, String>(25)?))
+        })
+        .optional()
+        .map_err(boxed)?;
+    row.map(|((row, language, country), angle)| {
+        Ok(VideoSettings {
+            angle,
+            details: row.into_details(&language, &country, Vec::new())?,
+        })
+    })
+    .transpose()
+}
+
+/// Saves the settings `video` holds itself (its themes are not kept).
+pub(crate) fn save_video_settings(
+    conn: &Connection,
+    video: &str,
+    settings: &VideoSettings,
+) -> Result<(), RepositoryError> {
+    let details = &settings.details;
+    conn.execute(
+        "INSERT OR REPLACE INTO video_settings (project_id, angle, name, niche, aesthetic_notes,
+             language, country, default_persona_id, clip_provider, clip_model, caption_style,
+             transition, transition_frames, video_format, motion, motion_strength,
+             caption_highlight, thumbnail_look, take_provider, take_model, production_mode,
+             visual_style, clip_fit, clip_stretch_percent)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+        params![
+            video,
+            settings.angle,
+            details.name(),
+            details.niche(),
+            details.aesthetic_notes(),
+            details.language().code(),
+            details.country().code(),
+            details.default_persona().map(|id| id.to_string()),
+            details.clip_model().map(|model| model.provider().code()),
+            details.clip_model().map(ClipModelRef::model),
+            details.caption_style().code(),
+            details.transition().kind.code(),
+            details.transition().frames(),
+            details.format().code(),
+            details.motion().pattern.code(),
+            details.motion().strength.code(),
+            details.caption_highlight().code(),
+            details.thumbnail_look().code(),
+            details.take_model().map(|model| model.provider().code()),
+            details.take_model().map(ClipModelRef::model),
+            details.production().code(),
+            details.style().code(),
+            details.clip_fit().code(),
+            details.stretch_limit().percent(),
+        ],
+    )
+    .map_err(boxed)?;
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]

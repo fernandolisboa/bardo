@@ -24,6 +24,11 @@ As ideias são escritas para um canal e um nicho. Os nichos disponíveis são os
 
 Um ranqueamento é feito com dados do YouTube, então vai embora junto com eles 30 dias depois de feito: a ideia fica, esperando ser ranqueada de novo ([Política de privacidade](privacy.md#kept)).
 
+<a id="own-idea"></a>
+## Escrever minha ideia
+
+**Escrever minha ideia** acrescenta uma ideia que você digita, um título e um ângulo opcional, às ideias do nicho. Quando o projeto tem mais de um canal, pede para qual canal é a ideia. A ideia entra sem ranking: **Ranquear de novo** ranqueia como qualquer outra, e você aprova, edita ou descarta do mesmo jeito ([Aprovar, editar ou descartar](#review)). Para um teste rápido sem canal nenhum, comece um [vídeo avulso](projects.md#loose-videos).
+
 <a id="ranking"></a>
 ## Prioridade e confiança
 

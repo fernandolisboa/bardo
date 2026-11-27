@@ -4506,7 +4506,7 @@ pub(crate) mod tests {
         assert!(
             records
                 .iter()
-                .all(|r| r.channel == Some(project.channel) && r.job.is_some())
+                .all(|r| r.channel == project.channel && r.job.is_some())
         );
         let image = records
             .iter()

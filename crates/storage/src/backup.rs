@@ -637,12 +637,33 @@ impl LocalBackups {
                 Some((folder.project.as_deref()?, staged.target.as_path()))
             })
             .collect();
-        if !moved.is_empty() {
+        // The global folder restored elsewhere: the loose videos' folders
+        // inside it (#341) point there.
+        let global_moved: Vec<(String, String)> = staged
+            .iter()
+            .filter(|(folder, staged)| folder.project.is_none() && folder.origin != staged.target)
+            .map(|(folder, staged)| {
+                (
+                    crate::folders::path_text(&folder.origin),
+                    crate::folders::path_text(&staged.target),
+                )
+            })
+            .collect();
+        if !moved.is_empty() || !global_moved.is_empty() {
             let conn = Connection::open(incoming.join(DATABASE_ENTRY)).map_err(database_error)?;
             for (project, target) in moved {
                 conn.execute(
                     "UPDATE project SET folder = ?2 WHERE id = ?1",
                     rusqlite::params![project, crate::folders::path_text(target)],
+                )
+                .map_err(database_error)?;
+            }
+            for (origin, target) in global_moved {
+                conn.execute(
+                    "UPDATE video_project
+                     SET loose_folder = ?2 || substr(loose_folder, length(?1) + 1)
+                     WHERE substr(loose_folder, 1, length(?1)) = ?1",
+                    rusqlite::params![origin, target],
                 )
                 .map_err(database_error)?;
             }
@@ -2226,6 +2247,52 @@ mod tests {
         assert!(!root.join("E").exists());
         let db = Database::open(&paths.database).unwrap();
         assert_eq!(folder_of(&db, sea_id), Some(under_base));
+    }
+
+    #[test]
+    fn a_global_folder_restored_under_another_base_takes_its_loose_videos_along() {
+        use bardo_domain::{ThemeIdea, ThemeRepository, VideoSettings, loose_video};
+        let (install, profile) = Install::with_profile();
+        let root = install._dir.path().to_owned();
+        let global = root.join("Documents").join("Bardo").join(GLOBAL_DIR);
+        let idea = ThemeIdea::new("Why the Moon drifts away", "").unwrap();
+        let settings = VideoSettings::starting(&idea, None, |_| false);
+        let video = loose_video(profile.id, &idea, &settings, std::time::SystemTime::now());
+        let loose = global.join("Loose videos");
+        install.db.start_loose(&video, &settings, &loose).unwrap();
+        let folder = bardo_domain::FolderRepository::loose_folder(&*install.db, video.id)
+            .unwrap()
+            .unwrap();
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("render-youtube.mp4"), b"moon").unwrap();
+        let backups = LocalBackups::with_places(
+            Arc::clone(&install.db),
+            install.paths.clone(),
+            places(&root),
+        );
+        let to = install.out("full.zip");
+        backups.write(&to, WITH_MEDIA, &mut go_on()).unwrap();
+        drop(backups);
+        // Restored where the documents are elsewhere: another base folder.
+        let other = root.join("other");
+        let backups = LocalBackups::with_places(
+            Arc::clone(&install.db),
+            install.paths.clone(),
+            places(&other),
+        );
+        backups.stage(&to, &mut go_on()).unwrap();
+        drop(backups);
+        let Install { _dir, paths, db } = install;
+        drop(db);
+
+        assert!(apply_pending_restore(&paths).unwrap().succeeded());
+        let db = Database::open(&paths.database).unwrap();
+        let moved = bardo_domain::FolderRepository::loose_folder(&db, video.id)
+            .unwrap()
+            .unwrap();
+        let new_global = other.join("Documents").join("Bardo").join(GLOBAL_DIR);
+        assert!(moved.starts_with(&new_global), "{moved:?}");
+        assert_eq!(fs::read(moved.join("render-youtube.mp4")).unwrap(), b"moon");
     }
 
     #[test]

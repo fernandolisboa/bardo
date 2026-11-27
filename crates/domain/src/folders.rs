@@ -261,17 +261,26 @@ pub struct VideoToMove {
     pub title: String,
     /// Its channel's project, where the media goes.
     pub to: ProjectId,
-    /// Where it is now; `None` in the old projects folder.
+    /// Where it is now; `None` in the old projects folder, or in the
+    /// loose videos' folder (`from_loose`).
     pub from: Option<VideoFolder>,
+    /// The folder of a loose video that moved into a project (#341).
+    pub from_loose: Option<PathBuf>,
 }
 
 impl VideoToMove {
     /// The folder name it keeps, or the one it gets from its title.
     pub fn folder_name(&self) -> String {
-        self.from.as_ref().map_or_else(
-            || video_folder_name(&self.title, self.video),
-            |from| from.name.clone(),
-        )
+        if let Some(from) = &self.from {
+            return from.name.clone();
+        }
+        self.from_loose
+            .as_ref()
+            .and_then(|folder| folder.file_name())
+            .map_or_else(
+                || video_folder_name(&self.title, self.video),
+                |name| name.to_string_lossy().into_owned(),
+            )
     }
 }
 
@@ -296,6 +305,10 @@ pub trait FolderRepository: Send + Sync {
     fn set_project_folder(&self, project: ProjectId, folder: &Path) -> Result<(), RepositoryError>;
 
     fn video_folder(&self, video: VideoProjectId) -> Result<Option<VideoFolder>, RepositoryError>;
+
+    /// A loose video's folder (#341), in the loose videos' folder; `None`
+    /// for a video in a project's folder.
+    fn loose_folder(&self, video: VideoProjectId) -> Result<Option<PathBuf>, RepositoryError>;
 
     /// The owner's videos whose media is not in their project's folder.
     fn videos_to_move(&self, owner: ProfileId) -> Result<Vec<VideoToMove>, RepositoryError>;

@@ -906,9 +906,9 @@ impl Bardo {
             .project(project)?
             .filter(|project| project.owner == self.profile.id)
             .ok_or(PublicationError::ProjectNotFound)?;
+        // A loose video (#341) has no account: it is never published.
         let account = self
-            .network_accounts
-            .list(project.channel)?
+            .channel_accounts(project.channel)?
             .into_iter()
             .find(|account| account.network == network)
             .ok_or(PublicationError::NoAccount)?;
@@ -1640,7 +1640,7 @@ mod tests {
             .mark_posted(s.project.id, Network::TikTok, TIKTOK, false)
             .unwrap();
 
-        let view = s.app.channel_metrics(s.project.channel).unwrap();
+        let view = s.app.channel_metrics(s.project.channel.unwrap()).unwrap();
         assert_eq!(view.posts.len(), 2);
         assert!(
             view.posts
@@ -1715,7 +1715,7 @@ mod tests {
                 .all(|token| token == crate::uploads::tests::ACCESS)
         );
 
-        let view = s.app.channel_metrics(s.project.channel).unwrap();
+        let view = s.app.channel_metrics(s.project.channel.unwrap()).unwrap();
         assert_eq!(view.owner_access, OwnerAccess::Connected);
         let totals = view.totals.owner.unwrap();
         assert_eq!(totals.engaged_views, 33_600);
@@ -1810,7 +1810,7 @@ mod tests {
         );
         assert_eq!(post.engaged_views(), None, "the public views lead");
         assert_eq!(post.retention, None);
-        let view = s.app.channel_metrics(s.project.channel).unwrap();
+        let view = s.app.channel_metrics(s.project.channel.unwrap()).unwrap();
         assert_eq!(view.owner_access, OwnerAccess::NotConnected);
         assert_eq!(view.totals.owner, None);
     }
@@ -1848,7 +1848,7 @@ mod tests {
         let account = s
             .app
             .network_accounts
-            .list(s.project.channel)
+            .list(s.project.channel.unwrap())
             .unwrap()
             .into_iter()
             .find(|account| account.network == Network::YouTube)
@@ -1871,7 +1871,7 @@ mod tests {
         );
         assert_eq!(
             s.app
-                .channel_metrics(s.project.channel)
+                .channel_metrics(s.project.channel.unwrap())
                 .unwrap()
                 .owner_access,
             OwnerAccess::ReconnectNeeded
@@ -1904,7 +1904,7 @@ mod tests {
     fn account_on(s: &Setup, network: Network) -> NetworkAccount {
         s.app
             .network_accounts
-            .list(s.project.channel)
+            .list(s.project.channel.unwrap())
             .unwrap()
             .into_iter()
             .find(|account| account.network == network)
@@ -2031,7 +2031,7 @@ mod tests {
                 .iter()
                 .all(|token| token == PAGE_TOKEN)
         );
-        let view = s.app.channel_metrics(s.project.channel).unwrap();
+        let view = s.app.channel_metrics(s.project.channel.unwrap()).unwrap();
         assert_eq!(view.totals.views, 3_400);
         assert_eq!(view.totals.shares, Some(31));
     }

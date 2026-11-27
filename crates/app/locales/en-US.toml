@@ -111,6 +111,7 @@ aesthetic_notes_too_long = "Use at most 2,000 characters."
 name_taken = "You already have a channel with this name."
 not_found = "This channel no longer exists."
 not_saved = "Could not save the channel. Try again."
+needs_project = "No project is open. Open a project on the switcher, then add the channel there."
 persona_not_found = "That persona no longer exists. Pick another one."
 clip_model_not_offered = "That video model is no longer offered. Pick another one."
 take_model_not_offered = "That take model is no longer offered. Pick another one."
@@ -2996,6 +2997,10 @@ body = "Approving an idea starts a video project from it. Editing its title or a
 title = "Your projects"
 body = "The projects started from this channel's ideas. Open them on Videos to write the script and carry on."
 
+[tour.themes.own]
+title = "Your own idea"
+body = "Write my own idea adds an idea you type, a title and an angle, to this niche's ideas. It starts unranked: rank the ideas to see where it stands, then approve it like any other."
+
 [tour.performance]
 name = "Performance tour"
 
@@ -3044,15 +3049,15 @@ body = "The mode says which scenes become AI clips and with which model: Economy
 
 [tour.projects.stages]
 title = "Its stages"
-body = "Script, narration, scenes, clips, edit, render and publish, in order. The line under each stage says where it stands: done, generating, to review, out of date, or what it waits for."
-
-[tour.projects.unlock]
-title = "How a stage opens"
-body = "A stage opens as soon as the one before gives it something to work on: the narration reads the script, and the scenes are timed on the narration. Change an earlier stage and what was made from it shows as out of date."
+body = "Script, narration, scenes, clips, edit, render and publish, in order. The line under each stage says where it stands: done, generating, to review, out of date, or what it waits for. Each opens as soon as the one before gives it something to work on, and what was made from an earlier stage that later changed shows as out of date."
 
 [tour.projects.cost]
 title = "What it has cost"
 body = "The line under the project's name shows its niche, when it started and what it has cost so far, every paid call from the script to the clips. Costs has the details and your budgets."
+
+[tour.projects.loose]
+title = "Loose videos"
+body = "With No project open in the switcher, Videos lists the videos that have no project and no channel. New loose video starts one from an idea you type, with the settings of a channel you pick or a new channel's defaults. A loose video goes through every stage and exports files, but is never uploaded or scheduled; Move to a project gives it a channel whose accounts publish it, and it keeps its own settings."
 
 [tour.script]
 name = "Script tour"
@@ -5234,6 +5239,7 @@ project_title = "Delete {name}"
 video_title = "Delete {name}"
 project_hint = "Removes the project from Bardo with its channels, ideas and {videos} videos, and disconnects its network accounts ({connected} connected). Nothing is deleted on the networks, and its costs keep its name."
 video_hint = "Removes the video from Bardo. Its idea goes back to approved, with no video, and can start another. Nothing is deleted on the networks, and its costs keep its name."
+video_no_idea_hint = "Removes the video from Bardo. It has no idea to give back. Nothing is deleted on the networks, and its costs keep its name."
 folder_recycle = "Its folder ({size}) goes to the Recycle Bin: {folder}"
 folder_permanent = "Its folder ({size}) will be deleted permanently, not sent to the Recycle Bin: {folder}. {reason}"
 no_folder = "Its folder was not found, so only its records go."
@@ -5481,3 +5487,51 @@ save_project = "Save to World"
 [library.error]
 name_clash = "This project already has one with that name. Pick another name."
 other_project = "That belongs to another project. Pick one of this project's or a global one."
+
+[loose]
+delete_hint = "Removes the loose video from Bardo. It was never published, and its costs keep its name."
+not_saved = "The video could not be saved. Try again."
+not_found = "That loose video is no longer there."
+move_busy = "A job of this video is queued or running. Let it finish, or cancel it on Jobs, then move the video."
+move_archived = "That project is archived. Unarchive it first."
+move_video_archived = "This video is archived. Unarchive it first."
+switcher_row = "No project"
+count_none = "No loose video"
+count_one = "1 loose video"
+count_many = "{n} loose videos"
+title = "Loose videos"
+hint = "Videos with no project and no channel, for a quick try. They export files; to publish one, move it to a project."
+new = "New loose video"
+form_title = "New loose video"
+form_hint = "Type the idea. The video takes every setting a channel gives its videos from the channel you pick, or a new channel's defaults. Only global narrators and world items can appear in it."
+idea_title = "Title"
+idea_title_placeholder = "e.g. Why the Moon drifts away"
+idea_angle = "Angle"
+idea_angle_placeholder = "The take the video has on it (optional)"
+copy_from = "Settings from"
+copy_defaults = "A new channel's defaults"
+create = "Start the video"
+cancel = "Cancel"
+empty = "No loose video yet. Start one from an idea of your own."
+export_only = "A loose video exports files and is never uploaded or scheduled. Move it to a project to publish it."
+file_target = "File"
+move = "Move to a project…"
+move_title = "Move to a project"
+move_hint = "The video takes the channel's network accounts for publishing and keeps its own settings. Its folder moves into the project's folder."
+move_channel = "Project and channel"
+move_confirm = "Move the video"
+move_no_channels = "No project has a channel yet. Create one in a project first."
+moved = "Moved. The video is now among the project's videos."
+differs_language = "This video is in {video}; the channel speaks {channel}. The video stays in {video}."
+differs_country = "This video's country is {video}; the channel's is {channel}. The video keeps {video}."
+overview = "No project is open. Your loose videos are under Videos."
+open_videos = "Show the loose videos"
+
+[own_idea]
+button = "Write my own idea"
+title = "Your own idea"
+hint = "It joins this niche's ideas without a ranking. Rank the ideas to see where it stands."
+channel = "Channel"
+save = "Add the idea"
+cancel = "Cancel"
+saved = "Idea added. Rank the ideas to see where it stands."
