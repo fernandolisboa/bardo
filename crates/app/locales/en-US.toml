@@ -3210,7 +3210,7 @@ body = "Stability, similarity, style exaggeration and speed set how ElevenLabs r
 
 [tour.personas.share]
 title = "Save and share"
-body = "Save, duplicate, or export the persona to a file for another computer; Import from file at the top brings one in. A package holds a reference to the voice, never audio or keys."
+body = "Save, duplicate, or export the persona to a file for another computer; Import from file at the top brings one in. A package holds a reference to the voice, never audio or keys. Sharing, just above, lets other projects import it, exports a copy to one of them or makes it global."
 
 [tour.personas.realistic]
 title = "Realistic voice"
@@ -3249,7 +3249,7 @@ body = "An optional PNG logo for the ad's end card. Like the images, it stays in
 
 [tour.products.actions]
 title = "Save and tidy up"
-body = "Save the brief, duplicate it for a variant, archive a product you no longer advertise, or delete one no project uses."
+body = "Save the brief, duplicate it for a variant, archive a product you no longer advertise, or delete one no project uses. Sharing, below, lets other projects import it, exports a copy to one of them or makes it global."
 
 [tour.products-sheet]
 name = "Products tour, part 2: the sheet"
@@ -3292,6 +3292,10 @@ body = "Write a variable as {{name}}, and each generation replaces it with the p
 [tour.templates.save]
 title = "Save or start over"
 body = "Save as new version keeps your changes as the next version. Load Bardo's default puts the original text back in the editor, to save if you want it."
+
+[tour.templates.sharing]
+title = "Share with other projects"
+body = "Mark this project's template Shareable and other projects can import it, linked to take each new version or as their own. Make global adds its text as the next version of the global template, after showing which projects use that one."
 
 [tour.editor]
 name = "Editor tour"
@@ -5068,6 +5072,63 @@ bring_confirm = "Bring it"
 brought = "{name} is now in {project}."
 no_project = "Open a project to see its items. The global library is under Global library."
 
+[sharing]
+not_found = "This item is no longer there."
+not_own = "Only an item of this project can do that."
+linked_read_only = "A linked copy can't be changed here: change the original in its project, or unlink this copy first."
+not_shareable = "That item is no longer shared by its project."
+same_project = "It's in that project already."
+name_clash = "There's one with this name there already. Pick another name."
+invalid_name = "Give it a name."
+folder_unreachable = "A world folder can't be reached right now, so its pictures can't be copied. Reconnect the drive and try again."
+confirm_pictures = "Confirm you may use its pictures and brand."
+file_unreadable = "Couldn't read that file."
+file_not_written = "Couldn't save the file there."
+not_saved = "Couldn't save that. Try again."
+not_an_item_file = "That isn't a Bardo item file."
+newer_item_file = "That file was made by a newer Bardo. Update Bardo to open it."
+invalid_item_file = "That file's item is damaged and can't be opened."
+title = "Sharing"
+shareable = "Shareable"
+shareable_hint = "Other projects can import it, as a linked or an independent copy."
+follows = "Follows {name} from {project}"
+follows_template = "Follows the template of {project}"
+linked_hint = "A linked copy is read-only: every change of the original reaches it. Unlink it to change it here."
+updating = "Updating"
+waiting_for_folder = "Waiting for its folder"
+unlink = "Unlink"
+lost = "No longer follows {name} from {project}: the original was deleted or stopped being shared. This copy is independent now, with all it held."
+lost_template = "No longer follows the template of {project}. This template is the project's own now, with all its versions."
+lost_ok = "Got it"
+export = "Export to another project"
+export_title = "Export to another project"
+export_hint = "Makes an independent copy in the project you pick. This one stays as it is."
+export_to = "Export to {project}"
+export_done = "Exported to {project}."
+no_other_project = "There's no other project yet."
+make_global = "Make global"
+make_global_title = "Make it global?"
+make_global_hint = "Moves it to the global library. This project keeps using it by reference, and linked copies in other projects start using the global one."
+make_global_template_hint = "Adds this text as the next version of the global template, and this project goes back to using the global one."
+made_global = "It's in the global library now."
+save_file = "Save to file…"
+saved = "Saved to {path}."
+open_file = "Open item file…"
+opened = "Opened as an independent copy."
+import = "Import from another project"
+import_hint = "What other projects marked as shareable. A linked copy follows every change of the original and can't be edited here; an independent copy is this project's own."
+import_empty = "No other project shares anything here yet. Mark an item Shareable in its project first."
+import_linked = "Linked copy"
+import_independent = "Independent copy"
+imported = "{name} is in this project now."
+archived_project = "{project} (archived)"
+linked_tag = "Linked"
+shareable_tag = "Shared"
+name_label = "Name of the copy"
+global_name = "Name in the global library"
+confirm_pictures_check = "I may use its pictures and brand"
+close = "Close"
+
 [tour.overview]
 name = "Overview tour"
 
@@ -5358,6 +5419,10 @@ body = "The appearance is drawn into every reference picture and copied as it is
 [tour.world.actions]
 title = "Save and tidy up"
 body = "Save, duplicate under a new name, archive one no new video should pick, or delete one no video in progress uses."
+
+[tour.world.sharing]
+title = "Share with other projects"
+body = "Mark an item Shareable and other projects can import it, as a linked copy that follows every change or as an independent one. Export copies it to another project, Make global moves it to the global library, and Save to file makes a file for another computer."
 
 [tour.world.pictures]
 title = "Reference pictures"

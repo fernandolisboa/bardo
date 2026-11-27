@@ -39,6 +39,7 @@ mod removal;
 mod research;
 mod settings;
 mod settings_transfer;
+mod sharing;
 mod shell;
 #[cfg(feature = "showcase")]
 mod showcase;

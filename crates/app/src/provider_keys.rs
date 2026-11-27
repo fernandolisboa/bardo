@@ -417,6 +417,7 @@ mod tests {
                 personas: Arc::clone(&self.db) as _,
                 products: Arc::clone(&self.db) as _,
                 world: Arc::clone(&self.db) as _,
+                sharing: Arc::clone(&self.db) as _,
                 world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
                 ads: Arc::clone(&self.db) as _,
                 end_cards: Arc::clone(&self.db) as _,

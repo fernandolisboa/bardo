@@ -39,6 +39,9 @@ use crate::{Bardo, KeyState, TemplateError, Text};
 pub enum LookError {
     #[error("persona not found")]
     NotFound,
+    /// A linked copy is read-only (#340).
+    #[error("a linked copy")]
+    Linked,
     /// The description cannot be drawn: empty or too long.
     #[error("invalid description: {0}")]
     Description(LookDescriptionError),
@@ -84,6 +87,7 @@ impl LookError {
     pub fn message(&self) -> Text {
         match self {
             LookError::NotFound => Text::PersonaNotFound,
+            LookError::Linked => Text::SharingLinkedReadOnly,
             LookError::Description(error) => Text::LookDescriptionError(*error),
             LookError::MissingKey(Provider::Claude) => Text::LookMissingClaudeKey,
             LookError::MissingKey(_) => Text::LookMissingImageKey,
@@ -435,6 +439,16 @@ impl PersonaLookHandler {
 }
 
 impl Bardo {
+    /// The persona, refused when it is a linked copy: what changes its
+    /// look.
+    fn look_to_change(&self, persona: PersonaId) -> Result<bardo_domain::Persona, LookError> {
+        let found = self.look_persona(persona)?;
+        if self.is_linked_copy(bardo_domain::LibraryItem::Narrator(persona)) {
+            return Err(LookError::Linked);
+        }
+        Ok(found)
+    }
+
     fn look_persona(&self, persona: PersonaId) -> Result<bardo_domain::Persona, LookError> {
         self.personas
             .get(persona)?
@@ -588,7 +602,7 @@ impl Bardo {
         description: &str,
         consent: BudgetConsent,
     ) -> Result<JobId, LookError> {
-        let found = self.look_persona(persona)?;
+        let found = self.look_to_change(persona)?;
         let description = look_description(description).map_err(LookError::Description)?;
         if self.work_busy(&Work::Look(persona.to_string())) {
             return Err(LookError::Busy);
@@ -618,7 +632,7 @@ impl Bardo {
 
     /// Makes the drawing waiting for review the persona's look.
     pub fn keep_drawn_look(&self, persona: PersonaId) -> Result<PersonaLook, LookError> {
-        self.look_persona(persona)?;
+        self.look_to_change(persona)?;
         if !self.personas.keep_pending_look(persona)? {
             return Err(LookError::NothingWaiting);
         }
@@ -630,7 +644,7 @@ impl Bardo {
 
     /// Drops the drawing waiting for review; the look stays as it was.
     pub fn discard_drawn_look(&self, persona: PersonaId) -> Result<(), LookError> {
-        self.look_persona(persona)?;
+        self.look_to_change(persona)?;
         if self.personas.pending_look(persona)?.is_none() {
             return Err(LookError::NothingWaiting);
         }
@@ -646,7 +660,7 @@ impl Bardo {
         path: &Path,
         shows_me: bool,
     ) -> Result<PersonaLook, LookError> {
-        self.look_persona(persona)?;
+        self.look_to_change(persona)?;
         if !shows_me {
             return Err(LookError::NotConfirmed);
         }
@@ -679,7 +693,7 @@ impl Bardo {
 
     /// Removes the persona's look. A drawing waiting for review stays.
     pub fn remove_look(&self, persona: PersonaId) -> Result<(), LookError> {
-        self.look_persona(persona)?;
+        self.look_to_change(persona)?;
         // A look that no longer reads is removed all the same.
         if matches!(self.personas.look(persona), Ok(None)) {
             return Err(LookError::NoLook);
@@ -695,7 +709,7 @@ impl Bardo {
         persona: PersonaId,
         realistic: bool,
     ) -> Result<PersonaLook, LookError> {
-        self.look_persona(persona)?;
+        self.look_to_change(persona)?;
         let mut look = self.personas.look(persona)?.ok_or(LookError::NoLook)?;
         // A photo of the user is a real person: it stays realistic.
         if look.realistic != realistic && look.source == LookSource::Drawn {

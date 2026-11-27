@@ -67,6 +67,11 @@ Todo vídeo seguinte no mesmo visual recebe a imagem mantida de graça: a estima
 - **Arquivar** esconde o item de [Quem aparece](scenes.md#who-appears); os vídeos que já o escolheram continuam com ele. **Restaurar** o traz de volta.
 - **Excluir** remove o item com suas imagens. É recusado enquanto um vídeo em andamento o usa, e a mensagem cita esses vídeos: arquive o item, ou arquive ou exclua esses vídeos antes. Os vídeos que o mostraram mantêm suas imagens; a pessoa do elenco ou o lugar passa a ser do próprio vídeo, e os objetos de um personagem excluído deixam de pertencer a ele.
 
+<a id="sharing"></a>
+## Compartilhar com outros projetos
+
+Abaixo das ações, **Compartilhamento** marca um item como **Compartilhável** para seus outros projetos, exporta uma cópia para um deles, torna o item global ou o salva em arquivo; **Importar de outro projeto** e **Abrir arquivo de item…**, no topo, trazem um para cá. Uma cópia vinculada segue toda mudança do original, e as imagens chegam logo depois. Veja [Compartilhar entre projetos](global-library.md#sharing).
+
 <a id="save"></a>
 ## Salvar uma pessoa do vídeo no mundo
 

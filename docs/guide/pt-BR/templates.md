@@ -59,3 +59,8 @@ Escreva uma variável como `{{nome}}`; cada geração a troca pelo valor do proj
 ## Salvar e recomeçar
 
 **Salvar como nova versão** guarda o seu texto como a próxima versão; quando nada mudou, nenhuma versão é criada. **Descartar alterações** volta à versão atual. **Carregar o padrão do Bardo** põe no editor o texto com que o Bardo veio, para salvar como nova versão se você quiser de volta.
+
+<a id="sharing"></a>
+## Compartilhar com outros projetos
+
+Quando um projeto tem o próprio modelo, **Compartilhamento**, abaixo do editor, marca o modelo como **Compartilhável** para seus outros projetos, exporta para um deles, torna o modelo global ou o salva em arquivo. **Importar de outro projeto**, no topo, traz o modelo de outro projeto: um vinculado recebe cada nova versão do original e não pode ser salvo aqui; um independente copia só a versão mais recente, como a próxima versão do modelo deste projeto. Veja [Compartilhar entre projetos](global-library.md#sharing).

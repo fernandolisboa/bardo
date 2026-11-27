@@ -41,6 +41,7 @@ mod scene;
 mod script;
 mod secrets;
 mod setup_choices;
+mod sharing;
 mod staging;
 mod template;
 mod theme;
@@ -140,7 +141,14 @@ impl Database {
 
     fn init(mut conn: Connection) -> Result<Self, StorageError> {
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        // A migration may change the tables the sharing triggers read: they
+        // go while one runs, and are written again as the tables are now.
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if usize::try_from(version).unwrap_or(0) < migrations::SCHEMA_VERSION {
+            sharing::drop_mirrors(&conn)?;
+        }
         migrations::run(&mut conn)?;
+        sharing::install_mirrors(&mut conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             runner: uuid::Uuid::new_v4().to_string(),

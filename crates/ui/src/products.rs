@@ -5,13 +5,15 @@
 //! storage live in `bardo_app`; this file maps the form to a
 //! `ProductDraft` and results back to the screen.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use bardo_app::bardo_domain::{
-    ImageFormat, MAX_PRODUCT_IMAGES, Product, ProductBrief, ProductDraft, ProductFieldError,
-    ProductId, ProductImage, ProductImageError, ProductImageId, ProductImageKind, ProductKind,
-    ProductLogo, ProductOwnership, ProductPicture, ProjectId, split_facts,
+    ImageFormat, LibraryItem, LibraryKind, MAX_PRODUCT_IMAGES, Product, ProductBrief, ProductDraft,
+    ProductFieldError, ProductId, ProductImage, ProductImageError, ProductImageId,
+    ProductImageKind, ProductKind, ProductLogo, ProductOwnership, ProductPicture, ProjectId,
+    Sharing, split_facts,
 };
 use bardo_app::{Bardo, Control, Destination, LibraryUse, ProductError, Text, TourAnchor};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
@@ -33,6 +35,7 @@ use crate::library::{self, BringForm, LibraryScope};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::product_concept::ConceptSection;
 use crate::product_sheet::SheetSection;
+use crate::sharing::{self, ImportPanel, SharingEvent, SharingPanel};
 use crate::shell::tr;
 use crate::{guide, layout};
 
@@ -207,6 +210,12 @@ pub struct ProductsScreen {
     /// A file dialog that is open.
     dialog: Option<Task<()>>,
     picture_notice: Option<PictureNotice>,
+    /// The edited product's sharing, below its actions.
+    sharing: Entity<SharingPanel>,
+    /// *Import from another project* and *Open item file…*.
+    import: Entity<ImportPanel>,
+    /// How the listed products take part in sharing, for their tags.
+    shared: HashMap<LibraryItem, Sharing>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -266,6 +275,19 @@ impl ProductsScreen {
         let angles =
             cx.new(|cx| AnglesSection::new(bardo.clone(), form_scroll.clone(), window, cx));
         let mut subscriptions = subscriptions;
+        let sharing = cx.new(|_| SharingPanel::new(bardo.clone(), "product-sharing"));
+        let import =
+            cx.new(|_| ImportPanel::new(bardo.clone(), "product-import", LibraryKind::Product));
+        subscriptions.push(
+            cx.subscribe_in(&sharing, window, |this, _, event, window, cx| {
+                this.shared_changed(*event, window, cx)
+            }),
+        );
+        subscriptions.push(
+            cx.subscribe_in(&import, window, |this, _, event, window, cx| {
+                this.shared_changed(*event, window, cx)
+            }),
+        );
         // An angle's ad project opens on the Projects screen.
         subscriptions.push(cx.subscribe(&angles, |_, _, event: &OpenProject, cx| {
             cx.emit(OpenProject(event.0))
@@ -312,6 +334,9 @@ impl ProductsScreen {
             importing: None,
             dialog: None,
             picture_notice: None,
+            sharing,
+            import,
+            shared: HashMap::new(),
             _subscriptions: subscriptions,
         };
         screen.reload_list(cx);
@@ -363,10 +388,27 @@ impl ProductsScreen {
         }
     }
 
+    /// A sharing change: the list re-reads, and shows an arrived item.
+    fn shared_changed(&mut self, event: SharingEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event {
+            SharingEvent::Changed => self.reload(window, cx),
+            SharingEvent::Show(LibraryItem::Product(id)) => {
+                self.reload_list(cx);
+                self.edit(id, window, cx);
+            }
+            SharingEvent::Show(_) => self.reload(window, cx),
+        }
+    }
+
     fn reload_list(&mut self, cx: &mut Context<Self>) {
         let (owner, no_project) = self.scope.owner(self.bardo.read(cx));
         self.owner = owner;
         self.no_project = no_project;
+        let project_scope = self.scope == LibraryScope::Project;
+        self.import
+            .update(cx, |import, cx| import.set_owner(owner, project_scope, cx));
+        self.shared = sharing::sharing_map(self.bardo.read(cx), owner, LibraryKind::Product);
+        self.sharing.update(cx, |sharing, cx| sharing.refresh(cx));
         if no_project {
             self.products.clear();
             self.load_failed = false;
@@ -575,6 +617,8 @@ impl ProductsScreen {
         self.reset_feedback();
         self.fill(&ProductDraft::default(), window, cx);
         self.pictures_pending = true;
+        self.sharing
+            .update(cx, |sharing, cx| sharing.show(None, cx));
         cx.notify();
     }
 
@@ -583,6 +627,9 @@ impl ProductsScreen {
             return;
         };
         let draft = ProductDraft::from(&product.brief);
+        let shown = (LibraryItem::Product(id), product.brief.name().to_owned());
+        self.sharing
+            .update(cx, |sharing, cx| sharing.show(Some(shown), cx));
         self.filled = Some(product.brief.clone());
         self.editing = Some(id);
         self.sheet_pending = true;
@@ -1016,6 +1063,10 @@ impl ProductsScreen {
                 } else {
                     (self.scope == LibraryScope::Project && product.is_global())
                         .then(|| library::global_tag(bardo, cx))
+                        .or_else(|| {
+                            let shared = self.shared.get(&LibraryItem::Product(product.id))?;
+                            sharing::sharing_tag(bardo, shared, cx)
+                        })
                 };
                 tile
             })
@@ -1750,6 +1801,7 @@ impl ProductsScreen {
         let pictures = self.render_pictures(cx);
         let delete = self.confirm_delete.then(|| self.render_delete(cx));
         let library_parts = self.render_library(cx);
+        let linked = self.sharing.read(cx).is_linked();
         let global_note = self
             .edited_product()
             .filter(|product| self.scope == LibraryScope::Project && product.is_global())
@@ -1829,7 +1881,11 @@ impl ProductsScreen {
                 Button::new("save-product")
                     .primary()
                     .label(tr(bardo, action))
-                    .disabled(self.confirm.is_some() || (self.no_project && self.editing.is_none()))
+                    .disabled(
+                        self.confirm.is_some()
+                            || linked
+                            || (self.no_project && self.editing.is_none()),
+                    )
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.save(window, cx);
                     })),
@@ -1896,6 +1952,7 @@ impl ProductsScreen {
                             )
                             .children(global_note),
                     )
+                    .child(self.import.clone())
                     .children(library_parts)
                     .child(
                         kit::card(cx)
@@ -1967,6 +2024,13 @@ impl ProductsScreen {
                         actions,
                         scroll,
                     ))
+                    .when(self.editing.is_some(), |form| {
+                        form.child(kit::anchor_in(
+                            TourAnchor::Control(Control::LibrarySharing),
+                            self.sharing.clone(),
+                            scroll,
+                        ))
+                    })
                     .child(pictures)
                     .child(self.concept.clone()),
             )

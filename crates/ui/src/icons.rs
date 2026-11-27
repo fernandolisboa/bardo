@@ -31,6 +31,7 @@ icon_assets!(
         Users,
         Scissors,
         Send,
+        Share2,
         ShieldCheck,
         Trash,
         Tv,

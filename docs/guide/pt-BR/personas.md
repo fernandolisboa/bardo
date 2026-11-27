@@ -47,6 +47,8 @@ Os presets definem como a ElevenLabs lê com esta voz:
 
 **Criar persona** ou **Salvar alterações** guarda a persona. **Exportar para arquivo…** salva um pacote com a persona, uma referência à voz e a aparência quando ela é desenhada, nunca áudio, chaves ou uma foto sua, para usar em outro computador; **Importar de arquivo…**, no topo, traz uma para cá. Quem importa precisa da mesma voz na própria conta da ElevenLabs: até o Bardo encontrá-la lá, a persona fica marcada como **Voz não verificada** ou **Voz indisponível** e não pode narrar.
 
+Logo acima desses botões, **Compartilhamento** marca um narrador como **Compartilhável** para seus outros projetos, exporta uma cópia para um deles, torna o narrador global ou o salva como arquivo `.bardo-item`; **Importar de outro projeto** e **Abrir arquivo de item…**, no topo, trazem um para cá. Uma cópia vinculada segue toda mudança do original e não pode ser editada aqui. Veja [Compartilhar entre projetos](global-library.md#sharing).
+
 <a id="realistic"></a>
 ## Vozes realistas
 

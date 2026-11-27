@@ -7,8 +7,8 @@
 //! library's tab it edits the global templates (#339).
 
 use bardo_app::bardo_domain::{
-    ProjectId, TemplateField, TemplateFieldError, TemplateKind, TemplateSource, TemplateVersion,
-    TemplateVersionId,
+    LibraryItem, LibraryKind, ProjectId, TemplateField, TemplateFieldError, TemplateKind,
+    TemplateSource, TemplateVersion, TemplateVersionId,
 };
 use std::rc::Rc;
 
@@ -20,12 +20,15 @@ use gpui_kit::component::{
     h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, ClickEvent, Entity, ScrollHandle, SharedString, Window, div, px};
+use gpui_kit::{
+    AnyElement, ClickEvent, Entity, ScrollHandle, SharedString, Subscription, Window, div, px,
+};
 
 use crate::appearance::look;
 use crate::kit::{self, Tone};
 use crate::library::{self, LibraryScope};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
+use crate::sharing::{ImportPanel, SharingEvent, SharingPanel};
 use crate::shell::tr;
 use crate::{guide, layout};
 
@@ -55,6 +58,11 @@ pub struct TemplatesScreen {
     notice: Option<SharedString>,
     /// Scrolls the editor, so a tour can bring its parts into view.
     scroll: ScrollHandle,
+    /// The project's own template's sharing, below the editor.
+    sharing: Entity<SharingPanel>,
+    /// *Import from another project* and *Open item file…*.
+    import: Entity<ImportPanel>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl TemplatesScreen {
@@ -66,6 +74,17 @@ impl TemplatesScreen {
     ) -> Self {
         let instructions = cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 12));
         let prompt = cx.new(|cx| TextareaState::new(window, cx).auto_grow(6, 16));
+        let sharing = cx.new(|_| SharingPanel::new(bardo.clone(), "template-sharing"));
+        let import =
+            cx.new(|_| ImportPanel::new(bardo.clone(), "template-import", LibraryKind::Template));
+        let subscriptions = vec![
+            cx.subscribe_in(&sharing, window, |this, _, event, window, cx| {
+                this.shared_changed(*event, window, cx)
+            }),
+            cx.subscribe_in(&import, window, |this, _, event, window, cx| {
+                this.shared_changed(*event, window, cx)
+            }),
+        ];
         let mut screen = Self {
             bardo,
             scope,
@@ -82,6 +101,9 @@ impl TemplatesScreen {
             error: None,
             notice: None,
             scroll: ScrollHandle::new(),
+            sharing,
+            import,
+            _subscriptions: subscriptions,
         };
         screen.reload(window, cx);
         screen
@@ -112,7 +134,28 @@ impl TemplatesScreen {
                 });
             }
         }
+        // Only a project's own template takes part in sharing.
+        let shown = self
+            .owner
+            .filter(|_| self.source == TemplateSource::Project)
+            .map(|project| (LibraryItem::template(project, self.kind), String::new()));
+        self.sharing
+            .update(cx, |sharing, cx| sharing.show(shown, cx));
+        let project_scope = self.scope == LibraryScope::Project;
+        self.import.update(cx, |import, cx| {
+            import.set_owner(owner, project_scope, cx);
+            import.set_kind(LibraryKind::Template, cx);
+        });
         cx.notify();
+    }
+
+    /// A sharing change: the template re-reads; an arrived one shows its
+    /// kind.
+    fn shared_changed(&mut self, event: SharingEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if let SharingEvent::Show(LibraryItem::Template { kind, .. }) = event {
+            self.kind = kind;
+        }
+        self.reload(window, cx);
     }
 
     /// Whether the template has versions to show: the screen offers its
@@ -351,6 +394,14 @@ impl TemplatesScreen {
     fn render_editor(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let source = self.render_source(cx);
         let confirm = self.render_confirm(cx);
+        let linked = self.sharing.read(cx).is_linked();
+        let shared = (self.source == TemplateSource::Project && self.owner.is_some()).then(|| {
+            kit::anchor_in(
+                TourAnchor::Control(Control::LibrarySharing),
+                self.sharing.clone(),
+                Some(&self.scroll),
+            )
+        });
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let base_number = self
@@ -415,6 +466,7 @@ impl TemplatesScreen {
                 self.no_project
                     .then(|| kit::notice(Tone::Info, tr(bardo, Text::LibraryNoProject), cx)),
             )
+            .child(self.import.clone())
             .children(source)
             .children(base_number.map(|n| {
                 div()
@@ -457,7 +509,7 @@ impl TemplatesScreen {
                     .child(
                         Button::new("save-template")
                             .primary()
-                            .disabled(self.no_project || self.confirm.is_some())
+                            .disabled(self.no_project || linked || self.confirm.is_some())
                             .label(tr(bardo, Text::SaveTemplate))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.save(false, window, cx)
@@ -526,6 +578,7 @@ impl TemplatesScreen {
                     .children(variables),
                 scroll,
             ))
+            .children(shared)
     }
 }
 

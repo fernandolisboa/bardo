@@ -1077,6 +1077,9 @@ pub enum TemplateError {
     /// The project already has its own template of the kind.
     #[error("the project already has its own template")]
     AlreadyOwn,
+    /// A linked copy is read-only (#340).
+    #[error("the template is a linked copy")]
+    Linked,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -1093,6 +1096,7 @@ impl TemplateError {
             TemplateError::NotFound => Text::TemplateNotFound,
             TemplateError::UsedByProjects(_) => Text::TemplateGlobalUsedBy,
             TemplateError::AlreadyOwn => Text::TemplateAlreadyOwn,
+            TemplateError::Linked => Text::SharingLinkedReadOnly,
             TemplateError::Repository(_) => Text::TemplateNotSaved,
         }
     }
@@ -1266,7 +1270,12 @@ impl Bardo {
             .stored_template(None, kind)?
             .pop()
             .ok_or(TemplateError::NotFound)?;
-        let copy = TemplateVersion::project_copy(&latest, project, SystemTime::now());
+        let mut copy = TemplateVersion::project_copy(&latest, project, SystemTime::now());
+        // After the versions it had before it was made global, if any.
+        copy.number = self
+            .templates
+            .last_template_number(self.profile.id, Some(project), kind)?
+            + 1;
         self.templates.add_template_version(&copy)?;
         Ok(copy)
     }
@@ -1293,6 +1302,12 @@ impl Bardo {
         let Some(next) = current.revise(body, SystemTime::now()) else {
             return Ok(current);
         };
+        if let Some(project) = project
+            && in_use.source == TemplateSource::Project
+            && self.is_linked_copy(bardo_domain::LibraryItem::template(project, kind))
+        {
+            return Err(TemplateError::Linked);
+        }
         if in_use.source == TemplateSource::Global && !confirmed {
             let users = self.global_template_users(kind)?;
             if !users.is_empty() {

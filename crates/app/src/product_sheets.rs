@@ -54,6 +54,9 @@ const SHEET_ANSWER_TOKENS: u64 = 6_000;
 pub enum SheetError {
     #[error("product not found")]
     NotFound,
+    /// A linked copy is read-only (#340).
+    #[error("a linked copy")]
+    Linked,
     /// The product has no sheet yet.
     #[error("the product has no sheet")]
     NoSheet,
@@ -83,6 +86,7 @@ impl SheetError {
     pub fn message(&self) -> Option<Text> {
         match self {
             SheetError::NotFound => Some(Text::ProductNotFound),
+            SheetError::Linked => Some(Text::SharingLinkedReadOnly),
             SheetError::NoSheet => Some(Text::SheetNone),
             SheetError::Invalid(_) => None,
             SheetError::Claim(error) => Some(Text::SheetClaimError(*error)),
@@ -965,6 +969,9 @@ impl Bardo {
     /// the brief's facts on it. Refused while a job is filling it.
     fn sheet_to_change(&self, id: ProductId) -> Result<ProductSheet, SheetError> {
         let product = self.sheet_product(id)?;
+        if self.is_linked_copy(bardo_domain::LibraryItem::Product(id)) {
+            return Err(SheetError::Linked);
+        }
         if self.sheet_is_busy(id) {
             return Err(SheetError::Busy);
         }
@@ -984,6 +991,9 @@ impl Bardo {
     /// has is returned as it is.
     pub fn start_product_sheet(&self, id: ProductId) -> Result<ProductSheet, SheetError> {
         self.sheet_product(id)?;
+        if self.is_linked_copy(bardo_domain::LibraryItem::Product(id)) {
+            return Err(SheetError::Linked);
+        }
         if let Some(sheet) = self.products.sheet(id)? {
             return Ok(sheet);
         }
@@ -1103,6 +1113,9 @@ impl Bardo {
         consent: BudgetConsent,
     ) -> Result<JobId, SheetError> {
         let product = self.sheet_product(id)?;
+        if self.is_linked_copy(bardo_domain::LibraryItem::Product(id)) {
+            return Err(SheetError::Linked);
+        }
         if self.sheet_is_busy(id) {
             return Err(SheetError::Busy);
         }

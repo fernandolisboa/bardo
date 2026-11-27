@@ -3210,7 +3210,7 @@ body = "Estabilidade, similaridade, exagero de estilo e velocidade definem como 
 
 [tour.personas.share]
 title = "Salve e compartilhe"
-body = "Salve, duplique ou exporte a persona para um arquivo, para usar em outro computador; Importar de arquivo, no topo, traz uma de volta. O pacote guarda uma referência à voz, nunca áudio ou chaves."
+body = "Salve, duplique ou exporte a persona para um arquivo, para usar em outro computador; Importar de arquivo, no topo, traz uma de volta. O pacote guarda uma referência à voz, nunca áudio ou chaves. Compartilhamento, logo acima, deixa outros projetos importá-la, exporta uma cópia para um deles ou a torna global."
 
 [tour.personas.realistic]
 title = "Voz realista"
@@ -3249,7 +3249,7 @@ body = "Um logo PNG opcional para o cartão final do anúncio. Como as imagens, 
 
 [tour.products.actions]
 title = "Salvar e organizar"
-body = "Salve o briefing, duplique para uma variação, arquive um produto que você não anuncia mais, ou exclua um que nenhum projeto usa."
+body = "Salve o briefing, duplique para uma variação, arquive um produto que você não anuncia mais, ou exclua um que nenhum projeto usa. Compartilhamento, abaixo, deixa outros projetos importá-lo, exporta uma cópia para um deles ou o torna global."
 
 [tour.products-sheet]
 name = "Tour de Produtos, parte 2: a ficha"
@@ -3292,6 +3292,10 @@ body = "Escreva uma variável como {{nome}}, e cada geração a troca pelo valor
 [tour.templates.save]
 title = "Salve ou recomece"
 body = "Salvar como nova versão guarda as suas mudanças como a próxima versão. Carregar o padrão do Bardo põe o texto original de volta no editor, para salvar se você quiser."
+
+[tour.templates.sharing]
+title = "Compartilhe com outros projetos"
+body = "Marque o modelo deste projeto como Compartilhável e outros projetos podem importá-lo, vinculado para receber cada nova versão ou como próprio deles. Tornar global adiciona o texto como a próxima versão do modelo global, depois de mostrar quais projetos usam esse."
 
 [tour.editor]
 name = "Tour do editor"
@@ -5068,6 +5072,63 @@ bring_confirm = "Trazer"
 brought = "{name} agora está em {project}."
 no_project = "Abra um projeto para ver os itens dele. A biblioteca global fica em Biblioteca global."
 
+[sharing]
+not_found = "Este item não está mais aqui."
+not_own = "Só um item deste projeto pode fazer isso."
+linked_read_only = "Uma cópia vinculada não pode ser mudada aqui: mude o original no projeto dele, ou desvincule esta cópia antes."
+not_shareable = "Esse item não é mais compartilhado pelo projeto dele."
+same_project = "Ele já está nesse projeto."
+name_clash = "Já existe um com esse nome lá. Escolha outro nome."
+invalid_name = "Dê um nome a ele."
+folder_unreachable = "Uma pasta do Mundo não está acessível agora, então as imagens não podem ser copiadas. Reconecte o disco e tente de novo."
+confirm_pictures = "Confirme que você pode usar as imagens e a marca."
+file_unreadable = "Não foi possível ler esse arquivo."
+file_not_written = "Não foi possível salvar o arquivo aí."
+not_saved = "Não foi possível salvar. Tente de novo."
+not_an_item_file = "Esse não é um arquivo de item do Bardo."
+newer_item_file = "Esse arquivo foi feito por um Bardo mais novo. Atualize o Bardo para abri-lo."
+invalid_item_file = "O item desse arquivo está danificado e não pode ser aberto."
+title = "Compartilhamento"
+shareable = "Compartilhável"
+shareable_hint = "Outros projetos podem importá-lo, como cópia vinculada ou independente."
+follows = "Segue {name} de {project}"
+follows_template = "Segue o modelo de {project}"
+linked_hint = "Uma cópia vinculada é só leitura: toda mudança do original chega a ela. Desvincule para mudar aqui."
+updating = "Atualizando"
+waiting_for_folder = "Aguardando a pasta"
+unlink = "Desvincular"
+lost = "Não segue mais {name} de {project}: o original foi excluído ou deixou de ser compartilhado. Esta cópia agora é independente, com tudo o que tinha."
+lost_template = "Não segue mais o modelo de {project}. Este modelo agora é do projeto, com todas as versões."
+lost_ok = "Entendi"
+export = "Exportar para outro projeto"
+export_title = "Exportar para outro projeto"
+export_hint = "Faz uma cópia independente no projeto que você escolher. Este fica como está."
+export_to = "Exportar para {project}"
+export_done = "Exportado para {project}."
+no_other_project = "Ainda não há outro projeto."
+make_global = "Tornar global"
+make_global_title = "Tornar global?"
+make_global_hint = "Move para a biblioteca global. Este projeto continua usando por referência, e as cópias vinculadas em outros projetos passam a usar a global."
+make_global_template_hint = "Adiciona este texto como a próxima versão do modelo global, e este projeto volta a usar o global."
+made_global = "Agora está na biblioteca global."
+save_file = "Salvar em arquivo…"
+saved = "Salvo em {path}."
+open_file = "Abrir arquivo de item…"
+opened = "Aberto como cópia independente."
+import = "Importar de outro projeto"
+import_hint = "O que outros projetos marcaram como compartilhável. Uma cópia vinculada segue toda mudança do original e não pode ser editada aqui; uma cópia independente é deste projeto."
+import_empty = "Nenhum outro projeto compartilha nada aqui ainda. Marque um item como Compartilhável no projeto dele antes."
+import_linked = "Cópia vinculada"
+import_independent = "Cópia independente"
+imported = "{name} agora está neste projeto."
+archived_project = "{project} (arquivado)"
+linked_tag = "Vinculado"
+shareable_tag = "Compartilhado"
+name_label = "Nome da cópia"
+global_name = "Nome na biblioteca global"
+confirm_pictures_check = "Posso usar as imagens e a marca"
+close = "Fechar"
+
 [tour.overview]
 name = "Tour da visão geral"
 
@@ -5358,6 +5419,10 @@ body = "A aparência é desenhada em toda imagem de referência e copiada como e
 [tour.world.actions]
 title = "Salvar e organizar"
 body = "Salve, duplique com um novo nome, arquive um que nenhum vídeo novo deve escolher, ou exclua um que nenhum vídeo em andamento usa."
+
+[tour.world.sharing]
+title = "Compartilhe com outros projetos"
+body = "Marque um item como Compartilhável e outros projetos podem importá-lo, como cópia vinculada que acompanha cada mudança ou como cópia independente. Exportar copia para outro projeto, Tornar global leva para a biblioteca global e Salvar em arquivo gera um arquivo para outro computador."
 
 [tour.world.pictures]
 title = "Imagens de referência"

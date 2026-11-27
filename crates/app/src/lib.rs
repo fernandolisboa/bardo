@@ -29,6 +29,7 @@ mod formats;
 mod guide;
 mod guide_site;
 pub mod i18n;
+mod item_file;
 mod jobs;
 mod library;
 mod localization;
@@ -68,6 +69,7 @@ mod scripts;
 mod selection;
 mod settings_file;
 mod settings_transfer;
+mod sharing;
 mod shortcuts;
 mod shot_looks;
 mod showcase;
@@ -171,6 +173,7 @@ pub use guide::{
 };
 pub use guide_site::{SiteFile, SiteOptions, guide_site};
 pub use i18n::{Catalog, Text};
+pub use item_file::ItemFileError;
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use library::{LibraryUse, usable_in};
 pub use localization::{
@@ -236,6 +239,7 @@ pub use settings_transfer::{
     SettingsGroup, SettingsItem, SettingsOffer, SettingsOpen, SettingsTransferError,
     inspect_settings_file, settings_file_name,
 };
+pub use sharing::{ItemSharing, PictureFollowing, SharingError};
 pub use shortcuts::{SHORTCUTS, Shortcut, ShortcutGroup};
 pub use showcase::{Shot, ShotReady, ShotSize, ShowcasePlace};
 pub use stages::{
@@ -380,6 +384,9 @@ pub struct Repositories {
     /// The world's characters, their pictures and who appears in each
     /// video (issue #337). Shared with the job queue.
     pub world: Arc<dyn bardo_domain::WorldRepository>,
+    /// What projects share of their library items, and the linked copies
+    /// that follow them (#340).
+    pub sharing: Arc<dyn bardo_domain::SharingRepository>,
     /// The world's picture files. Shared with the job queue.
     pub world_files: Arc<dyn bardo_domain::WorldFiles>,
     /// Voice samples heard on the Personas screen, kept on this machine.
@@ -504,6 +511,7 @@ impl Repositories {
             removals: Arc::clone(&db) as _,
             trash: Arc::new(bardo_storage::MemoryTrash::default()),
             world: Arc::clone(&db) as _,
+            sharing: Arc::clone(&db) as _,
             world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
             research: db,
             files,
@@ -850,6 +858,7 @@ impl Bardo {
             trash,
             places,
             world,
+            sharing,
             world_files,
             voice_samples,
             secrets,
@@ -1022,6 +1031,7 @@ impl Bardo {
         };
         let world_book = world::WorldBook {
             world,
+            sharing,
             files: world_files,
             projects: Arc::clone(&projects),
             channels: Arc::clone(&channels),
@@ -3730,6 +3740,7 @@ mod tests {
             removals: Arc::clone(&db) as _,
             trash: Arc::new(bardo_storage::MemoryTrash::default()),
             world: Arc::clone(&db) as _,
+            sharing: Arc::clone(&db) as _,
             world_files: Arc::new(bardo_storage::MemoryWorldFiles::default()),
             places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),

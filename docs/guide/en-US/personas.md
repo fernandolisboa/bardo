@@ -47,6 +47,8 @@ The presets set how ElevenLabs reads with this voice:
 
 **Create persona** or **Save changes** keeps it. **Export to file…** saves a package with the persona, a reference to its voice and its look when it is a drawing, never audio, keys or a photo of you, to use on another computer; **Import from file…** at the top brings one in. Whoever imports it needs the same voice in their own ElevenLabs account: until Bardo finds it there, the persona is marked **Voice not checked** or **Voice unavailable** and cannot narrate.
 
+Just above these buttons, **Sharing** marks a narrator **Shareable** for your other projects, exports a copy to one of them, makes it global or saves it as a `.bardo-item` file; **Import from another project** and **Open item file…** at the top bring one in. A linked copy follows every change of its original and cannot be edited here. See [Sharing between projects](global-library.md#sharing).
+
 <a id="realistic"></a>
 ## Realistic voices
 

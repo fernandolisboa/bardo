@@ -16,7 +16,7 @@ use bardo_app::bardo_domain::{
 use std::rc::Rc;
 use std::time::Duration;
 
-use bardo_app::bardo_domain::ProjectId;
+use bardo_app::bardo_domain::{LibraryItem, LibraryKind, ProjectId, Sharing};
 use bardo_app::{
     Bardo, BudgetConsent, Control, Destination, LibraryUse, PersonaError, SamplePlayer,
     SpendEstimate, Text, TourAnchor, VoiceSample, VoiceSampleError, VoiceSampling, VoiceStatus,
@@ -34,11 +34,13 @@ use gpui_kit::{
     AnyElement, App, ClickEvent, Entity, PathPromptOptions, ScrollHandle, SharedString,
     Subscription, Task, Window, div, px,
 };
+use std::collections::HashMap;
 
 use crate::kit::{self, Tone};
 use crate::library::{self, BringForm, LibraryScope};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::persona_look::LookSection;
+use crate::sharing::{self, ImportPanel, SharingEvent, SharingPanel};
 use crate::shell::tr;
 use crate::spend::budget_question;
 use crate::{guide, layout};
@@ -215,6 +217,12 @@ pub struct PersonasScreen {
     note_in_picker: bool,
     /// The persona's look, below the form.
     look: Entity<LookSection>,
+    /// The edited narrator's sharing, below the form.
+    sharing: Entity<SharingPanel>,
+    /// *Import from another project* and *Open item file…*.
+    import: Entity<ImportPanel>,
+    /// How the listed narrators take part in sharing, for their tags.
+    shared: HashMap<LibraryItem, Sharing>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -246,7 +254,16 @@ impl PersonasScreen {
             })
             .collect();
 
+        let sharing = cx.new(|_| SharingPanel::new(bardo.clone(), "persona-sharing"));
+        let import =
+            cx.new(|_| ImportPanel::new(bardo.clone(), "persona-import", LibraryKind::Narrator));
         let mut subscriptions = vec![
+            cx.subscribe_in(&sharing, window, |this, _, event, window, cx| {
+                this.shared_changed(*event, window, cx)
+            }),
+            cx.subscribe_in(&import, window, |this, _, event, window, cx| {
+                this.shared_changed(*event, window, cx)
+            }),
             cx.subscribe(&name, |this, _, event, cx| {
                 this.edited(NAME_ERRORS, event, cx)
             }),
@@ -309,6 +326,9 @@ impl PersonasScreen {
             sample_ask: None,
             note_in_picker: false,
             look,
+            sharing,
+            import,
+            shared: HashMap::new(),
             _subscriptions: subscriptions,
         };
         screen.reload_list(cx);
@@ -339,10 +359,27 @@ impl PersonasScreen {
         cx.notify();
     }
 
+    /// A sharing change: the list re-reads, and shows an arrived item.
+    fn shared_changed(&mut self, event: SharingEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event {
+            SharingEvent::Changed => self.reload(window, cx),
+            SharingEvent::Show(LibraryItem::Narrator(id)) => {
+                self.reload_list(cx);
+                self.edit(id, window, cx);
+            }
+            SharingEvent::Show(_) => self.reload(window, cx),
+        }
+    }
+
     fn reload_list(&mut self, cx: &mut Context<Self>) {
         let (owner, no_project) = self.scope.owner(self.bardo.read(cx));
         self.owner = owner;
         self.no_project = no_project;
+        let project_scope = self.scope == LibraryScope::Project;
+        self.import
+            .update(cx, |import, cx| import.set_owner(owner, project_scope, cx));
+        self.shared = sharing::sharing_map(self.bardo.read(cx), owner, LibraryKind::Narrator);
+        self.sharing.update(cx, |sharing, cx| sharing.refresh(cx));
         if no_project {
             self.personas.clear();
             self.load_failed = false;
@@ -458,6 +495,8 @@ impl PersonasScreen {
         self.reset_feedback();
         self.fill(&PersonaDraft::default(), window, cx);
         self.look.update(cx, |look, cx| look.show(None, window, cx));
+        self.sharing
+            .update(cx, |sharing, cx| sharing.show(None, cx));
         cx.notify();
     }
 
@@ -466,6 +505,9 @@ impl PersonasScreen {
             return;
         };
         let draft = PersonaDraft::from(&persona.details);
+        let shown = (LibraryItem::Narrator(id), persona.details.name().to_owned());
+        self.sharing
+            .update(cx, |sharing, cx| sharing.show(Some(shown), cx));
         self.editing = Some(id);
         self.reset_feedback();
         self.fill(&draft, window, cx);
@@ -968,6 +1010,10 @@ impl PersonasScreen {
                     .or_else(|| {
                         (self.scope == LibraryScope::Project && persona.is_global())
                             .then(|| library::global_tag(self.bardo.read(cx), cx))
+                    })
+                    .or_else(|| {
+                        let shared = self.shared.get(&LibraryItem::Narrator(id))?;
+                        sharing::sharing_tag(self.bardo.read(cx), shared, cx)
                     });
                 tile
             })
@@ -1607,6 +1653,7 @@ impl PersonasScreen {
             .as_deref()
             .map(|uses| self.render_confirm(uses, cx));
         let bring = self.render_bring(cx);
+        let linked = self.sharing.read(cx).is_linked();
         let global_note = self
             .edited_persona()
             .filter(|persona| self.scope == LibraryScope::Project && persona.is_global())
@@ -1704,6 +1751,7 @@ impl PersonasScreen {
                         .children(usage)
                         .children(global_note),
                 )
+                .child(self.import.clone())
                 .children(bring)
                 .children(flag)
                 .child(
@@ -1744,6 +1792,13 @@ impl PersonasScreen {
                     scroll,
                 ))
                 .children(confirm)
+                .when(self.editing.is_some(), |form| {
+                    form.child(kit::anchor_in(
+                        TourAnchor::Control(Control::LibrarySharing),
+                        self.sharing.clone(),
+                        scroll,
+                    ))
+                })
                 .child(kit::anchor_in(
                     TourAnchor::Control(Control::PersonaShare),
                     h_flex()
@@ -1754,6 +1809,7 @@ impl PersonasScreen {
                                 .label(tr(bardo, action))
                                 .disabled(
                                     self.confirm.is_some()
+                                        || linked
                                         || (self.no_project && self.editing.is_none()),
                                 )
                                 .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
