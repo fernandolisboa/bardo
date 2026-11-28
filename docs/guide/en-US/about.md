@@ -18,7 +18,9 @@ The version of Bardo on this computer. Say it when you report a problem.
 <a id="updates"></a>
 ## Updates
 
-Bardo looks for a newer release on [GitHub](https://github.com/fernandolisboa/bardo/releases) when it opens and once a day while it stays open. When one is out, a bar over the screens says so: **See what's new** opens this section, and **Later** hides the bar until Bardo opens again or a newer release comes out. Nothing is downloaded or installed until you choose to.
+Bardo looks for a newer release on [GitHub](https://github.com/fernandolisboa/bardo/releases) when it opens and once a day while it stays open. When one is out, a bar over the screens says so: **See what's new** opens its notes in a popup over the screen you are on, and **Later** hides the bar until Bardo opens again or a newer release comes out. Nothing is downloaded or installed until you choose to.
+
+The popup shows what this section shows: the version, when it was published, what's new, **Download** (with its progress and the install review) and **Release page**. In its corner, the expand button (**Open in Settings › About**) closes the popup and opens this section; **Close**, or Esc, only closes the popup, and the bar stays. It also closes when a tour starts or the Guide opens.
 
 - **Check for updates automatically** turns the checks at start and every day off or on. **Check now** checks at once, even when it is off. The line under it says when Bardo last checked and what it found.
 - A newer release shows its version, when it was published, what's new in it and a link to its **Release page**.

@@ -278,6 +278,8 @@ pub(crate) struct UpdateBook {
     newer: Option<Release>,
     /// The version whose banner the user put off.
     put_off: Option<Version>,
+    /// The version whose notes the banner's popup shows (#359).
+    notes_open: Option<Version>,
 }
 
 impl UpdateBook {
@@ -297,6 +299,7 @@ impl UpdateBook {
             last_check: None,
             newer: None,
             put_off: None,
+            notes_open: None,
         }
     }
 }
@@ -618,8 +621,28 @@ impl Bardo {
             .map(|release| release.version.clone())
     }
 
+    /// Opens the popup with the newer release's notes over the screens,
+    /// from the banner (#359); `false` while the banner does not show.
+    pub fn open_update_notes(&mut self) -> bool {
+        self.updates.notes_open = self.update_banner();
+        self.updates.notes_open.is_some()
+    }
+
+    /// Closes the popup with the newer release's notes.
+    pub fn close_update_notes(&mut self) {
+        self.updates.notes_open = None;
+    }
+
+    /// The popup with the newer release's notes shows: opened from the
+    /// banner, which still names the same release. It closes by itself
+    /// when the banner is put off or a newer release is found.
+    pub fn update_notes_open(&self) -> bool {
+        self.updates.notes_open.is_some() && self.updates.notes_open == self.update_banner()
+    }
+
     /// Hides the banner until Bardo opens again, or a newer release.
     pub fn put_off_update(&mut self) {
+        self.close_update_notes();
         self.updates.put_off = self
             .updates
             .newer
@@ -1164,6 +1187,86 @@ mod tests {
         setup.releases.publish("9.1.0", INSTALLER);
         check(&mut app, false);
         assert!(app.update_view().banner);
+    }
+
+    #[test]
+    fn the_notes_popup_opens_from_the_banner_alone() {
+        let setup = Setup::new();
+        let mut app = setup.start();
+        assert!(!app.open_update_notes(), "no newer release");
+        assert!(!app.update_notes_open());
+
+        setup.releases.publish("9.0.0", INSTALLER);
+        check(&mut app, false);
+        assert!(app.open_update_notes());
+        assert!(app.update_notes_open());
+        assert!(app.update_view().banner, "the banner stays under it");
+        app.close_update_notes();
+        assert!(!app.update_notes_open());
+
+        app.put_off_update();
+        assert!(!app.open_update_notes(), "the banner was put off");
+        assert!(!app.update_notes_open());
+    }
+
+    #[test]
+    fn later_closes_the_notes_popup() {
+        let setup = Setup::new();
+        let mut app = setup.start();
+        setup.releases.publish("9.0.0", INSTALLER);
+        check(&mut app, false);
+        assert!(app.open_update_notes());
+        app.put_off_update();
+        assert!(!app.update_notes_open());
+        // A newer release brings the banner back, not the popup.
+        setup.releases.publish("9.1.0", INSTALLER);
+        check(&mut app, false);
+        assert!(app.update_view().banner);
+        assert!(!app.update_notes_open());
+    }
+
+    #[test]
+    fn a_newer_release_closes_the_notes_of_the_one_before() {
+        let setup = Setup::new();
+        let mut app = setup.start();
+        setup.releases.publish("9.0.0", INSTALLER);
+        check(&mut app, false);
+        assert!(app.open_update_notes());
+        check(&mut app, false);
+        assert!(app.update_notes_open(), "the same release keeps it open");
+        setup.releases.publish("9.1.0", INSTALLER);
+        check(&mut app, false);
+        assert!(!app.update_notes_open(), "it showed 9.0.0's notes");
+        assert!(app.open_update_notes());
+    }
+
+    #[test]
+    fn a_tour_closes_the_notes_popup() {
+        let setup = Setup::new();
+        let mut app = setup.start();
+        setup.releases.publish("9.0.0", INSTALLER);
+        check(&mut app, false);
+        assert!(app.open_update_notes());
+        app.start_tour(
+            bardo_domain::TourId::About,
+            crate::Destination::Overview,
+            false,
+        )
+        .unwrap();
+        assert!(!app.update_notes_open());
+        assert!(app.update_view().banner);
+    }
+
+    #[test]
+    fn a_store_copy_never_shows_the_notes_popup() {
+        let setup = Setup::new();
+        let mut app = setup.start();
+        setup.releases.publish("9.0.0", INSTALLER);
+        check(&mut app, false);
+        assert!(app.open_update_notes());
+        app.updates.installation = Installation::Store;
+        assert!(!app.update_notes_open());
+        assert!(!app.open_update_notes());
     }
 
     #[test]

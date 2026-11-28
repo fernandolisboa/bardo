@@ -3711,7 +3711,7 @@ body = "The version of Bardo on this computer. Say it when you report a problem.
 
 [tour.about.updates]
 title = "Updates"
-body = "Bardo looks for a newer release when it opens and once a day, unless you turn that off. How it updates depends on how it was installed: this section says what to do."
+body = "Bardo looks for a newer release when it opens and once a day, unless you turn that off. When one is out, the bar over the screens opens its notes in a popup; its expand button comes here. How it updates depends on how it was installed: this section says what to do."
 
 [tour.about.privacy]
 title = "Privacy and YouTube"
@@ -3960,6 +3960,8 @@ waits_for_restore = "A restore is under way. Install after Bardo restarts."
 other_window = "Another Bardo window is open. Close it, then install."
 banner_see = "See what's new"
 banner_later = "Later"
+notes_open_about = "Open in Settings › About"
+notes_close = "Close"
 download_unreachable = "Couldn't reach GitHub. Check the connection, then try again."
 waiting_to_retry = "Waiting to try again…"
 switch_not_saved = "Couldn't save the setting. Try again."

@@ -18,7 +18,9 @@ A versão do Bardo neste computador. Informe-a quando relatar um problema.
 <a id="updates"></a>
 ## Atualizações
 
-O Bardo procura uma versão mais nova no [GitHub](https://github.com/fernandolisboa/bardo/releases) ao abrir e uma vez por dia enquanto fica aberto. Quando sai uma, uma barra sobre as telas avisa: **Ver novidades** abre esta seção, e **Depois** esconde a barra até o Bardo abrir de novo ou sair uma versão mais nova. Nada é baixado nem instalado até você escolher.
+O Bardo procura uma versão mais nova no [GitHub](https://github.com/fernandolisboa/bardo/releases) ao abrir e uma vez por dia enquanto fica aberto. Quando sai uma, uma barra sobre as telas avisa: **Ver novidades** abre as novidades numa janela sobre a tela em que você está, e **Depois** esconde a barra até o Bardo abrir de novo ou sair uma versão mais nova. Nada é baixado nem instalado até você escolher.
+
+A janela de novidades mostra o mesmo que esta seção: a versão, quando foi publicada, as novidades, **Baixar** (com o progresso e a revisão da instalação) e **Página da versão**. No canto dela, o botão de expandir (**Abrir em Configurações › Sobre**) fecha a janela e abre esta seção; **Fechar**, ou Esc, só fecha a janela, e a barra continua. Ela também fecha quando um tour começa ou o Guia abre.
 
 - **Procurar atualizações automaticamente** liga ou desliga as buscas ao abrir e diárias. **Procurar agora** busca na hora, mesmo com ela desligada. A linha abaixo diz quando o Bardo buscou pela última vez e o que encontrou.
 - Uma versão mais nova mostra o número, quando foi publicada, as novidades e um link para a **Página da versão**.

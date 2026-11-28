@@ -3,7 +3,9 @@
 //! Settings › About. What is checked, downloaded and run, and when
 //! installing waits, live in `bardo_app`; this view starts checks off the
 //! UI thread, polls the job queue for the download's progress like the
-//! Jobs panel, and quits Bardo once the installer has started.
+//! Jobs panel, and quits Bardo once the installer has started. The
+//! banner's "See what's new" opens the release's notes in a popup over the
+//! screens (#359), with the same card About shows.
 
 use std::time::Duration;
 
@@ -21,12 +23,13 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, ElementId, Entity, ScrollHandle, SharedString, Subscription, Task,
-    WeakEntity, Window, div, px, rems,
+    AnyElement, App, ClickEvent, ElementId, Entity, FocusHandle, KeyDownEvent, ScrollHandle,
+    SharedString, Subscription, Task, WeakEntity, Window, div, px, rems,
 };
 
 use crate::appearance::look;
 use crate::guide;
+use crate::icons::Lucide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
 
@@ -78,10 +81,17 @@ pub fn check_daily(bardo: WeakEntity<Bardo>, cx: &mut App) -> Task<()> {
     })
 }
 
-/// The bar over the screens: the newer version, a way to it, and Later.
-pub fn banner(bardo: &Entity<Bardo>, version: &Version, cx: &App) -> AnyElement {
+/// The bar over the screens: the newer version, a way to its notes, and
+/// Later.
+pub fn banner(
+    bardo: &Entity<Bardo>,
+    version: &Version,
+    notes: FocusHandle,
+    cx: &App,
+) -> AnyElement {
     let t = look(cx).tokens;
     let read = bardo.read(cx);
+    let see = bardo.clone();
     let later = bardo.clone();
     h_flex()
         .id("update-banner")
@@ -128,8 +138,17 @@ pub fn banner(bardo: &Entity<Bardo>, version: &Version, cx: &App) -> AnyElement 
                         .small()
                         .primary()
                         .label(tr(read, Text::UpdateBannerSee))
-                        .on_click(|_, window, cx| {
-                            guide::go(GuidePlace::Settings(SettingsTab::About), window, cx)
+                        // The notes open over the screen, which stays (#359).
+                        .on_click(move |_, window, cx| {
+                            let opened = see.update(cx, |bardo, cx| {
+                                cx.notify();
+                                bardo.open_update_notes()
+                            });
+                            // The keyboard goes to it once it is drawn.
+                            if opened {
+                                let notes = notes.clone();
+                                window.on_next_frame(move |window, cx| window.focus(&notes, cx));
+                            }
                         }),
                 )
                 .child(
@@ -148,11 +167,21 @@ pub fn banner(bardo: &Entity<Bardo>, version: &Version, cx: &App) -> AnyElement 
         .into_any_element()
 }
 
-/// Settings › About's Updates section.
-pub struct UpdatePanel {
+/// Where an [`UpdateCard`] is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardPlace {
+    /// Settings › About's Updates section, a card of its own.
+    About,
+    /// The popup over the screens, which frames it and names the version.
+    Popup,
+}
+
+/// A newer release: its notes, its download and the install review. The
+/// download and its progress live in the job queue, so About and the popup
+/// show the same one.
+pub struct UpdateCard {
     bardo: Entity<Bardo>,
-    /// The settings screen's scroll, so the tour brings it into view.
-    scroll: ScrollHandle,
+    place: CardPlace,
     view: UpdateView,
     revision: u64,
     /// The install review is open.
@@ -165,8 +194,8 @@ pub struct UpdatePanel {
     _subscriptions: Vec<Subscription>,
 }
 
-impl UpdatePanel {
-    pub fn new(bardo: Entity<Bardo>, scroll: ScrollHandle, cx: &mut Context<Self>) -> Self {
+impl UpdateCard {
+    pub fn new(bardo: Entity<Bardo>, place: CardPlace, cx: &mut Context<Self>) -> Self {
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -175,7 +204,7 @@ impl UpdatePanel {
                 }
             }
         });
-        // A check that ended, the switch, the language.
+        // A check that ended, the language.
         let subscriptions = vec![cx.observe(&bardo, |this, _, cx| this.reload(cx))];
         let (view, revision) = {
             let bardo = bardo.read(cx);
@@ -183,7 +212,7 @@ impl UpdatePanel {
         };
         Self {
             bardo,
-            scroll,
+            place,
             view,
             revision,
             review: false,
@@ -213,21 +242,6 @@ impl UpdatePanel {
         if self.bardo.read(cx).jobs_revision() != self.revision {
             self.reload(cx);
         }
-    }
-
-    fn check_now(&mut self, cx: &mut Context<Self>) {
-        self.error = None;
-        check(&self.bardo, true, cx);
-    }
-
-    fn set_check(&mut self, on: bool, cx: &mut Context<Self>) {
-        let saved = self.bardo.update(cx, |bardo, cx| {
-            let saved = bardo.set_update_check(on).is_ok();
-            cx.notify();
-            saved
-        });
-        self.error = (!saved).then_some(Text::UpdateSwitchNotSaved);
-        cx.notify();
     }
 
     fn download(&mut self, cx: &mut Context<Self>) {
@@ -288,31 +302,6 @@ impl UpdatePanel {
         .detach();
     }
 
-    /// When the last check ran and what it found.
-    fn last_check_line(&self, bardo: &Bardo) -> String {
-        let Some(last) = self.view.last_check else {
-            return bardo.text(Text::UpdatesNever).into_owned();
-        };
-        let when = bardo.backup_time_text(last.at);
-        let text = match last.found {
-            UpdateFound::UpToDate => Text::UpdatesUpToDate,
-            UpdateFound::Newer => Text::UpdatesFoundNewer,
-            UpdateFound::NoRelease => Text::UpdatesNoRelease,
-            UpdateFound::Offline => Text::UpdatesOffline,
-            UpdateFound::RateLimited(Some(until)) => {
-                return bardo.text_with(
-                    Text::UpdatesRateLimited,
-                    &[("when", &bardo.backup_time_text(until))],
-                );
-            }
-            UpdateFound::RateLimited(None) => {
-                return bardo.text(Text::UpdatesRateLimitedLater).into_owned();
-            }
-            UpdateFound::Failed => Text::UpdatesFailed,
-        };
-        bardo.text_with(text, &[("when", &when)])
-    }
-
     fn render_available(&self, update: &AvailableUpdate, cx: &mut Context<Self>) -> AnyElement {
         let progress = update
             .downloading()
@@ -320,6 +309,7 @@ impl UpdatePanel {
         let review = (self.review && update.ready).then(|| self.render_review(update, cx));
         let bardo = self.bardo.read(cx);
         let t = look(cx).tokens;
+        let popup = self.place == CardPlace::Popup;
         let release = &update.release;
         let version = release.version.to_string();
         let published = release.published_at.map(|at| {
@@ -334,6 +324,8 @@ impl UpdatePanel {
         let notes = (!release.notes.trim().is_empty()).then(|| {
             v_flex()
                 .gap_1()
+                // In the popup the notes take the room the window leaves.
+                .when(popup, |notes| notes.flex_shrink_1().min_h_0())
                 .child(
                     div()
                         .text_sm()
@@ -342,8 +334,13 @@ impl UpdatePanel {
                 )
                 .child(
                     div()
-                        .id("update-notes")
-                        .max_h(px(240.))
+                        .id(if popup {
+                            "update-popup-notes"
+                        } else {
+                            "update-notes"
+                        })
+                        .when(popup, |notes| notes.flex_shrink_1().min_h_0())
+                        .max_h(px(if popup { 480. } else { 240. }))
                         .overflow_y_scroll()
                         .p_3()
                         .bg(t.sunken)
@@ -351,7 +348,13 @@ impl UpdatePanel {
                         .child(
                             div().w_full().pr_4().child(
                                 TextView::markdown(
-                                    ElementId::Name(format!("update-notes-{version}").into()),
+                                    ElementId::Name(
+                                        format!(
+                                            "update-notes-{}-{version}",
+                                            if popup { "popup" } else { "about" }
+                                        )
+                                        .into(),
+                                    ),
                                     release.notes.clone(),
                                 )
                                 .selectable(true)
@@ -436,22 +439,32 @@ impl UpdatePanel {
                     .into_any_element(),
             )
         };
-        kit::card(cx)
-            .p_4()
-            .gap_3()
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(
-                        div().font_semibold().child(
-                            bardo.text_with(Text::UpdateAvailable, &[("version", &version)]),
-                        ),
-                    )
-                    .children(published),
-            )
+        // What the review asked for shows in the review.
+        let error = self
+            .error
+            .filter(|_| !(self.review && update.ready))
+            .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx));
+        let heading = v_flex()
+            .gap_1()
+            .when(!popup, |heading| {
+                heading.child(
+                    div()
+                        .font_semibold()
+                        .child(bardo.text_with(Text::UpdateAvailable, &[("version", &version)])),
+                )
+            })
+            .children(published);
+        let body = if popup {
+            v_flex().flex_shrink_1().min_h_0().gap_3()
+        } else {
+            kit::card(cx).p_4().gap_3()
+        };
+        body.child(heading)
             .children(notes)
+            .children(error)
             .child(
                 h_flex()
+                    .flex_none()
                     .flex_wrap()
                     .items_start()
                     .gap_3()
@@ -509,6 +522,7 @@ impl UpdatePanel {
         let t = look(cx).tokens;
         let block = update.install_block;
         v_flex()
+            .flex_none()
             .gap_2()
             .pt_3()
             .border_t(t.border_width)
@@ -566,6 +580,87 @@ impl UpdatePanel {
                     ),
             )
             .into_any_element()
+    }
+}
+
+impl Render for UpdateCard {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        match self.view.available.clone() {
+            Some(update) => self.render_available(&update, cx),
+            None => div().into_any_element(),
+        }
+    }
+}
+
+/// Settings › About's Updates section.
+pub struct UpdatePanel {
+    bardo: Entity<Bardo>,
+    /// The settings screen's scroll, so the tour brings it into view.
+    scroll: ScrollHandle,
+    view: UpdateView,
+    card: Entity<UpdateCard>,
+    /// The switch could not be saved.
+    error: Option<Text>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl UpdatePanel {
+    pub fn new(bardo: Entity<Bardo>, scroll: ScrollHandle, cx: &mut Context<Self>) -> Self {
+        // A check that ended, the switch, the language.
+        let subscriptions = vec![cx.observe(&bardo, |this, bardo, cx| {
+            this.view = bardo.read(cx).update_view();
+            cx.notify();
+        })];
+        let view = bardo.read(cx).update_view();
+        let card = cx.new(|cx| UpdateCard::new(bardo.clone(), CardPlace::About, cx));
+        Self {
+            bardo,
+            scroll,
+            view,
+            card,
+            error: None,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    fn check_now(&mut self, cx: &mut Context<Self>) {
+        self.error = None;
+        check(&self.bardo, true, cx);
+    }
+
+    fn set_check(&mut self, on: bool, cx: &mut Context<Self>) {
+        let saved = self.bardo.update(cx, |bardo, cx| {
+            let saved = bardo.set_update_check(on).is_ok();
+            cx.notify();
+            saved
+        });
+        self.error = (!saved).then_some(Text::UpdateSwitchNotSaved);
+        cx.notify();
+    }
+
+    /// When the last check ran and what it found.
+    fn last_check_line(&self, bardo: &Bardo) -> String {
+        let Some(last) = self.view.last_check else {
+            return bardo.text(Text::UpdatesNever).into_owned();
+        };
+        let when = bardo.backup_time_text(last.at);
+        let text = match last.found {
+            UpdateFound::UpToDate => Text::UpdatesUpToDate,
+            UpdateFound::Newer => Text::UpdatesFoundNewer,
+            UpdateFound::NoRelease => Text::UpdatesNoRelease,
+            UpdateFound::Offline => Text::UpdatesOffline,
+            UpdateFound::RateLimited(Some(until)) => {
+                return bardo.text_with(
+                    Text::UpdatesRateLimited,
+                    &[("when", &bardo.backup_time_text(until))],
+                );
+            }
+            UpdateFound::RateLimited(None) => {
+                return bardo.text(Text::UpdatesRateLimitedLater).into_owned();
+            }
+            UpdateFound::Failed => Text::UpdatesFailed,
+        };
+        bardo.text_with(text, &[("when", &when)])
     }
 }
 
@@ -664,25 +759,128 @@ impl Render for UpdatePanel {
                     )
                 });
         }
-        let reviewing = self.review
-            && self
-                .view
-                .available
-                .as_ref()
-                .is_some_and(|update| update.ready);
         let error = self
             .error
-            .filter(|_| !reviewing)
             .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx));
-        let available = self
-            .view
-            .available
-            .clone()
-            .map(|update| self.render_available(&update, cx));
+        let available = self.view.available.is_some().then(|| self.card.clone());
         kit::anchor_in(
             TourAnchor::Control(Control::AboutUpdates),
             section.children(error).children(available),
             Some(&self.scroll),
         )
+    }
+}
+
+/// The popup over the screens with the newer release's notes (#359),
+/// opened from the banner. Its header goes on to Settings › About, or
+/// closes it; so does Esc.
+pub struct UpdateNotes {
+    bardo: Entity<Bardo>,
+    card: Entity<UpdateCard>,
+    /// Given the keyboard as the banner opens it, so Esc closes it.
+    focus: FocusHandle,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl UpdateNotes {
+    pub fn new(bardo: Entity<Bardo>, cx: &mut Context<Self>) -> Self {
+        let card = cx.new(|cx| UpdateCard::new(bardo.clone(), CardPlace::Popup, cx));
+        let subscriptions = vec![cx.observe(&bardo, |_, _, cx| cx.notify())];
+        Self {
+            bardo,
+            card,
+            focus: cx.focus_handle(),
+            _subscriptions: subscriptions,
+        }
+    }
+
+    /// What the banner gives the keyboard to as it opens the notes.
+    pub fn focus_handle(&self) -> FocusHandle {
+        self.focus.clone()
+    }
+
+    pub fn is_open(&self, cx: &App) -> bool {
+        self.bardo.read(cx).update_notes_open()
+    }
+
+    fn close(&mut self, cx: &mut Context<Self>) {
+        self.bardo.update(cx, |bardo, cx| {
+            bardo.close_update_notes();
+            cx.notify();
+        });
+    }
+
+    fn on_key(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if event.keystroke.key == "escape" {
+            self.close(cx);
+            cx.stop_propagation();
+        }
+    }
+}
+
+impl Render for UpdateNotes {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let bardo = self.bardo.read(cx);
+        let version = bardo
+            .update_notes_open()
+            .then(|| bardo.update_banner())
+            .flatten();
+        let Some(version) = version else {
+            return div().into_any_element();
+        };
+        let t = look(cx).tokens;
+        let header = h_flex()
+            .flex_none()
+            .gap_2()
+            .items_center()
+            .child(div().flex_1().min_w_0().child(kit::title(
+                bardo.text_with(Text::UpdateAvailable, &[("version", &version.to_string())]),
+            )))
+            .child(
+                // Goes on inside Bardo, so no external-link arrow (the
+                // release page has it): "open as a full page".
+                Button::new("update-popup-full")
+                    .small()
+                    .ghost()
+                    .icon(Lucide::Maximize2)
+                    .tooltip(tr(bardo, Text::UpdateNotesOpenAbout))
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.close(cx);
+                        guide::go(GuidePlace::Settings(SettingsTab::About), window, cx);
+                    })),
+            )
+            .child(
+                Button::new("update-popup-close")
+                    .small()
+                    .ghost()
+                    .icon(IconName::Close)
+                    .tooltip(tr(bardo, Text::UpdateNotesClose))
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.close(cx))),
+            );
+        let card = kit::card(cx)
+            .w(px(640.))
+            .max_w_full()
+            .max_h_full()
+            .p_4()
+            .gap_3()
+            .border_color(t.accent_edge)
+            .shadow_lg()
+            .child(header)
+            .child(v_flex().flex_shrink_1().min_h_0().child(self.card.clone()));
+        // Over the screens, which take no clicks while it is up.
+        div()
+            .id("update-popup")
+            .absolute()
+            .inset_0()
+            .occlude()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(Self::on_key))
+            .p_6()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(t.app.opacity(0.8))
+            .child(card)
+            .into_any_element()
     }
 }
