@@ -9,6 +9,7 @@ mod ad_export;
 mod ad_review;
 mod agent_task;
 mod backup;
+mod bridge;
 mod capture;
 mod channel;
 mod connection;

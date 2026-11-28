@@ -67,7 +67,7 @@ use crate::{Bardo, KeyState, SceneError};
 /// How many rounds of status checks in a row may all fail on the
 /// provider's side before the job gives up for now (the queue retries it
 /// later, polling the same requests).
-const MAX_HICCUPS: u32 = 10;
+pub(crate) const MAX_HICCUPS: u32 = 10;
 
 /// How long after sending a submission whose answer was lost the job
 /// keeps looking for it before saying it may have started unseen: the
@@ -164,66 +164,70 @@ impl ClipsPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct ClipOrder {
-    scene: usize,
-    provider: String,
-    model: String,
+pub(crate) struct ClipOrder {
+    pub(crate) scene: usize,
+    pub(crate) provider: String,
+    pub(crate) model: String,
     /// The clips (current and waiting, by generation) the scene held when
     /// the job was started. A clip that is not among them and not this
     /// job's was made by another job since, and a scene the job has
     /// nothing on its way for is left to it. `None` in a job from before
     /// this was kept: nothing is known, and nothing is left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    had: Option<Vec<String>>,
+    pub(crate) had: Option<Vec<String>>,
 }
 
 /// What a clip job sent, saved as the job's external handle after every
 /// change: a restart reads it to poll instead of submitting again.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-struct ClipsState {
-    scenes: Vec<ClipRun>,
+pub(crate) struct ClipsState {
+    pub(crate) scenes: Vec<ClipRun>,
     /// The scenes whose requests ended without a clip, or that the
     /// provider would not take. While a scene is here the job leaves it
     /// alone: sending it again is a new paid request, which only the user
     /// asks for, by retrying the job (`ClipHandler::asked_again`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    ended: Vec<Ended>,
+    pub(crate) ended: Vec<Ended>,
     /// The scenes the user's last retry asked again for. A run still
     /// stopping then may save its old notes over them; they are dropped
     /// again (`ClipHandler::saved_after_ask`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    asked: Vec<usize>,
+    pub(crate) asked: Vec<usize>,
     /// The scenes this job saved a clip for. They are done for good: a
     /// retry never asks about, fetches or sends them again, whatever the
     /// user did with the clip since (rejected it, replaced it).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    delivered: Vec<usize>,
+    pub(crate) delivered: Vec<usize>,
 }
 
-/// One scene's submission.
+/// One request's submission: a scene's, or a bridge's.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct ClipRun {
-    scene: usize,
+pub(crate) struct ClipRun {
+    pub(crate) scene: usize,
     /// Counts the scene's submissions in this job, from 1. Part of the
     /// idempotency key: resending the same submission (after a crash right
     /// after sending it) returns the first one instead of a second clip,
     /// and a failed submission gets a new number.
-    submission: u32,
-    prompt: String,
-    seconds: u32,
+    pub(crate) submission: u32,
+    pub(crate) prompt: String,
+    pub(crate) seconds: u32,
     /// The limit it was asked for shorter than the scene under, to play
     /// slowed, in percent; 0 when it covers the scene.
     #[serde(default)]
-    stretch_percent: u8,
+    pub(crate) stretch_percent: u8,
     /// The image animated: its generation and file.
-    source_image: String,
-    image_file: String,
+    pub(crate) source_image: String,
+    pub(crate) image_file: String,
     /// The image as the provider refers to it, once handed over.
-    staged: Option<String>,
+    pub(crate) staged: Option<String>,
+    /// The frame the clip must end on as the provider refers to it, once
+    /// handed over: a bridge's (#363), never a scene's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) staged_last: Option<String>,
     /// The provider's request id, once submitted.
-    request: Option<String>,
+    pub(crate) request: Option<String>,
     /// What the provider said the clip costs, in micro-dollars.
-    quote_micros: Option<u64>,
+    pub(crate) quote_micros: Option<u64>,
     /// When the submission was sent without an answer yet (Unix seconds).
     /// Written before sending and kept while the answer is lost, so the
     /// job knows a clip of its own may be on its way. For a provider that
@@ -233,24 +237,24 @@ struct ClipRun {
     /// have started where it does not. For one that recognizes the
     /// submission, sending it again finds the first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    sent_at: Option<u64>,
+    pub(crate) sent_at: Option<u64>,
     /// The cost record of the request, written when the provider accepted
     /// it. Saved with the request id before recording, so recording again
     /// after a crash counts the clip once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    cost: Option<String>,
+    pub(crate) cost: Option<String>,
 }
 
-/// A scene's failure, as the job keeps it.
+/// A request's failure, as the job keeps it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct Ended {
-    scene: usize,
-    kind: String,
-    detail: String,
+pub(crate) struct Ended {
+    pub(crate) scene: usize,
+    pub(crate) kind: String,
+    pub(crate) detail: String,
 }
 
 impl Ended {
-    fn failure(&self) -> JobFailure {
+    pub(crate) fn failure(&self) -> JobFailure {
         JobFailure::new(
             self.kind.parse().unwrap_or(JobFailureKind::RequestFailed),
             self.detail.clone(),
@@ -263,6 +267,7 @@ impl ClipRun {
     fn restart(&mut self) {
         self.submission += 1;
         self.staged = None;
+        self.staged_last = None;
         self.request = None;
         self.quote_micros = None;
         self.sent_at = None;
@@ -270,8 +275,8 @@ impl ClipRun {
     }
 }
 
-/// Where one scene stands after a step.
-enum Step {
+/// Where one request stands after a step.
+pub(crate) enum Step {
     /// Submitted, not ready yet.
     Waiting,
     /// Submitted, but the provider did not say how it is going.
@@ -365,6 +370,93 @@ pub(crate) struct ClipHandler {
     pub(crate) costs: CostBook,
 }
 
+/// How a clip run reaches its providers: their keys, and a plan's access
+/// token, asked for on every step instead of kept (it expires within the
+/// hour and is renewed while clips run).
+pub(crate) struct ClipCalls {
+    owner: ProfileId,
+    secrets: Arc<dyn SecretStore>,
+    plan_sessions: crate::plans::PlanSessions,
+    keys: Vec<(Provider, ApiKey)>,
+    /// A plan's token was renewed after the provider refused it, and no
+    /// call has worked since: a second refusal is final.
+    renewed: bool,
+}
+
+impl ClipCalls {
+    pub(crate) fn new(
+        owner: ProfileId,
+        secrets: Arc<dyn SecretStore>,
+        plan_sessions: crate::plans::PlanSessions,
+    ) -> ClipCalls {
+        ClipCalls {
+            owner,
+            secrets,
+            plan_sessions,
+            keys: Vec::new(),
+            renewed: false,
+        }
+    }
+
+    /// The provider's key, or a plan's access token.
+    pub(crate) fn key(&mut self, provider: Provider) -> Result<ApiKey, JobFailure> {
+        if provider.signs_in() {
+            return self
+                .plan_sessions
+                .access_token(provider)
+                .map_err(|error| plan_failure(provider, &error));
+        }
+        if let Some((_, key)) = self.keys.iter().find(|(p, _)| *p == provider) {
+            return Ok(key.clone());
+        }
+        let key = self
+            .secrets
+            .get(self.owner, provider)
+            .map_err(|e| JobFailure::unexpected(format!("could not read the key: {e}")))?
+            .ok_or_else(|| {
+                JobFailure::new(
+                    JobFailureKind::MissingKey,
+                    format!("no {provider} key is saved"),
+                )
+            })?;
+        self.keys.push((provider, key.clone()));
+        Ok(key)
+    }
+
+    /// Calls the provider. A token a plan's provider refuses is renewed
+    /// and the call made once more: a refusal started nothing.
+    fn call<R>(
+        &mut self,
+        generator: &Arc<dyn ClipGenerator>,
+        key: &mut ApiKey,
+        call: impl Fn(&ApiKey) -> Result<R, ProviderFailure>,
+    ) -> Result<R, ProviderFailure> {
+        let provider = generator.provider();
+        let answer = match call(key) {
+            Err(failure)
+                if failure.kind == ProviderFailureKind::Rejected
+                    && provider.signs_in()
+                    && !self.renewed =>
+            {
+                self.renewed = true;
+                self.plan_sessions.renew(provider);
+                match self.key(provider) {
+                    Ok(fresh) => {
+                        *key = fresh;
+                        call(key)
+                    }
+                    Err(_) => Err(failure),
+                }
+            }
+            answer => answer,
+        };
+        if answer.is_ok() {
+            self.renewed = false;
+        }
+        answer
+    }
+}
+
 /// One clip job's run.
 struct ClipJob<'a> {
     handler: &'a ClipHandler,
@@ -374,38 +466,47 @@ struct ClipJob<'a> {
     /// How far a clip of a model of fixed lengths stretches, as queued.
     stretch: Option<StretchLimit>,
     state: ClipsState,
-    keys: Vec<(Provider, ApiKey)>,
-    /// A plan's token was renewed after the provider refused it, and no
-    /// call has worked since: a second refusal is final.
-    renewed: bool,
+    calls: ClipCalls,
+}
+
+/// The user's retry asks again for the requests that ended: they are no
+/// longer left alone. `None` when none ended.
+pub(crate) fn ask_again(external_handle: Option<&str>) -> Option<String> {
+    let mut state: ClipsState = serde_json::from_str(external_handle?).ok()?;
+    if state.ended.is_empty() && state.asked.is_empty() {
+        return None;
+    }
+    state.asked = state.ended.drain(..).map(|ended| ended.scene).collect();
+    Some(to_json(&state))
+}
+
+/// A run cancelled and retried before it returned may still note an end
+/// after the retry: that note stays, since the user has not seen it yet.
+/// Only the notes the retry cleared are dropped.
+pub(crate) fn saved_after_asking(asked: Option<&str>, saved: String) -> String {
+    let asked = asked.and_then(|asked| serde_json::from_str::<ClipsState>(asked).ok());
+    let (Some(asked), Ok(mut state)) = (asked, serde_json::from_str::<ClipsState>(&saved)) else {
+        return saved;
+    };
+    state
+        .ended
+        .retain(|ended| !asked.asked.contains(&ended.scene));
+    state.asked = asked.asked;
+    to_json(&state)
 }
 
 impl JobHandler for ClipHandler {
     /// The user's retry is what asks again for the scenes whose requests
     /// ended: they are no longer left alone.
     fn asked_again(&self, external_handle: Option<&str>) -> Option<String> {
-        let mut state: ClipsState = serde_json::from_str(external_handle?).ok()?;
-        if state.ended.is_empty() && state.asked.is_empty() {
-            return None;
-        }
-        state.asked = state.ended.drain(..).map(|ended| ended.scene).collect();
-        Some(to_json(&state))
+        ask_again(external_handle)
     }
 
     /// A run cancelled and retried before it returned may still note a
     /// scene's end after the retry: that note stays, since the user has
     /// not seen it yet. Only the notes the retry cleared are dropped.
     fn saved_after_ask(&self, asked: Option<&str>, saved: String) -> String {
-        let asked = asked.and_then(|asked| serde_json::from_str::<ClipsState>(asked).ok());
-        let (Some(asked), Ok(mut state)) = (asked, serde_json::from_str::<ClipsState>(&saved))
-        else {
-            return saved;
-        };
-        state
-            .ended
-            .retain(|ended| !asked.asked.contains(&ended.scene));
-        state.asked = asked.asked;
-        to_json(&state)
+        saved_after_asking(asked, saved)
     }
 
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
@@ -421,8 +522,11 @@ impl JobHandler for ClipHandler {
             plan: id(&payload.plan)?,
             stretch: payload.stretch(),
             state,
-            keys: Vec::new(),
-            renewed: false,
+            calls: ClipCalls::new(
+                self.owner,
+                Arc::clone(&self.secrets),
+                self.plan_sessions.clone(),
+            ),
         };
         run.run(&payload.scenes, cx)
     }
@@ -433,6 +537,596 @@ impl ClipHandler {
         self.generators
             .iter()
             .find(|generator| generator.provider() == provider)
+    }
+}
+
+/// How one paid clip is asked for, whatever it is for (a scene of the plan,
+/// or a bridge over a cut in the editor): sent once (ADR-0030), a lost
+/// answer looked for where the provider can and never sent again by
+/// itself, its cost recorded when the provider accepts it and taken back
+/// when the provider fails it, its end noted so that only the user's retry
+/// asks again. Each request is one of the run's `ClipRun`s, by its
+/// `ClipOrder::scene`; what it is for says what a clip is saved as, what a
+/// failure shows on, and how its submissions are numbered.
+pub(crate) trait ClipRequests {
+    fn calls(&mut self) -> &mut ClipCalls;
+
+    fn state(&self) -> &ClipsState;
+
+    fn state_mut(&mut self) -> &mut ClipsState;
+
+    fn job(&self) -> JobId;
+
+    fn project(&self) -> VideoProjectId;
+
+    fn costs(&self) -> &CostBook;
+
+    /// What the clip is paid for.
+    fn purpose(&self) -> CostPurpose;
+
+    /// What a failure of the request names: "Scene 3", "The bridge".
+    fn label(&self, order: &ClipOrder) -> String;
+
+    /// The idempotency key of submission number `submission` of the
+    /// request: unique to the job, the request and the submission, and
+    /// never one another kind of clip could make.
+    fn submission_id(&self, order: &ClipOrder, submission: u32) -> String;
+
+    /// Shows where the clip belongs that it failed.
+    fn show_failed(&self, order: &ClipOrder, failure: &JobFailure) -> Result<(), JobFailure>;
+
+    /// Saves the made clip for the user to review. Its cost was recorded
+    /// when the provider accepted it.
+    fn save_clip(&mut self, order: &ClipOrder, bytes: &[u8]) -> Result<(), JobFailure>;
+
+    fn save_state(&self, cx: &mut JobContext) -> Result<(), JobFailure> {
+        cx.save_external_handle(to_json(self.state()))
+            .map_err(unexpected)
+    }
+
+    /// Notes that the request's clip is saved: it is done for good.
+    fn delivered(&mut self, scene: usize, cx: &mut JobContext) -> Result<(), JobFailure> {
+        if !self.state().delivered.contains(&scene) {
+            self.state_mut().delivered.push(scene);
+            self.save_state(cx)?;
+        }
+        Ok(())
+    }
+
+    fn run_of(&mut self, scene: usize) -> Option<&mut ClipRun> {
+        self.state_mut()
+            .scenes
+            .iter_mut()
+            .find(|run| run.scene == scene)
+    }
+
+    fn call<R>(
+        &mut self,
+        generator: &Arc<dyn ClipGenerator>,
+        key: &mut ApiKey,
+        call: impl Fn(&ApiKey) -> Result<R, ProviderFailure>,
+    ) -> Result<R, ProviderFailure> {
+        self.calls().call(generator, key, call)
+    }
+
+    /// Whether a submission was noted as sent with no answer, to a provider
+    /// that offers no way to look for it: it ends there (`may_have_started`),
+    /// before anything is read, checked or sent.
+    fn ends_unseen(&mut self, order: &ClipOrder, generator: &Arc<dyn ClipGenerator>) -> bool {
+        self.run_of(order.scene)
+            .is_some_and(|run| run.sent_at.is_some())
+            && !generator.dedupes_submissions()
+            && !generator.lists_submissions()
+    }
+
+    /// Asks how the request `request` is going, and saves the clip when it
+    /// is ready.
+    fn poll(
+        &mut self,
+        order: &ClipOrder,
+        generator: &Arc<dyn ClipGenerator>,
+        key: &mut ApiKey,
+        request: String,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let handle = ClipHandle(request);
+        match self.call(generator, key, |key| generator.status(key, &handle)) {
+            Ok(ClipStatus::Queued | ClipStatus::Running) => Ok(Step::Waiting),
+            Ok(ClipStatus::Done { video }) => {
+                match self.call(generator, key, |key| generator.download(key, &video)) {
+                    Ok(clip) => {
+                        self.save_clip(order, &clip.bytes)?;
+                        self.delivered(order.scene, cx)?;
+                        Ok(Step::Saved)
+                    }
+                    Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
+                        Ok(Step::Hiccup(self.failure(order, failure)))
+                    }
+                    Err(failure) => self.not_fetched(order, failure),
+                }
+            }
+            Ok(ClipStatus::Failed(failure)) => {
+                // The provider says it made nothing: not billed.
+                self.take_back(order.scene);
+                self.request_ended(order, failure, cx)
+            }
+            Ok(ClipStatus::Lost(failure)) => {
+                // No clip, and no word that none was made: its cost stays.
+                let failure = ProviderFailure::new(
+                    failure.kind,
+                    format!(
+                        "{} (it may have been charged, so its cost stays in Costs)",
+                        failure.detail
+                    ),
+                );
+                self.request_ended(order, failure, cx)
+            }
+            Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
+                Ok(Step::Hiccup(self.failure(order, failure)))
+            }
+            Err(failure) => Err(self.failure(order, failure)),
+        }
+    }
+
+    /// Sends `request`, whose images are handed over: once. The job may be
+    /// told to stop while a call is on its way (cancelled, or the app
+    /// closing): it looks again right before the call that starts, and
+    /// charges for, the clip.
+    fn send(
+        &mut self,
+        order: &ClipOrder,
+        generator: &Arc<dyn ClipGenerator>,
+        key: &mut ApiKey,
+        request: &ClipRequest,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let number = self
+            .run_of(order.scene)
+            .expect("staging adds the request's run")
+            .submission;
+        let submission = self.submission_id(order, number);
+        if !generator.dedupes_submissions() {
+            return self.submit_once(order, generator, key, request, &submission, cx);
+        }
+        if cx.should_stop() {
+            return Ok(Step::Stopped);
+        }
+        // Noted before sending and kept while the answer is lost: sending
+        // the same submission again finds the clip it may have started.
+        self.run_of(order.scene)
+            .expect("staging adds the request's run")
+            .sent_at = Some(now_secs());
+        self.save_state(cx)?;
+        match self.call(generator, key, |key| {
+            generator.submit(key, request, &submission)
+        }) {
+            Ok(submitted) => self.submitted(order, submitted, cx),
+            Err(failure) => {
+                if failure.kind != ProviderFailureKind::AnswerLost {
+                    self.run_of(order.scene)
+                        .expect("the request's run exists")
+                        .sent_at = None;
+                    self.save_state(cx)?;
+                }
+                self.submit_failed(order, failure, cx)
+            }
+        }
+    }
+
+    /// Submits to a provider that would start (and charge for) a second
+    /// clip if sent the same submission again. The job writes down that it
+    /// sends before sending. With that note and no answer it never sends
+    /// again by itself: where the provider lists what it started it looks
+    /// for the clip, and where it does not the request ends there, as one
+    /// that may have started.
+    fn submit_once(
+        &mut self,
+        order: &ClipOrder,
+        generator: &Arc<dyn ClipGenerator>,
+        key: &mut ApiKey,
+        request: &ClipRequest,
+        submission: &str,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let provider = generator.provider();
+        if let Some(sent_at) = self.run_of(order.scene).and_then(|run| run.sent_at) {
+            return match self.call(generator, key, |key| generator.find_submitted(key, request)) {
+                Ok(Some(handle)) => {
+                    tracing::info!(scene = order.scene, "found the clip a lost answer started");
+                    self.submitted(
+                        order,
+                        ClipSubmission {
+                            handle,
+                            quote: None,
+                        },
+                        cx,
+                    )
+                }
+                Ok(None) if now_secs().saturating_sub(sent_at) < lookup_grace_secs() => {
+                    Ok(Step::NotSubmitted(self.failure(
+                        order,
+                        ProviderFailure::new(
+                            ProviderFailureKind::ProviderDown,
+                            format!(
+                                "waiting for {provider} to list the clip sent without an answer"
+                            ),
+                        ),
+                    )))
+                }
+                Ok(None) => self.scene_failed(
+                    order,
+                    ProviderFailure::new(
+                        ProviderFailureKind::Unexpected,
+                        format!(
+                            "{provider} did not answer the submission and does not list it; \
+                             it may still have started the clip, so check your {provider} \
+                             library before asking for this clip again"
+                        ),
+                    ),
+                    cx,
+                ),
+                Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
+                    Ok(Step::NotSubmitted(self.failure(order, failure)))
+                }
+                // Stops with the note kept: the next attempt looks again.
+                Err(failure) => Err(self.failure(order, failure)),
+            };
+        }
+        if let Err(failure) = self.call(generator, key, |key| generator.check_submit(key, request))
+        {
+            return self.submit_failed(order, failure, cx);
+        }
+        if cx.should_stop() {
+            return Ok(Step::Stopped);
+        }
+        self.run_of(order.scene)
+            .expect("staging adds the request's run")
+            .sent_at = Some(now_secs());
+        self.save_state(cx)?;
+        match self.call(generator, key, |key| {
+            generator.submit(key, request, submission)
+        }) {
+            Ok(submitted) => self.submitted(order, submitted, cx),
+            // It may have started. The note stays, and the queue comes
+            // back to look for the clip.
+            Err(failure)
+                if failure.kind == ProviderFailureKind::AnswerLost
+                    && generator.lists_submissions() =>
+            {
+                let waiting = ProviderFailure::new(
+                    ProviderFailureKind::Unreachable,
+                    format!(
+                        "{}; looking for the clip before sending anything again",
+                        failure.detail
+                    ),
+                );
+                Ok(Step::NotSubmitted(self.failure(order, waiting)))
+            }
+            Err(failure) if failure.kind == ProviderFailureKind::AnswerLost => {
+                self.may_have_started(order, &failure.detail, cx)
+            }
+            // Nothing was started.
+            Err(failure) => {
+                self.run_of(order.scene)
+                    .expect("the request's run exists")
+                    .sent_at = None;
+                self.save_state(cx)?;
+                self.submit_failed(order, failure, cx)
+            }
+        }
+    }
+
+    /// The submission was sent, no answer says what came of it, and the
+    /// provider offers no way to look: it may be making the clip, and
+    /// billing it. The request ends there, as any request that ended does,
+    /// and what the clip costs goes to Costs: a spend that may have
+    /// happened counts (ADR-0030). The record's id is saved first, so a
+    /// run cut here records it once.
+    fn may_have_started(
+        &mut self,
+        order: &ClipOrder,
+        why: &str,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let run = self.run_of(order.scene).expect("the request's run exists");
+        let cost = run
+            .cost
+            .get_or_insert_with(|| CostRecordId::new().to_string())
+            .clone();
+        let run = run.clone();
+        self.save_state(cx)?;
+        self.write_cost(order, &run, &cost)?;
+        let failure = ProviderFailure::new(
+            ProviderFailureKind::AnswerLost,
+            format!(
+                "the provider did not confirm the submission and has no way to look for it, \
+                 so the clip may have been made and charged: its cost is in Costs, and it \
+                 is not sent again unless you retry ({why})"
+            ),
+        );
+        let failure = self.failure(order, failure);
+        self.note_ended(order, failure, cx)
+    }
+
+    /// Keeps the provider's handle and records the clip's cost: from now
+    /// on the provider makes it, and bills it, whatever this job does, and
+    /// the job asks how it goes.
+    fn submitted(
+        &mut self,
+        order: &ClipOrder,
+        submitted: ClipSubmission,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let run = self.run_of(order.scene).expect("the request's run exists");
+        run.request = Some(submitted.handle.0);
+        run.quote_micros = submitted.quote.map(Money::micros);
+        run.sent_at = None;
+        run.cost = Some(CostRecordId::new().to_string());
+        self.save_state(cx)?;
+        self.record(order)?;
+        Ok(Step::Waiting)
+    }
+
+    /// Writes the cost record of the request the provider accepted, if
+    /// there is one: what the provider quoted, else the rate table's
+    /// price. Under its own record id, which makes writing it again
+    /// harmless.
+    fn record(&mut self, order: &ClipOrder) -> Result<(), JobFailure> {
+        let Some(run) = self.run_of(order.scene).map(|run| run.clone()) else {
+            return Ok(());
+        };
+        let (Some(_), Some(cost)) = (&run.request, &run.cost) else {
+            return Ok(());
+        };
+        self.write_cost(order, &run, cost)
+    }
+
+    /// Writes what the request's clip costs under the record id `cost`.
+    fn write_cost(&self, order: &ClipOrder, run: &ClipRun, cost: &str) -> Result<(), JobFailure> {
+        self.costs().record_request(
+            id(cost)?,
+            PaidCall {
+                provider: order.provider.parse().map_err(unexpected)?,
+                model: &order.model,
+                purpose: self.purpose(),
+                usage: Metered::video_seconds(u64::from(run.seconds)),
+                job: Some(self.job()),
+                reported: run.quote_micros.map(Money::from_micros),
+            },
+            self.project(),
+        );
+        Ok(())
+    }
+
+    /// Takes back the cost record of the request.
+    fn take_back(&mut self, scene: usize) {
+        let cost = self.run_of(scene).and_then(|run| run.cost.clone());
+        if let Some(Ok(record)) = cost.as_deref().map(id::<CostRecordId>) {
+            self.costs().take_back(record);
+        }
+    }
+
+    fn failure(&self, order: &ClipOrder, failure: ProviderFailure) -> JobFailure {
+        JobFailure::new(
+            failure.kind.into(),
+            format!("{}: {}", self.label(order), failure.detail),
+        )
+    }
+
+    /// A submission that did not go through: the provider is busy (try
+    /// again later), the request is at fault (the others go on), or the
+    /// key or credits are (stop).
+    fn submit_failed(
+        &mut self,
+        order: &ClipOrder,
+        failure: ProviderFailure,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let kind = JobFailureKind::from(failure.kind);
+        if kind.is_transient() {
+            return Ok(Step::NotSubmitted(self.failure(order, failure)));
+        }
+        if !is_about_the_scene(kind) {
+            return Err(self.failure(order, failure));
+        }
+        self.scene_failed(order, failure, cx)
+    }
+
+    /// The request ended without a clip, or the provider will not take it:
+    /// where the clip belongs shows why. Sending it again is a new request,
+    /// so the job notes the end and leaves it alone until the user retries
+    /// the job; the queue trying again after an outage (of this provider
+    /// or another's) never sends it, nor does a run picked up after the
+    /// app closed. Whatever the provider called the failure, it is not one
+    /// that passes.
+    fn scene_failed(
+        &mut self,
+        order: &ClipOrder,
+        failure: ProviderFailure,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let mut failure = self.failure(order, failure);
+        if failure.kind.is_transient() {
+            failure.kind = JobFailureKind::RequestFailed;
+        }
+        self.note_ended(order, failure, cx)
+    }
+
+    /// The provider took the request and it ended there without a clip:
+    /// failed, cancelled or forgotten. It says so as such, unless the
+    /// provider's safety rules declined it.
+    fn request_ended(
+        &mut self,
+        order: &ClipOrder,
+        failure: ProviderFailure,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let mut failure = self.failure(order, failure);
+        if failure.kind != JobFailureKind::Declined {
+            failure.kind = JobFailureKind::RequestFailed;
+        }
+        self.note_ended(order, failure, cx)
+    }
+
+    /// Notes the request's end, so only the user's retry sends it again,
+    /// and shows it where the clip belongs.
+    fn note_ended(
+        &mut self,
+        order: &ClipOrder,
+        failure: JobFailure,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        if let Some(run) = self.run_of(order.scene) {
+            run.restart();
+        }
+        let state = self.state_mut();
+        state.ended.retain(|ended| ended.scene != order.scene);
+        state.ended.push(Ended {
+            scene: order.scene,
+            kind: failure.kind.code().to_owned(),
+            // Kept in storage like a job's failure: known keys masked.
+            detail: cx.redact(&failure.detail),
+        });
+        self.save_state(cx)?;
+        self.show_failed(order, &failure)?;
+        Ok(Step::Failed(failure))
+    }
+
+    /// The clip was made, and billed, but could not be downloaded for good
+    /// (its link expired, or what came is not a video). It shows the
+    /// failure and keeps its request: the next attempt asks the provider
+    /// for the clip again, which may give a fresh link, and never submits
+    /// it again on its own. A new clip is the user's to ask for.
+    fn not_fetched(
+        &mut self,
+        order: &ClipOrder,
+        failure: ProviderFailure,
+    ) -> Result<Step, JobFailure> {
+        let failure = JobFailure::new(
+            failure.kind.into(),
+            format!(
+                "{}: the clip was made but could not be downloaded ({}); retry to fetch \
+                 it again, since asking for it anew pays for another clip",
+                self.label(order),
+                failure.detail
+            ),
+        );
+        self.show_failed(order, &failure)?;
+        Ok(Step::Failed(failure))
+    }
+}
+
+impl ClipRequests for ClipJob<'_> {
+    fn calls(&mut self) -> &mut ClipCalls {
+        &mut self.calls
+    }
+
+    fn state(&self) -> &ClipsState {
+        &self.state
+    }
+
+    fn state_mut(&mut self) -> &mut ClipsState {
+        &mut self.state
+    }
+
+    fn job(&self) -> JobId {
+        self.job
+    }
+
+    fn project(&self) -> VideoProjectId {
+        self.project
+    }
+
+    fn costs(&self) -> &CostBook {
+        &self.handler.costs
+    }
+
+    fn purpose(&self) -> CostPurpose {
+        CostPurpose::SceneClip
+    }
+
+    fn label(&self, order: &ClipOrder) -> String {
+        format!("Scene {}", order.scene + 1)
+    }
+
+    fn submission_id(&self, order: &ClipOrder, submission: u32) -> String {
+        format!("{}-{}-{}", self.job, order.scene, submission)
+    }
+
+    /// Shows on the scene that its clip failed.
+    fn show_failed(&self, order: &ClipOrder, failure: &JobFailure) -> Result<(), JobFailure> {
+        if let Some(mut plan) = self.saved_plan()? {
+            plan.scene_mut(order.scene, SystemTime::now())
+                .map_err(unexpected)?
+                .fail_clip(failure.kind);
+            self.handler
+                .plans
+                .save_scene(&plan, order.scene)
+                .map_err(unexpected)?;
+        }
+        Ok(())
+    }
+
+    /// Saves the clip beside the scene's current clip, for the user to
+    /// review. Its cost was recorded when the provider accepted it.
+    fn save_clip(&mut self, order: &ClipOrder, bytes: &[u8]) -> Result<(), JobFailure> {
+        let provider: Provider = order.provider.parse().map_err(unexpected)?;
+        let run = self
+            .run_of(order.scene)
+            .expect("a submitted scene has its run")
+            .clone();
+        let Some(mut plan) = self.saved_plan()? else {
+            return Ok(());
+        };
+        let generation = GenerationId::new();
+        let file = clip_file(generation);
+        self.handler
+            .files
+            .write(self.project, &file, bytes)
+            .map_err(unexpected)?;
+        let clip = SceneClip {
+            file: file.clone(),
+            seconds: run.seconds,
+            stretch: (run.stretch_percent > 0)
+                .then(|| StretchLimit::new(run.stretch_percent.into())),
+            source_image: id(&run.source_image)?,
+            generation: Generation {
+                id: generation,
+                owner: self.handler.owner,
+                project: self.project,
+                provider,
+                model: order.model.clone(),
+                template: plan.generation.template,
+                instructions: format!(
+                    "Image to video, {} s{}, from {}",
+                    run.seconds,
+                    if run.stretch_percent > 0 {
+                        " (played slowed to fit the scene)"
+                    } else {
+                        ""
+                    },
+                    run.image_file
+                ),
+                prompt: run.prompt,
+                output: file,
+                usage: TokenUsage::default(),
+                generated_at: SystemTime::now(),
+                job: Some(self.job),
+            },
+        };
+        let pushed = plan
+            .scene_mut(order.scene, SystemTime::now())
+            .map_err(unexpected)?
+            .add_clip(clip);
+        self.handler
+            .plans
+            .save_scene(&plan, order.scene)
+            .map_err(unexpected)?;
+        if let Some(pushed) = pushed {
+            crate::proxies::remove_media(self.handler.files.as_ref(), self.project, &pushed.file);
+        }
+        // Once more, in case storage refused the record at acceptance.
+        self.record(order)
     }
 }
 
@@ -576,35 +1270,6 @@ impl ClipJob<'_> {
             .ok_or_else(|| JobFailure::unexpected(format!("{provider} does not make clips")))
     }
 
-    /// The provider's key. A plan's access token is asked for on every
-    /// step instead of kept: it expires within the hour and is renewed
-    /// while clips run.
-    fn key(&mut self, provider: Provider) -> Result<ApiKey, JobFailure> {
-        if provider.signs_in() {
-            return self
-                .handler
-                .plan_sessions
-                .access_token(provider)
-                .map_err(|error| plan_failure(provider, &error));
-        }
-        if let Some((_, key)) = self.keys.iter().find(|(p, _)| *p == provider) {
-            return Ok(key.clone());
-        }
-        let key = self
-            .handler
-            .secrets
-            .get(self.handler.owner, provider)
-            .map_err(|e| JobFailure::unexpected(format!("could not read the key: {e}")))?
-            .ok_or_else(|| {
-                JobFailure::new(
-                    JobFailureKind::MissingKey,
-                    format!("no {provider} key is saved"),
-                )
-            })?;
-        self.keys.push((provider, key.clone()));
-        Ok(key)
-    }
-
     /// The saved plan, if it is still this job's.
     fn saved_plan(&self) -> Result<Option<ScenePlan>, JobFailure> {
         Ok(self
@@ -627,24 +1292,6 @@ impl ClipJob<'_> {
             .is_some_and(|plan| plan.is_stale(narration.as_ref())))
     }
 
-    fn save_state(&self, cx: &mut JobContext) -> Result<(), JobFailure> {
-        cx.save_external_handle(to_json(&self.state))
-            .map_err(unexpected)
-    }
-
-    /// Notes that the scene's clip is saved: the scene is done for good.
-    fn delivered(&mut self, scene: usize, cx: &mut JobContext) -> Result<(), JobFailure> {
-        if !self.state.delivered.contains(&scene) {
-            self.state.delivered.push(scene);
-            self.save_state(cx)?;
-        }
-        Ok(())
-    }
-
-    fn run_of(&mut self, scene: usize) -> Option<&mut ClipRun> {
-        self.state.scenes.iter_mut().find(|run| run.scene == scene)
-    }
-
     /// Moves one scene along: hands its image over and submits it, or asks
     /// how its request is going and saves the clip when it is ready.
     /// `Err` stops the whole job.
@@ -655,7 +1302,7 @@ impl ClipJob<'_> {
         generator: &Arc<dyn ClipGenerator>,
         cx: &mut JobContext,
     ) -> Result<Step, JobFailure> {
-        let mut key = self.key(generator.provider())?;
+        let mut key = self.calls.key(generator.provider())?;
         let submitted = self.run_of(order.scene).and_then(|run| run.request.clone());
         let Some(request) = submitted else {
             // Nothing is paid for a scene the narration left behind (a job
@@ -670,82 +1317,10 @@ impl ClipJob<'_> {
             }
             return self.submit(order, scene, generator, &mut key, cx);
         };
-        let handle = ClipHandle(request);
-        match self.call(generator, &mut key, |key| generator.status(key, &handle)) {
-            Ok(ClipStatus::Queued | ClipStatus::Running) => Ok(Step::Waiting),
-            Ok(ClipStatus::Done { video }) => {
-                match self.call(generator, &mut key, |key| generator.download(key, &video)) {
-                    Ok(clip) => {
-                        self.save_clip(order, &clip.bytes)?;
-                        self.delivered(order.scene, cx)?;
-                        Ok(Step::Saved)
-                    }
-                    Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
-                        Ok(Step::Hiccup(self.failure(order, failure)))
-                    }
-                    Err(failure) => self.not_fetched(order, failure),
-                }
-            }
-            Ok(ClipStatus::Failed(failure)) => {
-                // The provider says it made nothing: not billed.
-                self.take_back(order.scene);
-                self.request_ended(order, failure, cx)
-            }
-            Ok(ClipStatus::Lost(failure)) => {
-                // No clip, and no word that none was made: its cost stays.
-                let failure = ProviderFailure::new(
-                    failure.kind,
-                    format!(
-                        "{} (it may have been charged, so its cost stays in Costs)",
-                        failure.detail
-                    ),
-                );
-                self.request_ended(order, failure, cx)
-            }
-            Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
-                Ok(Step::Hiccup(self.failure(order, failure)))
-            }
-            Err(failure) => Err(self.failure(order, failure)),
-        }
-    }
-
-    /// Calls the provider. A token a plan's provider refuses is renewed
-    /// and the call made once more: a refusal started nothing.
-    fn call<R>(
-        &mut self,
-        generator: &Arc<dyn ClipGenerator>,
-        key: &mut ApiKey,
-        call: impl Fn(&ApiKey) -> Result<R, ProviderFailure>,
-    ) -> Result<R, ProviderFailure> {
-        let provider = generator.provider();
-        let answer = match call(key) {
-            Err(failure)
-                if failure.kind == ProviderFailureKind::Rejected
-                    && provider.signs_in()
-                    && !self.renewed =>
-            {
-                self.renewed = true;
-                self.handler.plan_sessions.renew(provider);
-                match self.key(provider) {
-                    Ok(fresh) => {
-                        *key = fresh;
-                        call(key)
-                    }
-                    Err(_) => Err(failure),
-                }
-            }
-            answer => answer,
-        };
-        if answer.is_ok() {
-            self.renewed = false;
-        }
-        answer
+        self.poll(order, generator, &mut key, request, cx)
     }
 
     /// Hands the scene's image over (once per submission) and submits it.
-    /// The job may be told to stop while a call is on its way (cancelled,
-    /// or the app closing): it looks again right before the call that
-    /// starts, and charges for, the clip.
     fn submit(
         &mut self,
         order: &ClipOrder,
@@ -756,16 +1331,16 @@ impl ClipJob<'_> {
     ) -> Result<Step, JobFailure> {
         // A submission noted as sent, with no answer and nowhere to look
         // for it, ends here: before anything is read, checked or sent.
-        let unanswered = self
-            .run_of(order.scene)
-            .is_some_and(|run| run.sent_at.is_some());
-        if unanswered && !generator.dedupes_submissions() && !generator.lists_submissions() {
+        if self.ends_unseen(order, generator) {
             return self.may_have_started(
                 order,
                 "Bardo stopped while the submission was on its way",
                 cx,
             );
         }
+        let unanswered = self
+            .run_of(order.scene)
+            .is_some_and(|run| run.sent_at.is_some());
         // Nothing of this job is on its way for the scene, and another job
         // has animated it meanwhile (the user did not wait for a retry):
         // sending it now would pay for a clip nobody is missing. With a
@@ -841,187 +1416,7 @@ impl ClipJob<'_> {
             seconds: run.seconds,
             last: None,
         };
-        let submission = format!("{}-{}-{}", self.job, order.scene, run.submission);
-        if !generator.dedupes_submissions() {
-            return self.submit_once(order, generator, key, &request, &submission, cx);
-        }
-        if cx.should_stop() {
-            return Ok(Step::Stopped);
-        }
-        // Noted before sending and kept while the answer is lost: sending
-        // the same submission again finds the clip it may have started.
-        self.run_of(order.scene)
-            .expect("staging adds the scene's run")
-            .sent_at = Some(now_secs());
-        self.save_state(cx)?;
-        match self.call(generator, key, |key| {
-            generator.submit(key, &request, &submission)
-        }) {
-            Ok(submitted) => self.submitted(order, submitted, cx),
-            Err(failure) => {
-                if failure.kind != ProviderFailureKind::AnswerLost {
-                    self.run_of(order.scene)
-                        .expect("the scene's run exists")
-                        .sent_at = None;
-                    self.save_state(cx)?;
-                }
-                self.submit_failed(order, failure, cx)
-            }
-        }
-    }
-
-    /// Submits to a provider that would start (and charge for) a second
-    /// clip if sent the same submission again. The job writes down that it
-    /// sends before sending. With that note and no answer it never sends
-    /// again by itself: where the provider lists what it started it looks
-    /// for the clip, and where it does not the scene ends there, as one
-    /// that may have started.
-    fn submit_once(
-        &mut self,
-        order: &ClipOrder,
-        generator: &Arc<dyn ClipGenerator>,
-        key: &mut ApiKey,
-        request: &ClipRequest,
-        submission: &str,
-        cx: &mut JobContext,
-    ) -> Result<Step, JobFailure> {
-        let provider = generator.provider();
-        if let Some(sent_at) = self.run_of(order.scene).and_then(|run| run.sent_at) {
-            return match self.call(generator, key, |key| generator.find_submitted(key, request)) {
-                Ok(Some(handle)) => {
-                    tracing::info!(scene = order.scene, "found the clip a lost answer started");
-                    self.submitted(
-                        order,
-                        ClipSubmission {
-                            handle,
-                            quote: None,
-                        },
-                        cx,
-                    )
-                }
-                Ok(None) if now_secs().saturating_sub(sent_at) < lookup_grace_secs() => {
-                    Ok(Step::NotSubmitted(self.failure(
-                        order,
-                        ProviderFailure::new(
-                            ProviderFailureKind::ProviderDown,
-                            format!(
-                                "waiting for {provider} to list the clip sent without an answer"
-                            ),
-                        ),
-                    )))
-                }
-                Ok(None) => self.scene_failed(
-                    order,
-                    ProviderFailure::new(
-                        ProviderFailureKind::Unexpected,
-                        format!(
-                            "{provider} did not answer the submission and does not list it; \
-                             it may still have started the clip, so check your {provider} \
-                             library before animating this scene again"
-                        ),
-                    ),
-                    cx,
-                ),
-                Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
-                    Ok(Step::NotSubmitted(self.failure(order, failure)))
-                }
-                // Stops with the note kept: the next attempt looks again.
-                Err(failure) => Err(self.failure(order, failure)),
-            };
-        }
-        if let Err(failure) = self.call(generator, key, |key| generator.check_submit(key, request))
-        {
-            return self.submit_failed(order, failure, cx);
-        }
-        if cx.should_stop() {
-            return Ok(Step::Stopped);
-        }
-        self.run_of(order.scene)
-            .expect("staging adds the scene's run")
-            .sent_at = Some(now_secs());
-        self.save_state(cx)?;
-        match self.call(generator, key, |key| {
-            generator.submit(key, request, submission)
-        }) {
-            Ok(submitted) => self.submitted(order, submitted, cx),
-            // It may have started. The note stays, and the queue comes
-            // back to look for the clip.
-            Err(failure)
-                if failure.kind == ProviderFailureKind::AnswerLost
-                    && generator.lists_submissions() =>
-            {
-                let waiting = ProviderFailure::new(
-                    ProviderFailureKind::Unreachable,
-                    format!(
-                        "{}; looking for the clip before sending anything again",
-                        failure.detail
-                    ),
-                );
-                Ok(Step::NotSubmitted(self.failure(order, waiting)))
-            }
-            Err(failure) if failure.kind == ProviderFailureKind::AnswerLost => {
-                self.may_have_started(order, &failure.detail, cx)
-            }
-            // Nothing was started.
-            Err(failure) => {
-                self.run_of(order.scene)
-                    .expect("the scene's run exists")
-                    .sent_at = None;
-                self.save_state(cx)?;
-                self.submit_failed(order, failure, cx)
-            }
-        }
-    }
-
-    /// The submission was sent, no answer says what came of it, and the
-    /// provider offers no way to look: it may be making the clip, and
-    /// billing it. The scene ends there, as any request that ended does,
-    /// and what the clip costs goes to Costs: a spend that may have
-    /// happened counts (ADR-0030). The record's id is saved first, so a
-    /// run cut here records it once.
-    fn may_have_started(
-        &mut self,
-        order: &ClipOrder,
-        why: &str,
-        cx: &mut JobContext,
-    ) -> Result<Step, JobFailure> {
-        let run = self.run_of(order.scene).expect("the scene's run exists");
-        let cost = run
-            .cost
-            .get_or_insert_with(|| CostRecordId::new().to_string())
-            .clone();
-        let run = run.clone();
-        self.save_state(cx)?;
-        self.write_cost(order, &run, &cost)?;
-        let failure = ProviderFailure::new(
-            ProviderFailureKind::AnswerLost,
-            format!(
-                "the provider did not confirm the submission and has no way to look for it, \
-                 so the clip may have been made and charged: its cost is in Costs, and it \
-                 is not sent again unless you retry ({why})"
-            ),
-        );
-        let failure = self.failure(order, failure);
-        self.note_ended(order, failure, cx)
-    }
-
-    /// Keeps the provider's handle and records the clip's cost: from now
-    /// on the provider makes it, and bills it, whatever this job does, and
-    /// the job asks how it goes.
-    fn submitted(
-        &mut self,
-        order: &ClipOrder,
-        submitted: ClipSubmission,
-        cx: &mut JobContext,
-    ) -> Result<Step, JobFailure> {
-        let run = self.run_of(order.scene).expect("the scene's run exists");
-        run.request = Some(submitted.handle.0);
-        run.quote_micros = submitted.quote.map(Money::micros);
-        run.sent_at = None;
-        run.cost = Some(CostRecordId::new().to_string());
-        self.save_state(cx)?;
-        self.record(order)?;
-        Ok(Step::Waiting)
+        self.send(order, generator, key, &request, cx)
     }
 
     /// Records the cost of every request the provider accepted, each
@@ -1060,43 +1455,6 @@ impl ClipJob<'_> {
             self.record(order)?;
         }
         Ok(())
-    }
-
-    /// Writes the cost record of the scene's accepted request, if it has
-    /// one: what the provider quoted, else the rate table's price.
-    fn record(&mut self, order: &ClipOrder) -> Result<(), JobFailure> {
-        let Some(run) = self.run_of(order.scene).map(|run| run.clone()) else {
-            return Ok(());
-        };
-        let (Some(_), Some(cost)) = (&run.request, &run.cost) else {
-            return Ok(());
-        };
-        self.write_cost(order, &run, cost)
-    }
-
-    /// Writes what the scene's clip costs under the record id `cost`.
-    fn write_cost(&self, order: &ClipOrder, run: &ClipRun, cost: &str) -> Result<(), JobFailure> {
-        self.handler.costs.record_request(
-            id(cost)?,
-            PaidCall {
-                provider: order.provider.parse().map_err(unexpected)?,
-                model: &order.model,
-                purpose: CostPurpose::SceneClip,
-                usage: Metered::video_seconds(u64::from(run.seconds)),
-                job: Some(self.job),
-                reported: run.quote_micros.map(Money::from_micros),
-            },
-            self.project,
-        );
-        Ok(())
-    }
-
-    /// Takes back the cost record of the scene's request.
-    fn take_back(&mut self, scene: usize) {
-        let cost = self.run_of(scene).and_then(|run| run.cost.clone());
-        if let Some(Ok(record)) = cost.as_deref().map(id::<CostRecordId>) {
-            self.handler.costs.take_back(record);
-        }
     }
 
     /// Reads the scene as it is now (image, motion prompt, length) and
@@ -1164,6 +1522,7 @@ impl ClipJob<'_> {
                 source_image,
                 image_file,
                 staged: Some(staged.clone()),
+                staged_last: None,
                 request: None,
                 quote_micros: None,
                 sent_at: None,
@@ -1172,191 +1531,6 @@ impl ClipJob<'_> {
         }
         self.save_state(cx)?;
         Ok(Ok(staged))
-    }
-
-    fn failure(&self, order: &ClipOrder, failure: ProviderFailure) -> JobFailure {
-        JobFailure::new(
-            failure.kind.into(),
-            format!("Scene {}: {}", order.scene + 1, failure.detail),
-        )
-    }
-
-    /// A submission that did not go through: the provider is busy (try
-    /// again later), the scene is at fault (the others go on), or the key
-    /// or credits are (stop).
-    fn submit_failed(
-        &mut self,
-        order: &ClipOrder,
-        failure: ProviderFailure,
-        cx: &mut JobContext,
-    ) -> Result<Step, JobFailure> {
-        let kind = JobFailureKind::from(failure.kind);
-        if kind.is_transient() {
-            return Ok(Step::NotSubmitted(self.failure(order, failure)));
-        }
-        if !is_about_the_scene(kind) {
-            return Err(self.failure(order, failure));
-        }
-        self.scene_failed(order, failure, cx)
-    }
-
-    /// The scene's request ended without a clip, or the provider will not
-    /// take the scene: the scene shows why. Sending it again is a new
-    /// request, so the job notes the end and leaves the scene alone until
-    /// the user retries the job; the queue trying again after an outage
-    /// (of this scene's provider or another's) never sends it, nor does a
-    /// run picked up after the app closed. Whatever the provider called
-    /// the failure, it is not one that passes.
-    fn scene_failed(
-        &mut self,
-        order: &ClipOrder,
-        failure: ProviderFailure,
-        cx: &mut JobContext,
-    ) -> Result<Step, JobFailure> {
-        let mut failure = self.failure(order, failure);
-        if failure.kind.is_transient() {
-            failure.kind = JobFailureKind::RequestFailed;
-        }
-        self.note_ended(order, failure, cx)
-    }
-
-    /// The provider took the scene's request and it ended there without a
-    /// clip: failed, cancelled or forgotten. It says so as such, unless
-    /// the provider's safety rules declined it.
-    fn request_ended(
-        &mut self,
-        order: &ClipOrder,
-        failure: ProviderFailure,
-        cx: &mut JobContext,
-    ) -> Result<Step, JobFailure> {
-        let mut failure = self.failure(order, failure);
-        if failure.kind != JobFailureKind::Declined {
-            failure.kind = JobFailureKind::RequestFailed;
-        }
-        self.note_ended(order, failure, cx)
-    }
-
-    /// Notes the scene's end, so only the user's retry sends it again, and
-    /// shows it on the scene.
-    fn note_ended(
-        &mut self,
-        order: &ClipOrder,
-        failure: JobFailure,
-        cx: &mut JobContext,
-    ) -> Result<Step, JobFailure> {
-        if let Some(run) = self.run_of(order.scene) {
-            run.restart();
-        }
-        self.state.ended.retain(|ended| ended.scene != order.scene);
-        self.state.ended.push(Ended {
-            scene: order.scene,
-            kind: failure.kind.code().to_owned(),
-            // Kept in storage like a job's failure: known keys masked.
-            detail: cx.redact(&failure.detail),
-        });
-        self.save_state(cx)?;
-        self.show_failed(order, &failure)?;
-        Ok(Step::Failed(failure))
-    }
-
-    /// The clip was made, and billed, but could not be downloaded for good
-    /// (its link expired, or what came is not a video). The scene shows
-    /// the failure and keeps its request: the next attempt asks the
-    /// provider for the clip again, which may give a fresh link, and never
-    /// submits the scene again on its own. A new clip is the user's to ask
-    /// for, with Animate.
-    fn not_fetched(
-        &mut self,
-        order: &ClipOrder,
-        failure: ProviderFailure,
-    ) -> Result<Step, JobFailure> {
-        let failure = JobFailure::new(
-            failure.kind.into(),
-            format!(
-                "Scene {}: the clip was made but could not be downloaded ({}); retry to fetch \
-                 it again, since animating the scene anew pays for another clip",
-                order.scene + 1,
-                failure.detail
-            ),
-        );
-        self.show_failed(order, &failure)?;
-        Ok(Step::Failed(failure))
-    }
-
-    /// Shows on the scene that its clip failed.
-    fn show_failed(&self, order: &ClipOrder, failure: &JobFailure) -> Result<(), JobFailure> {
-        if let Some(mut plan) = self.saved_plan()? {
-            plan.scene_mut(order.scene, SystemTime::now())
-                .map_err(unexpected)?
-                .fail_clip(failure.kind);
-            self.handler
-                .plans
-                .save_scene(&plan, order.scene)
-                .map_err(unexpected)?;
-        }
-        Ok(())
-    }
-
-    /// Saves the clip beside the scene's current clip, for the user to
-    /// review. Its cost was recorded when the provider accepted it.
-    fn save_clip(&mut self, order: &ClipOrder, bytes: &[u8]) -> Result<(), JobFailure> {
-        let provider: Provider = order.provider.parse().map_err(unexpected)?;
-        let run = self
-            .run_of(order.scene)
-            .expect("a submitted scene has its run")
-            .clone();
-        let Some(mut plan) = self.saved_plan()? else {
-            return Ok(());
-        };
-        let generation = GenerationId::new();
-        let file = clip_file(generation);
-        self.handler
-            .files
-            .write(self.project, &file, bytes)
-            .map_err(unexpected)?;
-        let clip = SceneClip {
-            file: file.clone(),
-            seconds: run.seconds,
-            stretch: (run.stretch_percent > 0)
-                .then(|| StretchLimit::new(run.stretch_percent.into())),
-            source_image: id(&run.source_image)?,
-            generation: Generation {
-                id: generation,
-                owner: self.handler.owner,
-                project: self.project,
-                provider,
-                model: order.model.clone(),
-                template: plan.generation.template,
-                instructions: format!(
-                    "Image to video, {} s{}, from {}",
-                    run.seconds,
-                    if run.stretch_percent > 0 {
-                        " (played slowed to fit the scene)"
-                    } else {
-                        ""
-                    },
-                    run.image_file
-                ),
-                prompt: run.prompt,
-                output: file,
-                usage: TokenUsage::default(),
-                generated_at: SystemTime::now(),
-                job: Some(self.job),
-            },
-        };
-        let pushed = plan
-            .scene_mut(order.scene, SystemTime::now())
-            .map_err(unexpected)?
-            .add_clip(clip);
-        self.handler
-            .plans
-            .save_scene(&plan, order.scene)
-            .map_err(unexpected)?;
-        if let Some(pushed) = pushed {
-            crate::proxies::remove_media(self.handler.files.as_ref(), self.project, &pushed.file);
-        }
-        // Once more, in case storage refused the record at acceptance.
-        self.record(order)
     }
 }
 

@@ -115,6 +115,8 @@ The words Bardo uses, in plain terms.
 
 **Transition**: how the picture goes from one clip to the next around a cut: a crossfade, a pass through black or white, a wipe, a slide or a zoom. Centered on the cut, so the cut and the narration stay where they are.
 
+**AI bridge**: a short clip a video model makes over a cut, from the last frame before it to the first frame after it, so a jump between two places reads as one move. It covers half its length on each side of the cut and never adds time ([AI bridge over a cut](editor.md#bridge)).
+
 **Motion (Ken Burns)**: a slow zoom or pan over a still picture while it shows, so a video of stills does not play as a slideshow. Set per still, with a strength; a channel's new cuts vary it from scene to scene.
 
 **In sync**: a performed clip that plays where the cut plays the narration it performs, frame for frame. Trimming, moving or removing a clip before it puts it early or late; **Put back in sync** brings it back.

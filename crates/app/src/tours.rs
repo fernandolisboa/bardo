@@ -1168,7 +1168,7 @@ pub const EDITOR: Tour = {
     const PAGE: &str = "editor";
     Tour {
         id: TourId::Editor,
-        version: 3,
+        version: 4,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "preview", control(Control::EditorPreview)).learn(PAGE, "preview"),

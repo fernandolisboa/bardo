@@ -56,6 +56,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) framing: crate::look_framing::LookFramingHandler,
     pub(crate) scenes: SceneHandler,
     pub(crate) clips: ClipHandler,
+    pub(crate) bridges: crate::bridges::BridgeHandler,
     pub(crate) proxies: ProxyHandler,
     pub(crate) music_prompts: MusicPromptHandler,
     pub(crate) music: MusicHandler,
@@ -102,6 +103,7 @@ pub(crate) fn built_in_handlers(
         framing,
         scenes,
         clips,
+        bridges,
         proxies,
         music_prompts,
         music,
@@ -151,6 +153,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::SceneImages, Arc::clone(&scenes) as _);
     handlers.insert(JobKind::ShotBackdrop, scenes);
     handlers.insert(JobKind::SceneClips, Arc::new(clips));
+    handlers.insert(JobKind::BridgeClip, Arc::new(bridges));
     handlers.insert(JobKind::Proxies, Arc::new(proxies));
     handlers.insert(JobKind::MusicPrompt, Arc::new(music_prompts));
     handlers.insert(JobKind::Music, Arc::new(music));
@@ -408,6 +411,7 @@ impl Bardo {
         let Some((project, calls)) = self
             .images_left(&job)
             .or_else(|| self.clips_left(&job))
+            .or_else(|| self.bridge_left(&job))
             .or_else(|| self.backdrop_left(&job))
             .or_else(|| self.script_calls_left(&job))
         else {
@@ -2247,6 +2251,7 @@ mod tests {
             scene_plans: Arc::clone(db) as _,
             timelines: Arc::clone(db) as _,
             media_assets: Arc::clone(db) as _,
+            bridges: Arc::clone(db) as _,
             music_prompts: Arc::clone(db) as _,
             music_tracks: Arc::clone(db) as _,
             thumbnails: Arc::clone(db) as _,

@@ -37,12 +37,48 @@ impl Ffmpeg {
         self.jpeg(source, Some(at), destination, max_bytes)
     }
 
+    /// Writes one end of an AI bridge (#363) as a JPEG at `destination`,
+    /// within `max_bytes`: the frame of the video at `source` shown at
+    /// `at`, or the still image at `source` with no `at`. With a `size`
+    /// the picture is scaled to cover it and cut to it from the middle, so
+    /// both ends of a bridge have the same shape; without one it keeps its
+    /// own size, rounded down to even sides.
+    pub fn bridge_frame(
+        &self,
+        source: &Path,
+        at: Option<Duration>,
+        size: Option<(u32, u32)>,
+        destination: &Path,
+        max_bytes: u64,
+    ) -> Result<(), MediaError> {
+        let filter = match size {
+            Some((width, height)) => format!(
+                "scale={width}:{height}:force_original_aspect_ratio=increase,\
+                 crop={width}:{height},setsar=1"
+            ),
+            None => "crop=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1".to_owned(),
+        };
+        self.jpeg_filtered(source, at, Some(&filter), destination, max_bytes)
+    }
+
     /// One picture of `source`, from `at` for a video, as a JPEG with no
     /// metadata (EXIF, GPS, device) within `max_bytes`.
     fn jpeg(
         &self,
         source: &Path,
         at: Option<Duration>,
+        destination: &Path,
+        max_bytes: u64,
+    ) -> Result<(), MediaError> {
+        self.jpeg_filtered(source, at, None, destination, max_bytes)
+    }
+
+    /// `jpeg`, through the video `filter` when given.
+    fn jpeg_filtered(
+        &self,
+        source: &Path,
+        at: Option<Duration>,
+        filter: Option<&str>,
         destination: &Path,
         max_bytes: u64,
     ) -> Result<(), MediaError> {
@@ -57,7 +93,11 @@ impl Ffmpeg {
                 .arg("-i")
                 .arg(path_arg(source))
                 .args(["-map_metadata", "-1"])
-                .args(["-frames:v", "1"])
+                .args(["-frames:v", "1"]);
+            if let Some(filter) = filter {
+                command.args(["-vf", filter]);
+            }
+            command
                 .args(["-c:v", "mjpeg", "-q:v", &quality.to_string()])
                 .args(["-pix_fmt", "yuvj420p", "-f", "mjpeg"])
                 .arg(path_arg(&partial));

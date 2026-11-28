@@ -10,6 +10,7 @@ mod ads;
 mod agent;
 mod appearance;
 mod backup;
+mod bridges;
 mod captures;
 mod channels;
 mod chapters;
@@ -137,6 +138,9 @@ pub use backup::{
 pub use bardo_domain;
 /// How each caption style looks, for the editor's style swatches.
 pub use bardo_media::ffmpeg::{CaptionLook, caption_look, highlight_colour};
+pub use bridges::{
+    BridgeAsk, BridgeError, BridgeLength, BridgeModel, BridgeOptions, BridgeState, BridgeView,
+};
 pub use captures::{CaptureError, CaptureReader, CaptureVoiceChoice, ChosenCapture, take_source};
 pub use channels::ChannelError;
 pub use chapters::{ChapterRow, ChaptersError, ChaptersView};
@@ -349,6 +353,9 @@ pub struct Repositories {
     pub timelines: Arc<dyn TimelineRepository>,
     /// Each project's imported media.
     pub media_assets: Arc<dyn MediaAssetRepository>,
+    /// The AI bridges waiting on their cuts (#363). Shared with the job
+    /// queue.
+    pub bridges: Arc<dyn bardo_domain::BridgeRepository>,
     /// Each project's music prompt. Shared with the job queue.
     pub music_prompts: Arc<dyn MusicPromptRepository>,
     /// Each project's generated music. Shared with the job queue.
@@ -507,6 +514,7 @@ impl Repositories {
             scene_plans: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
             media_assets: Arc::clone(&db) as _,
+            bridges: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             music_tracks: Arc::clone(&db) as _,
             thumbnails: Arc::clone(&db) as _,
@@ -727,6 +735,7 @@ pub struct Bardo {
     scene_plans: Arc<dyn ScenePlanRepository>,
     timelines: Arc<dyn TimelineRepository>,
     media_assets: Arc<dyn MediaAssetRepository>,
+    bridges: Arc<dyn bardo_domain::BridgeRepository>,
     music_prompts: Arc<dyn MusicPromptRepository>,
     music_tracks: Arc<dyn MusicTrackRepository>,
     thumbnails: Arc<dyn ThumbnailRepository>,
@@ -858,6 +867,7 @@ impl Bardo {
             scene_plans,
             timelines,
             media_assets,
+            bridges,
             music_prompts,
             music_tracks,
             thumbnails,
@@ -1112,6 +1122,16 @@ impl Bardo {
             plan_sessions: plan_book.sessions().clone(),
             costs: cost_book.clone(),
         };
+        let bridge_handler = crate::bridges::BridgeHandler {
+            owner: profile.id,
+            bridges: Arc::clone(&bridges),
+            files: Arc::clone(&files),
+            media: Arc::clone(&providers.media),
+            generators: providers.clips.clone(),
+            secrets: Arc::clone(&secrets),
+            plan_sessions: plan_book.sessions().clone(),
+            costs: cost_book.clone(),
+        };
         let proxy_handler = ProxyHandler {
             files: Arc::clone(&files),
             media: Arc::clone(&providers.media),
@@ -1311,6 +1331,7 @@ impl Bardo {
                     framing: framing_handler,
                     scenes: scene_handler,
                     clips: clip_handler,
+                    bridges: bridge_handler,
                     proxies: proxy_handler,
                     music_prompts: music_prompt_handler,
                     music: music_handler,
@@ -1364,6 +1385,7 @@ impl Bardo {
             scene_plans,
             timelines,
             media_assets,
+            bridges,
             music_prompts,
             music_tracks,
             thumbnails,
@@ -3778,6 +3800,7 @@ mod tests {
             scene_plans: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
             media_assets: Arc::clone(&db) as _,
+            bridges: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             music_tracks: Arc::clone(&db) as _,
             thumbnails: Arc::clone(&db) as _,

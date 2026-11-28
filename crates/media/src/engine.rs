@@ -102,6 +102,18 @@ pub trait MediaEngine: Send + Sync {
         max_bytes: u64,
     ) -> Result<(), MediaError>;
 
+    /// Writes one end of an AI bridge (#363) as a JPEG at `destination`,
+    /// within `max_bytes`: a video's frame at `at`, or a still with none,
+    /// covering `size` when given (`Ffmpeg::bridge_frame`).
+    fn bridge_frame(
+        &self,
+        source: &Path,
+        at: Option<Duration>,
+        size: Option<(u32, u32)>,
+        destination: &Path,
+        max_bytes: u64,
+    ) -> Result<(), MediaError>;
+
     /// Writes the sound of the recording at `source` to `destination` as
     /// mono 16-bit WAV at 44.1 kHz.
     fn extract_sound(
@@ -285,6 +297,18 @@ impl MediaEngine for BundledFfmpeg {
     ) -> Result<(), MediaError> {
         self.ffmpeg()?
             .draw_card_text(picture, layout, text, destination)
+    }
+
+    fn bridge_frame(
+        &self,
+        source: &Path,
+        at: Option<Duration>,
+        size: Option<(u32, u32)>,
+        destination: &Path,
+        max_bytes: u64,
+    ) -> Result<(), MediaError> {
+        self.ffmpeg()?
+            .bridge_frame(source, at, size, destination, max_bytes)
     }
 
     fn fit_picture(

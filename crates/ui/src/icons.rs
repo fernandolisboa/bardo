@@ -34,6 +34,7 @@ icon_assets!(
         Send,
         Share2,
         ShieldCheck,
+        Sparkles,
         Trash,
         Tv,
         Webcam,

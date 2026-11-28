@@ -195,7 +195,7 @@ impl Timeline {
     /// video track, cutting the items at both ends and replacing what lies
     /// between; the track's last item runs on to `from` when the track ends
     /// before it. Items are compared by the frames they start and end on.
-    fn overwrite(
+    pub(crate) fn overwrite(
         &self,
         from: u64,
         to: u64,

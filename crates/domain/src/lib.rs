@@ -47,6 +47,7 @@ mod ad_review;
 mod agent_task;
 mod appearance;
 mod backup;
+mod bridge;
 mod budget;
 mod byteplus;
 mod caption;
@@ -163,6 +164,10 @@ pub use appearance::{
 pub use backup::{
     AUTOMATIC_BACKUP_EVERY, AUTOMATIC_BACKUPS_KEPT, BackupError, BackupInfo, BackupOptions,
     BackupStore, MediaSize, ProgressReport, RestoreOutcome, SavedBackup,
+};
+pub use bridge::{
+    BRIDGE_NOTE_MAX_CHARS, BRIDGE_PROMPT, Bridge, BridgeCut, BridgeId, BridgeRefusal,
+    BridgeRepository, BridgeSpan, FrameSource, bridge_frames, bridge_prompt,
 };
 pub use budget::{Budget, BudgetLevel, Month};
 pub use byteplus::{

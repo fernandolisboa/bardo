@@ -346,6 +346,8 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
             ..Metered::default()
         },
         CostPurpose::SceneClip => Metered::video_seconds(5),
+        // The shortest a bridge is asked for.
+        CostPurpose::BridgeClip => Metered::video_seconds(3),
         // A ten-minute recording.
         CostPurpose::NarrationAlignment
         | CostPurpose::ScriptCheck
