@@ -380,6 +380,8 @@ pub(crate) fn copy_plan(
                 failure: None,
             })
             .with_described_only(member.is_described_only())
+            // A recurring object stays one (#361).
+            .with_kind(member.kind())
         })
         .collect();
     // The copied portraits have records of their own: an image drawn with

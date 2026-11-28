@@ -402,7 +402,7 @@ checksum = "The installer doesn't match the checksum its release publishes, so B
 off_script = "The recording does not follow the script closely enough. Record it again reading the current script, then import it."
 vision_models = "The face, depth and mask models are missing, damaged or would not run. Reinstall Bardo to put them back, then retry."
 out_of_date = "The narration was made again since these scenes were planned, so nothing more was made for them. On the Scenes stage, fit the scenes to the narration or plan them again (on a version, place them), then start again."
-portrait_missing = "The portrait of a person in the scene is missing or could not be sent, and a scene is not drawn without it. Draw the portrait again under People in this scene, or choose Draw without a portrait there, then draw the scene."
+portrait_missing = "The portrait of a person or the picture of an object in the scene is missing or could not be sent, and a scene is not drawn without it. Draw it again under People in this scene or Objects in this scene, or choose to draw without it there, then draw the scene."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
@@ -2029,12 +2029,25 @@ described_only_hint = "Drawn from the description alone, as you chose: no portra
 draw_without = "Draw without a portrait"
 use_portrait = "Use a portrait"
 
+[scenes.props]
+title = "Objects in this scene"
+hint = "Bardo draws one reference picture of each object that comes back in the video and sends it with every scene that shows it, so it keeps the same shape, colors and material."
+later = "No picture yet: it is drawn before the first scene that shows this object."
+edit = "Edit description"
+redraw = "Draw picture again"
+failed = "The picture was not drawn:"
+described_only = "No picture"
+described_only_hint = "Drawn from the description alone, as you chose: no picture is drawn or sent for this object, so it may change from scene to scene."
+draw_without = "Draw without a picture"
+use_picture = "Use a picture"
+save_hint = "Keeps this object, with its picture, as a World object other videos can pick."
+
 [scenes.old_portraits]
-title = "Scenes showing an older face: {n}"
-hint = "These images do not match the portrait of someone they show: they were drawn with an older portrait of that person, or without one. They stay as they are until drawn again, and each new image waits for review beside the current one. A missing portrait is drawn first."
+title = "Scenes showing an older face or object: {n}"
+hint = "These images do not match the portrait of someone or the picture of an object they show: they were drawn with an older reference, or without one. They stay as they are until drawn again, and each new image waits for review beside the current one. A missing reference is drawn first."
 redraw = "Draw them again"
-scene = "This image does not match the portrait of someone in it: it was drawn with an older portrait, or without one. Draw it again to match."
-card = "Older face"
+scene = "This image does not match the portrait of someone or the picture of an object in it: it was drawn with an older reference, or without one. Draw it again to match."
+card = "Older reference"
 
 [scenes.restyled]
 title = "Scenes in another style: {n}"
@@ -3180,7 +3193,7 @@ body = "Pick the world's characters this video shows, each with an instruction f
 
 [tour.scenes.plan]
 title = "Plan and draw"
-body = "Plan scenes turns the narration into a storyboard: scenes on its sentences that follow one another, the people and places that come back, and an image prompt for each scene. Then draw the missing images in one run, each one with the earlier ones as references; the estimate is under the button."
+body = "Plan scenes turns the narration into a storyboard: scenes on its sentences that follow one another, the people, places and objects that come back, and an image prompt for each scene. Then draw the missing images in one run, each one with the earlier ones as references; the estimate is under the button."
 
 [tour.scenes.list]
 title = "The scenes"
@@ -3188,7 +3201,7 @@ body = "Each scene in order, with its time, its image and where it stands: to dr
 
 [tour.scenes.scene]
 title = "A scene"
-body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images. A product shot's layout, position and backdrop change for free too; only drawing a backdrop is paid, after its estimate, and a new one waits for you to keep or discard it. A scene of the product in use is drawn with the product's photo and waits for you to check it against the real product, draw it again, or use the real image instead. The end card, the ad's last scene, is composed for free too: type its headline and second line, show the brief's offer or not, and pick its look and where its text and logo sit."
+body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people and objects that come back in the video with their reference portraits and pictures, so places, people and things look the same in every scene. A scene is not drawn without the portrait or picture of everything in it that comes back, except what you chose to draw without one, and one drawn with an older reference is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images. A product shot's layout, position and backdrop change for free too; only drawing a backdrop is paid, after its estimate, and a new one waits for you to keep or discard it. A scene of the product in use is drawn with the product's photo and waits for you to check it against the real product, draw it again, or use the real image instead. The end card, the ad's last scene, is composed for free too: type its headline and second line, show the brief's offer or not, and pick its look and where its text and logo sit."
 
 [tour.scenes.redraw]
 title = "Draw again"

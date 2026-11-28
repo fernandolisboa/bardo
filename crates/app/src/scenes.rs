@@ -48,7 +48,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, AspectRatio, CastDraft, CastMember, CostPurpose, GeneratedText, Generation,
+    ApiKey, AspectRatio, CastDraft, CastKind, CastMember, CostPurpose, GeneratedText, Generation,
     GenerationId, ImageFormat, ImageGenerator, ImageRequest, ImageShape, Job, JobFailure,
     JobFailureKind, JobId, JobKind, Narration, NarrationId, NarrationRepository, NoPendingClip,
     NoPendingImage, NoSuchCastMember, NoSuchPlace, NoSuchScene, OtherShot, OtherText, PlaceDraft,
@@ -348,10 +348,12 @@ impl ScenesView {
 
 /// The shape Claude answers in, in the order it thinks the video through:
 /// the story the images tell from first to last, the cast, the places,
-/// then the scenes, each with the cast members it shows (by their index
-/// in `cast`), the place it happens in (by its index in `places`, -1 for
-/// a place of its own) and how its clip moves. The story is only there to
-/// be written before the scenes; Bardo keeps it in the plan's provenance.
+/// the recurring objects (#361), then the scenes, each with the cast
+/// members it shows (by their index in `cast`), the place it happens in
+/// (by its index in `places`, -1 for a place of its own), the recurring
+/// objects it shows (by their index in `props`) and how its clip moves.
+/// The story is only there to be written before the scenes; Bardo keeps it
+/// in the plan's provenance.
 /// The fields a template may not mention say what they are for, so a
 /// template written before them still gets an answer Bardo can use.
 pub(crate) const PLAN_SCHEMA: &str = r#"{
@@ -386,6 +388,19 @@ pub(crate) const PLAN_SCHEMA: &str = r#"{
         "additionalProperties": false
       }
     },
+    "props": {
+      "type": "array",
+      "description": "The objects that more than one scene shows (a cup, a lantern, a notebook), each once, with one fixed description: shape, size, material, colors and markings. Empty when no object recurs.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"}
+        },
+        "required": ["name", "description"],
+        "additionalProperties": false
+      }
+    },
     "scenes": {
       "type": "array",
       "items": {
@@ -403,6 +418,11 @@ pub(crate) const PLAN_SCHEMA: &str = r#"{
             "type": "array",
             "items": {"type": "integer"},
             "description": "The numbers of the fixed objects this scene shows (from 1). Leave it out, or empty, when it shows none."
+          },
+          "props": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "The positions in `props` (from 0) of the recurring objects this scene shows. Leave it out, or empty, when it shows none."
           }
         },
         "required": ["first_sentence", "place", "prompt", "cast", "motion"],
@@ -410,7 +430,7 @@ pub(crate) const PLAN_SCHEMA: &str = r#"{
       }
     }
   },
-  "required": ["story", "cast", "places", "scenes"],
+  "required": ["story", "cast", "places", "props", "scenes"],
   "additionalProperties": false
 }"#;
 
@@ -420,6 +440,9 @@ struct PlannedScenes {
     cast: Vec<PlannedMember>,
     #[serde(default)]
     places: Vec<PlannedMember>,
+    /// The recurring objects (#361); absent from answers before them.
+    #[serde(default)]
+    props: Vec<PlannedMember>,
     scenes: Vec<PlannedScene>,
 }
 
@@ -447,6 +470,9 @@ struct PlannedScene {
     /// The fixed objects it shows (#338), by their number from 1.
     #[serde(default)]
     objects: Vec<i64>,
+    /// The recurring objects it shows (#361), by their index in `props`.
+    #[serde(default)]
+    props: Vec<i64>,
     /// The product image a product shot or an end card shows, by its
     /// position; negative for none. Read as any JSON value: one that is no
     /// position (a fraction, a huge number, text) shows the first image
@@ -483,6 +509,11 @@ struct PlanPayload {
     /// numbered them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     fixed_objects: Vec<String>,
+    /// Their names, in the same order: a recurring object of the answer
+    /// with one of these names is that world object, already drawn with
+    /// its own picture, and is not drawn a second time (#361).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    fixed_object_names: Vec<String>,
 }
 
 /// A character of the fixed cast, or a fixed place, as the plan's request
@@ -498,9 +529,24 @@ impl FixedMember {
     /// Whether the planner's cast member `name` is this character: the
     /// same name, ignoring case and a leading article.
     fn is(&self, name: &str) -> bool {
-        bardo_domain::same_name(&self.name, name)
-            || bardo_domain::same_name(without_article(&self.name), without_article(name))
+        names_match(&self.name, name)
     }
+}
+
+/// What a scene waits for when `member`'s reference is missing: a
+/// person's portrait or an object's picture (#361).
+fn missing_reference(member: &CastMember) -> String {
+    match member.kind() {
+        CastKind::Person => format!("the portrait of {}", member.name),
+        CastKind::Object => format!("the picture of {}", member.name),
+    }
+}
+
+/// Whether two names read as the same, ignoring case and a leading
+/// article, as a planner's answer may name a picked item.
+fn names_match(one: &str, other: &str) -> bool {
+    bardo_domain::same_name(one, other)
+        || bardo_domain::same_name(without_article(one), without_article(other))
 }
 
 /// `name` without a leading English article.
@@ -921,7 +967,7 @@ impl SceneHandler {
         // A member named as a picked character is that character, with its
         // fixed appearance whatever the answer wrote; each character once.
         let mut taken: Vec<&str> = Vec::new();
-        let cast = planned
+        let cast: Vec<CastDraft> = planned
             .cast
             .into_iter()
             .map(|member| {
@@ -937,16 +983,54 @@ impl SceneHandler {
                             character: uuid::Uuid::parse_str(&fixed.character)
                                 .ok()
                                 .map(bardo_domain::WorldItemId::from),
+                            kind: CastKind::Person,
                         }
                     }
                     None => CastDraft {
                         name: member.name,
                         description: member.description,
                         character: None,
+                        kind: CastKind::Person,
                     },
                 }
             })
             .collect();
+        // The recurring objects follow the people as cast members of their
+        // own kind (#361), so a scene's `props` point past the people. One
+        // named as a picked world object is that object, which the scene
+        // shows through its `objects`: it is left out rather than drawn
+        // twice.
+        let people = cast.len();
+        // For each prop, the picked object it names, by its position in
+        // the request's fixed objects.
+        let picked_as: Vec<Option<usize>> = planned
+            .props
+            .iter()
+            .map(|prop| {
+                payload
+                    .fixed_object_names
+                    .iter()
+                    .position(|name| names_match(name, &prop.name))
+            })
+            .collect();
+        let props: Vec<Option<CastDraft>> = planned
+            .props
+            .into_iter()
+            .zip(&picked_as)
+            .map(|(prop, picked)| {
+                picked.is_none().then_some(CastDraft {
+                    name: prop.name,
+                    description: prop.description,
+                    character: None,
+                    kind: CastKind::Object,
+                })
+            })
+            .collect();
+        let kept_props: Vec<bool> = props.iter().map(Option::is_some).collect();
+        let mut cast = cast;
+        // A left-out object keeps its place with an empty name, which no
+        // plan keeps, so the positions after it still point right.
+        cast.extend(props.into_iter().map(Option::unwrap_or_default));
         // A place named as a picked place is that world place, likewise.
         let mut placed: Vec<&str> = Vec::new();
         let places = planned
@@ -994,6 +1078,16 @@ impl SceneHandler {
                         .cast
                         .into_iter()
                         .filter_map(|member| usize::try_from(member).ok())
+                        // A person's position past the people is no one.
+                        .filter(|&member| member < people)
+                        .chain(
+                            scene
+                                .props
+                                .iter()
+                                .filter_map(|&prop| usize::try_from(prop).ok())
+                                .filter(|&prop| kept_props.get(prop).copied().unwrap_or(false))
+                                .map(|prop| people + prop),
+                        )
                         .collect(),
                     motion: scene.motion,
                     place: scene.place.and_then(|place| usize::try_from(place).ok()),
@@ -1002,12 +1096,27 @@ impl SceneHandler {
                         .product_image
                         .and_then(|image| image.as_u64())
                         .and_then(|image| usize::try_from(image).ok()),
-                    objects: scene
-                        .objects
-                        .into_iter()
-                        .filter_map(|number| usize::try_from(number).ok()?.checked_sub(1))
-                        .filter_map(|at| objects.get(at).copied())
-                        .collect(),
+                    objects: {
+                        let mut shown: Vec<bardo_domain::WorldItemId> = Vec::new();
+                        // A prop that is a picked object shows that object.
+                        let named = scene
+                            .props
+                            .iter()
+                            .filter_map(|&prop| usize::try_from(prop).ok())
+                            .filter_map(|prop| picked_as.get(prop).copied().flatten());
+                        let numbered = scene
+                            .objects
+                            .into_iter()
+                            .filter_map(|number| usize::try_from(number).ok()?.checked_sub(1));
+                        for at in numbered.chain(named) {
+                            if let Some(&item) = objects.get(at)
+                                && !shown.contains(&item)
+                            {
+                                shown.push(item);
+                            }
+                        }
+                        shown
+                    },
                 })
             })
             .collect();
@@ -1354,7 +1463,9 @@ impl SceneHandler {
             // again) the scene is not drawn: it would be paid for and show
             // another face (#269).
             let mut used: PortraitsUsed = Vec::new();
-            let mut without: Vec<&str> = Vec::new();
+            // What is missing, as "the portrait of the chef" or "the picture
+            // of the cup" (#361).
+            let mut without: Vec<String> = Vec::new();
             // The people whose portrait is there and will not read.
             let mut unreadable: Vec<usize> = Vec::new();
             for (member, cast) in &members {
@@ -1376,9 +1487,9 @@ impl SceneHandler {
                     Some(Ok(portrait)) => used.push((*member, Some(portrait))),
                     Some(Err(NotAdded::Unreadable)) => {
                         unreadable.push(*member);
-                        without.push(&cast.name);
+                        without.push(missing_reference(cast));
                     }
-                    Some(Err(NotAdded::NoRoom)) | None => without.push(&cast.name),
+                    Some(Err(NotAdded::NoRoom)) | None => without.push(missing_reference(cast)),
                 }
             }
             if !without.is_empty() {
@@ -1641,7 +1752,7 @@ impl SceneHandler {
             .chain(waiting.iter().map(|(people, scenes)| {
                 let numbers: Vec<String> = scenes.iter().map(ToString::to_string).collect();
                 format!(
-                    "{} {} not drawn, for lack of the portrait of {people}",
+                    "{} {} not drawn, for lack of {people}",
                     if scenes.len() == 1 { "scene" } else { "scenes" },
                     numbers.join(", ") + if scenes.len() == 1 { " was" } else { " were" },
                 )
@@ -2421,6 +2532,11 @@ impl Bardo {
             .iter()
             .map(|(item, _)| item.id.to_string())
             .collect();
+        let fixed_object_names = world
+            .objects
+            .iter()
+            .map(|(item, _)| item.name().to_owned())
+            .collect();
         let payload = to_json(&PlanPayload {
             project: project.id.to_string(),
             narration: narration.id.to_string(),
@@ -2432,6 +2548,7 @@ impl Bardo {
             fixed,
             fixed_places,
             fixed_objects,
+            fixed_object_names,
         });
         // The same plan was asked for and answered, and is not the
         // project's plan (its job was cancelled as the answer arrived, or
@@ -3553,6 +3670,7 @@ pub(crate) mod tests {
             fixed: Vec::new(),
             fixed_places: Vec::new(),
             fixed_objects: Vec::new(),
+            fixed_object_names: Vec::new(),
         };
         let job = Job::new(app.profile.id, JobKind::ScenePlan, to_json(&payload));
         let job = wait_done(&app, app.jobs.enqueue(job).unwrap());
@@ -3721,6 +3839,158 @@ pub(crate) mod tests {
             "the generation records what was sent"
         );
         assert!(plan.files().any(|file| file == portrait.file));
+    }
+
+    /// A plan whose cup comes back in two scenes, held by the chef in the
+    /// first (#361).
+    pub(crate) fn props_answer() -> String {
+        serde_json::json!({
+            "cast": [
+                {"name": "the chef", "description": "A man in his fifties, brown skin, grey beard, white apron"},
+            ],
+            "places": [],
+            "props": [
+                {"name": "the cup", "description": "A squat white porcelain cup with a thin gold rim"},
+                {"name": "the brass lamp", "description": "A world object written again"},
+                {"name": "the spoon", "description": "Shown in no scene"},
+            ],
+            "scenes": [
+                {"first_sentence": 0, "prompt": "The chef lifts the cup", "place": -1,
+                 "cast": [0, 1], "props": [0, 1, 9], "motion": "Slow push in"},
+                {"first_sentence": 1, "prompt": "The probe drifting away from Earth", "place": -1,
+                 "cast": [], "motion": "The probe drifts left"},
+                {"first_sentence": 2, "prompt": "The cup on a steel desk", "place": -1,
+                 "cast": [], "props": [0], "motion": "Static"},
+            ],
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn a_recurring_object_is_drawn_once_and_sent_with_every_scene_that_shows_it() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = h.narrated_project(&app);
+        h.answer(props_answer());
+        done(
+            &app,
+            app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let request = h.text.requests().pop().unwrap();
+        let TextFormat::Json { schema } = &request.format else {
+            panic!("the plan is asked as JSON");
+        };
+        assert!(schema.contains("\"props\""));
+        assert!(request.instructions.contains("The recurring objects:"));
+
+        let view = app.scenes(project.id).unwrap();
+        assert_eq!(
+            view.missing_images(),
+            6,
+            "three scenes, the chef and two objects"
+        );
+        let plan = view.plan.unwrap();
+        let names: Vec<(&str, CastKind)> = plan
+            .cast()
+            .iter()
+            .map(|member| (member.name.as_str(), member.kind()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("the chef", CastKind::Person),
+                ("the cup", CastKind::Object),
+                ("the brass lamp", CastKind::Object)
+            ],
+            "a person's position past the people is no one; unshown objects go"
+        );
+        assert_eq!(plan.scene_cast(0), [0, 1, 2]);
+        assert_eq!(plan.scenes_with(1), [0, 2]);
+
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let requests = h.images.requests.lock().unwrap().clone();
+        let pictures: Vec<&ImageRequest> = requests
+            .iter()
+            .filter(|request| request.prompt.contains("A reference picture of one object"))
+            .collect();
+        assert_eq!(pictures.len(), 2, "the cup and the lamp, each once");
+        assert!(
+            pictures[0]
+                .prompt
+                .contains("the cup: A squat white porcelain cup")
+        );
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        let cup = plan.cast()[1].portrait().unwrap().clone();
+        let cup = h.files.read(project.id, &cup.file).unwrap();
+        let drawn = |index: usize| {
+            requests
+                .iter()
+                .find(|request| {
+                    request.prompt == plan.scenes()[index].image().unwrap().generation.prompt
+                })
+                .unwrap()
+                .clone()
+        };
+        let first = drawn(0);
+        assert_eq!(first.references[1].bytes, cup, "after the chef's portrait");
+        assert!(
+            first
+                .prompt
+                .contains("Reference 2: the cup, A squat white porcelain cup")
+        );
+        let last = drawn(2);
+        assert_eq!(last.references[0].bytes, cup);
+        assert!(
+            last.prompt
+                .contains("Reference 1: the cup, A squat white porcelain cup")
+        );
+        assert!(!last.prompt.contains("the people in this scene"));
+    }
+
+    #[test]
+    fn a_recurring_object_named_as_a_picked_world_object_is_left_out() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = h.narrated_project(&app);
+        let lamp = app
+            .create_world_item(
+                None,
+                bardo_domain::WorldKind::Object,
+                bardo_domain::WorldItemDraft {
+                    name: "Brass lamp".into(),
+                    appearance: "An old brass lamp.".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        app.set_who_appears(
+            project.id,
+            vec![bardo_domain::WorldPick {
+                item: lamp.id,
+                instruction: String::new(),
+            }],
+        )
+        .unwrap();
+        h.answer(props_answer());
+        done(
+            &app,
+            app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        let names: Vec<&str> = plan.cast().iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["the chef", "the cup"]);
+        assert_eq!(plan.scene_cast(0), [0, 1], "the cup keeps its place");
+        assert_eq!(
+            plan.scenes()[0].objects(),
+            [lamp.id],
+            "the scene still shows the lamp, as the world's"
+        );
     }
 
     #[test]

@@ -402,7 +402,7 @@ checksum = "O instalador não confere com o checksum publicado na versão, entã
 off_script = "A gravação não segue o roteiro de perto o bastante. Grave de novo lendo o roteiro atual e importe."
 vision_models = "Os modelos de rosto, profundidade e máscara estão faltando, danificados ou não rodaram. Reinstale o Bardo para recolocá-los e tente de novo."
 out_of_date = "A narração foi feita de novo depois que estas cenas foram planejadas, então nada mais foi feito para elas. Na etapa Cenas, ajuste as cenas à narração ou planeje de novo (numa versão, posicione as cenas), e comece de novo."
-portrait_missing = "O retrato de uma pessoa da cena está faltando ou não pôde ser enviado, e uma cena não é desenhada sem ele. Desenhe o retrato de novo em Pessoas nesta cena, ou escolha Desenhar sem retrato ali, e depois desenhe a cena."
+portrait_missing = "O retrato de uma pessoa ou a imagem de um objeto da cena está faltando ou não pôde ser enviado, e uma cena não é desenhada sem ele. Desenhe-o de novo em Pessoas nesta cena ou Objetos nesta cena, ou escolha ali desenhar sem ele, e depois desenhe a cena."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -2029,12 +2029,25 @@ described_only_hint = "Desenhada só pela descrição, como você escolheu: nenh
 draw_without = "Desenhar sem retrato"
 use_portrait = "Usar um retrato"
 
+[scenes.props]
+title = "Objetos nesta cena"
+hint = "O Bardo desenha uma imagem de referência de cada objeto que volta no vídeo e a envia com toda cena que o mostra, para que ele mantenha a mesma forma, as mesmas cores e o mesmo material."
+later = "Ainda sem imagem: ela é desenhada antes da primeira cena que mostra este objeto."
+edit = "Editar descrição"
+redraw = "Desenhar imagem de novo"
+failed = "A imagem não foi desenhada:"
+described_only = "Sem imagem"
+described_only_hint = "Desenhado só pela descrição, como você escolheu: nenhuma imagem é desenhada nem enviada para este objeto, então ele pode mudar de uma cena para outra."
+draw_without = "Desenhar sem imagem"
+use_picture = "Usar uma imagem"
+save_hint = "Guarda este objeto, com a imagem, como um objeto do Mundo que outros vídeos podem escolher."
+
 [scenes.old_portraits]
-title = "Cenas com um rosto antigo: {n}"
-hint = "Estas imagens não batem com o retrato de alguém que elas mostram: foram desenhadas com um retrato mais antigo dessa pessoa, ou sem retrato. Elas ficam como estão até serem desenhadas de novo, e cada imagem nova espera a revisão ao lado da atual. Um retrato que falta é desenhado antes."
+title = "Cenas com um rosto ou objeto antigo: {n}"
+hint = "Estas imagens não batem com o retrato de alguém ou a imagem de um objeto que elas mostram: foram desenhadas com uma referência mais antiga, ou sem ela. Elas ficam como estão até serem desenhadas de novo, e cada imagem nova espera a revisão ao lado da atual. Uma referência que falta é desenhada antes."
 redraw = "Desenhar todas de novo"
-scene = "Esta imagem não bate com o retrato de alguém que aparece nela: foi desenhada com um retrato mais antigo, ou sem retrato. Desenhe de novo para igualar."
-card = "Rosto antigo"
+scene = "Esta imagem não bate com o retrato de alguém ou a imagem de um objeto que aparece nela: foi desenhada com uma referência mais antiga, ou sem ela. Desenhe de novo para igualar."
+card = "Referência antiga"
 
 [scenes.restyled]
 title = "Cenas em outro estilo: {n}"
@@ -3180,7 +3193,7 @@ body = "Escolha os personagens do mundo que este vídeo mostra, cada um com uma 
 
 [tour.scenes.plan]
 title = "Planeje e desenhe"
-body = "Planejar cenas transforma a narração num storyboard: cenas pelas frases, uma continuando a outra, as pessoas e os lugares que voltam e um prompt de imagem para cada cena. Depois desenhe as imagens que faltam de uma vez, cada uma com as anteriores como referência; a estimativa fica sob o botão."
+body = "Planejar cenas transforma a narração num storyboard: cenas pelas frases, uma continuando a outra, as pessoas, os lugares e os objetos que voltam e um prompt de imagem para cada cena. Depois desenhe as imagens que faltam de uma vez, cada uma com as anteriores como referência; a estimativa fica sob o botão."
 
 [tour.scenes.list]
 title = "As cenas"
@@ -3188,7 +3201,7 @@ body = "Cada cena em ordem, com o tempo, a imagem e como está: para desenhar, p
 
 [tour.scenes.scene]
 title = "Uma cena"
-body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas que voltam no vídeo com os retratos de referência, para que lugares e pessoas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato de cada pessoa dela, a não ser de quem você escolheu desenhar sem retrato, e uma desenhada com um retrato mais antigo fica marcada. Edite o prompt para mudar o que o próximo desenho mostra. Num anúncio, Tipo de cena diz o que a cena é: desenhada, ou uma foto do produto que o Bardo compõe de graça a partir de uma das imagens do próprio produto. O layout, a posição e o fundo de uma foto do produto também mudam de graça; só desenhar um fundo é pago, depois da estimativa, e um fundo novo espera você manter ou descartar. Uma cena do produto em uso é desenhada com a foto do produto e espera você conferir com o produto de verdade, desenhar de novo ou usar a imagem real. O cartão final, a última cena do anúncio, também é composto de graça: digite o título e a segunda linha, mostre ou não a oferta do briefing e escolha o visual e onde ficam o texto e o logo."
+body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas e os objetos que voltam no vídeo com os retratos e as imagens de referência, para que lugares, pessoas e coisas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato ou a imagem de tudo o que volta nela, a não ser do que você escolheu desenhar sem, e uma desenhada com uma referência mais antiga fica marcada. Edite o prompt para mudar o que o próximo desenho mostra. Num anúncio, Tipo de cena diz o que a cena é: desenhada, ou uma foto do produto que o Bardo compõe de graça a partir de uma das imagens do próprio produto. O layout, a posição e o fundo de uma foto do produto também mudam de graça; só desenhar um fundo é pago, depois da estimativa, e um fundo novo espera você manter ou descartar. Uma cena do produto em uso é desenhada com a foto do produto e espera você conferir com o produto de verdade, desenhar de novo ou usar a imagem real. O cartão final, a última cena do anúncio, também é composto de graça: digite o título e a segunda linha, mostre ou não a oferta do briefing e escolha o visual e onde ficam o texto e o logo."
 
 [tour.scenes.redraw]
 title = "Desenhe de novo"
