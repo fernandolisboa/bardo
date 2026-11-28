@@ -173,6 +173,17 @@ impl BridgeRepository for Database {
         Ok(())
     }
 
+    fn set_bridge_file(&self, id: BridgeId, file: &str) -> Result<bool, RepositoryError> {
+        let changed = self
+            .conn()
+            .execute(
+                "UPDATE bridge SET file = ?2 WHERE id = ?1",
+                params![id.to_string(), file],
+            )
+            .map_err(boxed)?;
+        Ok(changed > 0)
+    }
+
     fn delete_bridge(&self, id: BridgeId) -> Result<(), RepositoryError> {
         self.conn()
             .execute("DELETE FROM bridge WHERE id = ?1", [id.to_string()])
@@ -270,5 +281,8 @@ mod tests {
         db.delete_bridge(earlier.id).unwrap();
         assert_eq!(db.bridge(earlier.id).unwrap(), None);
         assert_eq!(db.bridges(first.id).unwrap().len(), 1);
+        // A clip made after its bridge was discarded brings nothing back.
+        assert!(!db.set_bridge_file(earlier.id, "bridge.mp4").unwrap());
+        assert_eq!(db.bridge(earlier.id).unwrap(), None);
     }
 }

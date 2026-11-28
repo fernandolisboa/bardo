@@ -315,6 +315,10 @@ pub trait BridgeRepository: Send + Sync {
 
     fn save_bridge(&self, bridge: &Bridge) -> Result<(), RepositoryError>;
 
+    /// Records the made clip of bridge `id`; `false`, and nothing saved,
+    /// when the bridge is gone.
+    fn set_bridge_file(&self, id: BridgeId, file: &str) -> Result<bool, RepositoryError>;
+
     fn delete_bridge(&self, id: BridgeId) -> Result<(), RepositoryError>;
 }
 
@@ -329,6 +333,10 @@ impl<T: BridgeRepository + ?Sized> BridgeRepository for std::sync::Arc<T> {
 
     fn save_bridge(&self, bridge: &Bridge) -> Result<(), RepositoryError> {
         (**self).save_bridge(bridge)
+    }
+
+    fn set_bridge_file(&self, id: BridgeId, file: &str) -> Result<bool, RepositoryError> {
+        (**self).set_bridge_file(id, file)
     }
 
     fn delete_bridge(&self, id: BridgeId) -> Result<(), RepositoryError> {

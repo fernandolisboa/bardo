@@ -300,6 +300,7 @@ impl EditorScreen {
             to.map(|seconds| -> super::Click {
                 std::rc::Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
                     this.bridge.seconds = seconds;
+                    this.bridge.ask = None;
                     cx.notify();
                 })
             })
@@ -428,23 +429,23 @@ impl EditorScreen {
     /// first; any other refusal shows in the banner.
     fn make_bridge(&mut self, consent: BudgetConsent, cx: &mut Context<Self>) {
         let note = self.bridge_note.read(cx).value().to_string();
-        let ask = match (&self.bridge.ask, consent) {
-            (Some((ask, _)), BudgetConsent::Confirmed) => ask.clone(),
-            _ => {
-                let Some(options) = self.bridge.options.as_ref() else {
-                    return;
-                };
-                let Some(model) = options.models.get(self.bridge.model) else {
-                    return;
-                };
-                BridgeAsk {
-                    cut: options.cut,
-                    provider: model.model.id.provider(),
-                    model: model.model.id.model().to_owned(),
-                    seconds: self.bridge.seconds,
-                    note,
-                }
-            }
+        let Some(ask) = self.bridge.options.as_ref().and_then(|options| {
+            let model = options.models.get(self.bridge.model)?;
+            Some(BridgeAsk {
+                cut: options.cut,
+                provider: model.model.id.provider(),
+                model: model.model.id.model().to_owned(),
+                seconds: self.bridge.seconds,
+                note,
+            })
+        }) else {
+            return;
+        };
+        // A yes covers only the bridge it was asked about: one changed
+        // since (another length or note) is asked about again.
+        let consent = match (&self.bridge.ask, consent) {
+            (Some((asked, _)), BudgetConsent::Confirmed) if *asked == ask => consent,
+            _ => BudgetConsent::Ask,
         };
         let Self { bardo, editor, .. } = self;
         let Some(editor) = editor.as_mut() else {

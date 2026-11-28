@@ -379,11 +379,16 @@ impl ClipRequests for BridgeJob<'_> {
             .files
             .write(self.project, &file, bytes)
             .map_err(unexpected)?;
-        bridge.file = Some(file);
-        self.handler
+        bridge.file = Some(file.clone());
+        // Discarded meanwhile: its clip goes too, and the record stays gone.
+        if !self
+            .handler
             .bridges
-            .save_bridge(&bridge)
-            .map_err(unexpected)?;
+            .set_bridge_file(bridge.id, &file)
+            .map_err(unexpected)?
+        {
+            let _ = self.handler.files.remove(self.project, &file);
+        }
         remove_frames(self.handler.files.as_ref(), self.project, bridge.id);
         // Once more, in case storage refused the record at acceptance.
         self.record(order)
@@ -763,11 +768,13 @@ impl Bardo {
             .bridge_span(ask.cut, ask.seconds)
             .map_err(BridgeError::Refused)?;
         let (first, last) = timeline.bridge_ends(&span).map_err(BridgeError::Refused)?;
-        if view
-            .bridges
-            .iter()
-            .any(|bridge| bridge.cut == Some(ask.cut))
-        {
+        // One bridge per cut, and none over another's stretch: using one
+        // would leave the other on a cut that changed, paid for.
+        let (from, to) = (span.start(), span.end());
+        if view.bridges.iter().any(|bridge| {
+            bridge.cut == Some(ask.cut)
+                || (bridge.cut.is_some() && bridge.from < to && from < bridge.to)
+        }) {
             return Err(BridgeError::Busy);
         }
         let models = self.bridge_models(&project)?;
@@ -847,9 +854,24 @@ impl Bardo {
             .ok_or(EditorError::NothingToCut)?;
         // Checked before anything is saved: the stretch must still fit.
         let (edit, placed) = timeline.put_bridge(&span, bridge_item(&file, view.seconds))?;
-        let asset = self.bridge_asset(project, &file, &view, span, timeline.aspect())?;
-        self.media_assets.save_media_asset(&asset)?;
+        // A Use cut short before keeps its asset: it is taken again.
+        if editor.view().media_file(&file).is_none() {
+            let asset = self.bridge_asset(project, &file, &view, span, timeline.aspect())?;
+            self.media_assets.save_media_asset(&asset)?;
+        }
         self.apply_edit(editor, edit, Some(placed))?;
+        // An edit the editor could not make (its scenes or narration
+        // changed meanwhile) leaves the bridge waiting.
+        let on_cut = editor.view().timeline.as_ref().is_some_and(|timeline| {
+            timeline
+                .video()
+                .get(placed.index)
+                .is_some_and(|item| item.source.file() == Some(file.as_str()))
+        });
+        if !on_cut {
+            self.refresh_editor(editor)?;
+            return Err(BridgeError::CutChanged);
+        }
         self.bridges.delete_bridge(id)?;
         remove_frames(self.files.as_ref(), project, id);
         self.refresh_editor(editor)?;
@@ -910,11 +932,27 @@ impl Bardo {
             .any(|job| job.id() == bridge.job && job.state().is_active())
             || self.jobs.runs_here(bridge.job);
         if making {
-            return Err(BridgeError::StillMaking);
+            // One whose cut changed is no use: its job is cancelled first,
+            // so it does not go on to pay for it.
+            let stale = editor
+                .view()
+                .timeline
+                .as_ref()
+                .is_none_or(|timeline| bridge.cut.find(timeline).is_none());
+            if !stale {
+                return Err(BridgeError::StillMaking);
+            }
+            self.cancel_job(bridge.job)
+                .map_err(|_| BridgeError::StillMaking)?;
         }
         editor.preview_bridge(None);
         self.bridges.delete_bridge(id)?;
-        if let Some(file) = &bridge.file {
+        // A clip already in the project's media (a Use cut short) stays.
+        if let Some(file) = bridge
+            .file
+            .as_ref()
+            .filter(|file| editor.view().media_file(file).is_none())
+        {
             crate::proxies::remove_media(self.files.as_ref(), project, file);
         }
         remove_frames(self.files.as_ref(), project, id);

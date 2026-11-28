@@ -316,6 +316,77 @@ fn a_bridge_being_made_is_not_discarded_and_holds_nothing_on_the_cut() {
 }
 
 #[test]
+fn a_bridge_whose_cut_changes_while_it_is_made_is_discarded_by_cancelling_its_job() {
+    let h = Harness::new();
+    let app = h.start();
+    let (project, mut editor) = opened(&h, &app);
+    h.clips.hold(true);
+    let id = app
+        .make_bridge(&mut editor, ask(1, 3, ""), BudgetConsent::Ask)
+        .unwrap();
+    let job = editor.view().bridges[0].job;
+    let deadline = std::time::Instant::now() + PATIENCE;
+    while h.clips.polls.lock().unwrap().is_empty() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let end = editor.view().clips[0].at + editor.view().clips[0].duration;
+    app.edit(
+        &mut editor,
+        EditAction::Trim {
+            item: ItemRef::video(0),
+            edge: bardo_domain::Edge::End,
+            to: end - Duration::from_millis(500),
+            reach: Duration::ZERO,
+        },
+    )
+    .unwrap();
+    assert_eq!(editor.view().bridges[0].cut, None);
+    // No use waiting for it: Discard cancels its job.
+    app.discard_bridge(&mut editor, id).unwrap();
+    h.clips.hold(false);
+    let cancelled = wait_done(&app, job);
+    assert_eq!(cancelled.state(), JobState::Cancelled);
+    app.refresh_editor(&mut editor).unwrap();
+    assert!(editor.view().bridges.is_empty(), "never comes back");
+    assert!(!h.files.exists(project.id, &Bridge::file_name(id)));
+}
+
+#[test]
+fn a_bridge_over_another_bridges_stretch_is_refused() {
+    let h = Harness::new();
+    let app = h.start();
+    let (_, mut editor) = opened(&h, &app);
+    let longest = |cut: usize| {
+        let options = app.bridge_options(&editor, cut).unwrap();
+        options.models[0].lengths.last().unwrap().seconds
+    };
+    let (first, second) = (3, longest(2));
+    let timeline = editor.view().timeline.clone().unwrap();
+    let a = timeline.bridge_span(1, first).unwrap();
+    let b = timeline.bridge_span(2, second).unwrap();
+    assert!(
+        a.end() > b.start(),
+        "the longest bridge reaches into the first"
+    );
+    app.make_bridge(&mut editor, ask(1, first, ""), BudgetConsent::Ask)
+        .unwrap();
+    let error = app
+        .make_bridge(&mut editor, ask(2, second, ""), BudgetConsent::Ask)
+        .unwrap_err();
+    assert!(matches!(error, BridgeError::Busy));
+    // One that keeps clear of it is fine.
+    let clear = app.bridge_options(&editor, 2).unwrap().models[0]
+        .lengths
+        .iter()
+        .map(|length| length.seconds)
+        .find(|&seconds| timeline.bridge_span(2, seconds).unwrap().start() >= a.end());
+    let seconds = clear.expect("a shorter bridge keeps clear");
+    app.make_bridge(&mut editor, ask(2, seconds, ""), BudgetConsent::Ask)
+        .unwrap();
+}
+
+#[test]
 fn a_bridge_the_provider_fails_is_not_billed_and_a_retry_sends_it_anew() {
     let h = Harness::new();
     let app = h.start();
