@@ -172,6 +172,7 @@ pub mod refs {
     pub const SCENES_REDRAW: GuideRef = at("scenes", "redraw");
     pub const SCENES_CHAT: GuideRef = at("scenes", "chat");
     pub const SCENES_CAST: GuideRef = at("scenes", "cast");
+    pub const SCENES_PROPS: GuideRef = at("scenes", "props");
     pub const SCENES_SAME_PLACE: GuideRef = at("scenes", "same-place");
     pub const SCENES_STYLE: GuideRef = at("scenes", "style");
     pub const SCENES_FIT: GuideRef = at("scenes", "fit");
@@ -266,7 +267,7 @@ pub mod refs {
     pub const COSTS_PROJECT_KEYS: GuideRef = at("costs", "project-keys");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 130] = [
+    pub const ALL: [GuideRef; 131] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -319,6 +320,7 @@ pub mod refs {
         SCENES_PRODUCT_CHECK,
         CLIPS_PRODUCT_CHECK,
         SCENES_CAST,
+        SCENES_PROPS,
         SCENES_SAME_PLACE,
         SCENES_STYLE,
         SCENES_FIT,

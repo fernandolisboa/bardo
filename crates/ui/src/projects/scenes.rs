@@ -9,7 +9,7 @@
 //! video player until the editor has its own.
 
 use bardo_app::bardo_domain::{
-    AnimatedScenes, AspectRatio, BackdropDirection, CastMember, ClipModel, Job, JobState,
+    AnimatedScenes, AspectRatio, BackdropDirection, CastKind, CastMember, ClipModel, Job, JobState,
     ProductImageId, Scene, SceneClip, SceneImage, SceneKind, ShotBackdrop, ShotColor, ShotLook,
     ShotPlacement, TemplateKind, VideoProjectId,
 };
@@ -2479,9 +2479,9 @@ impl ProjectsScreen {
         )
     }
 
-    /// The recurring people scene `index` shows (#246): each one's
-    /// portrait, name and look, with editing the look and drawing the
-    /// portrait again. `None` for a scene that shows nobody who recurs.
+    /// The recurring people (#246) and objects (#361) scene `index` shows,
+    /// each kind under its own title. `None` for a scene that shows nothing
+    /// that recurs.
     fn render_scene_cast(
         &self,
         index: usize,
@@ -2490,15 +2490,36 @@ impl ProjectsScreen {
         busy: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let groups: Vec<AnyElement> = CastKind::ALL
+            .into_iter()
+            .filter_map(|kind| self.render_scene_members(index, scene, kind, open, busy, cx))
+            .collect();
+        (!groups.is_empty()).then(|| v_flex().gap_3().children(groups).into_any_element())
+    }
+
+    /// The recurring members of `kind` scene `index` shows: each one's
+    /// portrait (an object's picture), name and look, with editing the look
+    /// and drawing the picture again. `None` when it shows none of them.
+    fn render_scene_members(
+        &self,
+        index: usize,
+        scene: &Scene,
+        kind: CastKind,
+        open: Option<ScenePromptField>,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let plan = self.scenes.as_ref()?.plan.as_ref()?;
-        if scene.cast().is_empty() {
-            return None;
-        }
         let members: Vec<(usize, CastMember)> = scene
             .cast()
             .iter()
             .filter_map(|&member| Some((member, plan.cast_member(member).ok()?.clone())))
+            .filter(|(_, member)| member.kind() == kind)
             .collect();
+        if members.is_empty() {
+            return None;
+        }
+        let texts = MemberTexts::of(kind);
         let editors: Vec<Option<AnyElement>> = members
             .iter()
             .map(|(member, _)| {
@@ -2552,7 +2573,7 @@ impl ProjectsScreen {
                     .when(cast.is_described_only(), |row| {
                         row.child(kit::status(
                             Tone::Warning,
-                            tr(bardo, Text::CastDescribedOnly),
+                            tr(bardo, texts.described_only),
                             cx,
                         ))
                     });
@@ -2568,7 +2589,7 @@ impl ProjectsScreen {
                         Tone::Danger,
                         format!(
                             "{} {}",
-                            bardo.text(Text::CastPortraitFailed),
+                            bardo.text(texts.failed),
                             bardo.text(Text::JobFailureKindName(kind))
                         ),
                         cx,
@@ -2582,9 +2603,9 @@ impl ProjectsScreen {
                     div().text_xs().text_color(theme.muted_foreground).child(tr(
                         bardo,
                         if described_only {
-                            Text::CastDescribedOnlyHint
+                            texts.described_only_hint
                         } else {
-                            Text::CastPortraitLater
+                            texts.later
                         },
                     ))
                 });
@@ -2615,7 +2636,7 @@ impl ProjectsScreen {
                         .child(guide::info(
                             bardo,
                             ("save-cast-info", member),
-                            tr(bardo, Text::CastSaveHint),
+                            tr(bardo, texts.save_hint),
                             guide::refs::WORLD_SAVE,
                         ))
                 });
@@ -2627,7 +2648,7 @@ impl ProjectsScreen {
                             Button::new(("edit-cast", member))
                                 .ghost()
                                 .xsmall()
-                                .label(tr(bardo, Text::EditCastDescription))
+                                .label(tr(bardo, texts.edit))
                                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                     this.edit_scene(
                                         index,
@@ -2644,7 +2665,7 @@ impl ProjectsScreen {
                                 Button::new(("use-portrait", member))
                                     .outline()
                                     .xsmall()
-                                    .label(tr(bardo, Text::CastUsePortrait))
+                                    .label(tr(bardo, texts.use_picture))
                                     .on_click(cx.listener(
                                         move |this, _: &ClickEvent, window, cx| {
                                             this.scene_action(window, cx, |bardo, id| {
@@ -2659,7 +2680,7 @@ impl ProjectsScreen {
                                 Button::new(("draw-without-portrait", member))
                                     .ghost()
                                     .xsmall()
-                                    .label(tr(bardo, Text::CastDrawWithoutPortrait))
+                                    .label(tr(bardo, texts.draw_without))
                                     .on_click(cx.listener(
                                         move |this, _: &ClickEvent, window, cx| {
                                             this.scene_action(window, cx, |bardo, id| {
@@ -2677,7 +2698,7 @@ impl ProjectsScreen {
                                     self.paid(Button::new(("redraw-portrait", member)), cx)
                                         .outline()
                                         .xsmall()
-                                        .label(tr(bardo, Text::RedrawCastPortrait))
+                                        .label(tr(bardo, texts.redraw))
                                         .on_click(cx.listener(
                                             move |this, _: &ClickEvent, window, cx| {
                                                 this.run_scene(
@@ -2713,12 +2734,12 @@ impl ProjectsScreen {
         let title = h_flex()
             .gap_1()
             .items_center()
-            .child(field_label(tr(bardo, Text::SceneCast)))
+            .child(field_label(tr(bardo, texts.title)))
             .child(guide::info(
                 bardo,
-                ("scene-cast-info", index),
-                tr(bardo, Text::SceneCastHint),
-                guide::refs::SCENES_CAST,
+                (texts.info_id, index),
+                tr(bardo, texts.hint),
+                texts.guide,
             ));
         Some(
             v_flex()
@@ -3412,4 +3433,59 @@ fn clip_record(bardo: &Bardo, models: &[ClipModel], clip: &SceneClip) -> SharedS
         Text::SceneClipRecord,
         &[("seconds", &clip.seconds.to_string()), ("model", &model)],
     ))
+}
+
+/// What Scenes says of a recurring member of each kind (#361): a person's
+/// portrait, or an object's picture.
+struct MemberTexts {
+    title: Text,
+    hint: Text,
+    info_id: &'static str,
+    guide: bardo_app::GuideRef,
+    later: Text,
+    edit: Text,
+    redraw: Text,
+    failed: Text,
+    described_only: Text,
+    described_only_hint: Text,
+    draw_without: Text,
+    use_picture: Text,
+    save_hint: Text,
+}
+
+impl MemberTexts {
+    fn of(kind: CastKind) -> Self {
+        match kind {
+            CastKind::Person => Self {
+                title: Text::SceneCast,
+                hint: Text::SceneCastHint,
+                info_id: "scene-cast-info",
+                guide: guide::refs::SCENES_CAST,
+                later: Text::CastPortraitLater,
+                edit: Text::EditCastDescription,
+                redraw: Text::RedrawCastPortrait,
+                failed: Text::CastPortraitFailed,
+                described_only: Text::CastDescribedOnly,
+                described_only_hint: Text::CastDescribedOnlyHint,
+                draw_without: Text::CastDrawWithoutPortrait,
+                use_picture: Text::CastUsePortrait,
+                save_hint: Text::CastSaveHint,
+            },
+            CastKind::Object => Self {
+                title: Text::SceneProps,
+                hint: Text::ScenePropsHint,
+                info_id: "scene-props-info",
+                guide: guide::refs::SCENES_PROPS,
+                later: Text::PropPictureLater,
+                edit: Text::EditPropDescription,
+                redraw: Text::RedrawPropPicture,
+                failed: Text::PropPictureFailed,
+                described_only: Text::PropDescribedOnly,
+                described_only_hint: Text::PropDescribedOnlyHint,
+                draw_without: Text::PropDrawWithoutPicture,
+                use_picture: Text::PropUsePicture,
+                save_hint: Text::PropSaveHint,
+            },
+        }
+    }
 }

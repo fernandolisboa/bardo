@@ -397,7 +397,7 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
     let mut statement = conn
         .prepare(
             "SELECT name, generated_description, description, portrait_file,
-                 portrait_generation_id, failure, described_only, character_id
+                 portrait_generation_id, failure, described_only, character_id, kind
              FROM scene_cast WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -411,6 +411,7 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
         Option<String>,
         bool,
         Option<String>,
+        String,
     )> = statement
         .query_map([plan], |row| {
             Ok((
@@ -422,6 +423,7 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
                 row.get(5)?,
                 row.get(6)?,
                 row.get(7)?,
+                row.get(8)?,
             ))
         })
         .map_err(boxed)?
@@ -438,7 +440,10 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
                 failure,
                 described_only,
                 character,
+                kind,
             )| {
+                // The column's check allows no other value.
+                let kind = bardo_domain::CastKind::from_code(&kind).unwrap_or_default();
                 Ok(CastMember::restore(CastRecord {
                     name,
                     generated_description: prompt(&generated)?,
@@ -447,6 +452,7 @@ fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryErro
                     failure: failure_kind(failure)?,
                 })
                 .with_described_only(described_only)
+                .with_kind(kind)
                 // A value that does not read is no link: the member stays
                 // the video's own.
                 .with_character(
@@ -472,10 +478,11 @@ fn write_cast_member(
     }
     tx.execute(
         "INSERT INTO scene_cast (plan_id, position, name, generated_description, description,
-             portrait_file, portrait_generation_id, failure, described_only, character_id)
+             portrait_file, portrait_generation_id, failure, described_only, character_id,
+             kind)
          SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
              -- A character deleted meanwhile is no link.
-             (SELECT id FROM character WHERE id = ?10)
+             (SELECT id FROM character WHERE id = ?10), ?11
          WHERE 1
          ON CONFLICT (plan_id, position) DO UPDATE SET
              description = excluded.description,
@@ -483,7 +490,8 @@ fn write_cast_member(
              portrait_generation_id = excluded.portrait_generation_id,
              failure = excluded.failure,
              described_only = excluded.described_only,
-             character_id = excluded.character_id",
+             character_id = excluded.character_id,
+             kind = excluded.kind",
         params![
             plan,
             position(index)?,
@@ -497,6 +505,7 @@ fn write_cast_member(
             member.failure().map(|kind| kind.code()),
             member.is_described_only(),
             member.character().map(|id| id.to_string()),
+            member.kind().code(),
         ],
     )
     .map_err(boxed)?;
@@ -1131,6 +1140,7 @@ mod tests {
                 name: "the engineer".into(),
                 description: "A woman in her thirties, short black hair.".into(),
                 character: None,
+                kind: bardo_domain::CastKind::Person,
             }],
             vec![
                 SceneDraft {
@@ -1257,6 +1267,7 @@ mod tests {
                  ALTER TABLE scene_plan DROP COLUMN picks_changed;
                  ALTER TABLE scene DROP COLUMN objects;
                  ALTER TABLE scene_place DROP COLUMN item_id;
+                 ALTER TABLE scene_cast DROP COLUMN kind;
                  ALTER TABLE scene_cast DROP COLUMN character_id;
                  DROP TABLE video_cast_pick; DROP TABLE reference_picture; DROP TABLE character;
                  DROP TABLE deleted_work;
@@ -1354,6 +1365,15 @@ mod tests {
         s.db.save_cast_member(&plan, 0).unwrap();
         let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
         assert!(stored.cast()[0].is_described_only());
+        assert_eq!(stored, plan);
+        // A recurring object (#361) is kept as one.
+        let object = plan.cast()[0]
+            .clone()
+            .with_kind(bardo_domain::CastKind::Object);
+        *plan.cast_mut(0, time(1_800_000_043)).unwrap() = object;
+        s.db.save_cast_member(&plan, 0).unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored.cast()[0].kind(), bardo_domain::CastKind::Object);
         assert_eq!(stored, plan);
         s.db.save_scene_plan(&plan).unwrap();
         assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));

@@ -75,7 +75,7 @@ Under the actions, **Sharing** marks an item **Shareable** for your other projec
 <a id="save"></a>
 ## Saving a video's person to the world
 
-A person of a video's cast can become a character: on the [Scenes](scenes.md#cast) stage, **Save to World** keeps them in the project's world and **Save to global library** in the global library, with their portrait for the video's look. The video's person then is that character.
+A person of a video's cast can become a character: on the [Scenes](scenes.md#cast) stage, **Save to World** keeps them in the project's world and **Save to global library** in the global library, with their portrait for the video's look. The video's person then is that character. An [object that comes back](scenes.md#props) is saved the same way, as an object with its picture.
 
 <a id="save-place"></a>
 ## Saving a video's place to the world
