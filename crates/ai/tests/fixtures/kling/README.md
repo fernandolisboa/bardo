@@ -37,3 +37,8 @@ checked on 2026-10-25). `take-status-succeeded.http` is written from the
 documented task query, with the video's `duration` as a number and the
 `billing` block of a balance-paid task; `status-succeeded.http` keeps the
 duration as text, which the adapter reads too.
+
+A clip that ends on a given frame (#362) adds `{"type": "last_frame"}` to
+`contents`, as the API reference shows for Kling 3.0 (any resolution) and
+for 2.6 and 2.5 Turbo (1080p only). Its answers are the same as any
+submission's, so it reuses `submit-submitted.http`.

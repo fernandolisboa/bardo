@@ -2158,8 +2158,9 @@ not_loaded = "Não foi possível carregar a revisão do render. Tente de novo."
 
 [render]
 checking = "Verificando codificadores e loudness…"
-no_accounts = "Este canal não tem contas de rede. Adicione uma em Contas para renderizar para ela."
-info = "O render faz um arquivo por rede, no preset da conta: quadro, tamanho, codec, bitrate, duração máxima e loudness. Leva um tempo e substitui o último arquivo da rede, então só começa depois que você revisa as verificações e confirma. Uma verificação que bloqueia deixa a rede de fora; um aviso deixa você seguir."
+no_accounts = "Nada para renderizar."
+info = "O render faz um arquivo por rede marcada: quadro, tamanho, codec, bitrate, duração máxima e loudness vêm do preset da rede, das mudanças da conta quando o canal tem conta nela, e por fim dos ajustes deste vídeo. Uma rede sem conta também renderiza um arquivo para baixar, compartilhar ou publicar você mesmo; só o envio precisa de conta. O render leva um tempo e substitui o último arquivo da rede, então só começa depois que você revisa as verificações e confirma. Uma verificação que bloqueia deixa a rede de fora; um aviso deixa você seguir."
+file_only = "Este canal não tem conta no {network}: o Bardo renderiza o arquivo para você compartilhar ou publicar por conta própria. Adicione uma conta em Canais e contas para enviar pelo Bardo."
 captions_on = "Ligadas"
 captions_off = "Desligadas"
 measuring = "Medindo…"
@@ -2185,6 +2186,14 @@ product_unchecked = "Confira o produto em cada cena do produto em uso, em Cenas,
 product_unchecked_scenes = "O produto não foi conferido em: cena {scenes}. Confira em Cenas, ou use ali a imagem real."
 end_card_out_of_date = "O cartão final mostra um design anterior, ou ainda não foi composto. Componha em Cenas antes de renderizar: é grátis."
 
+[render.settings]
+title = "Ajustes deste vídeo"
+hint = "Só para o arquivo deste vídeo nesta rede: o preset da conta continua como está. Padrão mantém o valor da conta ou da rede."
+default = "Padrão ({value})"
+save = "Salvar ajustes"
+restore = "Restaurar padrões"
+saved = "Salvo. Renderize de novo para fazer o arquivo com esses ajustes."
+
 [render.figure]
 length = "Duração"
 frame = "Quadro do corte"
@@ -2192,8 +2201,8 @@ loudness = "Loudness da mixagem"
 captions = "Legendas"
 
 [render.gate]
-too_long = "Mais longo do que esta rede aceita ({limit}). Encurte o corte ou aumente o limite da conta."
-no_encoder = "Nenhum codificador {codec} funciona neste computador. Escolha outro codec no preset da conta."
+too_long = "Mais longo do que esta rede aceita ({limit}). Encurte o corte ou aumente o limite de duração nos ajustes deste vídeo."
+no_encoder = "Nenhum codificador {codec} funciona neste computador. Escolha outro codec nos ajustes deste vídeo."
 reframed = "O corte é {cut}; este arquivo é {output}, cada clipe pela sua janela de corte (centralizada, a menos que você a tenha movido)."
 reframed_wide = "O corte é {cut}; este arquivo é {output}: imagens deitadas aparecem inteiras, e as em pé inteiras com faixas nas laterais."
 captions_off = "As legendas estão desligadas no corte."
@@ -2231,7 +2240,7 @@ go = "Renderizar agora"
 back = "Voltar"
 
 [export.error]
-no_accounts = "Este canal não tem contas de rede. Adicione uma em Contas para exportar para ela."
+no_accounts = "Nada para exportar ainda: renderize um arquivo na etapa Render primeiro."
 nothing_chosen = "Escolha ao menos uma rede para exportar."
 blocked = "Uma rede escolhida ainda não pode ser exportada. Veja o que falta nela."
 already_running = "Este projeto já está exportando."
@@ -2258,6 +2267,7 @@ reminder = "Voz sintética: marque este vídeo como conteúdo alterado ou sinté
 notice = "A voz do narrador está marcada como clone ou voz sintética realista. Ao postar, marque cada vídeo como conteúdo alterado ou sintético; o arquivo de metadados de cada rede diz onde."
 
 [export]
+file_only = "Este canal não tem conta nesta rede: exporte o arquivo e publique você mesmo, ou adicione uma conta em Canais e contas para enviar pelo Bardo."
 info = "A publicação prepara o post de cada rede. O Claude escreve título, descrição e tags a partir do roteiro e dos padrões da conta; você edita dentro dos limites de cada rede. Exportar grava uma pasta por rede com o arquivo renderizado e um metadata.txt para postar à mão; uma conta conectada do YouTube, do Instagram ou do TikTok envia daqui depois que você revisa."
 chosen = "{n} de {total} escolhidas"
 targets = "Redes"
@@ -3395,11 +3405,15 @@ body = "Confira o corte como ele vai sair antes de renderizar: duração, format
 
 [tour.render.targets]
 title = "Um arquivo por rede"
-body = "Cada conta de rede do canal ganha o próprio arquivo, no preset dela: quadro, tamanho, codec, bitrate, duração máxima e loudness. Marque as que vão renderizar; as que ainda não têm arquivo ou estão desatualizadas já vêm marcadas."
+body = "Toda rede pode ganhar o próprio arquivo, no preset dela: quadro, tamanho, codec, bitrate, duração máxima e loudness. Uma rede em que o canal tem conta mostra o @ dela; as outras dizem Arquivo, para baixar e publicar você mesmo. Marque as que vão renderizar; as contas que ainda não têm arquivo ou estão desatualizadas já vêm marcadas."
 
 [tour.render.gates]
 title = "O que bloqueia e o que avisa"
 body = "Uma verificação marcada Bloqueia deixa a rede fora do render até você corrigir, como um corte mais longo do que a rede aceita. Um aviso deixa renderizar, e a confirmação conta os avisos que ficam."
+
+[tour.render.settings]
+title = "Ajustes deste vídeo"
+body = "Mude o quadro, o tamanho, o codec, o bitrate, a duração máxima ou o loudness da rede escolhida só para este vídeo, por exemplo 16:9 para mandar para alguém. O preset da conta continua como está, e Restaurar padrões volta para ele."
 
 [tour.render.render]
 title = "Renderizar"

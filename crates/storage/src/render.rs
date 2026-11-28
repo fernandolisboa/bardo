@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    Bitrate, Loudness, MaxDuration, MeasuredLoudness, NetworkAccountId, ProfileId, Render,
-    RenderId, RenderPreset, RenderRepository, RenderedCut, RepositoryError, Resolution,
-    VideoProjectId,
+    Bitrate, Loudness, MaxDuration, MeasuredLoudness, Network, NetworkAccountId, PresetOverrides,
+    ProfileId, Render, RenderId, RenderPreset, RenderRepository, RenderedCut, RepositoryError,
+    Resolution, VideoProjectId,
 };
 use rusqlite::{OptionalExtension as _, params};
 use uuid::Uuid;
@@ -190,6 +190,19 @@ impl RenderRepository for Database {
             ],
         )
         .map_err(boxed)?;
+        // One file per network (`render-<network>.mp4`): another target's
+        // row for the network, a file target's before an account took the
+        // network over or the other way round (#360), describes a file this
+        // one replaced.
+        tx.execute(
+            "DELETE FROM render WHERE project_id = ?1 AND network = ?2 AND account_id <> ?3",
+            params![
+                render.project.to_string(),
+                render.network.code(),
+                render.account.to_string(),
+            ],
+        )
+        .map_err(boxed)?;
         tx.execute(
             "INSERT INTO rendered_cut (render_id, project_id, length_ns, aspect, cut, timing)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -246,6 +259,134 @@ impl RenderRepository for Database {
             })
         })
         .transpose()
+    }
+
+    fn render_settings(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<(Network, PresetOverrides)>, RepositoryError> {
+        let conn = self.conn();
+        let mut statement = conn
+            .prepare(
+                "SELECT network, aspect, resolution, codec, bitrate_kbps, max_duration_secs,
+                        loudness_tenths
+                 FROM render_setting WHERE project_id = ?1",
+            )
+            .map_err(boxed)?;
+        let rows = statement
+            .query_map([project.to_string()], |row| {
+                Ok(SettingsRow {
+                    network: row.get(0)?,
+                    aspect: row.get(1)?,
+                    resolution: row.get(2)?,
+                    codec: row.get(3)?,
+                    bitrate_kbps: row.get(4)?,
+                    max_duration_secs: row.get(5)?,
+                    loudness_tenths: row.get(6)?,
+                })
+            })
+            .map_err(boxed)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(boxed)?;
+        let mut settings = rows
+            .into_iter()
+            .map(SettingsRow::into_settings)
+            .collect::<Result<Vec<_>, _>>()?;
+        settings.sort_by_key(|(network, _)| *network);
+        Ok(settings)
+    }
+
+    fn save_render_settings(
+        &self,
+        project: VideoProjectId,
+        network: Network,
+        settings: &PresetOverrides,
+    ) -> Result<(), RepositoryError> {
+        let conn = self.conn();
+        if settings.is_empty() {
+            conn.execute(
+                "DELETE FROM render_setting WHERE project_id = ?1 AND network = ?2",
+                params![project.to_string(), network.code()],
+            )
+            .map_err(boxed)?;
+            return Ok(());
+        }
+        conn.execute(
+            "INSERT INTO render_setting
+                (project_id, network, aspect, resolution, codec, bitrate_kbps,
+                 max_duration_secs, loudness_tenths)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT (project_id, network) DO UPDATE SET
+                 aspect = excluded.aspect,
+                 resolution = excluded.resolution,
+                 codec = excluded.codec,
+                 bitrate_kbps = excluded.bitrate_kbps,
+                 max_duration_secs = excluded.max_duration_secs,
+                 loudness_tenths = excluded.loudness_tenths",
+            params![
+                project.to_string(),
+                network.code(),
+                settings.aspect.map(|aspect| aspect.code()),
+                settings
+                    .resolution
+                    .map(|resolution| resolution.short_side()),
+                settings.codec.map(|codec| codec.code()),
+                settings.bitrate.map(Bitrate::kbps),
+                settings.max_duration.map(MaxDuration::seconds),
+                settings.loudness.map(Loudness::tenths),
+            ],
+        )
+        .map_err(boxed)?;
+        Ok(())
+    }
+}
+
+/// A video's render settings row, before domain validation.
+struct SettingsRow {
+    network: String,
+    aspect: Option<String>,
+    resolution: Option<u32>,
+    codec: Option<String>,
+    bitrate_kbps: Option<u32>,
+    max_duration_secs: Option<u32>,
+    loudness_tenths: Option<i16>,
+}
+
+impl SettingsRow {
+    fn into_settings(self) -> Result<(Network, PresetOverrides), RepositoryError> {
+        let invalid = || boxed(bardo_domain::OutOfRange);
+        let settings = PresetOverrides {
+            aspect: self
+                .aspect
+                .map(|code| code.parse())
+                .transpose()
+                .map_err(boxed)?,
+            resolution: self
+                .resolution
+                .map(|pixels| Resolution::from_short_side(pixels).ok_or_else(invalid))
+                .transpose()?,
+            codec: self
+                .codec
+                .map(|code| code.parse())
+                .transpose()
+                .map_err(boxed)?,
+            bitrate: self
+                .bitrate_kbps
+                .map(Bitrate::from_kbps)
+                .transpose()
+                .map_err(boxed)?,
+            max_duration: self
+                .max_duration_secs
+                .map(MaxDuration::from_seconds)
+                .transpose()
+                .map_err(boxed)?,
+            loudness: self
+                .loudness_tenths
+                .map(Loudness::from_tenths)
+                .transpose()
+                .map_err(boxed)?,
+        };
+        Ok((self.network.parse().map_err(boxed)?, settings))
     }
 }
 
@@ -336,6 +477,67 @@ mod tests {
             timing: Some("0011223344556677".into()),
             rendered_at: time(at),
         }
+    }
+
+    #[test]
+    fn a_render_replaces_another_targets_row_for_the_same_network() {
+        let db = Database::open_in_memory().unwrap();
+        let (project, accounts) = project(&db);
+        let youtube = &accounts[1];
+        let file = NetworkAccount::file_target(project.owner, project.id, Network::YouTube);
+        db.save_render(&render(&project, &file, 1_000)).unwrap();
+        db.save_render(&render(&project, &accounts[0], 1_500))
+            .unwrap();
+        let by_account = render(&project, youtube, 2_000);
+        db.save_render(&by_account).unwrap();
+        let renders = db.renders(project.id).unwrap();
+        assert_eq!(renders.len(), 2, "TikTok's stays");
+        assert!(renders.iter().any(|saved| saved.id == by_account.id));
+        assert!(renders.iter().all(|saved| saved.account != file.id));
+    }
+
+    #[test]
+    fn a_video_keeps_its_own_render_settings_per_network() {
+        let db = Database::open_in_memory().unwrap();
+        let (project, _) = project(&db);
+        assert!(db.render_settings(project.id).unwrap().is_empty());
+        let wide = PresetOverrides {
+            aspect: Some(AspectRatio::Landscape),
+            resolution: Resolution::from_short_side(720),
+            codec: Some(VideoCodec::Hevc),
+            bitrate: Some(Bitrate::from_kbps(6_000).unwrap()),
+            max_duration: Some(MaxDuration::from_seconds(600).unwrap()),
+            loudness: Some(Loudness::from_tenths(-160).unwrap()),
+        };
+        let louder = PresetOverrides {
+            loudness: Some(Loudness::from_tenths(-120).unwrap()),
+            ..PresetOverrides::default()
+        };
+        db.save_render_settings(project.id, Network::X, &louder)
+            .unwrap();
+        db.save_render_settings(project.id, Network::TikTok, &wide)
+            .unwrap();
+        assert_eq!(
+            db.render_settings(project.id).unwrap(),
+            [(Network::TikTok, wide), (Network::X, louder)]
+        );
+        // Saving again replaces; empty settings remove the row.
+        db.save_render_settings(project.id, Network::TikTok, &louder)
+            .unwrap();
+        db.save_render_settings(project.id, Network::X, &PresetOverrides::default())
+            .unwrap();
+        assert_eq!(
+            db.render_settings(project.id).unwrap(),
+            [(Network::TikTok, louder)]
+        );
+        // They go with the video.
+        db.conn()
+            .execute(
+                "DELETE FROM video_project WHERE id = ?1",
+                [project.id.to_string()],
+            )
+            .unwrap();
+        assert!(db.render_settings(project.id).unwrap().is_empty());
     }
 
     #[test]

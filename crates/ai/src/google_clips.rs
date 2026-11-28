@@ -153,6 +153,8 @@ pub fn models() -> Vec<ClipModel> {
             id: model_ref(spec.id),
             name: bardo_domain::ModelName::new(spec.name[0], spec.name[1], spec.name[2]),
             durations: durations(),
+            // Omni takes no frame to end on.
+            ends_on_frame: false,
         })
         .collect()
 }
@@ -580,6 +582,9 @@ impl<T: Transport> ClipGenerator for GoogleClips<T> {
         request: &ClipRequest,
         _submission: &str,
     ) -> Result<ClipSubmission, ProviderFailure> {
+        if request.last.is_some() {
+            return Err(bardo_domain::no_last_frame(&request.model));
+        }
         let http = submit_request(key, request).ok_or_else(|| {
             ProviderFailure::new(
                 ProviderFailureKind::NotAllowed,

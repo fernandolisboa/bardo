@@ -11,7 +11,7 @@ Uma exportação é um pacote pronto para postar: para cada rede, o arquivo rend
 <a id="choose"></a>
 ## Escolher as redes
 
-A linha de cada rede tem uma caixa: marque as redes a exportar. Redes ainda não exportadas, ou cuja última exportação está desatualizada, já vêm marcadas. Uma rede pode ser exportada quando tem um arquivo renderizado e os metadados escritos e dentro dos limites da rede ([Metadados e seus limites](uploading.md#metadata)); até lá, a linha dela diz o que ainda falta, e salvar ou reverter edições não salvas vem antes.
+As redes listadas são as contas do canal e toda rede sem conta que já tem um arquivo renderizado ([Redes e presets](render.md#targets)): um arquivo que você publica por conta própria, então a linha dela diz que ele nunca é enviado. A linha de cada rede tem uma caixa: marque as redes a exportar. Redes ainda não exportadas, ou cuja última exportação está desatualizada, já vêm marcadas. Uma rede pode ser exportada quando tem um arquivo renderizado e os metadados escritos e dentro dos limites da rede ([Metadados e seus limites](uploading.md#metadata)); até lá, a linha dela diz o que ainda falta, e salvar ou reverter edições não salvas vem antes.
 
 <a id="export"></a>
 ## Exportar

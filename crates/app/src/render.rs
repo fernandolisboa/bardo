@@ -19,9 +19,9 @@ use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     AspectRatio, Bitrate, CutFacts, FPS, Gate, Job, JobFailure, JobFailureKind, JobId, JobKind,
-    Loudness, MaxDuration, MeasuredLoudness, Network, NetworkAccountId, ProfileId, Progress,
-    ProjectFiles, Render, RenderId, RenderPreset, RenderRepository, RepositoryError, Resolution,
-    TRUE_PEAK_CEILING, VideoProjectId, cut_gates, cut_timing, output_gates,
+    Loudness, MaxDuration, MeasuredLoudness, Network, NetworkAccountId, PresetOverrides, ProfileId,
+    Progress, ProjectFiles, Render, RenderId, RenderPreset, RenderRepository, RepositoryError,
+    Resolution, TRUE_PEAK_CEILING, VideoProjectId, cut_gates, cut_timing, output_gates,
 };
 use bardo_media::MediaEngine;
 use bardo_media::ffmpeg::{
@@ -115,14 +115,29 @@ impl From<EditorError> for RenderError {
     }
 }
 
-/// One network account as a render target.
+/// One network as a render target: the channel's account on it, or a file
+/// no account stands behind (#360).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderTarget {
     pub account: NetworkAccountId,
     pub network: Network,
+    /// Empty for a file target.
     pub handle: String,
-    /// The network's preset with the account's overrides.
+    /// No account stands behind this target: it renders and exports a
+    /// file, and is never uploaded (#341, #360).
+    pub file_only: bool,
+    /// What this render uses: the network's preset with the account's
+    /// overrides, then this video's own settings.
     pub preset: RenderPreset,
+    /// The preset without this video's own settings.
+    pub default_preset: RenderPreset,
+    /// This video's own settings for the network (#360).
+    pub settings: PresetOverrides,
+    /// Whether the target starts ticked: an account whose file is missing
+    /// or out of date, a file target whose file is out of date, and, for
+    /// a video with no account at all and nothing rendered yet, the first
+    /// file target in the cut's own frame shape.
+    pub preselected: bool,
     /// The encoder the render would use, once the machine's are known.
     pub encoder: Option<VideoEncoder>,
     pub gates: Vec<Gate>,
@@ -149,6 +164,8 @@ impl RenderTarget {
 #[derive(Debug, Clone)]
 pub struct RenderReview {
     pub project: VideoProjectId,
+    /// A loose video (#341): no channel, so no account behind any target.
+    pub loose: bool,
     /// The cut's length, frame shape, captions and missing media, and the
     /// mix's loudness once measured.
     pub cut: CutFacts,
@@ -280,6 +297,29 @@ fn measured(loudness: bardo_media::ffmpeg::Loudness) -> MeasuredLoudness {
     MeasuredLoudness {
         integrated: f64::from(loudness.integrated),
         true_peak: f64::from(loudness.true_peak),
+    }
+}
+
+/// Which targets start ticked (`RenderTarget::preselected`): accounts are
+/// what the video is for, so they lead; a video with no account at all
+/// gets one file in its own frame shape, ready to share.
+fn preselect(targets: &mut [RenderTarget], cut: AspectRatio) {
+    let any_account = targets.iter().any(|target| !target.file_only);
+    let nothing_rendered = targets.iter().all(|target| target.last.is_none());
+    let first_file = (!any_account && nothing_rendered)
+        .then(|| {
+            targets
+                .iter()
+                .position(|target| target.preset.aspect == cut)
+                .or((!targets.is_empty()).then_some(0))
+        })
+        .flatten();
+    for (index, target) in targets.iter_mut().enumerate() {
+        target.preselected = if target.file_only {
+            (target.last.is_some() && !target.last_current) || first_file == Some(index)
+        } else {
+            !target.last_current
+        };
     }
 }
 
@@ -453,9 +493,22 @@ impl Bardo {
         let accounts = self.target_accounts(&view.project)?;
         let renders = self.renders.renders(project)?;
         let format = self.video_format(&view.project)?;
-        let presets: Vec<RenderPreset> = accounts
+        let settings = self.renders.render_settings(project)?;
+        let settings_of = |network: Network| {
+            settings
+                .iter()
+                .find(|(of, _)| *of == network)
+                .map(|(_, settings)| *settings)
+                .unwrap_or_default()
+        };
+        let defaults: Vec<RenderPreset> = accounts
             .iter()
             .map(|account| account.render_preset(format))
+            .collect();
+        let presets: Vec<RenderPreset> = accounts
+            .iter()
+            .zip(&defaults)
+            .map(|(account, preset)| preset.with(&settings_of(account.network)))
             .collect();
         let timeline = view
             .timeline
@@ -478,10 +531,11 @@ impl Bardo {
                 .count(),
             mix: None,
         };
-        let targets = accounts
+        let mut targets: Vec<RenderTarget> = accounts
             .into_iter()
             .zip(presets)
-            .map(|(account, preset)| {
+            .zip(defaults)
+            .map(|((account, preset), default_preset)| {
                 let last = renders
                     .iter()
                     .find(|render| render.account == account.id)
@@ -493,18 +547,24 @@ impl Bardo {
                 let last_current = last.as_ref().is_some_and(|last| {
                     Some(last.cut.as_str()) == current_cut && last.preset == preset
                 });
+                let file_only = account.is_file_target();
                 RenderTarget {
                     account: account.id,
                     network: account.network,
                     handle: account.details.handle().to_owned(),
+                    file_only,
                     preset,
+                    default_preset,
+                    settings: settings_of(account.network),
+                    preselected: false,
                     encoder: None,
                     gates: Vec::new(),
-                    last,
                     last_current,
+                    last,
                 }
             })
             .collect();
+        preselect(&mut targets, aspect);
         let unchecked_products = self
             .scene_plans
             .scene_plan(project)?
@@ -513,6 +573,7 @@ impl Bardo {
         let end_card_waits = self.end_card_waits(project)?;
         let mut review = RenderReview {
             project,
+            loose: view.project.is_loose(),
             cut,
             gates: Vec::new(),
             targets,
@@ -523,6 +584,21 @@ impl Bardo {
         };
         review.regate();
         Ok(review)
+    }
+
+    /// Keeps this video's own render settings for `network` (#360), over
+    /// the account's or the network's preset; empty ones restore those.
+    /// The last file for the network goes out of date when they change it.
+    pub fn set_render_settings(
+        &self,
+        project: VideoProjectId,
+        network: Network,
+        settings: &PresetOverrides,
+    ) -> Result<(), RenderError> {
+        self.editor_project(project)?;
+        Ok(self
+            .renders
+            .save_render_settings(project, network, settings)?)
     }
 
     /// What checking `review` needs, bound to the bundled ffmpeg.
@@ -972,11 +1048,26 @@ pub(crate) mod tests {
         review.checked(&found)
     }
 
-    /// Checks the project's cut and renders every account it can.
+    /// Checks the project's cut and renders every account it can; a
+    /// video with no account renders every network's file.
     pub(crate) fn render_all(app: &Bardo, project: VideoProjectId) {
         let review = checked(app, project);
-        let chosen = review.renderable();
+        let accounts = review.targets.iter().any(|target| !target.file_only);
+        let chosen: Vec<NetworkAccountId> = review
+            .renderable()
+            .into_iter()
+            .filter(|account| !accounts || !target(&review, *account).file_only)
+            .collect();
         done(app, app.start_render(&review, &chosen).unwrap());
+    }
+
+    /// The review's accounts, leaving out the files no account is behind.
+    fn accounts_of(review: &RenderReview) -> Vec<&RenderTarget> {
+        review
+            .targets
+            .iter()
+            .filter(|target| !target.file_only)
+            .collect()
     }
 
     fn target(review: &RenderReview, account: NetworkAccountId) -> &RenderTarget {
@@ -995,8 +1086,7 @@ pub(crate) mod tests {
 
         let review = app.render_review(project.id).unwrap();
         assert_eq!(
-            review
-                .targets
+            accounts_of(&review)
                 .iter()
                 .map(|target| target.network)
                 .collect::<Vec<_>>(),
@@ -1029,7 +1119,8 @@ pub(crate) mod tests {
                 true_peak: -8.0
             })
         );
-        assert_eq!(review.renderable(), [youtube.id, kick.id]);
+        assert!(review.renderable().contains(&youtube.id));
+        assert!(review.renderable().contains(&kick.id));
         // The cut is 16:9: the vertical Short reframes it, Kick does not.
         assert_eq!(
             target(&review, youtube.id).gates,
@@ -1044,6 +1135,159 @@ pub(crate) mod tests {
             Some(VideoEncoder::OpenH264)
         );
         assert!(review.gates.is_empty());
+    }
+
+    #[test]
+    fn every_network_renders_with_or_without_an_account() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let project = app
+            .set_project_format(project.id, Some(bardo_domain::VideoFormat::Short))
+            .unwrap();
+        // A channel with no account still renders a file for each network.
+        let review = checked(&app, project.id);
+        assert_eq!(
+            review
+                .targets
+                .iter()
+                .map(|target| target.network)
+                .collect::<Vec<_>>(),
+            Network::ALL
+        );
+        assert!(review.targets.iter().all(|target| target.file_only));
+        assert!(review.targets.iter().all(|target| target.handle.is_empty()));
+        // Nothing rendered yet: the first file in the cut's shape (9:16,
+        // YouTube Shorts) starts ticked, the others do not.
+        let ticked: Vec<Network> = review
+            .targets
+            .iter()
+            .filter(|target| target.preselected)
+            .map(|target| target.network)
+            .collect();
+        assert_eq!(ticked, [Network::YouTube]);
+        let tiktok = review
+            .targets
+            .iter()
+            .find(|target| target.network == Network::TikTok)
+            .unwrap()
+            .account;
+        done(&app, app.start_render(&review, &[tiktok]).unwrap());
+        let renders = app.renders(project.id).unwrap();
+        assert_eq!(renders.len(), 1);
+        assert_eq!(renders[0].network, Network::TikTok);
+        assert_eq!(renders[0].account, tiktok);
+        // Rendered and current: nothing starts ticked any more.
+        let review = app.render_review(project.id).unwrap();
+        assert!(review.targets.iter().all(|target| !target.preselected));
+        // Publish exports the rendered file only, and never uploads it.
+        let view = app.export_view(project.id).unwrap();
+        assert!(!view.loose);
+        assert_eq!(view.targets.len(), 1);
+        assert_eq!(view.targets[0].account, tiktok);
+        assert!(view.targets[0].file_only);
+        assert!(app.upload_review(project.id, Network::TikTok).is_err());
+
+        // An account takes its network over and leads; files stay for the
+        // others, unticked.
+        let x = account(&app, &project, Network::X, NetworkAccountDraft::default());
+        let review = app.render_review(project.id).unwrap();
+        assert_eq!(review.targets.len(), Network::ALL.len());
+        let of = |network: Network| {
+            review
+                .targets
+                .iter()
+                .find(|target| target.network == network)
+                .unwrap()
+        };
+        assert_eq!(of(Network::X).account, x.id);
+        assert!(!of(Network::X).file_only);
+        let view = app.export_view(project.id).unwrap();
+        assert_eq!(
+            view.targets
+                .iter()
+                .map(|target| (target.network, target.file_only))
+                .collect::<Vec<_>>(),
+            [(Network::TikTok, true), (Network::X, false)],
+            "the account, and the file rendered with no account"
+        );
+        assert!(of(Network::X).preselected);
+        assert_eq!(
+            of(Network::TikTok).account,
+            tiktok,
+            "the file is found again"
+        );
+        assert!(of(Network::TikTok).last_current);
+        assert!(!of(Network::YouTube).preselected);
+        assert_eq!(
+            review
+                .targets
+                .iter()
+                .filter(|target| target.preselected)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_video_s_own_settings_change_its_render_and_outdate_the_last_file() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, youtube, kick) = rendered_project(&h, &app);
+        render_all(&app, project.id);
+        let format = bardo_domain::VideoFormat::Short;
+        let review = app.render_review(project.id).unwrap();
+        assert!(target(&review, youtube.id).last_current);
+        assert_eq!(
+            target(&review, youtube.id).default_preset,
+            youtube.render_preset(format)
+        );
+
+        // YouTube in 16:9 at 720p for this video only.
+        let wide = bardo_domain::RenderSettingsDraft {
+            aspect: Some(AspectRatio::Landscape),
+            resolution: Some(Resolution::Hd720),
+            bitrate: "6".into(),
+            ..bardo_domain::RenderSettingsDraft::default()
+        }
+        .validate()
+        .unwrap();
+        app.set_render_settings(project.id, Network::YouTube, &wide)
+            .unwrap();
+        let review = checked(&app, project.id);
+        let shown = target(&review, youtube.id);
+        assert_eq!(shown.settings, wide);
+        assert_eq!(shown.default_preset, youtube.render_preset(format));
+        assert_eq!(shown.preset, youtube.render_preset(format).with(&wide));
+        assert_eq!(shown.size(), (1280, 720));
+        assert!(!shown.last_current, "the last file is out of date");
+        assert!(shown.preselected);
+        assert!(shown.gates.is_empty(), "16:9 needs no reframing now");
+        assert!(target(&review, kick.id).last_current, "Kick keeps its own");
+
+        done(&app, app.start_render(&review, &[youtube.id]).unwrap());
+        let render = app
+            .renders(project.id)
+            .unwrap()
+            .into_iter()
+            .find(|render| render.account == youtube.id)
+            .unwrap();
+        assert_eq!(render.preset, shown.preset);
+        assert!(target(&app.render_review(project.id).unwrap(), youtube.id).last_current);
+
+        // Restoring the defaults puts the account's preset back.
+        app.set_render_settings(project.id, Network::YouTube, &PresetOverrides::default())
+            .unwrap();
+        let review = app.render_review(project.id).unwrap();
+        assert_eq!(
+            target(&review, youtube.id).preset,
+            youtube.render_preset(format)
+        );
+        assert!(target(&review, youtube.id).settings.is_empty());
+        assert!(matches!(
+            app.set_render_settings(VideoProjectId::new(), Network::X, &wide),
+            Err(RenderError::ProjectNotFound)
+        ));
     }
 
     #[test]
@@ -1083,7 +1327,9 @@ pub(crate) mod tests {
                 .contains(&Gate::NoEncoder(VideoCodec::Hevc))
         );
         assert_eq!(target(&review, tiktok.id).encoder, None);
-        assert_eq!(review.renderable(), [youtube.id, kick.id]);
+        let renderable = review.renderable();
+        assert!(renderable.contains(&youtube.id) && renderable.contains(&kick.id));
+        assert!(!renderable.contains(&x.id) && !renderable.contains(&tiktok.id));
         assert!(matches!(
             app.start_render(&review, &[youtube.id, x.id]),
             Err(RenderError::Blocked)
@@ -1108,7 +1354,11 @@ pub(crate) mod tests {
         let review = checked(&app, project.id);
         assert!(!review.cut.captions_shown);
         assert_eq!(review.gates, [Gate::CaptionsOff, Gate::Silent]);
-        assert_eq!(review.renderable().len(), 2, "warnings block nothing");
+        assert_eq!(
+            review.renderable().len(),
+            Network::ALL.len(),
+            "warnings block nothing"
+        );
     }
 
     #[test]
@@ -1159,7 +1409,7 @@ pub(crate) mod tests {
         assert_eq!(renders[1].network, Network::Kick);
 
         let again = app.render_review(project.id).unwrap();
-        assert!(again.targets.iter().all(|target| target.last_current));
+        assert!(accounts_of(&again).iter().all(|target| target.last_current));
         let summary = app.render_summary(project.id).unwrap();
         assert_eq!((summary.current, summary.outdated), (2, 0));
     }

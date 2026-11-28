@@ -264,6 +264,8 @@ pub enum Control {
     EditorRender,
     /// Render: the picked target's checks.
     RenderChecks,
+    /// Render: the picked target's settings for this video (#360).
+    RenderSettings,
     /// Render: the picked target's last file.
     RenderLast,
     /// Channels: the niche, its themes and the aesthetic notes.
@@ -1218,7 +1220,7 @@ pub const RENDER: Tour = {
     const TARGET: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Render,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "review", TourAnchor::Summary)
@@ -1229,6 +1231,9 @@ pub const RENDER: Tour = {
             at_stage(AT, "gates", control(Control::RenderChecks))
                 .missing(TARGET)
                 .learn(PAGE, "gates"),
+            at_stage(AT, "settings", control(Control::RenderSettings))
+                .missing(TARGET)
+                .learn(PAGE, "settings"),
             at_stage(AT, "render", TourAnchor::Toolbar).learn(PAGE, "render"),
             at_stage(AT, "last", control(Control::RenderLast))
                 .missing(TARGET)

@@ -11,18 +11,22 @@
 
 use std::rc::Rc;
 
-use bardo_app::bardo_domain::{Gate, GateLevel, Job, JobState, NetworkAccountId, VideoProjectId};
+use bardo_app::bardo_domain::{
+    AspectRatio, Gate, GateLevel, Job, JobState, NetworkAccountFieldError, NetworkAccountId,
+    PresetOverrides, RenderSettingsDraft, Resolution, VideoCodec, VideoProjectId,
+};
 use bardo_app::{
     Bardo, Control, RenderError, RenderReview, RenderTarget, Stage, Text, TourAnchor,
     render_job_files,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{Sizable as _, StyledExt as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, ClickEvent, SharedString, Window, div, px};
+use gpui_kit::{AnyElement, App, ClickEvent, Entity, SharedString, Window, div, px};
 
 use super::{ProjectsScreen, clock, muted};
 use crate::appearance::look;
@@ -191,7 +195,7 @@ impl ProjectsScreen {
         self.render_choices
             .iter()
             .find(|(account, _)| *account == target.account)
-            .map_or(!target.last_current, |(_, chosen)| *chosen)
+            .map_or(target.preselected, |(_, chosen)| *chosen)
     }
 
     /// The targets the render would make: the renderable ones chosen.
@@ -613,8 +617,9 @@ impl ProjectsScreen {
             let state = target_state(review, target);
             let mut tile = Tile::new(
                 ("render-target", tiles.len()),
-                Rc::new(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                Rc::new(cx.listener(move |this, _: &ClickEvent, window, cx| {
                     this.selected_target = Some(account);
+                    this.fill_render_settings(false, window, cx);
                     cx.notify();
                 })),
             );
@@ -622,7 +627,7 @@ impl ProjectsScreen {
             tile.title = Some(tr(bardo, Text::NetworkName(target.network)));
             tile.text = Some(SharedString::from(format!(
                 "{} · {}",
-                handle_or_file(bardo, &target.handle),
+                handle_or_file(bardo, target),
                 bardo.preset_summary(&target.preset)
             )));
             tile.time = Some(tr(bardo, last_state(target)));
@@ -663,6 +668,7 @@ impl ProjectsScreen {
             self.include_box("render-include-shown", target, Some(label), cx)
                 .into_any_element()
         });
+        let settings = self.render_settings_section(target, job, cx);
         let bardo = self.bardo.read(cx);
         let t = look(cx).tokens;
         let state = target_state(review, target);
@@ -672,7 +678,7 @@ impl ProjectsScreen {
             .child(div().font_semibold().child(SharedString::from(format!(
                 "{} · {}",
                 bardo.text(Text::NetworkName(target.network)),
-                handle_or_file(bardo, &target.handle)
+                handle_or_file(bardo, target)
             ))))
             .child(state_chip(bardo, state, cx))
             .into_any_element();
@@ -692,6 +698,17 @@ impl ProjectsScreen {
         };
 
         let mut body: Vec<AnyElement> = include.into_iter().collect();
+        if target.file_only {
+            let text = if review.loose {
+                bardo.text(Text::LooseExportOnly).into_owned()
+            } else {
+                bardo.text_with(
+                    Text::RenderFileOnly,
+                    &[("network", &bardo.text(Text::NetworkName(target.network)))],
+                )
+            };
+            body.push(kit::notice(Tone::Info, text, cx).into_any_element());
+        }
         body.push(section(
             Text::RenderColumnPreset,
             vec![
@@ -728,6 +745,15 @@ impl ProjectsScreen {
                 .into_any_element(),
             );
         }
+
+        body.push(
+            kit::anchor_in(
+                TourAnchor::Control(Control::RenderSettings),
+                settings,
+                Some(&self.inspector_scroll),
+            )
+            .into_any_element(),
+        );
 
         let mut last = vec![
             h_flex()
@@ -828,12 +854,368 @@ fn last_state(target: &RenderTarget) -> Text {
     }
 }
 
-/// The account's handle; a loose video's file target (no account, #341)
-/// says *File*.
-fn handle_or_file(bardo: &Bardo, handle: &str) -> String {
-    if handle.is_empty() {
+/// The account's handle; a network no account stands behind (#341,
+/// #360) says *File*.
+fn handle_or_file(bardo: &Bardo, target: &RenderTarget) -> String {
+    if target.file_only {
         bardo.text(Text::LooseFileTarget).into_owned()
     } else {
-        handle.to_owned()
+        target.handle.clone()
+    }
+}
+
+/// One choice of a render setting as a row of small buttons, *Default
+/// (value)* first; the picked one is filled.
+fn choice_row<T: Copy + PartialEq + 'static>(
+    id: &'static str,
+    options: Vec<(Option<T>, SharedString)>,
+    picked: Option<T>,
+    enabled: bool,
+    pick: impl Fn(&mut ProjectsScreen, Option<T>) + Clone + 'static,
+    cx: &mut Context<ProjectsScreen>,
+) -> AnyElement {
+    h_flex()
+        .gap_1()
+        .flex_wrap()
+        .children(
+            options
+                .into_iter()
+                .enumerate()
+                .map(|(index, (value, title))| {
+                    let pick = pick.clone();
+                    let button = Button::new((id, index))
+                        .xsmall()
+                        .label(title)
+                        .disabled(!enabled)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            pick(this, value);
+                            this.render_settings_errors.clear();
+                            this.render_settings_saved = false;
+                            cx.notify();
+                        }));
+                    if value == picked {
+                        button.primary()
+                    } else {
+                        button.outline()
+                    }
+                }),
+        )
+        .into_any_element()
+}
+
+/// A setting's choices: *Default (value)*, then each value.
+fn options<T: Copy>(
+    default: SharedString,
+    all: &[T],
+    label: impl Fn(T) -> SharedString,
+) -> Vec<(Option<T>, SharedString)> {
+    std::iter::once((None, default))
+        .chain(all.iter().map(|&value| (Some(value), label(value))))
+        .collect()
+}
+
+/// The text a settings box holds or shows: the interface language's
+/// decimals for bitrate and loudness.
+fn settings_texts(bardo: &Bardo, draft: &RenderSettingsDraft) -> [String; 3] {
+    [
+        bardo.localized_decimal(&draft.bitrate),
+        draft.max_duration.clone(),
+        bardo.localized_decimal(&draft.loudness),
+    ]
+}
+
+impl ProjectsScreen {
+    fn render_settings_inputs(&self) -> [&Entity<InputState>; 3] {
+        [
+            &self.render_bitrate,
+            &self.render_max_duration,
+            &self.render_loudness,
+        ]
+    }
+
+    /// Fills this video's settings boxes from the shown target, when they
+    /// hold another network's (or always, with `again`): its own values,
+    /// and its default preset as each box's placeholder.
+    pub(super) fn fill_render_settings(
+        &mut self,
+        again: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(target) = self
+            .render_review
+            .as_ref()
+            .and_then(|review| self.shown_target(review))
+        else {
+            self.render_draft = None;
+            return;
+        };
+        let network = target.network;
+        if !again
+            && self
+                .render_draft
+                .as_ref()
+                .is_some_and(|(shown, _)| *shown == network)
+        {
+            return;
+        }
+        let draft = RenderSettingsDraft::from(&target.settings);
+        let defaults = &target.default_preset;
+        let bardo = self.bardo.read(cx);
+        let values = settings_texts(bardo, &draft);
+        let placeholders = [
+            bardo.localized_decimal(&defaults.bitrate.to_string()),
+            defaults.max_duration.to_string(),
+            bardo.localized_decimal(&defaults.loudness.to_string()),
+        ];
+        let inputs = self.render_settings_inputs().map(Entity::clone);
+        for ((input, value), placeholder) in inputs.iter().zip(values).zip(placeholders) {
+            input.update(cx, |input, cx| {
+                input.set_value(value, window, cx);
+                input.set_placeholder(placeholder, window, cx);
+            });
+        }
+        self.render_draft = Some((network, draft));
+        self.render_settings_errors.clear();
+        self.render_settings_saved = false;
+    }
+
+    /// What the boxes and buttons hold now.
+    fn render_settings_draft(
+        &self,
+        cx: &App,
+    ) -> Option<(bardo_app::bardo_domain::Network, RenderSettingsDraft)> {
+        let (network, draft) = self.render_draft.as_ref()?;
+        let [bitrate, max_duration, loudness] = self
+            .render_settings_inputs()
+            .map(|input| input.read(cx).value().to_string());
+        Some((
+            *network,
+            RenderSettingsDraft {
+                bitrate,
+                max_duration,
+                loudness,
+                ..draft.clone()
+            },
+        ))
+    }
+
+    /// Saves this video's settings for the shown network (or clears them,
+    /// with `restore`), then reads the review again.
+    fn save_render_settings(&mut self, restore: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(project), Some((network, draft))) =
+            (self.project, self.render_settings_draft(cx))
+        else {
+            return;
+        };
+        let settings = if restore {
+            PresetOverrides::default()
+        } else {
+            match draft.validate() {
+                Ok(settings) => settings,
+                Err(errors) => {
+                    self.render_settings_errors = errors;
+                    cx.notify();
+                    return;
+                }
+            }
+        };
+        let saved = self
+            .bardo
+            .read(cx)
+            .set_render_settings(project, network, &settings);
+        // The review chooses again from what is out of date now.
+        self.render_choices.clear();
+        self.confirm_render = false;
+        match saved {
+            Ok(()) => self.render_error = None,
+            Err(ref error) => self.render_error = Some(error.message()),
+        }
+        self.load(window, cx);
+        self.fill_render_settings(true, window, cx);
+        self.render_settings_saved = saved.is_ok() && !restore;
+        cx.notify();
+    }
+
+    /// The shown target's settings for this video (#360): frame, size and
+    /// codec as buttons, bitrate, length limit and loudness as boxes, each
+    /// defaulting to the account's or the network's value.
+    fn render_settings_section(
+        &self,
+        target: &RenderTarget,
+        job: Option<&Job>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let editable = !is_running(job);
+        let draft = self
+            .render_draft
+            .as_ref()
+            .filter(|(network, _)| *network == target.network)
+            .map(|(_, draft)| draft.clone())
+            .unwrap_or_else(|| RenderSettingsDraft::from(&target.settings));
+        let defaults = target.default_preset;
+        let (bitrate, max_duration, loudness) = (
+            self.render_bitrate.clone(),
+            self.render_max_duration.clone(),
+            self.render_loudness.clone(),
+        );
+        let changed = self
+            .render_settings_draft(cx)
+            .and_then(|(_, now)| now.validate().ok())
+            .is_none_or(|now| now != target.settings);
+        let default = |value: String| {
+            SharedString::from(
+                self.bardo
+                    .read(cx)
+                    .text_with(Text::RenderSettingsDefault, &[("value", &value)]),
+            )
+        };
+        let (aspect_default, resolution_default, codec_default) = (
+            default(defaults.aspect.code().to_owned()),
+            default(defaults.resolution.to_string()),
+            default(defaults.codec.name().to_owned()),
+        );
+        let aspects = choice_row(
+            "render-setting-aspect",
+            options(aspect_default, &AspectRatio::ALL, |aspect| {
+                SharedString::from(aspect.code())
+            }),
+            draft.aspect,
+            editable,
+            |this, value| {
+                if let Some((_, draft)) = this.render_draft.as_mut() {
+                    draft.aspect = value;
+                }
+            },
+            cx,
+        );
+        let resolutions = choice_row(
+            "render-setting-resolution",
+            options(resolution_default, &Resolution::ALL, |resolution| {
+                SharedString::from(resolution.to_string())
+            }),
+            draft.resolution,
+            editable,
+            |this, value| {
+                if let Some((_, draft)) = this.render_draft.as_mut() {
+                    draft.resolution = value;
+                }
+            },
+            cx,
+        );
+        let codecs = choice_row(
+            "render-setting-codec",
+            options(codec_default, &VideoCodec::ALL, |codec| {
+                SharedString::from(codec.name())
+            }),
+            draft.codec,
+            editable,
+            |this, value| {
+                if let Some((_, draft)) = this.render_draft.as_mut() {
+                    draft.codec = value;
+                }
+            },
+            cx,
+        );
+        let bardo = self.bardo.read(cx);
+        let t = look(cx).tokens;
+        let error_for = |error: NetworkAccountFieldError| {
+            self.render_settings_errors.contains(&error).then(|| {
+                div()
+                    .text_xs()
+                    .text_color(t.danger)
+                    .child(tr(bardo, Text::NetworkAccountFieldError(error)))
+            })
+        };
+        let field = |label: Text, control: AnyElement| {
+            v_flex()
+                .gap_1()
+                .child(div().text_xs().text_color(t.text2).child(tr(bardo, label)))
+                .child(control)
+        };
+        let input_field = |label: Text, input: &Entity<InputState>, error| {
+            field(
+                label,
+                Input::new(input)
+                    .small()
+                    .disabled(!editable)
+                    .into_any_element(),
+            )
+            .children(error_for(error))
+        };
+        let restorable = !target.settings.is_empty();
+        let actions = h_flex()
+            .gap_2()
+            .flex_wrap()
+            .items_center()
+            .child(
+                Button::new("render-settings-save")
+                    .small()
+                    .primary()
+                    .label(tr(bardo, Text::RenderSettingsSave))
+                    .disabled(!editable || !changed)
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.save_render_settings(false, window, cx);
+                    })),
+            )
+            .child(
+                Button::new("render-settings-restore")
+                    .small()
+                    .ghost()
+                    .label(tr(bardo, Text::RenderSettingsRestore))
+                    .disabled(!editable || !restorable)
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.save_render_settings(true, window, cx);
+                    })),
+            );
+        v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(field_label(tr(bardo, Text::RenderSettingsTitle)))
+                    .child(guide::info(
+                        bardo,
+                        "render-settings-info",
+                        tr(bardo, Text::RenderSettingsHint),
+                        guide::refs::RENDER_SETTINGS,
+                    )),
+            )
+            .child(field(Text::RenderPresetAspect, aspects))
+            .child(field(Text::RenderPresetResolution, resolutions))
+            .child(field(Text::RenderPresetCodec, codecs))
+            .child(input_field(
+                Text::RenderPresetBitrate,
+                &bitrate,
+                NetworkAccountFieldError::BitrateInvalid,
+            ))
+            .child(
+                input_field(
+                    Text::RenderPresetMaxDuration,
+                    &max_duration,
+                    NetworkAccountFieldError::MaxDurationInvalid,
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(t.text2)
+                        .child(tr(bardo, Text::RenderPresetMaxDurationHint)),
+                ),
+            )
+            .child(input_field(
+                Text::RenderPresetLoudness,
+                &loudness,
+                NetworkAccountFieldError::LoudnessInvalid,
+            ))
+            .when(self.render_settings_saved, |section| {
+                section.child(kit::notice(
+                    Tone::Success,
+                    tr(bardo, Text::RenderSettingsSaved),
+                    cx,
+                ))
+            })
+            .child(actions)
+            .into_any_element()
     }
 }

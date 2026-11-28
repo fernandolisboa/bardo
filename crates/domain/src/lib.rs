@@ -196,7 +196,8 @@ pub use claims_check::{
 pub use clip::{
     ClipDurations, ClipFit, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel,
     ClipModelError, ClipModelRef, ClipRequest, ClipStatus, ClipSubmission, CurrentClipModel,
-    GeneratedClip, RetiredClipModel, StagedImage, StretchLimit, current_clip_model,
+    GeneratedClip, LastFrame, RetiredClipModel, StagedImage, StretchLimit, current_clip_model,
+    no_last_frame,
 };
 pub use connection::{
     AppCredentials, AppCredentialsFieldError, BrowserSignIn, ConnectedIdentity, ConnectionSecrets,
@@ -308,7 +309,7 @@ pub use network::{
 };
 pub use network_account::{
     MetadataDefaults, NetworkAccount, NetworkAccountDetails, NetworkAccountDraft,
-    NetworkAccountFieldError, NetworkAccountId, NetworkAccountRepository,
+    NetworkAccountFieldError, NetworkAccountId, NetworkAccountRepository, RenderSettingsDraft,
 };
 pub use owner_metrics::{
     AnalyticsError, AnalyticsErrorKind, Earnings, Monetization, MoneyReport, OwnerAnalytics,

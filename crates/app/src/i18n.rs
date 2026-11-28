@@ -2302,6 +2302,16 @@ pub enum Text {
     RenderNotLoaded,
     RenderNoAccounts,
     RenderInfo,
+    RenderSettingsTitle,
+    RenderSettingsHint,
+    /// Placeholder: `{value}`.
+    RenderSettingsDefault,
+    RenderSettingsSave,
+    RenderSettingsRestore,
+    RenderSettingsSaved,
+    /// Placeholder: `{network}`.
+    RenderFileOnly,
+    ExportFileOnly,
     RenderFigureLength,
     RenderFigureFrame,
     RenderFigureLoudness,
@@ -6109,6 +6119,14 @@ impl Text {
             Text::RenderNotLoaded => "render.error.not_loaded",
             Text::RenderNoAccounts => "render.no_accounts",
             Text::RenderInfo => "render.info",
+            Text::RenderSettingsTitle => "render.settings.title",
+            Text::RenderSettingsHint => "render.settings.hint",
+            Text::RenderSettingsDefault => "render.settings.default",
+            Text::RenderSettingsSave => "render.settings.save",
+            Text::RenderSettingsRestore => "render.settings.restore",
+            Text::RenderSettingsSaved => "render.settings.saved",
+            Text::RenderFileOnly => "render.file_only",
+            Text::ExportFileOnly => "export.file_only",
             Text::RenderFigureLength => "render.figure.length",
             Text::RenderFigureFrame => "render.figure.frame",
             Text::RenderFigureLoudness => "render.figure.loudness",
@@ -10302,6 +10320,14 @@ mod tests {
         texts.push(Text::RenderNotLoaded);
         texts.push(Text::RenderNoAccounts);
         texts.push(Text::RenderInfo);
+        texts.push(Text::RenderSettingsTitle);
+        texts.push(Text::RenderSettingsHint);
+        texts.push(Text::RenderSettingsDefault);
+        texts.push(Text::RenderSettingsSave);
+        texts.push(Text::RenderSettingsRestore);
+        texts.push(Text::RenderSettingsSaved);
+        texts.push(Text::RenderFileOnly);
+        texts.push(Text::ExportFileOnly);
         texts.push(Text::RenderFigureLength);
         texts.push(Text::RenderFigureFrame);
         texts.push(Text::RenderFigureLoudness);
