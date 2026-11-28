@@ -13,14 +13,14 @@ A video project is one video on its way from an approved idea to a published pos
 <a id="switch"></a>
 ## Picking a project
 
-The project's name heads the screen, with a menu beside it that lists the channel's other projects; pick one to switch. An ad project is marked **Ad** in that menu, and the line under its name starts with **Ad for** and the product it advertises. An ad whose product was an *idea* when the project started is a concept: it is marked **Concept** in that menu and beside its name, and keeps that mark even if the product changes kind later ([A concept image for an idea](products.md#concept)). The channel picker next to **Videos** lists another channel's projects. **Show folder** opens the video's folder in Explorer, where its narration, images, clips and renders are ([A project's folder](storage.md#project-folder)).
+The project's name heads the screen, with a menu beside it that lists the channel's other projects; pick one to switch. An ad project is marked **Ad** in that menu, and the line under its name starts with **Ad for** and the product it advertises. An ad whose product was an *idea* when the project started is a concept: it is marked **Concept** in that menu and beside its name, and keeps that mark even if the product changes kind later ([A concept image for an idea](products.md#concept)). The channel picker next to **Videos** lists another channel's projects. **Show folder**, in the **⋯** menu on the right, opens the video's folder in Explorer, where its narration, images, clips and renders are ([A project's folder](storage.md#project-folder)).
 
 <a id="archive"></a>
 ## Archive or delete a video
 
-Beside **Show folder**, **Archive…** puts the open video away: it leaves the list and becomes read-only, so no job of it runs and nothing of it publishes, while its published posts go on syncing their metrics ([Metrics sync](metrics-sync.md)). **Show archived** lists the channel's archived videos instead, each marked **Archived**; **Unarchive** brings the open one back.
+In the **⋯** menu on the right, **Archive…** puts the open video away: it leaves the list and becomes read-only, so no job of it runs and nothing of it publishes, while its published posts go on syncing their metrics ([Metrics sync](metrics-sync.md)). **Show archived**, beside the menu, lists the channel's archived videos instead, each marked **Archived**; **Unarchive**, in the same menu, brings the open one back.
 
-**Delete…** asks you to type the video's name. Its records leave Bardo and its folder goes to the Recycle Bin, unless the dialog says it will be deleted permanently: a folder on a removable or network drive, or larger than that drive's Recycle Bin holds, skips the bin. **Delete permanently** skips it on purpose. Its idea goes back to approved on [Themes](themes-ranking.md#restart), and may start another video. Nothing is deleted on the networks, its first week leaves the channel's past performance, and [Costs](costs.md#deleted) keeps its name.
+**Delete…**, also in the **⋯** menu, asks you to type the video's name. Its records leave Bardo and its folder goes to the Recycle Bin, unless the dialog says it will be deleted permanently: a folder on a removable or network drive, or larger than that drive's Recycle Bin holds, skips the bin. **Delete permanently** skips it on purpose. Its idea goes back to approved on [Themes](themes-ranking.md#restart), and may start another video. Nothing is deleted on the networks, its first week leaves the channel's past performance, and [Costs](costs.md#deleted) keeps its name.
 
 Neither is possible while something is pending, and the dialog lists what to clear first:
 
@@ -31,7 +31,11 @@ Neither is possible while something is pending, and the dialog lists what to cle
 <a id="settings"></a>
 ## The video's settings
 
-Under the project's name, one bar holds what the video is and how it is made. **Video** has the [narrator](#narrator), the [format](#format), the [length](#length) and the [visual style](#style); **Production and spend** has the [mode](#mode), the [cap](#mode) and what the whole video will cost. Each setting has its label above it and an ⓘ that explains it. In a window narrower than 1000 pixels the bar goes compact, labels beside the fields and no group names, so the stage below still shows. What the cap has to say (the default cap offered, a video over its cap, a cap saved) shows under the bar, across its width.
+Under the project's name, one line sums up what the video is and how it is made: who narrates it, its format, length and visual style, its mode, and what the whole video will cost against its cap (in a warning color when it goes over). Point at an item to see which setting it is. Each value is the video's own or, when it chose none, its channel's.
+
+**Edit**, at the end of the line, opens the settings in a popup over the screen. **Video** has the [narrator](#narrator), the [format](#format), the [length](#length) and the [visual style](#style); **Production and spend** has the [mode](#mode), the [cap](#mode) and what the whole video will cost. Each setting has its label above it and an ⓘ that explains it. The summary follows every change; **Close** or Esc closes the popup, and so does switching videos, going to another screen or starting a tour.
+
+The arrow at the end of the buttons on the right of the title collapses the summary, and with it the line with the niche, the spend and, for an ad, the product, to give the stages more room; it applies to every video and Bardo remembers it. What the cap has to say that needs you (the default cap offered to an older video, a video over its cap) shows under the title with the summary collapsed too.
 
 <a id="narrator"></a>
 ## The narrator
@@ -41,7 +45,7 @@ The narrator is the persona that reads the video's narration, and its tone and s
 <a id="format"></a>
 ## Short or long
 
-**Format**, in the settings bar, says whether this video is a Short (vertical, under a minute) or a long video (16:9, 8 to 10 minutes). **Channel's** follows the channel's [video format](channels.md#format); pick **Short** or **Long** to make this one video the other kind.
+**Format**, in the video's settings, says whether this video is a Short (vertical, under a minute) or a long video (16:9, 8 to 10 minutes). **Channel's** follows the channel's [video format](channels.md#format); pick **Short** or **Long** to make this one video the other kind.
 
 The format applies to what is made next: the next script's length, the shape of the next scene images and clips, a new cut in the editor and YouTube's [render preset](render.md#targets). What was already made keeps its shape, so after switching, write the script again and draw the scenes again for a video that matches.
 
@@ -109,7 +113,7 @@ The line under the project's name shows its niche, when it was started and, once
 <a id="loose-videos"></a>
 ## Loose videos
 
-A loose video has no project and no channel: a quick try at an idea before it earns a place in a project. Pick **No project** at the end of the [project switcher](your-projects.md#no-project) and Videos lists the loose videos, with **Show archived**, **Archive…** and **Delete…** as for any video.
+A loose video has no project and no channel: a quick try at an idea before it earns a place in a project. Pick **No project** at the end of the [project switcher](your-projects.md#no-project) and Videos lists the loose videos, with **Show archived** and the **⋯** menu (**Archive…**, **Delete…**) as for any video.
 
 **New loose video** asks for the idea, a title and an optional angle, and for **Settings from**: a channel whose settings the video copies (language, country, narrator, format, style, models and the rest a channel gives its videos), or **A new channel's defaults**. The video keeps those settings as its own; changing the channel later does not change it. Only global items appear in it: a narrator that belongs to a project is left out, and [Who appears](world.md) offers only the global library.
 

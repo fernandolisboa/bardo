@@ -14,7 +14,8 @@ impl ProfileRepository for Database {
             .query_row(
                 "SELECT id, ui_language, ui_theme, ui_layout, metrics_sync, cut_suggestion_floor,
                         offer_screen_tours, background_agent, auto_backup, update_check,
-                        privacy_version, privacy_accepted_at, decision_engine
+                        privacy_version, privacy_accepted_at, decision_engine,
+                        video_summary
                  FROM user_profile
                  ORDER BY created_at, rowid LIMIT 1",
                 [],
@@ -33,6 +34,7 @@ impl ProfileRepository for Database {
                         row.get::<_, Option<i64>>(10)?,
                         row.get::<_, Option<i64>>(11)?,
                         row.get::<_, String>(12)?,
+                        row.get::<_, bool>(13)?,
                     ))
                 },
             )
@@ -53,6 +55,7 @@ impl ProfileRepository for Database {
             privacy_version,
             privacy_accepted_at,
             decision_engine,
+            video_summary,
         )) = row
         else {
             return Ok(None);
@@ -69,6 +72,7 @@ impl ProfileRepository for Database {
             background_agent,
             auto_backup,
             update_check,
+            video_summary,
             privacy: match (privacy_version, privacy_accepted_at) {
                 (Some(version), Some(at)) => Some(PrivacyConsent {
                     version: u32::try_from(version).map_err(boxed)?,
@@ -86,8 +90,8 @@ impl ProfileRepository for Database {
                                            cut_suggestion_floor, offer_screen_tours,
                                            background_agent, auto_backup, update_check,
                                            privacy_version, privacy_accepted_at,
-                                           decision_engine)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                                           decision_engine, video_summary)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                  ON CONFLICT (id) DO UPDATE SET
                      ui_language = excluded.ui_language,
                      ui_theme = excluded.ui_theme,
@@ -100,7 +104,8 @@ impl ProfileRepository for Database {
                      update_check = excluded.update_check,
                      privacy_version = excluded.privacy_version,
                      privacy_accepted_at = excluded.privacy_accepted_at,
-                     decision_engine = excluded.decision_engine",
+                     decision_engine = excluded.decision_engine,
+                     video_summary = excluded.video_summary",
                 params![
                     profile.id.to_string(),
                     profile.ui_language.tag(),
@@ -117,6 +122,7 @@ impl ProfileRepository for Database {
                         .privacy
                         .map(|consent| to_unix_millis(consent.accepted_at)),
                     profile.decision_engine.code(),
+                    profile.video_summary,
                 ],
             )
             .map_err(boxed)?;
@@ -192,6 +198,18 @@ mod tests {
         assert!(db.load_default().unwrap().unwrap().update_check);
 
         profile.update_check = false;
+        db.save(&profile).unwrap();
+        assert_eq!(db.load_default().unwrap(), Some(profile));
+    }
+
+    #[test]
+    fn the_video_summary_shows_until_collapsed() {
+        let db = Database::open_in_memory().unwrap();
+        let mut profile = UserProfile::new(UiLanguage::EnUs);
+        db.save(&profile).unwrap();
+        assert!(db.load_default().unwrap().unwrap().video_summary);
+
+        profile.video_summary = false;
         db.save(&profile).unwrap();
         assert_eq!(db.load_default().unwrap(), Some(profile));
     }

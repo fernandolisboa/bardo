@@ -646,6 +646,7 @@ title_too_long = "Use no máximo 120 caracteres no título."
 angle_too_long = "Use no máximo 500 caracteres no ângulo."
 
 [projects]
+more_actions = "Mais ações"
 settings_video = "Vídeo"
 settings_production = "Produção e gasto"
 switch = "Trocar de vídeo"
@@ -678,6 +679,17 @@ estimate = "Vídeo inteiro: cerca de {total} ({spent} gastos)"
 estimate_partial = "Vídeo inteiro: cerca de {total}, mais chamadas sem preço ({spent} gastos)"
 ad = "Anúncio"
 ad_for = "Anúncio de {product}"
+
+[projects.summary]
+no_narrator = "Sem narrador"
+spend = "cerca de {total} de {cap}"
+spend_no_cap = "cerca de {total}, sem teto"
+hide = "Recolher o resumo do vídeo"
+show = "Mostrar o resumo do vídeo"
+edit = "Editar"
+edit_hint = "Trocar narrador, formato, duração, estilo visual, modo e teto deste vídeo"
+settings_title = "Configurações do vídeo"
+close = "Fechar"
 
 [projects.cap]
 label = "Teto"
@@ -3099,11 +3111,11 @@ name = "Tour dos Vídeos"
 
 [tour.projects.switcher]
 title = "Seu vídeo"
-body = "O vídeo em que você está trabalhando, com o menu que troca para outro vídeo do canal. O seletor de canal ao lado de Vídeos lista os vídeos de outro canal. Mostrar arquivados, Arquivar… e Excluir… ao lado guardam este vídeo ou o removem."
+body = "O vídeo em que você está trabalhando, com o menu que troca para outro vídeo do canal. O seletor de canal ao lado de Vídeos lista os vídeos de outro canal. À direita, Mostrar arquivados lista os vídeos arquivados, e o menu ⋯ mostra a pasta do vídeo, arquiva ou exclui."
 
 [tour.projects.narrator]
 title = "Quem narra"
-body = "O narrador lê a narração deste vídeo e dá forma ao roteiro. É a persona padrão do canal, a menos que você escolha outra só para este vídeo."
+body = "O narrador lê a narração deste vídeo e dá forma ao roteiro. É a persona padrão do canal, a menos que você escolha outra só para este vídeo. O resumo sob o título, quando aberto, mostra quem é."
 
 [tour.projects.format]
 title = "Short ou longo, e quanto dura"
@@ -3111,15 +3123,15 @@ body = "Um Short é um vídeo vertical de 45 a 60 segundos; um vídeo longo é 1
 
 [tour.projects.mode]
 title = "Como é produzido, e quanto custa"
-body = "O modo diz quais cenas viram clipes de IA e com qual modelo: Econômico mantém imagens com movimento, Gancho animado anima os primeiros 10 segundos, Tudo animado e premium animam todas as cenas. Cada opção mostra quanto o vídeo inteiro custaria antes de gerar qualquer coisa, e o teto faz o Bardo perguntar antes de um passo que passaria dele: US$ 5 para um Short e US$ 20 para um vídeo longo, a não ser que você defina o seu."
+body = "O modo diz quais cenas viram clipes de IA e com qual modelo: Econômico mantém imagens com movimento, Gancho animado anima os primeiros 10 segundos, Tudo animado e premium animam todas as cenas. Cada opção mostra quanto o vídeo inteiro custaria antes de gerar qualquer coisa, e o teto faz o Bardo perguntar antes de um passo que passaria dele: US$ 5 para um Short e US$ 20 para um vídeo longo, a não ser que você defina o seu. Com o resumo aberto, a linha sob o nome do vídeo soma quanto ele já custou; Custos tem os detalhes."
+
+[tour.projects.edit]
+title = "Mudar as configurações"
+body = "Editar abre as configurações deste vídeo numa janela: narrador, formato, duração, estilo visual, modo e teto de gasto, cada um com o seu ⓘ. O resumo acompanha o que você muda. A seta no fim dos botões à direita recolhe o resumo de todos os vídeos, para sobrar mais espaço para as etapas."
 
 [tour.projects.stages]
 title = "As etapas"
 body = "Roteiro, narração, cenas, clipes, edição, render e publicação, nessa ordem. A linha sob cada etapa diz como ela está: pronta, gerando, para revisar, desatualizada ou o que ela espera. Cada uma se abre assim que a anterior lhe dá com o que trabalhar, e o que foi feito a partir de uma etapa anterior que mudou depois aparece como desatualizado."
-
-[tour.projects.cost]
-title = "Quanto já custou"
-body = "A linha sob o nome do projeto mostra o nicho, quando ele começou e quanto já custou, somando cada chamada paga, do roteiro aos clipes. Em Custos ficam os detalhes e os seus orçamentos."
 
 [tour.projects.loose]
 title = "Vídeos avulsos"

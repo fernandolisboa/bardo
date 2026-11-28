@@ -576,7 +576,7 @@ fn screen_header(header: Header, cx: &App) -> AnyElement {
                 .items_center()
                 .children(header.actions),
         );
-    // The settings bar runs the full width under the title (#330).
+    // The bar (a video's summary) runs the full width under the title (#330).
     v_flex()
         .flex_none()
         .child(row)
