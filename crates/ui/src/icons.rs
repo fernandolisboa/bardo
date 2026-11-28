@@ -23,6 +23,7 @@ icon_assets!(
         Link,
         List,
         Lock,
+        Maximize2,
         Mic,
         MonitorPlay,
         Package,
