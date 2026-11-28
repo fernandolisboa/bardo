@@ -37,8 +37,8 @@ folder, world and libraries (#332).
   global item into the open project.
 - **Sharing between projects** (#340): import another project's shareable
   item as a linked copy, which follows every change, or as an independent
-  one. **Make global** moves an item to the global library, and `.bardo-item`
-  files carry one between computers.
+  one. **Make global** moves an item to the global library, and a
+  `.bardo-item` file carries one as a single file.
 - **Videos with no project** (#341): **No project** in the switcher holds
   videos started from a typed idea, with settings of their own; they export
   a file per network and move into a project's channel to be published.
@@ -47,7 +47,8 @@ folder, world and libraries (#332).
   package with its records, the global items it uses and its media, never
   keys, tokens, costs or unfinished jobs. **Import a project package** brings
   one in as a new project. **Open a project from a folder** relinks a moved
-  project or brings a deleted one back from the Recycle Bin.
+  project, or brings back a deleted one whose folder you restored from the
+  Recycle Bin.
 - **Keys and budgets per project** (#343): Settings › This project takes an
   optional key per provider for the open project, kept in Windows Credential
   Manager, with a monthly budget for what it pays. Jobs pay with the
