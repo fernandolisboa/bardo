@@ -8,7 +8,7 @@ use bardo_ai::google_clips::{API_URL, DEFAULT_MODEL, omni_body};
 use bardo_ai::http::{HttpResponse, Method};
 use bardo_domain::{
     ApiKey, AspectRatio, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest,
-    ClipStatus, ImageFormat, Provider, ProviderFailureKind, StagedImage,
+    ClipStatus, ImageFormat, LastFrame, Provider, ProviderFailureKind, StagedImage,
 };
 use base64::Engine as _;
 use common::{Scripted, fixture, recording_sleeper};
@@ -46,6 +46,7 @@ fn request(model: &str, seconds: u32) -> ClipRequest {
         },
         seconds,
         aspect: AspectRatio::Landscape,
+        last: None,
     }
 }
 
@@ -593,4 +594,23 @@ fn offline_is_unreachable() {
         .status(&key(), &ClipHandle(INTERACTION.into()))
         .unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unreachable);
+}
+
+#[test]
+fn omni_ends_on_no_given_frame_and_a_last_frame_is_never_sent() {
+    let adapter = clips(&[]);
+    assert!(adapter.models().iter().all(|model| !model.ends_on_frame));
+    let bridge = ClipRequest {
+        last: Some(LastFrame {
+            image: StagedImage("inline".into()),
+            frame: ClipImage {
+                bytes: FRAME.to_vec(),
+                format: ImageFormat::Png,
+            },
+        }),
+        ..request(DEFAULT_MODEL, 6)
+    };
+    let failure = adapter.submit(&key(), &bridge, "41-2-1").unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::NotAllowed);
+    assert!(adapter.transport().sent().is_empty());
 }

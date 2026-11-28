@@ -42,3 +42,9 @@ Synthetic, for edge cases: `balance-plus.http`,
 `wait-unknown-going.http` (statuses the adapter does not know),
 `put-ok.http`, `put-refused.http`, and `download-clip.http` (not a real
 video: just the `ftyp` box marker an MP4 starts with).
+
+A clip that ends on a given frame (#362) adds a second media,
+`{"role": "end_image", "value": <media id>}`: the server's `models_explore`
+lists that role for Kling 3.0, Seedance 2.0, Wan 2.7 and Minimax Hailuo, and
+not for Kling 2.6 (checked on 2026-11-28). Its answers are the same as any
+generation's, so it reuses `estimate.http` and `submitted.http`.

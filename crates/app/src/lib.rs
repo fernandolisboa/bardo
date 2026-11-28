@@ -2542,11 +2542,13 @@ pub(crate) mod testing {
                     id: ClipModelRef::new(self.provider(), "fake/range").unwrap(),
                     name: "Fake Range".into(),
                     durations: ClipDurations::Range { min: 3, max: 15 },
+                    ends_on_frame: true,
                 },
                 ClipModel {
                     id: ClipModelRef::new(self.provider(), "fake/choices").unwrap(),
                     name: "Fake Choices".into(),
                     durations: ClipDurations::Choices(vec![5, 10]),
+                    ends_on_frame: false,
                 },
             ];
             if self.nameless.load(std::sync::atomic::Ordering::SeqCst) {
@@ -2554,6 +2556,7 @@ pub(crate) mod testing {
                     id: ClipModelRef::new(self.provider(), "nameless/one").unwrap(),
                     name: "Nameless One".into(),
                     durations: ClipDurations::Range { min: 3, max: 15 },
+                    ends_on_frame: false,
                 });
             }
             models
@@ -2582,6 +2585,15 @@ pub(crate) mod testing {
         ) -> Result<ClipSubmission, ProviderFailure> {
             self.keys.lock().unwrap().push(key.expose().to_owned());
             self.refused()?;
+            // As every adapter does: a last frame goes only to a model
+            // that ends on one.
+            let ends_on_frame = self
+                .models()
+                .iter()
+                .any(|model| model.id.model() == request.model && model.ends_on_frame);
+            if request.last.is_some() && !ends_on_frame {
+                return Err(bardo_domain::no_last_frame(&request.model));
+            }
             if let Some(failure) = self.submit_failure.lock().unwrap().clone() {
                 return Err(failure);
             }

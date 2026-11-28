@@ -196,7 +196,8 @@ pub use claims_check::{
 pub use clip::{
     ClipDurations, ClipFit, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel,
     ClipModelError, ClipModelRef, ClipRequest, ClipStatus, ClipSubmission, CurrentClipModel,
-    GeneratedClip, RetiredClipModel, StagedImage, StretchLimit, current_clip_model,
+    GeneratedClip, LastFrame, RetiredClipModel, StagedImage, StretchLimit, current_clip_model,
+    no_last_frame,
 };
 pub use connection::{
     AppCredentials, AppCredentialsFieldError, BrowserSignIn, ConnectedIdentity, ConnectionSecrets,

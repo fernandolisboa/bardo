@@ -8,7 +8,7 @@ use bardo_ai::higgsfield::{API_URL, DEFAULT_MODEL};
 use bardo_ai::http::Method;
 use bardo_domain::{
     ApiKey, AspectRatio, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest,
-    ClipStatus, ImageFormat, Money, Provider, ProviderFailureKind, StagedImage,
+    ClipStatus, ImageFormat, LastFrame, Money, Provider, ProviderFailureKind, StagedImage,
 };
 use common::{Scripted, fixture, recording_sleeper};
 
@@ -42,6 +42,7 @@ fn request(model: &str) -> ClipRequest {
         },
         seconds: 8,
         aspect: AspectRatio::Landscape,
+        last: None,
     }
 }
 
@@ -380,19 +381,119 @@ fn a_model_that_takes_a_frame_shape_gets_the_first_frames() {
         ..request(model)
     };
     assert_eq!(
-        bardo_ai::higgsfield::clip_body(&vertical)["aspect_ratio"],
+        bardo_ai::higgsfield::clip_body(&vertical).unwrap()["aspect_ratio"],
         "9:16"
     );
     assert_eq!(
-        bardo_ai::higgsfield::clip_body(&request(model))["aspect_ratio"],
+        bardo_ai::higgsfield::clip_body(&request(model)).unwrap()["aspect_ratio"],
         "16:9"
     );
     let other = bardo_ai::higgsfield::clip_body(&ClipRequest {
         aspect: AspectRatio::Vertical,
         ..request(bardo_ai::higgsfield::DEFAULT_MODEL)
-    });
+    })
+    .unwrap();
     assert!(
         other.get("aspect_ratio").is_none(),
         "models without one get none"
+    );
+}
+
+const LAST_URL: &str = "https://cdn.higgsfield.example/input/9a8b7c6d.png";
+
+/// `request` ending on another staged image.
+fn bridge(model: &str) -> ClipRequest {
+    ClipRequest {
+        last: Some(LastFrame {
+            image: StagedImage(LAST_URL.into()),
+            frame: ClipImage {
+                bytes: vec![0x89, b'P', b'N', b'G', 9],
+                format: ImageFormat::Png,
+            },
+        }),
+        ..request(model)
+    }
+}
+
+#[test]
+fn kling_3_seedance_2_and_minimax_h3_end_on_a_given_frame() {
+    let ends: Vec<String> = clips(&[])
+        .models()
+        .into_iter()
+        .filter(|model| model.ends_on_frame)
+        .map(|model| model.id.model().to_owned())
+        .collect();
+    assert_eq!(
+        ends,
+        [
+            DEFAULT_MODEL,
+            "bytedance/seedance-2.0/image-to-video",
+            "minimax/h3/image-to-video",
+        ]
+    );
+}
+
+#[test]
+fn the_last_frame_goes_in_the_field_each_model_names_and_is_quoted_too() {
+    let adapter = clips(&[
+        "estimate",
+        "submit-queued",
+        "estimate",
+        "submit-queued",
+        "estimate",
+        "submit-queued",
+    ]);
+    for model in [
+        DEFAULT_MODEL,
+        "bytedance/seedance-2.0/image-to-video",
+        "minimax/h3/image-to-video",
+    ] {
+        adapter.submit(&key(), &bridge(model), SUBMISSION).unwrap();
+    }
+    let sent = adapter.transport().sent();
+    assert_eq!(sent[1].body["last_image_url"], LAST_URL);
+    assert!(sent[1].body.get("end_image_url").is_none());
+    assert_eq!(sent[3].body["end_image_url"], LAST_URL);
+    assert_eq!(sent[5].body["end_image_url"], LAST_URL);
+    for pair in sent.chunks(2) {
+        assert_eq!(pair[0].body, pair[1].body, "the estimate prices the bridge");
+        assert_eq!(pair[1].body["image_url"], PUBLIC_URL);
+    }
+}
+
+#[test]
+fn a_clip_without_a_last_frame_sends_no_last_frame_field() {
+    let body = bardo_ai::higgsfield::clip_body(&request(DEFAULT_MODEL)).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "prompt": "Slow push in on the launch pad, steam rising.",
+            "image_url": PUBLIC_URL,
+            "duration": 8,
+            "sound": "off",
+        }),
+        "a scene's clip is sent as before"
+    );
+    let refused = bardo_ai::higgsfield::clip_body(&bridge("wan/v2.6/image-to-video"));
+    assert_eq!(refused.unwrap_err().kind, ProviderFailureKind::NotAllowed);
+}
+
+#[test]
+fn a_last_frame_to_a_model_that_takes_none_is_not_sent() {
+    let adapter = clips(&[]);
+    for model in [
+        "kling-video/v2.6/pro/image-to-video",
+        "kling-video/v2.5-turbo/standard/image-to-video",
+        "wan/v2.6/image-to-video",
+        "minimax/hailuo-2.3/standard/image-to-video",
+    ] {
+        let failure = adapter
+            .submit(&key(), &bridge(model), SUBMISSION)
+            .unwrap_err();
+        assert_eq!(failure.kind, ProviderFailureKind::NotAllowed, "{model}");
+    }
+    assert!(
+        adapter.transport().sent().is_empty(),
+        "not even an estimate"
     );
 }
