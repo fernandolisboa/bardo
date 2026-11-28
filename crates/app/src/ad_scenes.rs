@@ -2469,7 +2469,7 @@ pub(crate) mod ad_tests {
         );
         let review = checked(&app, project.id);
         assert!(review.unchecked_products.is_empty());
-        assert_eq!(review.renderable(), [youtube.id]);
+        assert!(review.renderable().contains(&youtube.id));
 
         // Its clip waits for a check of its own before the cut plays it.
         app.accept_scene_clip(project.id, 2).unwrap();

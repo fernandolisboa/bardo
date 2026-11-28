@@ -13,8 +13,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    AspectRatio, MaxDuration, Network, NetworkAccountId, ProfileId, RenderPreset, RenderedCut,
-    RepositoryError, VideoCodec, VideoProjectId,
+    AspectRatio, MaxDuration, Network, NetworkAccountId, PresetOverrides, ProfileId, RenderPreset,
+    RenderedCut, RepositoryError, VideoCodec, VideoProjectId,
 };
 
 uuid_id!(
@@ -228,13 +228,31 @@ pub trait RenderRepository: Send + Sync {
     fn renders(&self, project: VideoProjectId) -> Result<Vec<Render>, RepositoryError>;
 
     /// Saves a render, replacing the project's earlier one for the same
-    /// account. What it was cut from is kept (`RenderedCut`), and that of
+    /// account, and any other target's for the same network: each network
+    /// has one file. What it was cut from is kept (`RenderedCut`), and that of
     /// earlier files no render, post or export points to any more is let go.
     fn save_render(&self, render: &Render) -> Result<(), RepositoryError>;
 
     /// What the file `render` was cut from, while the project's render, a
     /// post or an export points to it.
     fn rendered_cut(&self, render: RenderId) -> Result<Option<RenderedCut>, RepositoryError>;
+
+    /// The video's own render settings (#360), per network, over the
+    /// account's or the network's preset; networks without any are left
+    /// out. In `Network::ALL` order.
+    fn render_settings(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<(Network, PresetOverrides)>, RepositoryError>;
+
+    /// Keeps the video's own render settings for `network`; empty ones
+    /// remove them.
+    fn save_render_settings(
+        &self,
+        project: VideoProjectId,
+        network: Network,
+        settings: &PresetOverrides,
+    ) -> Result<(), RepositoryError>;
 }
 
 impl<T: RenderRepository + ?Sized> RenderRepository for Arc<T> {
@@ -248,6 +266,22 @@ impl<T: RenderRepository + ?Sized> RenderRepository for Arc<T> {
 
     fn rendered_cut(&self, render: RenderId) -> Result<Option<RenderedCut>, RepositoryError> {
         (**self).rendered_cut(render)
+    }
+
+    fn render_settings(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<(Network, PresetOverrides)>, RepositoryError> {
+        (**self).render_settings(project)
+    }
+
+    fn save_render_settings(
+        &self,
+        project: VideoProjectId,
+        network: Network,
+        settings: &PresetOverrides,
+    ) -> Result<(), RepositoryError> {
+        (**self).save_render_settings(project, network, settings)
     }
 }
 

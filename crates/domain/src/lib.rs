@@ -308,7 +308,7 @@ pub use network::{
 };
 pub use network_account::{
     MetadataDefaults, NetworkAccount, NetworkAccountDetails, NetworkAccountDraft,
-    NetworkAccountFieldError, NetworkAccountId, NetworkAccountRepository,
+    NetworkAccountFieldError, NetworkAccountId, NetworkAccountRepository, RenderSettingsDraft,
 };
 pub use owner_metrics::{
     AnalyticsError, AnalyticsErrorKind, Earnings, Monetization, MoneyReport, OwnerAnalytics,

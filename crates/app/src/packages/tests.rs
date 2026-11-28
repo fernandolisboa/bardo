@@ -332,3 +332,57 @@ fn a_package_holds_no_key_and_the_imported_project_has_none() {
             .all(|status| status.key.state == crate::KeyState::NotSet && status.budget.is_none())
     );
 }
+
+#[test]
+fn a_videos_files_with_no_account_and_its_render_settings_come_along() {
+    use bardo_domain::{
+        Network, NetworkAccount, PresetOverrides, Render, RenderId, RenderRepository as _,
+        Resolution, VideoFormat,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let app = on_disk(dir.path());
+    let (bakery, video) = filled(&app, "Bakery");
+    let file = NetworkAccount::file_target(video.owner, video.id, Network::TikTok);
+    app.renders
+        .save_render(&Render {
+            id: RenderId::new(),
+            owner: video.owner,
+            project: video.id,
+            account: file.id,
+            network: Network::TikTok,
+            preset: file.render_preset(VideoFormat::Short),
+            file: "render-tiktok.mp4".into(),
+            encoder: "libopenh264".into(),
+            duration: std::time::Duration::from_secs(30),
+            size_bytes: 1_000,
+            loudness: None,
+            cut: "0123".into(),
+            timing: None,
+            rendered_at: SystemTime::now(),
+        })
+        .unwrap();
+    let settings = PresetOverrides {
+        resolution: Some(Resolution::Hd720),
+        ..PresetOverrides::default()
+    };
+    app.set_render_settings(video.id, Network::TikTok, &settings)
+        .unwrap();
+    let package = dir.path().join("bakery.bardo-project");
+    exported(&app, bakery.id, &package);
+
+    let copy = imported(&app, &package);
+    let came = &videos(&app, copy)[0];
+    let renders = app.renders(came.id).unwrap();
+    assert_eq!(renders.len(), 1);
+    assert_eq!(
+        renders[0].account,
+        NetworkAccount::file_target_id(came.id, Network::TikTok),
+        "the file follows the video's new id"
+    );
+    assert_eq!(
+        app.renders.render_settings(came.id).unwrap(),
+        [(Network::TikTok, settings)]
+    );
+    // The first video keeps its own.
+    assert_eq!(app.renders(video.id).unwrap()[0].account, file.id);
+}

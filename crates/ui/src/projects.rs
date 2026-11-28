@@ -17,9 +17,9 @@ use std::time::Duration;
 
 use bardo_app::bardo_domain::{
     CaptureVoice, Channel, ChannelId, Generation, Job, JobKind, JobState, Narration,
-    NarrationSource, Network, NetworkAccountId, PersonaId, ProductionMode, SceneFieldError,
-    ScenePlanId, ScriptFieldError, SpendCap, StyleChoice, TemplateKind, VideoFormat, VideoLength,
-    VideoMetadataDraft, VideoProject, VideoProjectId,
+    NarrationSource, Network, NetworkAccountId, PersonaId, ProductionMode, RenderSettingsDraft,
+    SceneFieldError, ScenePlanId, ScriptFieldError, SpendCap, StyleChoice, TemplateKind,
+    VideoFormat, VideoLength, VideoMetadataDraft, VideoProject, VideoProjectId,
 };
 use bardo_app::{
     Bardo, BudgetConsent, ChaptersView, Control, Destination, ExportSummary, ExportView,
@@ -284,6 +284,14 @@ pub struct ProjectsScreen {
     render_choices: Vec<(NetworkAccountId, bool)>,
     /// The target open in the inspector.
     selected_target: Option<NetworkAccountId>,
+    /// The shown target's settings for this video (#360): the network the
+    /// boxes hold, and its frame, size and codec as picked.
+    render_draft: Option<(Network, RenderSettingsDraft)>,
+    render_bitrate: Entity<InputState>,
+    render_max_duration: Entity<InputState>,
+    render_loudness: Entity<InputState>,
+    render_settings_errors: Vec<bardo_app::bardo_domain::NetworkAccountFieldError>,
+    render_settings_saved: bool,
     /// "Render" was clicked: the page asks before the job starts.
     confirm_render: bool,
     render_error: Option<Text>,
@@ -438,6 +446,9 @@ impl ProjectsScreen {
         let brief_call_to_action = cx.new(|cx| InputState::new(window, cx));
         let brief_link = cx.new(|cx| InputState::new(window, cx));
         let card_headline = cx.new(|cx| InputState::new(window, cx));
+        let render_bitrate = cx.new(|cx| InputState::new(window, cx));
+        let render_max_duration = cx.new(|cx| InputState::new(window, cx));
+        let render_loudness = cx.new(|cx| InputState::new(window, cx));
         let card_second_line = cx.new(|cx| InputState::new(window, cx));
         let poll = cx.spawn(async move |this, cx| {
             loop {
@@ -566,6 +577,16 @@ impl ProjectsScreen {
             ),
         ];
         let mut subscriptions = subscriptions;
+        // Typing a render setting clears what the last save said.
+        for input in [&render_bitrate, &render_max_duration, &render_loudness] {
+            subscriptions.push(cx.subscribe(input, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.render_settings_errors.clear();
+                    this.render_settings_saved = false;
+                    cx.notify();
+                }
+            }));
+        }
         let who_appears = cx.new(|_| WhoAppearsPanel::new(bardo.clone()));
         // A new pick marks the plan for review: the stage reads it again.
         subscriptions.push(
@@ -685,6 +706,12 @@ impl ProjectsScreen {
             render_checking: None,
             render_check_failed: false,
             render_choices: Vec::new(),
+            render_draft: None,
+            render_bitrate,
+            render_max_duration,
+            render_loudness,
+            render_settings_errors: Vec::new(),
+            render_settings_saved: false,
             selected_target: None,
             confirm_render: false,
             render_error: None,
@@ -986,6 +1013,9 @@ impl ProjectsScreen {
         self.render_check_failed = false;
         self.render_choices.clear();
         self.selected_target = None;
+        self.render_draft = None;
+        self.render_settings_errors.clear();
+        self.render_settings_saved = false;
         self.confirm_render = false;
         self.render_error = None;
         self.export_error = None;
@@ -1618,6 +1648,7 @@ impl ProjectsScreen {
         self.load_end_card(id, window, cx);
         self.load_music(id, window, cx);
         self.load_render(id, cx);
+        self.fill_render_settings(false, window, cx);
         self.load_export(id, window, cx);
         self.load_youtube(id, window, cx);
         self.load_production(id, window, cx);

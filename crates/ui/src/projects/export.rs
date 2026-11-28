@@ -42,10 +42,10 @@ fn is_running(job: Option<&Job>) -> bool {
 
 /// Tags as typed: separated by commas, new lines or a space before `#`
 /// (`#space #nasa`); a `#` inside a word stays (`C#`).
-/// The account a target posts as, `@handle`; a loose video's file
-/// target (no account) says *File*.
+/// The account a target posts as, `@handle`; a file target (no account,
+/// #341, #360) says *File*.
 fn target_handle(bardo: &Bardo, target: &ExportTarget) -> String {
-    if target.handle.is_empty() {
+    if target.file_only {
         bardo.text(Text::LooseFileTarget).into_owned()
     } else {
         format!("@{}", target.handle)
@@ -1320,14 +1320,14 @@ impl ProjectsScreen {
             )
             .into_any_element()
         }));
-        // A loose video's file has no account to post it (#341).
-        let post = if target.handle.is_empty() {
-            kit::notice(
-                Tone::Info,
-                tr(self.bardo.read(cx), Text::LooseExportOnly),
-                cx,
-            )
-            .into_any_element()
+        // A file has no account to post it (#341, #360).
+        let post = if target.file_only {
+            let text = if view.loose {
+                Text::LooseExportOnly
+            } else {
+                Text::ExportFileOnly
+            };
+            kit::notice(Tone::Info, tr(self.bardo.read(cx), text), cx).into_any_element()
         } else {
             self.post_section(view, target, cx)
         };

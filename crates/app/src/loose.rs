@@ -231,20 +231,26 @@ impl Bardo {
         }
     }
 
-    /// What `video` renders and exports for: its channel's network
-    /// accounts, or for a loose video one target per network that no
-    /// account stands behind ([`NetworkAccount::file_target`]).
+    /// What `video` renders for (#360): one target per network, in
+    /// `Network::ALL` order. A network its channel has an account for is
+    /// that account; every other one, and every network of a loose video,
+    /// is a target no account stands behind ([`NetworkAccount::file_target`]):
+    /// rendering a file never needs an account, only uploading does.
     pub(crate) fn target_accounts(
         &self,
         video: &VideoProject,
     ) -> Result<Vec<NetworkAccount>, RepositoryError> {
-        match video.channel {
-            Some(channel) => self.network_accounts.list(channel),
-            None => Ok(Network::ALL
-                .into_iter()
-                .map(|network| NetworkAccount::file_target(video.owner, video.id, network))
-                .collect()),
-        }
+        let accounts = self.channel_accounts(video.channel)?;
+        Ok(Network::ALL
+            .into_iter()
+            .map(|network| {
+                accounts
+                    .iter()
+                    .find(|account| account.network == network)
+                    .cloned()
+                    .unwrap_or_else(|| NetworkAccount::file_target(video.owner, video.id, network))
+            })
+            .collect())
     }
 
     /// The angle a video takes: its theme's, or the one typed with a
@@ -557,15 +563,18 @@ mod tests {
             details.name(),
             app.channels.get(channel).unwrap().unwrap().details.name()
         );
-        // The channel's accounts publish it now.
+        // The channel's accounts publish it now; other networks stay files.
         let youtube = crate::render::tests::account(
             &app,
             &moved,
             Network::YouTube,
             bardo_domain::NetworkAccountDraft::default(),
         );
+        let targets = app.target_accounts(&moved).unwrap();
+        assert_eq!(targets[0].id, youtube.id);
+        assert!(targets[1..].iter().all(NetworkAccount::is_file_target));
         assert_eq!(
-            app.target_accounts(&moved)
+            app.channel_accounts(moved.channel)
                 .unwrap()
                 .iter()
                 .map(|a| a.id)
