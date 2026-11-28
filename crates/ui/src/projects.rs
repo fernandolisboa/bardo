@@ -41,11 +41,12 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, EventEmitter, FocusHandle, PathPromptOptions,
-    ScrollHandle, SharedString, Subscription, Task, Window, div, point, px,
+    AnyElement, App, ClickEvent, Entity, EventEmitter, FocusHandle, KeyDownEvent,
+    PathPromptOptions, ScrollHandle, SharedString, Subscription, Task, Window, div, point, px,
 };
 
 use crate::appearance::look;
+use crate::icons::Lucide;
 use crate::kit::{self, Tone};
 use crate::parts::{Header, ScreenParts, Stages};
 use crate::removal::{RemovalEvent, RemovalMode, RemovalPanel};
@@ -146,6 +147,10 @@ pub struct ProjectsScreen {
     spend_cap_input: Entity<InputState>,
     /// What saving the cap said.
     spend_cap_note: Option<(Tone, Text)>,
+    /// The open video's summary under its title (#366).
+    summary: Option<bardo_app::VideoSummary>,
+    /// Given the keyboard as the settings popup opens, so Esc closes it.
+    settings_focus: FocusHandle,
     channel: Option<ChannelId>,
     /// *No project* is open: the list is the loose videos (#341).
     loose: bool,
@@ -632,6 +637,8 @@ impl ProjectsScreen {
             production: None,
             spend_cap_input,
             spend_cap_note: None,
+            summary: None,
+            settings_focus: cx.focus_handle(),
             channel: None,
             loose: false,
             loose_form: None,
@@ -960,6 +967,9 @@ impl ProjectsScreen {
         cx: &mut Context<Self>,
     ) {
         self.project = id;
+        // Another video's settings were open: they close (#366).
+        self.bardo
+            .update(cx, |bardo, _| bardo.close_video_settings());
         self.removal = None;
         self.move_form = None;
         self.loaded = None;
@@ -1620,6 +1630,7 @@ impl ProjectsScreen {
         let Some(id) = self.project else {
             self.view = None;
             self.production = None;
+            self.summary = None;
             self.narration = None;
             self.player = None;
             self.scenes = None;
@@ -1652,6 +1663,7 @@ impl ProjectsScreen {
         self.load_export(id, window, cx);
         self.load_youtube(id, window, cx);
         self.load_production(id, window, cx);
+        self.summary = self.bardo.read(cx).video_summary(id).ok();
         match self.bardo.read(cx).script(id) {
             Ok(view) => {
                 let stored = view
@@ -2064,13 +2076,11 @@ impl ProjectsScreen {
     }
 
     /// The header: Projects › channel, the project and its switcher, its
-    /// line, and who narrates it.
+    /// line, and the video's summary (#366).
     fn header(&self, cx: &mut Context<Self>) -> Header {
         let screen = cx.entity().downgrade();
-        // A narrow window gets the compact bar: labels beside the fields and
-        // no group captions, so the stage below still shows (#330).
-        let compact = crate::layout::room(cx).window < COMPACT_BAR_BELOW;
-        let mode = self.render_mode(compact, cx);
+        let cap_notices = self.cap_notices(cx);
+        let summary_line = self.summary_line(cx);
         let archived_toggle = self.archived_toggle(cx);
         let loose_actions = self.loose.then(|| {
             let current = self.project;
@@ -2229,57 +2239,92 @@ impl ProjectsScreen {
                 &bardo.text_with(Text::ProjectSpent, &[("amount", &bardo.money(view.spent))]),
             );
         }
-        header.meta = Some(SharedString::from(meta));
-        // Its folder in Explorer: where its media is (#335).
+        let shown = bardo.video_summary_shown();
+        // Collapsed, the line goes with the summary (#366).
+        header.meta = shown.then(|| SharedString::from(meta));
+        // Show folder, archive (or bring back) and delete wait in the ⋯
+        // menu (#366); Archived, a filter of the list, stays a button.
         let folder = bardo.video_folder(project.id);
-        header.actions.push(
-            Button::new("video-show-folder")
-                .ghost()
-                .small()
-                .icon(IconName::FolderOpen)
-                .label(tr(bardo, Text::ShowFolder))
-                .on_click(move |_, _, cx| cx.open_with_system(&folder))
-                .into_any_element(),
+        let show_folder = tr(bardo, Text::ShowFolder);
+        let archive_label = tr(
+            bardo,
+            if archived {
+                Text::Unarchive
+            } else {
+                Text::ArchiveVideoAction
+            },
         );
-        // Show archived, archive or bring it back, and delete it (#336).
-        let archive = if archived {
-            Button::new("video-unarchive")
-                .ghost()
-                .small()
-                .icon(IconName::Undo)
-                .label(tr(bardo, Text::Unarchive))
-                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                    this.unarchive(window, cx);
-                }))
-        } else {
-            Button::new("video-archive")
-                .ghost()
-                .small()
-                .icon(IconName::Inbox)
-                .label(tr(bardo, Text::ArchiveVideoAction))
-                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                    this.start_removal(RemovalMode::Archive, window, cx);
-                }))
-        };
+        let delete_label = tr(bardo, Text::DeleteAction);
+        let menu_screen = cx.entity().downgrade();
+        let more = Button::new("video-more")
+            .ghost()
+            .small()
+            .icon(IconName::Ellipsis)
+            .tooltip(tr(bardo, Text::VideoMoreActions))
+            .dropdown_menu(move |menu, _, _| {
+                let folder = folder.clone();
+                let (to_archive, to_delete) = (menu_screen.clone(), menu_screen.clone());
+                menu.item(
+                    PopupMenuItem::new(show_folder.clone())
+                        .icon(IconName::FolderOpen)
+                        .on_click(move |_, _, cx| cx.open_with_system(&folder)),
+                )
+                .item(
+                    PopupMenuItem::new(archive_label.clone())
+                        .icon(if archived {
+                            IconName::Undo
+                        } else {
+                            IconName::Inbox
+                        })
+                        .on_click(move |_, window, cx| {
+                            let _ = to_archive.update(cx, |this, cx| {
+                                if archived {
+                                    this.unarchive(window, cx);
+                                } else {
+                                    this.start_removal(RemovalMode::Archive, window, cx);
+                                }
+                            });
+                        }),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new(delete_label.clone())
+                        .icon(IconName::Delete)
+                        .on_click(move |_, window, cx| {
+                            let _ = to_delete.update(cx, |this, cx| {
+                                this.start_removal(RemovalMode::Delete, window, cx);
+                            });
+                        }),
+                )
+            });
         if let Some((new, movable)) = loose_actions {
             header.actions.push(new);
             header.actions.extend(movable);
         }
+        // The summary collapses, for every video, to give the stage room.
+        let toggle = Button::new("video-summary-toggle")
+            .ghost()
+            .small()
+            .icon(if shown {
+                IconName::ChevronUp
+            } else {
+                IconName::ChevronDown
+            })
+            .tooltip(tr(
+                bardo,
+                if shown {
+                    Text::ProjectSummaryHide
+                } else {
+                    Text::ProjectSummaryShow
+                },
+            ))
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_summary(cx)));
         header.actions.push(
             h_flex()
                 .gap_1()
                 .child(archived_toggle)
-                .child(archive)
-                .child(
-                    Button::new("video-delete")
-                        .ghost()
-                        .small()
-                        .icon(IconName::Delete)
-                        .label(tr(bardo, Text::DeleteAction))
-                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                            this.start_removal(RemovalMode::Delete, window, cx);
-                        })),
-                )
+                .child(more)
+                .child(toggle)
                 .into_any_element(),
         );
         header.info = guide::header_tours(
@@ -2289,149 +2334,434 @@ impl ProjectsScreen {
             None,
             cx,
         );
-        // The video's settings in one bar under the title (#330): what the
-        // video is (narrator, format, length, look), then how it is made
-        // and what it may spend.
-        let muted = cx.theme().muted_foreground;
-        let setting = |label: Text,
-                       info: (&'static str, Text, bardo_app::GuideRef),
-                       width: f32,
-                       control: AnyElement| {
-            let (id, hint, at) = info;
-            let label = h_flex()
-                .flex_none()
-                .gap_1()
-                .items_center()
-                .text_xs()
-                .text_color(muted)
-                .child(tr(bardo, label))
-                .child(guide::info(bardo, id, tr(bardo, hint), at));
-            if compact {
-                h_flex()
-                    .gap_1p5()
-                    .items_center()
-                    .max_w_full()
-                    .child(label)
-                    .child(div().w(px(width - 20.)).min_w_0().child(control))
-            } else {
-                v_flex()
-                    .gap_1()
-                    .w(px(width))
-                    .max_w_full()
-                    .child(label)
-                    .child(control)
-            }
-        };
-        let video = v_flex()
-            .gap_2()
-            .when(!compact, |group| {
-                group.child(group_caption(bardo, Text::ProjectSettingsVideo, cx))
-            })
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .gap_x_3()
-                    .gap_y_2()
-                    .items_start()
-                    .child(kit::anchor(
-                        TourAnchor::Control(Control::ProjectNarrator),
-                        setting(
-                            Text::ProjectNarrator,
-                            (
-                                "project-narrator-info",
-                                Text::ProjectNarratorHint,
-                                guide::refs::PROJECTS_NARRATOR,
-                            ),
-                            220.,
-                            Select::new(&self.narrator_select)
-                                .small()
-                                .search_placeholder(tr(bardo, Text::PersonasTitle))
-                                .into_any_element(),
-                        ),
-                    ))
-                    .child(kit::anchor(
-                        TourAnchor::Control(Control::ProjectFormat),
-                        // The format's tour step covers the length and the
-                        // look too: they sit beside it.
-                        h_flex()
-                            .flex_wrap()
-                            .gap_x_3()
-                            .gap_y_2()
-                            .items_start()
-                            .child(setting(
-                                Text::ProjectFormat,
-                                (
-                                    "project-format-info",
-                                    Text::ProjectFormatHint,
-                                    guide::refs::PROJECTS_FORMAT,
-                                ),
-                                170.,
-                                Select::new(&self.format_select).small().into_any_element(),
-                            ))
-                            .child(setting(
-                                Text::ProjectLength,
-                                (
-                                    "project-length-info",
-                                    Text::ProjectLengthHint,
-                                    guide::refs::PROJECTS_LENGTH,
-                                ),
-                                190.,
-                                Select::new(&self.length_select).small().into_any_element(),
-                            ))
-                            .child(setting(
-                                Text::ProjectStyle,
-                                (
-                                    "project-style-info",
-                                    Text::ProjectStyleHint,
-                                    guide::refs::PROJECTS_STYLE,
-                                ),
-                                220.,
-                                Select::new(&self.style_select)
-                                    .small()
-                                    .search_placeholder(tr(bardo, Text::ChannelStyle))
-                                    .into_any_element(),
-                            )),
-                    )),
-            );
-        let (production, notices) = mode.unwrap_or_default();
-        header.bar = Some(
-            v_flex()
-                .w_full()
-                .gap_2()
-                .child(
-                    kit::card(cx).w_full().px_3().py_2().child(
-                        h_flex()
-                            .w_full()
-                            .flex_wrap()
-                            .when(compact, |row| row.gap_x_3().gap_y_2())
-                            .when(!compact, |row| row.gap_x_8().gap_y_3())
-                            .items_start()
-                            .child(video)
-                            .children(production),
-                    ),
-                )
-                .children(notices)
-                .into_any_element(),
-        );
+        // The summary under the title, then what the cap has to say: a
+        // warning shows with the summary collapsed too (#366).
+        let bar: Vec<AnyElement> = summary_line
+            .filter(|_| shown)
+            .into_iter()
+            .chain(cap_notices)
+            .collect();
+        header.bar =
+            (!bar.is_empty()).then(|| v_flex().w_full().gap_1p5().children(bar).into_any_element());
         header
     }
 
-    /// The production mode, what the whole video costs in it, and the
-    /// video's spend cap (#248), as a group of the settings bar; then what
-    /// the cap has to say, each a notice the bar's full width (#330).
-    fn render_mode(
-        &self,
-        compact: bool,
-        cx: &mut Context<Self>,
-    ) -> Option<(Option<AnyElement>, Vec<AnyElement>)> {
-        let production = self.production.as_ref()?;
-        let save = cx.listener(|this, _: &ClickEvent, window, cx| this.save_spend_cap(window, cx));
+    /// Shows or collapses the summary of every video (#366).
+    fn toggle_summary(&mut self, cx: &mut Context<Self>) {
+        let failed = self.bardo.update(cx, |bardo, _| {
+            let shown = bardo.video_summary_shown();
+            bardo.set_video_summary_shown(!shown).err()
+        });
+        if let Some(error) = failed {
+            tracing::warn!("could not save whether the video summary shows: {error}");
+        }
+        cx.notify();
+    }
+
+    /// Opens the open video's settings popup, with the keyboard in it so
+    /// Esc closes it.
+    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        self.bardo
+            .update(cx, |bardo, _| bardo.open_video_settings(id));
+        self.spend_cap_note = None;
+        window.focus(&self.settings_focus, cx);
+        cx.notify();
+    }
+
+    /// Closes the popup; a cap typed and not saved goes back to the saved
+    /// one, as the summary shows it.
+    fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.bardo
+            .update(cx, |bardo, _| bardo.close_video_settings());
+        let saved = self
+            .production
+            .as_ref()
+            .and_then(|view| view.cap)
+            .map(|cap| cap.to_string())
+            .unwrap_or_default();
+        self.spend_cap_input
+            .update(cx, |input, cx| input.set_value(saved, window, cx));
+        self.spend_cap_note = None;
+        cx.notify();
+    }
+
+    /// The video's summary on one line (#366): who narrates it, its
+    /// format, length and look, its mode and what the whole video costs
+    /// against its cap, and Edit, which opens every setting in a popup.
+    /// Each item names its setting on hover.
+    fn summary_line(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let summary = self.summary.as_ref()?;
+        let open = cx.listener(|this, _: &ClickEvent, window, cx| this.open_settings(window, cx));
+        let bardo = self.bardo.read(cx);
+        let muted = cx.theme().muted_foreground;
+        let warning = Tone::Warning.ink(cx);
+        let item = |id: &'static str, setting: Text, value: SharedString| {
+            let setting = tr(bardo, setting);
+            div()
+                .id(id)
+                .flex_none()
+                .child(value)
+                .tooltip(move |window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(setting.clone()).build(window, cx)
+                })
+        };
+        let dot = || div().flex_none().text_color(muted).child("·");
+        // Each part of the summary is a chip, so a narrow window wraps it
+        // between whole parts.
+        let t = look(cx).tokens;
+        let chip = || {
+            h_flex()
+                .flex_none()
+                .px_2()
+                .py_0p5()
+                .gap_2()
+                .items_center()
+                .rounded(t.radius)
+                .bg(t.surface)
+                .border(t.border_width)
+                .border_color(t.border)
+        };
+        let narrator = summary.narrator.clone().map_or_else(
+            || tr(bardo, Text::ProjectSummaryNoNarrator),
+            SharedString::from,
+        );
+        let length = tr(
+            bardo,
+            match summary.length {
+                Some(length) => Text::VideoLengthName(length),
+                None => Text::VideoFormatLength(summary.format),
+            },
+        );
+        let spend = self.production.as_ref().map(|production| {
+            let total = bardo.money(production.total(production.mode).unwrap_or_default());
+            let text = match production.cap {
+                Some(cap) => bardo.text_with(
+                    Text::ProjectSummarySpend,
+                    &[("total", &total), ("cap", &bardo.money(cap))],
+                ),
+                None => bardo.text_with(Text::ProjectSummarySpendNoCap, &[("total", &total)]),
+            };
+            (SharedString::from(text), production.over_cap())
+        });
+        let row = h_flex()
+            .w_full()
+            .min_w_0()
+            .flex_wrap()
+            .gap_x_2()
+            .gap_y_1()
+            .items_center()
+            .text_sm()
+            .child(kit::anchor(
+                TourAnchor::Control(Control::ProjectNarrator),
+                chip()
+                    .gap_1()
+                    .child(
+                        gpui_kit::component::Icon::new(Lucide::Mic)
+                            .size(px(14.))
+                            .text_color(muted),
+                    )
+                    .child(item(
+                        "video-summary-narrator",
+                        Text::ProjectNarrator,
+                        narrator,
+                    )),
+            ))
+            .child(kit::anchor(
+                TourAnchor::Control(Control::ProjectFormat),
+                chip()
+                    .child(item(
+                        "video-summary-format",
+                        Text::ProjectFormat,
+                        tr(bardo, Text::VideoFormatBrief(summary.format)),
+                    ))
+                    .child(dot())
+                    .child(item("video-summary-length", Text::ProjectLength, length))
+                    .child(dot())
+                    .child(item(
+                        "video-summary-style",
+                        Text::ProjectStyle,
+                        tr(bardo, Text::VisualStyleName(summary.style)),
+                    )),
+            ))
+            .child(kit::anchor(
+                TourAnchor::Control(Control::ProjectMode),
+                chip()
+                    .child(item(
+                        "video-summary-mode",
+                        Text::ProjectMode,
+                        tr(bardo, Text::ProductionModeName(summary.mode)),
+                    ))
+                    .children(spend.map(|(text, over)| {
+                        h_flex().gap_2().items_center().child(dot()).child(
+                            item("video-summary-spend", Text::SpendCap, text)
+                                .when(over, |spend| spend.text_color(warning)),
+                        )
+                    })),
+            ))
+            .child(kit::anchor(
+                TourAnchor::Control(Control::ProjectSettingsEdit),
+                Button::new("video-settings-edit")
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::Pencil)
+                    .label(tr(bardo, Text::ProjectSettingsEdit))
+                    .tooltip(tr(bardo, Text::ProjectSettingsEditHint))
+                    .on_click(open),
+            ));
+        Some(row.into_any_element())
+    }
+
+    /// What the cap has to say that needs the user, each on a line the
+    /// header's width: the default cap offered to a video from before
+    /// default caps, and a video whose whole cost is over its cap (#248).
+    /// They show with the summary collapsed too (#366).
+    fn cap_notices(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let Some(production) = self.production.as_ref() else {
+            return Vec::new();
+        };
         let answer = |accept: bool| {
             cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.answer_default_cap(accept, window, cx)
             })
         };
-        let (use_default, accept, decline) = (answer(true), answer(true), answer(false));
+        let (accept, decline) = (answer(true), answer(false));
+        let bardo = self.bardo.read(cx);
+        let default_cap = bardo.money(production.default_cap);
+        // Its text wraps where the screen is narrow (the Jobs panel open,
+        // or a small window), and the answers follow it.
+        let offer =
+            production.cap_choice.is_offer_due().then(|| {
+                kit::card(cx)
+                    .w_full()
+                    .px_3()
+                    .py_1p5()
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .flex_wrap()
+                            .gap_x_3()
+                            .gap_y_1()
+                            .items_center()
+                            .child(div().flex_1().min_w(px(240.)).text_xs().child(
+                                SharedString::from(
+                                    bardo.text_with(Text::SpendCapOffer, &[("cap", &default_cap)]),
+                                ),
+                            ))
+                            .child(
+                                h_flex()
+                                    .flex_none()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("accept-default-spend-cap")
+                                            .outline()
+                                            .xsmall()
+                                            .label(SharedString::from(bardo.text_with(
+                                                Text::SpendCapOfferAccept,
+                                                &[("cap", &default_cap)],
+                                            )))
+                                            .on_click(accept),
+                                    )
+                                    .child(
+                                        Button::new("decline-default-spend-cap")
+                                            .ghost()
+                                            .xsmall()
+                                            .label(tr(bardo, Text::SpendCapOfferDecline))
+                                            .on_click(decline),
+                                    ),
+                            ),
+                    )
+                    .into_any_element()
+            });
+        let over = production.over_cap().then(|| {
+            kit::notice(
+                Tone::Warning,
+                SharedString::from(bardo.text_with(
+                    Text::SpendCapOver,
+                    &[("cap", &bardo.money(production.cap.unwrap_or_default()))],
+                )),
+                cx,
+            )
+            .text_xs()
+            .into_any_element()
+        });
+        // What answering the offer said shows here; the popup shows its
+        // own saves.
+        let note = self
+            .spend_cap_note
+            .filter(|_| !bardo.video_settings_open(self.project))
+            .map(|(tone, text)| {
+                kit::notice(tone, tr(bardo, text), cx)
+                    .text_xs()
+                    .into_any_element()
+            });
+        offer.into_iter().chain(over).chain(note).collect()
+    }
+
+    /// The video's settings in a popup over the screen (#366): what the
+    /// video is (narrator, format, length, look), then how it is made and
+    /// what it may spend. Close and Esc close it.
+    fn settings_popup(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.bardo.read(cx).video_settings_open(self.project) || self.view.is_none() {
+            return None;
+        }
+        let production = self.production_form(cx);
+        let close = cx.listener(|this, _: &ClickEvent, window, cx| this.close_settings(window, cx));
+        let bardo = self.bardo.read(cx);
+        let t = look(cx).tokens;
+        let muted = cx.theme().muted_foreground;
+        // A change that failed says so here, not only behind the popup.
+        let error = self
+            .error
+            .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx).text_xs());
+        let setting = |label: Text,
+                       info: (&'static str, Text, bardo_app::GuideRef),
+                       width: f32,
+                       control: AnyElement| {
+            let (id, hint, at) = info;
+            v_flex()
+                .gap_1()
+                .w(px(width))
+                .max_w_full()
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(bardo, label))
+                        .child(guide::info(bardo, id, tr(bardo, hint), at)),
+                )
+                .child(control)
+        };
+        let video = v_flex()
+            .gap_2()
+            .child(group_caption(bardo, Text::ProjectSettingsVideo, cx))
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap_x_3()
+                    .gap_y_3()
+                    .items_start()
+                    .child(setting(
+                        Text::ProjectNarrator,
+                        (
+                            "project-narrator-info",
+                            Text::ProjectNarratorHint,
+                            guide::refs::PROJECTS_NARRATOR,
+                        ),
+                        260.,
+                        Select::new(&self.narrator_select)
+                            .small()
+                            .search_placeholder(tr(bardo, Text::PersonasTitle))
+                            .into_any_element(),
+                    ))
+                    .child(setting(
+                        Text::ProjectFormat,
+                        (
+                            "project-format-info",
+                            Text::ProjectFormatHint,
+                            guide::refs::PROJECTS_FORMAT,
+                        ),
+                        260.,
+                        Select::new(&self.format_select).small().into_any_element(),
+                    ))
+                    .child(setting(
+                        Text::ProjectLength,
+                        (
+                            "project-length-info",
+                            Text::ProjectLengthHint,
+                            guide::refs::PROJECTS_LENGTH,
+                        ),
+                        260.,
+                        Select::new(&self.length_select).small().into_any_element(),
+                    ))
+                    .child(setting(
+                        Text::ProjectStyle,
+                        (
+                            "project-style-info",
+                            Text::ProjectStyleHint,
+                            guide::refs::PROJECTS_STYLE,
+                        ),
+                        260.,
+                        Select::new(&self.style_select)
+                            .small()
+                            .search_placeholder(tr(bardo, Text::ChannelStyle))
+                            .into_any_element(),
+                    )),
+            );
+        let heading = h_flex()
+            .flex_none()
+            .gap_2()
+            .items_center()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(kit::title(bardo.text(Text::ProjectSettingsTitle))),
+            )
+            .child(
+                Button::new("video-settings-close")
+                    .small()
+                    .ghost()
+                    .icon(IconName::Close)
+                    .tooltip(tr(bardo, Text::ProjectSettingsClose))
+                    .on_click(close),
+            );
+        let card = kit::card(cx)
+            .w(px(640.))
+            .max_w_full()
+            .max_h_full()
+            .p_4()
+            .gap_3()
+            .border_color(t.accent_edge)
+            .shadow_lg()
+            .child(heading)
+            .child(
+                v_flex()
+                    .id("video-settings-body")
+                    .flex_shrink_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .gap_4()
+                    .children(error)
+                    .child(video)
+                    .children(production),
+            );
+        // Over the screen, which takes no clicks while it is up.
+        Some(
+            div()
+                .id("video-settings")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .track_focus(&self.settings_focus)
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.key == "escape" {
+                        this.close_settings(window, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+                .p_6()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(t.app.opacity(0.8))
+                .child(card)
+                .into_any_element(),
+        )
+    }
+
+    /// The production mode, what the whole video costs in it, and the
+    /// video's spend cap (#248), as a group of the settings popup, with
+    /// what saving the cap said.
+    fn production_form(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let production = self.production.as_ref()?;
+        let save = cx.listener(|this, _: &ClickEvent, window, cx| this.save_spend_cap(window, cx));
+        let use_default = cx
+            .listener(|this, _: &ClickEvent, window, cx| this.answer_default_cap(true, window, cx));
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let default_cap = bardo.money(production.default_cap);
@@ -2456,38 +2786,6 @@ impl ProjectsScreen {
             ),
             SpendCap::NotOffered => None,
         };
-        let offer = production.cap_choice.is_offer_due().then(|| {
-            // Its text wraps where the screen is narrow (the Jobs panel
-            // open, or a small window).
-            kit::card(cx)
-                .p_2()
-                .gap_2()
-                .max_w_full()
-                .child(div().text_xs().child(SharedString::from(
-                    bardo.text_with(Text::SpendCapOffer, &[("cap", &default_cap)]),
-                )))
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            Button::new("accept-default-spend-cap")
-                                .outline()
-                                .small()
-                                .label(SharedString::from(bardo.text_with(
-                                    Text::SpendCapOfferAccept,
-                                    &[("cap", &default_cap)],
-                                )))
-                                .on_click(accept),
-                        )
-                        .child(
-                            Button::new("decline-default-spend-cap")
-                                .ghost()
-                                .small()
-                                .label(tr(bardo, Text::SpendCapOfferDecline))
-                                .on_click(decline),
-                        ),
-                )
-        });
         let total = production.total(production.mode).unwrap_or_default();
         let partial = production
             .estimate(production.mode)
@@ -2518,20 +2816,15 @@ impl ProjectsScreen {
             .spend_cap_note
             .map(|(tone, text)| kit::notice(tone, tr(bardo, text), cx).text_xs());
         let field = |label: Text, control: AnyElement| {
-            let label = div()
-                .flex_none()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(tr(bardo, label));
-            if compact {
-                h_flex()
-                    .gap_1p5()
-                    .items_center()
-                    .child(label)
-                    .child(div().flex_1().min_w_0().child(control))
-            } else {
-                v_flex().gap_1().child(label).child(control)
-            }
+            v_flex()
+                .gap_1()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(tr(bardo, label)),
+                )
+                .child(control)
         };
         let info = guide::info(
             bardo,
@@ -2544,24 +2837,17 @@ impl ProjectsScreen {
             )),
             guide::refs::PROJECTS_MODE,
         );
-        // The compact bar has no caption: the ⓘ follows the cap.
-        let (caption_info, row_info) = if compact {
-            (None, Some(info))
-        } else {
-            (Some(info), None)
-        };
-        let group = kit::anchor(
-            TourAnchor::Control(Control::ProjectMode),
+        Some(
             v_flex()
                 .gap_2()
                 .max_w_full()
-                .children(caption_info.map(|info| {
+                .child(
                     h_flex()
                         .gap_1()
                         .items_center()
                         .child(group_caption(bardo, Text::ProjectSettingsProduction, cx))
-                        .child(info)
-                }))
+                        .child(info),
+                )
                 .child(
                     h_flex()
                         .flex_wrap()
@@ -2576,7 +2862,7 @@ impl ProjectsScreen {
                                     .menu_width(px(560.))
                                     .into_any_element(),
                             )
-                            .w(px(if compact { 260. } else { 280. }))
+                            .w(px(260.))
                             .max_w_full(),
                         )
                         .child(field(
@@ -2597,7 +2883,6 @@ impl ProjectsScreen {
                                         .on_click(save),
                                 )
                                 .children(default)
-                                .children(row_info)
                                 .into_any_element(),
                         )),
                 )
@@ -2606,17 +2891,11 @@ impl ProjectsScreen {
                         .text_xs()
                         .text_color(theme.muted_foreground)
                         .child(estimate),
-                ),
+                )
+                .children(over)
+                .children(note)
+                .into_any_element(),
         )
-        .max_w_full()
-        .into_any_element();
-        let notices = offer
-            .map(IntoElement::into_any_element)
-            .into_iter()
-            .chain(over.map(IntoElement::into_any_element))
-            .chain(note.map(IntoElement::into_any_element))
-            .collect();
-        Some((Some(group), notices))
     }
 
     /// The Script stage: the script, a new version to review, where it
@@ -3601,9 +3880,6 @@ impl ProjectsScreen {
     }
 }
 
-/// Below this window width the settings bar is compact (#330).
-const COMPACT_BAR_BELOW: f32 = 1000.;
-
 /// The caption over a group of the settings bar: "Video", "Production
 /// and spend".
 fn group_caption(bardo: &Bardo, text: Text, cx: &App) -> AnyElement {
@@ -3722,6 +3998,16 @@ impl Render for ProjectsScreen {
         if let Some(card) = self.loose_card(cx) {
             parts.notices.insert(0, card);
         }
-        layout::screen(parts, cx)
+        let popup = self.settings_popup(cx);
+        let screen = layout::screen(parts, cx);
+        match popup {
+            Some(popup) => div()
+                .relative()
+                .size_full()
+                .child(screen)
+                .child(popup)
+                .into_any_element(),
+            None => screen,
+        }
     }
 }

@@ -373,6 +373,8 @@ struct PreferencesEntry {
     #[serde(default)]
     update_check: Option<bool>,
     #[serde(default)]
+    video_summary: Option<bool>,
+    #[serde(default)]
     decision_engine: Option<String>,
 }
 
@@ -951,6 +953,7 @@ impl Bardo {
                 screen_tours: Some(profile.offer_screen_tours),
                 auto_backup: Some(profile.auto_backup),
                 update_check: Some(profile.update_check),
+                video_summary: Some(profile.video_summary),
                 decision_engine: Some(profile.decision_engine.code().to_owned()),
             });
         }
@@ -1381,6 +1384,9 @@ impl Bardo {
         if let Some(on) = entry.update_check {
             self.set_update_check(on).map_err(failed)?;
         }
+        if let Some(shown) = entry.video_summary {
+            self.set_video_summary_shown(shown).map_err(failed)?;
+        }
         // An engine this copy does not offer keeps the current one.
         if let Some(engine) = entry
             .decision_engine
@@ -1652,6 +1658,7 @@ mod tests {
             .unwrap();
         app.set_ui_layout(LayoutId::Studio).unwrap();
         app.set_auto_backup(false).unwrap();
+        app.set_video_summary_shown(false).unwrap();
         app.set_budget(Provider::Claude, "25").unwrap();
         let persona = app
             .create_persona(PersonaDraft {
@@ -2004,6 +2011,7 @@ mod tests {
         assert_eq!(other.ui_theme(), UiThemePreference::Fixed(UiTheme::Slate));
         assert_eq!(other.ui_layout(), LayoutId::Studio);
         assert!(!other.profile().auto_backup);
+        assert!(!other.video_summary_shown());
         let budgets = other.cost_book.costs.budgets(owner).unwrap();
         assert_eq!(budgets.len(), 1);
         assert_eq!(budgets[0].monthly, Money::from_cents(2500));

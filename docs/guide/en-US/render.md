@@ -13,7 +13,7 @@ Rendering turns the cut into the files you publish or share: one per network you
 <a id="review"></a>
 ## The review
 
-Opening the stage checks the cut and this computer: it measures the mix and tries the video encoders, which takes a few seconds. The figures at the top describe the cut as it will come out:
+Opening the stage checks the cut and this computer: it measures the mix and tries the video encoders, which takes a few seconds. The figures at the top of the stage (in Studio, on a line right under the stage tabs) describe the cut as it will come out:
 
 | Figure | Says |
 | --- | --- |

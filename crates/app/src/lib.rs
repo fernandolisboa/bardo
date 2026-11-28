@@ -85,6 +85,7 @@ mod thumbnails;
 mod tours;
 mod updates;
 mod uploads;
+mod video_summary;
 mod voice_samples;
 mod world;
 mod youtube_policy;
@@ -274,6 +275,7 @@ pub use uploads::{
     AdUploadChoices, DraftNote, SpecProblem, UploadBlock, UploadChoices, UploadReview,
     UploadReviewError, UploadState, upload_state,
 };
+pub use video_summary::VideoSummary;
 pub use voice_samples::{SampleAudio, SamplePlayer, VoiceSample, VoiceSampleError, VoiceSampling};
 pub use world::{PictureView, WhoAppears, WorldError, WorldItemCard};
 pub use youtube_policy::{
@@ -789,6 +791,8 @@ pub struct Bardo {
     folder_book: folders::FolderBook,
     /// The world's characters and their pictures (issue #337).
     world_book: world::WorldBook,
+    /// The video whose settings popup is open over its screen (#366).
+    video_settings_open: Option<bardo_domain::VideoProjectId>,
 }
 
 impl Bardo {
@@ -1414,6 +1418,7 @@ impl Bardo {
                 .then(settings_transfer::SettingsOffer::default),
             folder_book,
             world_book,
+            video_settings_open: None,
         })
         .inspect(|bardo| {
             if bardo.role == RunnerRole::App {

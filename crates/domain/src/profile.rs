@@ -109,6 +109,10 @@ pub struct UserProfile {
     /// Whether Bardo looks for a newer release when it opens and once a
     /// day (ADR-0011). On until the user turns it off.
     pub update_check: bool,
+    /// Whether an open video shows its summary (narrator, format, length,
+    /// style, mode, spend) under its title (#366). On until the user
+    /// collapses it, for every video.
+    pub video_summary: bool,
     /// The privacy policy the user accepted before Bardo used YouTube
     /// (ADR-0012); none until they do.
     pub privacy: Option<PrivacyConsent>,
@@ -128,6 +132,7 @@ impl UserProfile {
             background_agent: false,
             auto_backup: true,
             update_check: true,
+            video_summary: true,
             privacy: None,
         }
     }
