@@ -4,6 +4,32 @@ What changed in each version of Bardo, newest first. Each version is a
 [release on GitHub](https://github.com/fernandolisboa/bardo/releases) with the
 installer, and its notes there are the section below.
 
+## 0.5.1
+
+### Rendering
+
+- **Render without an account** (#360): the Render stage lists every
+  network. A network with no connected account gets a **File** target that
+  renders a video to download, share or post by hand and never uploads, so a
+  channel with no accounts can render now. Publish lists those files with
+  "post it yourself or add an account".
+- **This video's render settings** (#360): each target's inspector changes
+  frame, resolution, codec, bitrate, length limit and loudness for this
+  video only, over the account's or the network's preset, with **Save** and
+  **Restore defaults**. Changing them marks the last file out of date.
+  Project packages carry these settings and file renders.
+
+### Updates
+
+- **What's new in a popup** (#359): **See what's new** on the update banner
+  opens the release notes over the current screen, with Download, install
+  review and Release page. The expand button goes to Settings › About.
+
+### Upgrading from 0.5.0
+
+The database updates itself on the first start. Existing renders and
+accounts carry over.
+
 ## 0.5.0
 
 ### Projects
