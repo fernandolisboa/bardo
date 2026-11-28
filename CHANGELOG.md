@@ -4,6 +4,81 @@ What changed in each version of Bardo, newest first. Each version is a
 [release on GitHub](https://github.com/fernandolisboa/bardo/releases) with the
 installer, and its notes there are the section below.
 
+## 0.5.0
+
+### Projects
+
+Work is organized by project: one is open at a time, with its own channels,
+folder, world and libraries (#332).
+
+- **Project switcher** (#333): open, create and star projects from the title
+  bar, with favorites and recents. Channels belong to a project and can move
+  to another one; Jobs and Costs filter by project.
+- **Navigation by project** (#334): **Overview** is the new start screen,
+  with the open project's videos in progress and each one's next step, the
+  ideas waiting, the channels and this month's spending. Research and Themes
+  are tabs of **Ideas**; Personas is now **Narrators** and Projects is now
+  **Videos**. The **Global library** holds what every project can use.
+- **Project folders** (#335): each project gets a folder with `Videos` and
+  `World`, under a base folder chosen in Settings › Storage (`Documents\Bardo`
+  by default, or your user folder when OneDrive syncs Documents). A folder
+  that cannot be found marks the project **Folder not found** with
+  **Locate…**, and its jobs wait. Backups carry each project folder.
+- **Archive and delete** (#336): archive a project or a video to hide it and
+  keep it read-only, optionally packing its media into `Videos.zip`. Delete
+  asks for the name and sends the folder to the Recycle Bin. Costs keeps
+  deleted work under its name, and amounts never change.
+- **World** (#337, #338): characters, places and objects that come back
+  across videos, each with a reference picture per look, drawn once and
+  kept. **Who appears** picks them per video, objects may belong to a
+  character, and scenes are drawn with their pictures.
+- **Project libraries** (#339): narrators, products and templates belong to
+  a project or to the global library. **Bring into the project** copies a
+  global item into the open project.
+- **Sharing between projects** (#340): import another project's shareable
+  item as a linked copy, which follows every change, or as an independent
+  one. **Make global** moves an item to the global library, and a
+  `.bardo-item` file carries one as a single file.
+- **Videos with no project** (#341): **No project** in the switcher holds
+  videos started from a typed idea, with settings of their own; they export
+  a file per network and move into a project's channel to be published.
+  Themes gains **Write my own idea**.
+- **Project packages** (#342): **Export project** writes a `.bardo-project`
+  package with its records, the global items it uses and its media, never
+  keys, tokens, costs or unfinished jobs. **Import a project package** brings
+  one in as a new project. **Open a project from a folder** relinks a moved
+  project, or brings back a deleted one whose folder you restored from the
+  Recycle Bin.
+- **Keys and budgets per project** (#343): Settings › This project takes an
+  optional key per provider for the open project, kept in Windows Credential
+  Manager, with a monthly budget for what it pays. Jobs pay with the
+  project's key when it has one, else the app's; Costs splits the spend by
+  key.
+
+### Creation and editing
+
+- **Models picked in steps** (#329): the channel defaults, a scene's model
+  and a take's model are picked by provider, model, version and variant.
+- **Project header** (#330): video, production and spend settings sit in a
+  bar under the title, compact in windows narrower than 1,000 px.
+
+### Fixes
+
+- The first idea card on Themes keeps its title in wide windows (#328).
+- Two videos drawn at the same time pay for a shared world portrait once
+  (#351).
+
+### Upgrading from 0.4.0
+
+Projects, keys and connections carry over, and the database updates itself on
+the first start. Bardo makes a project for each channel, named after it;
+channels linked by a localized version share one project, named after the
+oldest. Existing narrators, products and templates join the global library,
+so nothing a channel or video used changes. Media of existing videos moves
+from `%LOCALAPPDATA%\Bardo\projects` into each project's folder as a job
+you can follow, cancel and resume on Jobs; other jobs wait until it ends.
+Keys stay app-wide until you add a project key.
+
 ## 0.4.0
 
 ### Ads for a product
