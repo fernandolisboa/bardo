@@ -597,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "bardo-ai"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bardo-domain",
  "base64 0.22.1",
@@ -613,7 +613,7 @@ dependencies = [
 
 [[package]]
 name = "bardo-app"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "argon2",
  "bardo-ai",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "bardo-domain"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "jiff 0.2.37",
  "serde_json",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "bardo-e2e"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "bardo-app",
@@ -668,7 +668,7 @@ dependencies = [
 
 [[package]]
 name = "bardo-media"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bardo-domain",
  "image",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "bardo-publish"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bardo-ai",
  "bardo-domain",
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "bardo-storage"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bardo-domain",
  "dirs 6.0.0",
@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "bardo-ui"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "bardo-app",
@@ -736,7 +736,7 @@ dependencies = [
 
 [[package]]
 name = "bardo-vision"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bardo-domain",
  "bardo-media",
@@ -9686,7 +9686,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "cargo_metadata",

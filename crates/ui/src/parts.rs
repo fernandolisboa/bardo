@@ -90,7 +90,7 @@ pub struct Header {
     /// What sits on the other side: the month, "New".
     pub actions: Vec<AnyElement>,
     /// A row of settings under the title, the full width of the header:
-    /// an open project's narrator, format, mode and cap (#330).
+    /// an open video's summary and the cap's warnings (#330, #366).
     pub bar: Option<AnyElement>,
     /// The places shown under the same entry, as tabs under the title:
     /// Research and Themes, Channels and Accounts, the global library's.

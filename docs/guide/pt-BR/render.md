@@ -13,7 +13,7 @@ O render transforma o corte nos arquivos que você publica ou compartilha: um po
 <a id="review"></a>
 ## A revisão
 
-Abrir a etapa verifica o corte e este computador: mede a mixagem e testa os codificadores de vídeo, o que leva alguns segundos. Os números no topo descrevem o corte como ele vai sair:
+Abrir a etapa verifica o corte e este computador: mede a mixagem e testa os codificadores de vídeo, o que leva alguns segundos. Os números no topo da etapa (no Studio, numa linha logo abaixo das abas das etapas) descrevem o corte como ele vai sair:
 
 | Número | Diz |
 | --- | --- |

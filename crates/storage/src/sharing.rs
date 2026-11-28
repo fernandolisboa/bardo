@@ -456,11 +456,13 @@ fn fingerprint_trigger(sql: &str) -> String {
 /// rewind further to check an older migration. Migration 86's columns go
 /// too; its table rebuild (optional channel and theme) stays, as an older
 /// database's rows all fit it. So does migration 87 (project keys).
+/// The video summary's profile column (#366) goes too.
 #[cfg(test)]
 pub(crate) fn undo_for_tests(conn: &Connection) {
     drop_mirrors(conn).unwrap();
     conn.execute_batch(
-        "DROP TABLE render_setting;
+        "ALTER TABLE user_profile DROP COLUMN video_summary;
+         DROP TABLE render_setting;
          DROP TABLE project_budget; DROP TABLE project_key;
          ALTER TABLE cost_record DROP COLUMN key_project_id;
          DROP TABLE video_settings;
