@@ -88,14 +88,16 @@ function Invoke-Media {
         @($resumed.files | Where-Object { $_ -like '*.partial*' }).Count -eq 0
     } { "partial seen: $started; $($resumed | ConvertTo-Json -Compress -Depth 5)" }
 
-    # S4.09, S4.10, S8.32: every network, both frame shapes.
+    # S4.09, S4.10, S8.32: every network, both frame shapes. Kick has no
+    # account in the seed, so it renders as a file only.
     $all = Keep 'render-all' (Installed render all)
-    Test-Check 'S4.09' 'every network renders in software' { $all.job.state -eq 'done' -and @($all.renders).Count -eq 4 } { $all.job | ConvertTo-Json -Compress }
+    Test-Check 'S4.09' 'every network renders in software, with or without an account' { $all.job.state -eq 'done' -and @($all.renders).Count -eq 5 } { $all.job | ConvertTo-Json -Compress }
     foreach ($expected in @(
             @{ network = 'youtube'; width = 1080; height = 1920 },
             @{ network = 'tiktok'; width = 1080; height = 1920 },
             @{ network = 'instagram_reels'; width = 1080; height = 1920 },
-            @{ network = 'x'; width = 1280; height = 720 })) {
+            @{ network = 'x'; width = 1280; height = 720 },
+            @{ network = 'kick'; width = 1920; height = 1080 })) {
         $render = Get-Render $all $expected.network
         Test-Check 'S4.09' "$($expected.network): H.264 at $($expected.width) x $($expected.height)" {
             $render.probe.video.codec -eq 'h264' -and $render.probe.video.width -eq $expected.width -and
@@ -112,7 +114,7 @@ function Invoke-Media {
     # S9.08, S9.09: the export package.
     $exported = Keep 'export' (Installed export all)
     $videos = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Videos\Bardo'
-    Test-Check 'S9.08' 'every network exports' { $exported.job.state -eq 'done' -and @($exported.exports).Count -eq 4 } { $exported.job | ConvertTo-Json -Compress }
+    Test-Check 'S9.08' 'every network exports' { $exported.job.state -eq 'done' -and @($exported.exports).Count -eq 5 } { $exported.job | ConvertTo-Json -Compress }
     foreach ($export in $exported.exports) {
         Test-Check 'S9.08' "$($export.network): %USERPROFILE%\Videos\Bardo\<title> (<id8>)\<Network>\ holds <title>.mp4 and metadata.txt, no .partial" {
             $export.folder.StartsWith($videos, [StringComparison]::OrdinalIgnoreCase) -and
@@ -121,8 +123,10 @@ function Invoke-Media {
         } { "$($export.folder): $($export.files -join ', ')" }
         $bytes = [System.IO.File]::ReadAllBytes((Join-Path $export.folder 'metadata.txt'))
         $text = [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+        # Kick takes no description, so its accents are in the tags.
+        $accented = if ($export.network -eq 'kick') { 'missões' } else { 'Narração' }
         Test-Check 'S9.09' "$($export.network): metadata.txt is UTF-8 with CRLF, accents intact, with the disclosure line" {
-            $text.Contains('Narração') -and $text.Contains("`r`n") -and -not ($text -replace "`r`n", '').Contains("`n") -and
+            $text.Contains($accented) -and $text.Contains("`r`n") -and -not ($text -replace "`r`n", '').Contains("`n") -and
             $export.disclosure -and $text.Contains($export.disclosure)
         } { $text.Substring(0, [math]::Min(300, $text.Length)) }
     }
@@ -147,7 +151,7 @@ function Invoke-Media {
         -not $edited.sfx_muted_before -and $edited.sfx_muted -and $state.sfx_muted
     } { "before $($edited.sfx_muted_before), after edit $($edited.sfx_muted), after restart $($state.sfx_muted)" }
     Test-Check 'S9.06' 'after an edit to the cut, every render is out of date' {
-        @($state.targets).Count -eq 4 -and @($state.targets | Where-Object { $_.current }).Count -eq 0
+        @($state.targets).Count -eq 5 -and @($state.targets | Where-Object { $_.current }).Count -eq 0
     } { $state.targets | ConvertTo-Json -Compress }
 
     # S8.36: a scene image deleted from the project folder.
