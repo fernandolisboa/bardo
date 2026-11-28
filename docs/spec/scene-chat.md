@@ -28,7 +28,7 @@ Each slice adds its terms to `docs/CONTEXT.md` when it lands.
 | **Chat target** | What a request is about: the scene's *image* or its *clip*. The user picks it when opening the chat; the chat header shows it and lets the user switch. |
 | **Proposal** | Claude's answer to a request that it understood: a short sentence of what will change, and one or more **options**, one of them recommended. A request Claude did not understand gets a **question** instead, with no options. |
 | **Option** | One way to apply a proposal, with its price: *Edit this image*, *Edit this clip*, *New clip* or *Edit the image, then a new clip*. Applying an option starts its job. |
-| **Image edit** | A new image drawn from the scene's current image and an English instruction ("make the cup on the table white; keep everything else the same"), with the same references the scene is drawn with. |
+| **Image edit** | A new image drawn from the scene's current image and an English instruction ("make the cup on the table white; keep everything else the same"), with the references the scene is drawn with (its people's portraits and its place), the current image last; other shots of the video are left out, since the current image already carries the look. |
 | **Clip edit** | A new clip made by Gemini Omni from the scene's current clip and an English instruction; the motion stays. |
 | **Chat placement** | Where the chat opens, chosen in Settings › Appearance: *beside the scene* (in the inspector, the default), *at the bottom* (a dock under the scenes) or *floating* (a box next to the picked scene). |
 
@@ -73,7 +73,7 @@ Each placement works in both layouts (Workspace, Studio), in all ten themes and 
 ## Templates and costs
 
 - A new template kind, **Scene chat**, holds Claude's instructions and prompt, with variables for the request, the recent messages, the scene, the target and the options offered. It is versioned and per project like the other kinds; every reply records the version.
-- Cost purposes: *Scene chat* (Claude), and the image and clip calls under the purposes of scene images and clips, with *edit* noted so Costs can tell them apart.
+- Cost purposes: *Scene chat* (Claude); an applied edit is recorded under the purpose of what it makes (scene images, scene clips) on its own job, so Costs lists it with the job that made it.
 - First guesses for the estimate: a chat reply 3,000 input / 600 output tokens; refined by the real-key checks.
 
 ## Not in this feature

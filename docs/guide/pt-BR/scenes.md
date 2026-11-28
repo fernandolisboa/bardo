@@ -108,6 +108,18 @@ No corte, o cartão aparece da primeira palavra da chamada para ação até 1,5 
 
 **Desenhar de novo** faz uma nova imagem a partir do prompt da cena, do lugar, das pessoas e das outras imagens do vídeo como estão agora. A nova imagem espera ao lado da atual: **Usar a nova imagem** a substitui, **Manter a atual** descarta a nova. Até você decidir, a cena mostra **Revisar** e a etapa diz quantas esperam.
 
+<a id="chat"></a>
+## Ajustar com IA
+
+**Ajustar com IA**, embaixo da imagem da cena, abre o chat da cena no inspetor. Escreva o que deve mudar, com suas palavras: *deixe branca a xícara na mesa*, *feche os olhos dela*, *luz mais quente*. O Claude olha a imagem e a cena e responde com o que entendeu, no idioma do app:
+
+- Quando o pedido é claro, ele propõe **Editar esta imagem**, com o preço da edição e a instrução em inglês que o modelo de imagem recebe. **Aplicar** edita a imagem atual e mantém todo o resto: a imagem vai para o modelo como referência, só com a mudança pedida.
+- Quando não é (qual das duas xícaras?), ele pergunta, e você responde no chat.
+
+Enviar paga só a resposta do Claude, pelo preço em **Enviar**; nada é desenhado até você aplicar uma opção, e passando de um orçamento o Bardo pergunta antes, como em **Desenhar de novo**. A imagem editada espera ao lado da atual como toda [imagem nova](#redraw): **Usar a nova imagem** a substitui e põe a edição no prompt da cena, então desenhar a cena de novo a mantém; **Manter a atual** deixa a cena como estava, e a opção pode ser aplicada de novo. Uma opção proposta para uma imagem que a cena não mostra mais não se aplica: envie o pedido de novo.
+
+O chat fica com a cena enquanto o plano fica, também depois de [ajustá-lo](#fit) a uma nova narração; planejar as cenas de novo o leva embora. As respostas seguem o [template](templates.md) **Chat da cena**. Uma cena que o Bardo compõe a partir da imagem do próprio produto (a [foto do produto de um anúncio](#ad)) não tem chat: nenhum modelo a altera.
+
 <a id="cast"></a>
 ## Pessoas que voltam
 

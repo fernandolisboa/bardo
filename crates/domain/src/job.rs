@@ -171,6 +171,10 @@ pub enum JobKind {
     /// *idea* and the image provider draw it (#280); it waits for the
     /// user's review.
     ProductConcept,
+    /// Has Claude answer the user's request about a scene's image with a
+    /// question or a proposal (#368, ADR-0049); nothing else is paid until
+    /// the user applies an option.
+    SceneChat,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -228,7 +232,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 47] = [
+    pub const ALL: [JobKind; 48] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -276,6 +280,7 @@ impl JobKind {
         JobKind::WorldPicture,
         JobKind::ProjectExport,
         JobKind::ProjectImport,
+        JobKind::SceneChat,
     ];
 
     /// Stable name stored in the database.
@@ -328,6 +333,7 @@ impl JobKind {
             JobKind::WorldPicture => "world_picture",
             JobKind::ProjectExport => "project_export",
             JobKind::ProjectImport => "project_import",
+            JobKind::SceneChat => "scene_chat",
         }
     }
 }

@@ -108,6 +108,18 @@ In the cut, the card shows from the first word of the call to action until 1.5 s
 
 **Draw again** makes a new image from the scene's prompt, its place, its people and the other images of the video as they are now. The new image waits beside the current one: **Use new image** replaces it, **Keep current** throws the new one away. Until you choose, the scene reads **Review** and the stage says how many wait.
 
+<a id="chat"></a>
+## Adjusting with AI
+
+**Adjust with AI**, under the scene's image, opens the scene's chat in the inspector. Write what should change, in your own words: *make the cup on the table white*, *close her eyes*, *warmer light*. Claude looks at the image and the scene and answers with what it understood, in the language of the app:
+
+- When the request is clear, it proposes **Edit this image**, with the price of the edit and the English instruction the image model gets. **Apply** edits the current image and keeps everything else: the image goes to the model as a reference, with only the change asked for.
+- When it is not (which of two cups?), it asks, and you answer in the chat.
+
+Sending pays only for Claude's reply, at the price on **Send**; nothing is drawn until you apply an option, and past a budget Bardo asks first, as for **Draw again**. The edited image waits beside the current one like any [new image](#redraw): **Use new image** replaces it and makes the edit part of the scene's prompt, so drawing the scene again keeps it; **Keep current** leaves the scene as it was, and the option can be applied again. An option proposed for an image the scene no longer shows does not apply: send the request again.
+
+The chat stays with the scene while the plan does, also after [fitting it](#fit) to a new narration; planning the scenes again takes it away. Replies follow the **Scene chat** [template](templates.md). A scene Bardo composes from the product's own image (an [ad's product shot](#ad)) has no chat: no model changes it.
+
 <a id="cast"></a>
 ## People who come back
 

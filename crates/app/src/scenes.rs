@@ -552,6 +552,37 @@ struct ImagesPayload {
     /// The product those pictures are composed from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     product: Option<String>,
+    /// An edit of the one scene in `scenes` asked for in its chat (#368):
+    /// its current image is edited instead of drawn again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    edit: Option<ImageEdit>,
+}
+
+/// An edit of a scene's current image (#368, ADR-0049): the image goes
+/// to the model with the instruction, after the references the scene is
+/// drawn with, so the rest of it stays.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ImageEdit {
+    /// What to change, in English.
+    pub(crate) instruction: String,
+    /// The scene's prompt with the change written in.
+    pub(crate) prompt: String,
+    /// The image it edits, by its generation: once the scene has another,
+    /// the edit is out of date and nothing is drawn.
+    pub(crate) from: String,
+}
+
+/// The prompt of an edit: the instruction on reference `number`, the
+/// scene's current image, then the scene's own prompt (whose references
+/// come before it) for what the picture shows.
+pub(crate) fn edit_prompt(edit: &ImageEdit, number: usize, scene: &str) -> String {
+    format!(
+        "Edit the picture given as Reference {number}: it is this scene's current image. Change \
+         only this: {}\nKeep everything else exactly as it is in that picture: the framing, the \
+         people and their poses, the place, the light, the colors and the rendering style. \
+         Return the whole picture, edited.\n\nWhat the scene shows, for context:\n{scene}",
+        edit.instruction.trim()
+    )
 }
 
 /// What an image job has delivered, saved as the job's external handle.
@@ -628,7 +659,7 @@ fn portrait_file(generation: GenerationId, extension: &str) -> String {
 }
 
 /// The format of an image file Bardo saved, from its extension.
-fn saved_format(file: &str) -> Option<ImageFormat> {
+pub(crate) fn saved_format(file: &str) -> Option<ImageFormat> {
     let extension = file.rsplit_once('.')?.1.to_ascii_lowercase();
     [ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::Webp]
         .into_iter()
@@ -656,7 +687,7 @@ pub(crate) fn reference_name(file: &str) -> String {
 /// before, or a new one, kept for the next request. `None` when the image
 /// is small enough as it is, or will not be rewritten (then it goes as it
 /// was saved, if the request has room).
-fn small_copy(
+pub(crate) fn small_copy(
     files: &dyn ProjectFiles,
     media: &dyn MediaEngine,
     project: VideoProjectId,
@@ -1505,11 +1536,18 @@ impl SceneHandler {
                     referenced: *referenced,
                 })
                 .collect();
+            // An edit of this scene's image (#368): it edits the current
+            // image, which already shows the place and the look.
+            let editing = payload
+                .edit
+                .as_ref()
+                .filter(|_| payload.scenes.first() == Some(&index));
             // Then the other scenes it belongs with; one whose image will
             // not read is left out.
             let shots: Vec<OtherShot> = plan
                 .reference_shots(index, style)
                 .into_iter()
+                .filter(|_| editing.is_none())
                 .filter(|(other, _)| {
                     plan.shot_in(*other, style).is_some_and(|image| {
                         references.add(
@@ -1533,11 +1571,59 @@ impl SceneHandler {
                 objects: &objects,
             };
             let with_product = looks.is_some();
+            let prompt = match editing {
+                None => scene_image_prompt(scene.prompt().as_str(), &shown, &referenced, setting),
+                Some(edit) => {
+                    // The image it edits goes last, so the scene's own
+                    // references keep their numbers.
+                    let current = scene
+                        .image()
+                        .filter(|image| image.generation.id.to_string() == edit.from);
+                    let added = current.map(|image| {
+                        references.try_add(
+                            self.files.as_ref(),
+                            self.media.as_ref(),
+                            project,
+                            &image.file,
+                        )
+                    });
+                    match added {
+                        Some(Ok(())) => edit_prompt(
+                            edit,
+                            references.images.len(),
+                            &scene_image_prompt(&edit.prompt, &shown, &referenced, setting),
+                        ),
+                        Some(Err(why)) => {
+                            failed.push(JobFailure::new(
+                                JobFailureKind::Files,
+                                format!(
+                                    "scene {}: its image {}",
+                                    index + 1,
+                                    match why {
+                                        NotAdded::Unreadable => "could not be read",
+                                        NotAdded::NoRoom => "did not fit in the request",
+                                    }
+                                ),
+                            ));
+                            step(&mut cx, &mut done, total)?;
+                            continue;
+                        }
+                        // The scene has another image since: the edit was
+                        // for one that is gone, and nothing is drawn.
+                        None => {
+                            failed.push(out_of_date(
+                                "the scene's image changed since the edit was asked for",
+                            ));
+                            step(&mut cx, &mut done, total)?;
+                            continue;
+                        }
+                    }
+                }
+            };
             let references = references.images;
             if cx.as_ref().is_some_and(|cx| cx.should_stop()) {
                 return Ok(());
             }
-            let prompt = scene_image_prompt(scene.prompt().as_str(), &shown, &referenced, setting);
             let request = ImageRequest {
                 prompt: prompt.clone(),
                 shape: aspect.into(),
@@ -2637,6 +2723,7 @@ impl Bardo {
             style: self.video_style(project)?.code().to_owned(),
             shots,
             product: project.product.map(|product| product.to_string()),
+            edit: None,
         };
         let job = Job::new(self.profile.id, JobKind::SceneImages, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
@@ -2652,6 +2739,38 @@ impl Bardo {
         scenes: Vec<usize>,
         portraits: Vec<usize>,
         shots: Vec<usize>,
+        consent: BudgetConsent,
+    ) -> Result<JobId, SceneError> {
+        self.draw_scenes_with(plan, scenes, portraits, shots, None, consent)
+    }
+
+    /// Starts a job that edits scene `index`'s current image as `edit`
+    /// says (#368); the new image waits for review. Past Gemini's budget
+    /// it needs `consent`.
+    pub(crate) fn edit_scene_image(
+        &self,
+        plan: &ScenePlan,
+        index: usize,
+        edit: ImageEdit,
+        consent: BudgetConsent,
+    ) -> Result<JobId, SceneError> {
+        self.draw_scenes_with(
+            plan,
+            vec![index],
+            Vec::new(),
+            Vec::new(),
+            Some(edit),
+            consent,
+        )
+    }
+
+    fn draw_scenes_with(
+        &self,
+        plan: &ScenePlan,
+        scenes: Vec<usize>,
+        portraits: Vec<usize>,
+        shots: Vec<usize>,
+        edit: Option<ImageEdit>,
         consent: BudgetConsent,
     ) -> Result<JobId, SceneError> {
         let project = self
@@ -2716,6 +2835,7 @@ impl Bardo {
             // its images make its product shots.
             product: project.product.map(|product| product.to_string()),
             shots,
+            edit,
         };
         let job = Job::new(self.profile.id, JobKind::SceneImages, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
@@ -2913,11 +3033,18 @@ impl Bardo {
         index: usize,
     ) -> Result<ScenePlan, SceneError> {
         let mut plan = self.own_plan(project)?;
+        let used = plan
+            .scene(index)?
+            .pending()
+            .and_then(|image| image.generation.job);
         let replaced = plan.scene_mut(index, SystemTime::now())?.accept_image()?;
         self.scene_plans.save_scene(&plan, index)?;
         if let Some(replaced) = replaced {
             crate::proxies::remove_media(self.files.as_ref(), plan.project, &replaced.file);
         }
+        // An edit asked for in the scene's chat makes its prompt the
+        // scene's (#368).
+        self.settle_scene_chat(&mut plan, index, used, bardo_domain::ChatOutcome::Used)?;
         Ok(plan)
     }
 
@@ -2931,6 +3058,12 @@ impl Bardo {
         let dropped = plan.scene_mut(index, SystemTime::now())?.reject_image()?;
         self.scene_plans.save_scene(&plan, index)?;
         crate::proxies::remove_media(self.files.as_ref(), plan.project, &dropped.file);
+        self.settle_scene_chat(
+            &mut plan,
+            index,
+            dropped.generation.job,
+            bardo_domain::ChatOutcome::Kept,
+        )?;
         Ok(plan)
     }
 

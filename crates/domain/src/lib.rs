@@ -111,6 +111,7 @@ mod repository;
 mod research;
 mod runner;
 mod scene;
+mod scene_chat;
 mod scene_kind;
 mod scene_plan_size;
 mod schedule;
@@ -419,6 +420,11 @@ pub use scene::{
     ProductCheckError, ProductChecks, Scene, SceneClip, SceneDraft, SceneFieldError, SceneImage,
     SceneObject, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt,
     SceneRecord, SceneSetting, Sentence, scene_image_prompt, sentences,
+};
+pub use scene_chat::{
+    Applied, CHAT_HISTORY_MESSAGES, ChatApplyError, ChatEntry, ChatOption, ChatOptionKind,
+    ChatOutcome, ChatReply, ChatRequestError, ChatTarget, MAX_CHAT_REQUEST_CHARS, Proposal,
+    ProposalError, SceneChatMessage, SceneChatMessageId, SceneChatRepository,
 };
 pub use scene_kind::{ComposedShot, KindChange, ProductPictures, SceneKind, SceneKindError};
 pub use scene_plan_size::ScenePlanSize;

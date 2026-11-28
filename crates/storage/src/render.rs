@@ -677,7 +677,8 @@ mod tests {
             let mut conn = db.conn();
             crate::sharing::undo_for_tests(&conn);
             conn.execute_batch(
-                "DROP INDEX template_version_number;
+                "DROP TABLE scene_chat_message;
+                 DROP INDEX template_version_number;
                  ALTER TABLE template_version DROP COLUMN owner_project_id;
                  DROP INDEX persona_profile_name;
                  ALTER TABLE persona DROP COLUMN owner_project_id;
