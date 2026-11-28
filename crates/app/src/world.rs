@@ -1554,7 +1554,8 @@ impl Bardo {
 
     /// Saves cast member `member` of the video's plan to the world of the
     /// video's project, or to the global library's with `global`, with its
-    /// portrait for the video's look, and makes the member that character.
+    /// portrait for the video's look, and makes the member that character:
+    /// a person as a character, a recurring object as an object (#361).
     pub fn save_cast_to_world(
         &self,
         video: VideoProjectId,
@@ -1590,9 +1591,14 @@ impl Bardo {
             .name
             .trim_start_matches(|c: char| !c.is_alphanumeric())
             .to_owned();
+        // A recurring object becomes a world object (#361).
+        let kind = match cast.kind() {
+            bardo_domain::CastKind::Person => WorldKind::Character,
+            bardo_domain::CastKind::Object => WorldKind::Object,
+        };
         let character = self.create_world_item(
             owner,
-            WorldKind::Character,
+            kind,
             WorldItemDraft {
                 name: if name.is_empty() {
                     cast.name.clone()
