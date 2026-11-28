@@ -3698,7 +3698,7 @@ body = "A versão do Bardo neste computador. Informe-a quando relatar um problem
 
 [tour.about.updates]
 title = "Atualizações"
-body = "O Bardo procura uma versão mais nova ao abrir e uma vez por dia, a menos que você desligue. Como ele se atualiza depende de como foi instalado: esta seção diz o que fazer."
+body = "O Bardo procura uma versão mais nova ao abrir e uma vez por dia, a menos que você desligue. Quando sai uma, a barra sobre as telas abre as novidades numa janela; o botão de expandir dela traz até aqui. Como ele se atualiza depende de como foi instalado: esta seção diz o que fazer."
 
 [tour.about.privacy]
 title = "Privacidade e YouTube"
@@ -3947,6 +3947,8 @@ waits_for_restore = "Há uma restauração em andamento. Instale depois que o Ba
 other_window = "Há outra janela do Bardo aberta. Feche-a e instale depois."
 banner_see = "Ver novidades"
 banner_later = "Depois"
+notes_open_about = "Abrir em Configurações › Sobre"
+notes_close = "Fechar"
 download_unreachable = "Não foi possível falar com o GitHub. Confira a conexão e tente de novo."
 waiting_to_retry = "Aguardando para tentar de novo…"
 switch_not_saved = "Não foi possível salvar a configuração. Tente de novo."

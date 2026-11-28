@@ -91,6 +91,9 @@ pub struct Shell {
     /// Scheduled posts that missed their time, over the window until the
     /// user decides on each or puts them off.
     missed: Entity<MissedPosts>,
+    /// The newer release's notes, over the screens when the banner's "See
+    /// what's new" opens them (#359).
+    update_notes: Entity<crate::updates::UpdateNotes>,
     /// The first-run offer, the help menu and the guided tour, over the
     /// screens.
     guide: Entity<Guide>,
@@ -147,6 +150,7 @@ impl Shell {
         let switcher = cx.new(|cx| ProjectSwitcher::new(bardo.clone(), window, cx));
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), window, cx));
         let missed = cx.new(|cx| MissedPosts::new(bardo.clone(), window, cx));
+        let update_notes = cx.new(|cx| crate::updates::UpdateNotes::new(bardo.clone(), cx));
         let guide = cx.new(|cx| Guide::new(bardo.clone(), missed.clone(), cx));
         let guide_screen = cx.new(|cx| GuideScreen::new(bardo.clone(), window, cx));
         // The startup theme guessed the system's appearance before any
@@ -333,6 +337,7 @@ impl Shell {
             jobs,
             jobs_open: false,
             missed,
+            update_notes,
             guide,
             guide_screen,
             nav_scroll: ScrollHandle::new(),
@@ -680,7 +685,16 @@ impl Shell {
     /// F1 or the menu's "User guide": the Guide screen at the page for
     /// where the user is (staying on the open page when already there),
     /// with the keyboard in its search box.
+    /// The newer release's notes close as Bardo goes somewhere else.
+    fn close_update_notes(&mut self, cx: &mut Context<Self>) {
+        self.bardo.update(cx, |bardo, cx| {
+            bardo.close_update_notes();
+            cx.notify();
+        });
+    }
+
     fn open_guide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_update_notes(cx);
         if self.editor.is_some() {
             if self.guide_over_editor {
                 self.guide_screen
@@ -865,6 +879,7 @@ impl Shell {
     }
 
     fn go(&mut self, place: GuidePlace, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_update_notes(cx);
         if self.editor.is_some() {
             if place == GuidePlace::Stage(Stage::Edit) {
                 self.back_to_editor(window, cx);
@@ -1198,18 +1213,25 @@ impl Shell {
                 .when(privacy, |bars| {
                     bars.child(crate::privacy::banner(&self.bardo, cx))
                 })
-                .children(update.map(|version| crate::updates::banner(&self.bardo, &version, cx)))
+                .children(update.map(|version| {
+                    let notes = self.update_notes.read(cx).focus_handle();
+                    crate::updates::banner(&self.bardo, &version, notes, cx)
+                }))
                 .child(div().flex_1().min_h_0().w_full().child(shell))
                 .into_any_element();
         }
-        if !self.missed.read(cx).is_open() {
+        let notes = self.update_notes.read(cx).is_open(cx);
+        let missed = self.missed.read(cx).is_open();
+        if !notes && !missed {
             return shell;
         }
+        // The missed posts ask first: they draw over the notes.
         div()
             .relative()
             .size_full()
             .child(shell)
-            .child(self.missed.clone())
+            .when(notes, |screens| screens.child(self.update_notes.clone()))
+            .when(missed, |screens| screens.child(self.missed.clone()))
             .into_any_element()
     }
 }

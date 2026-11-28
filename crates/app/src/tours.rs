@@ -1617,7 +1617,7 @@ pub const ABOUT: Tour = {
     const TAB: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::About,
-        version: 4,
+        version: 5,
         place: Some(AT),
         steps: &[
             TourStep::at("version", control(Control::AboutVersion))
@@ -2159,6 +2159,8 @@ impl Bardo {
         if missed_posts_open && !tour.over_missed_posts() {
             return Err(TourError::MissedPostsOpen);
         }
+        // A tour lights the screens: the new release's notes close (#359).
+        self.close_update_notes();
         let book = &mut self.tours;
         book.record_run();
         book.offer_answered = true;
