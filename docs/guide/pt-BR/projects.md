@@ -13,14 +13,14 @@ Um projeto de vídeo é um vídeo no caminho entre uma ideia aprovada e uma publ
 <a id="switch"></a>
 ## Escolher um projeto
 
-O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos do canal; escolha um para trocar. Um projeto de anúncio aparece marcado como **Anúncio** nesse menu, e a linha sob o nome dele começa com **Anúncio de** e o produto que ele anuncia. Um anúncio cujo produto era uma *ideia* quando o projeto começou é um conceito: ele aparece marcado como **Conceito** nesse menu e ao lado do nome, e continua com essa marca mesmo que o produto mude de tipo depois ([Uma imagem de conceito para uma ideia](products.md#concept)). O seletor de canal ao lado de **Vídeos** lista os projetos de outro canal. **Mostrar pasta** abre a pasta do vídeo no Explorer, onde ficam a narração, as imagens, os clipes e os renders ([A pasta de um projeto](storage.md#project-folder)).
+O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos do canal; escolha um para trocar. Um projeto de anúncio aparece marcado como **Anúncio** nesse menu, e a linha sob o nome dele começa com **Anúncio de** e o produto que ele anuncia. Um anúncio cujo produto era uma *ideia* quando o projeto começou é um conceito: ele aparece marcado como **Conceito** nesse menu e ao lado do nome, e continua com essa marca mesmo que o produto mude de tipo depois ([Uma imagem de conceito para uma ideia](products.md#concept)). O seletor de canal ao lado de **Vídeos** lista os projetos de outro canal. **Mostrar na pasta**, no menu **⋯** à direita, abre a pasta do vídeo no Explorer, onde ficam a narração, as imagens, os clipes e os renders ([A pasta de um projeto](storage.md#project-folder)).
 
 <a id="archive"></a>
 ## Arquivar ou excluir um vídeo
 
-Ao lado de **Mostrar pasta**, **Arquivar…** guarda o vídeo aberto: ele sai da lista e fica só para leitura, então nenhuma tarefa dele roda e nada dele é publicado, enquanto as publicações dele continuam sincronizando as métricas ([Sincronização de métricas](metrics-sync.md)). **Mostrar arquivados** lista no lugar os vídeos arquivados do canal, cada um marcado como **Arquivado**; **Desarquivar** traz o aberto de volta.
+No menu **⋯** à direita, **Arquivar…** guarda o vídeo aberto: ele sai da lista e fica só para leitura, então nenhuma tarefa dele roda e nada dele é publicado, enquanto as publicações dele continuam sincronizando as métricas ([Sincronização de métricas](metrics-sync.md)). **Mostrar arquivados**, ao lado do menu, lista no lugar os vídeos arquivados do canal, cada um marcado como **Arquivado**; **Desarquivar**, no mesmo menu, traz o aberto de volta.
 
-**Excluir…** pede que você digite o nome do vídeo. Os registros dele saem do Bardo e a pasta vai para a Lixeira, a menos que o diálogo diga que ela será excluída de vez: uma pasta num drive removível ou de rede, ou maior do que a Lixeira desse drive comporta, pula a Lixeira. **Excluir de vez** pula a Lixeira de propósito. A ideia dele volta a aprovada em [Temas](themes-ranking.md#restart) e pode começar outro vídeo. Nada é excluído nas redes, a primeira semana dele sai do desempenho passado do canal, e [Custos](costs.md#deleted) guarda o nome dele.
+**Excluir…**, também no menu **⋯**, pede que você digite o nome do vídeo. Os registros dele saem do Bardo e a pasta vai para a Lixeira, a menos que o diálogo diga que ela será excluída de vez: uma pasta num drive removível ou de rede, ou maior do que a Lixeira desse drive comporta, pula a Lixeira. **Excluir de vez** pula a Lixeira de propósito. A ideia dele volta a aprovada em [Temas](themes-ranking.md#restart) e pode começar outro vídeo. Nada é excluído nas redes, a primeira semana dele sai do desempenho passado do canal, e [Custos](costs.md#deleted) guarda o nome dele.
 
 Nenhum dos dois é possível enquanto algo está pendente, e o diálogo lista o que resolver antes:
 
@@ -31,7 +31,11 @@ Nenhum dos dois é possível enquanto algo está pendente, e o diálogo lista o 
 <a id="settings"></a>
 ## As configurações do vídeo
 
-Sob o nome do projeto, uma barra reúne o que o vídeo é e como ele é feito. **Vídeo** tem o [narrador](#narrator), o [formato](#format), a [duração](#length) e o [estilo visual](#style); **Produção e gasto** tem o [modo](#mode), o [teto](#mode) e quanto o vídeo inteiro vai custar. Cada configuração tem o rótulo em cima e um ⓘ que a explica. Numa janela com menos de 1000 pixels de largura, a barra fica compacta, com os rótulos ao lado dos campos e sem os nomes dos grupos, para a etapa embaixo continuar aparecendo. O que o teto tem a dizer (o teto padrão oferecido, um vídeo acima do teto, um teto salvo) aparece sob a barra, na largura dela.
+Sob o nome do projeto, uma linha resume o que o vídeo é e como ele é feito: quem narra, o formato, a duração, o estilo visual, o modo e quanto o vídeo inteiro vai custar diante do teto (em cor de alerta quando passa dele). Passe o mouse sobre um item para ver qual configuração ele é. Cada valor é o do próprio vídeo ou, se ele não escolheu, o do canal.
+
+**Editar**, no fim da linha, abre as configurações numa janela por cima da tela. **Vídeo** tem o [narrador](#narrator), o [formato](#format), a [duração](#length) e o [estilo visual](#style); **Produção e gasto** tem o [modo](#mode), o [teto](#mode) e quanto o vídeo inteiro vai custar. Cada configuração tem o rótulo em cima e um ⓘ que a explica. A linha de resumo acompanha cada mudança; **Fechar** ou Esc fecham a janela, e ela também fecha quando você troca de vídeo, vai para outra tela ou começa um tour.
+
+A seta à direita do título recolhe o resumo, e a linha com o nicho e o gasto junto, para sobrar mais espaço para as etapas; ela vale para todos os vídeos e o Bardo lembra dela. O que o teto tem a dizer e precisa de você (o teto padrão oferecido a um vídeo antigo, um vídeo acima do teto) aparece sob o título mesmo com o resumo recolhido.
 
 <a id="narrator"></a>
 ## O narrador
@@ -41,7 +45,7 @@ O narrador é a persona que lê a narração do vídeo, e o tom e o estilo de ro
 <a id="format"></a>
 ## Short ou longo
 
-**Formato**, na barra de configurações, diz se este vídeo é um Short (vertical, menos de um minuto) ou um vídeo longo (16:9, de 8 a 10 minutos). **Do canal** segue o [formato do vídeo](channels.md#format) do canal; escolha **Short** ou **Longo** para fazer só este vídeo do outro tipo.
+**Formato**, nas configurações do vídeo, diz se este vídeo é um Short (vertical, menos de um minuto) ou um vídeo longo (16:9, de 8 a 10 minutos). **Do canal** segue o [formato do vídeo](channels.md#format) do canal; escolha **Short** ou **Longo** para fazer só este vídeo do outro tipo.
 
 O formato vale para o que for feito depois: o tamanho do próximo roteiro, o formato das próximas imagens e clipes das cenas, um corte novo no editor e o [preset de render](render.md#targets) do YouTube. O que já foi feito mantém o formato, então, depois de trocar, escreva o roteiro de novo e desenhe as cenas de novo para ter um vídeo coerente.
 
@@ -109,7 +113,7 @@ A linha sob o nome do projeto mostra o nicho, quando ele começou e, assim que a
 <a id="loose-videos"></a>
 ## Vídeos avulsos
 
-Um vídeo avulso não tem projeto nem canal: um teste rápido de uma ideia antes de ela ganhar lugar num projeto. Escolha **Sem projeto** no fim do [seletor de projetos](your-projects.md#no-project) e Vídeos lista os vídeos avulsos, com **Mostrar arquivados**, **Arquivar…** e **Excluir…** como em qualquer vídeo.
+Um vídeo avulso não tem projeto nem canal: um teste rápido de uma ideia antes de ela ganhar lugar num projeto. Escolha **Sem projeto** no fim do [seletor de projetos](your-projects.md#no-project) e Vídeos lista os vídeos avulsos, com **Mostrar arquivados** e o menu **⋯** (**Arquivar…**, **Excluir…**) como em qualquer vídeo.
 
 **Novo vídeo avulso** pede a ideia, um título e um ângulo opcional, e **Configurações de**: um canal cujas configurações o vídeo copia (idioma, país, narrador, formato, estilo, modelos e o resto que um canal dá aos vídeos), ou **Os padrões de um canal novo**. O vídeo guarda essas configurações como suas; mudar o canal depois não muda o vídeo. Só itens globais aparecem nele: um narrador que pertence a um projeto fica de fora, e [Quem aparece](world.md) oferece só a biblioteca global.
 

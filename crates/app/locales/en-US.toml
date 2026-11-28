@@ -645,6 +645,7 @@ title_too_long = "Keep the title to at most 120 characters."
 angle_too_long = "Keep the angle to at most 500 characters."
 
 [projects]
+more_actions = "More actions"
 settings_video = "Video"
 settings_production = "Production and spend"
 switch = "Switch video"
@@ -677,6 +678,17 @@ estimate = "Whole video: about {total} ({spent} spent)"
 estimate_partial = "Whole video: about {total}, plus calls without a rate ({spent} spent)"
 ad = "Ad"
 ad_for = "Ad for {product}"
+
+[projects.summary]
+no_narrator = "No narrator"
+spend = "about {total} of {cap}"
+spend_no_cap = "about {total}, no cap"
+hide = "Collapse the video summary"
+show = "Show the video summary"
+edit = "Edit"
+edit_hint = "Change this video's narrator, format, length, visual style, mode and cap"
+settings_title = "Video settings"
+close = "Close"
 
 [projects.cap]
 label = "Cap"
@@ -3052,11 +3064,11 @@ name = "Videos tour"
 
 [tour.projects.switcher]
 title = "Your video"
-body = "The video you are working on, with the menu that switches to another video of the channel. The channel picker beside Videos lists another channel's videos. Show archived, Archive… and Delete… beside it put this video away or remove it."
+body = "The video you are working on, with the menu that switches to another video of the channel. The channel picker beside Videos lists another channel's videos. On the right, Show archived lists the archived videos, and the ⋯ menu shows the video's folder, archives it or deletes it."
 
 [tour.projects.narrator]
 title = "Who narrates it"
-body = "The narrator reads this video's narration and shapes its script. It is the channel's default persona unless you pick another one for this video only."
+body = "The narrator reads this video's narration and shapes its script. It is the channel's default persona unless you pick another one for this video only. The summary under the title shows who it is."
 
 [tour.projects.format]
 title = "Short or long, and how long"
@@ -3064,15 +3076,15 @@ body = "A Short is a vertical video of 45 to 60 seconds; a long video is 16:9 an
 
 [tour.projects.mode]
 title = "How it is produced, and what it costs"
-body = "The mode says which scenes become AI clips and with which model: Economy keeps stills with motion, Animated hook animates the first 10 seconds, All animated and premium animate every scene. Each choice shows what the whole video would cost before anything is generated, and the cap makes Bardo ask before a step that would pass it: US$ 5 for a Short and US$ 20 for a long video unless you set your own."
+body = "The mode says which scenes become AI clips and with which model: Economy keeps stills with motion, Animated hook animates the first 10 seconds, All animated and premium animate every scene. Each choice shows what the whole video would cost before anything is generated, and the cap makes Bardo ask before a step that would pass it: US$ 5 for a Short and US$ 20 for a long video unless you set your own. The line under the video's name adds up what it has cost so far; Costs has the details."
+
+[tour.projects.edit]
+title = "Change the settings"
+body = "Edit opens this video's settings in a popup: narrator, format, length, visual style, mode and spend cap, each with its ⓘ. The summary updates as you change them. The arrow beside the title collapses the summary for every video, to give the stages more room."
 
 [tour.projects.stages]
 title = "Its stages"
 body = "Script, narration, scenes, clips, edit, render and publish, in order. The line under each stage says where it stands: done, generating, to review, out of date, or what it waits for. Each opens as soon as the one before gives it something to work on, and what was made from an earlier stage that later changed shows as out of date."
-
-[tour.projects.cost]
-title = "What it has cost"
-body = "The line under the project's name shows its niche, when it started and what it has cost so far, every paid call from the script to the clips. Costs has the details and your budgets."
 
 [tour.projects.loose]
 title = "Loose videos"

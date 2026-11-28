@@ -432,6 +432,11 @@ impl Shell {
             });
             return;
         }
+        // A video's settings popup stays with its screen (#366).
+        if place != self.screen {
+            self.bardo
+                .update(cx, |bardo, _| bardo.close_video_settings());
+        }
         // What a screen lists may have changed on another one: channels,
         // personas, niches, projects started from themes.
         if place != self.screen {
@@ -685,10 +690,12 @@ impl Shell {
     /// F1 or the menu's "User guide": the Guide screen at the page for
     /// where the user is (staying on the open page when already there),
     /// with the keyboard in its search box.
-    /// The newer release's notes close as Bardo goes somewhere else.
+    /// The newer release's notes close as Bardo goes somewhere else, and
+    /// so does a video's settings popup (#366).
     fn close_update_notes(&mut self, cx: &mut Context<Self>) {
         self.bardo.update(cx, |bardo, cx| {
             bardo.close_update_notes();
+            bardo.close_video_settings();
             cx.notify();
         });
     }

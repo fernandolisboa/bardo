@@ -496,13 +496,67 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
             .into_any_element(),
     };
 
+    // A stage's figures (the Render stage's cut, the Publish stage's
+    // files) are the stage's: they go under its tabs, not into the
+    // video's header (#366).
+    let (header_summary, stage_summary) = if stage_row.is_some() {
+        (Vec::new(), summary)
+    } else {
+        (summary, Vec::new())
+    };
     v_flex()
         .size_full()
         .bg(t.app)
         .text_color(t.text)
-        .child(header_row(header, summary, cx))
+        .child(header_row(header, header_summary, cx))
         .children(stage_row)
+        .children((!stage_summary.is_empty()).then(|| stage_figures(stage_summary, cx)))
         .child(body)
+        .into_any_element()
+}
+
+/// A stage's figures on a line of their own under its tabs, each its
+/// label then its value (#366).
+fn stage_figures(summary: Vec<Figure>, cx: &App) -> AnyElement {
+    let t = &look(cx).tokens;
+    let mono = cx.theme().mono_font_family.clone();
+    h_flex()
+        .flex_none()
+        .w_full()
+        .flex_wrap()
+        .px_4()
+        .py_1p5()
+        .gap_x_5()
+        .gap_y_1()
+        .items_center()
+        .text_sm()
+        .bg(t.surface)
+        .border_b(t.border_width)
+        .border_color(t.border)
+        .children(summary.into_iter().map(|figure| {
+            if let Some(brief) = figure.brief {
+                return brief;
+            }
+            h_flex()
+                .flex_none()
+                .gap_1p5()
+                .items_baseline()
+                .child(div().text_color(t.text2).child(figure.label))
+                .child(
+                    div()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .font_family(mono.clone())
+                        .when_some(figure.tone, |value, tone| value.text_color(tone.ink(cx)))
+                        .child(figure.value),
+                )
+                .children(
+                    figure
+                        .beside
+                        .map(|beside| div().text_color(t.text2).child(beside)),
+                )
+                .into_any_element()
+        }))
+        .tour_anchor(TourAnchor::Summary, Side::Below, None)
         .into_any_element()
 }
 
@@ -628,7 +682,7 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
                 .items_center()
                 .children(header.actions),
         );
-    // The settings bar runs the full width under the line (#330).
+    // The bar (a video's summary) runs the full width under the line (#330).
     v_flex()
         .flex_none()
         .w_full()

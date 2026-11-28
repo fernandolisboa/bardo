@@ -89,6 +89,8 @@ pub enum Control {
     /// Projects: how the open project is produced, what the whole video
     /// costs in each mode, and its spend cap.
     ProjectMode,
+    /// Projects: the button that opens the video's settings popup (#366).
+    ProjectSettingsEdit,
     /// Brief: the product and the angle the ad project was approved from.
     BriefAngle,
     /// Brief: the claims the video uses, each switchable off.
@@ -726,15 +728,15 @@ pub const PERFORMANCE: Tour = {
 };
 
 /// Projects: the project and its narrator, its format, length, visual
-/// style and production mode, the stages and how they open, and what the project has
-/// cost.
+/// style and production mode, changing them in the settings popup, the
+/// stages and how they open, and what the project has cost.
 pub const PROJECTS: Tour = {
     const AT: Destination = Destination::Videos;
     const PAGE: &str = "projects";
     const HEADER: WhenMissing = WhenMissing::LightPart(TourAnchor::Header);
     Tour {
         id: TourId::Projects,
-        version: 7,
+        version: 8,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "switcher", control(Control::ProjectSwitcher))
@@ -749,8 +751,10 @@ pub const PROJECTS: Tour = {
             on(AT, "mode", control(Control::ProjectMode))
                 .missing(HEADER)
                 .learn(PAGE, "mode"),
+            on(AT, "edit", control(Control::ProjectSettingsEdit))
+                .missing(HEADER)
+                .learn(PAGE, "settings"),
             on(AT, "stages", TourAnchor::Stages).learn(PAGE, "stages"),
-            on(AT, "cost", TourAnchor::Header).learn(PAGE, "cost"),
             on(AT, "loose", control(Control::LooseNew))
                 .missing(HEADER)
                 .learn(PAGE, "loose-videos"),
@@ -2164,8 +2168,10 @@ impl Bardo {
         if missed_posts_open && !tour.over_missed_posts() {
             return Err(TourError::MissedPostsOpen);
         }
-        // A tour lights the screens: the new release's notes close (#359).
+        // A tour lights the screens: the new release's notes close (#359),
+        // and so does a video's settings popup (#366).
         self.close_update_notes();
+        self.close_video_settings();
         let book = &mut self.tours;
         book.record_run();
         book.offer_answered = true;
