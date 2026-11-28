@@ -925,9 +925,6 @@ pub const SCENES: Tour = {
             at_stage(AT, "redraw", control(Control::SceneRedraw))
                 .missing(WhenMissing::LightPart(TourAnchor::Inspector))
                 .learn(PAGE, "redraw"),
-            at_stage(AT, "chat", control(Control::SceneChat))
-                .missing(WhenMissing::LightPart(TourAnchor::Inspector))
-                .learn(PAGE, "chat"),
             at_stage(AT, "replan", control(Control::ScenesPlan))
                 .missing(TOOLBAR)
                 .learn(PAGE, "fit"),

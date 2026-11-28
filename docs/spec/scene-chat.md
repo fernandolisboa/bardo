@@ -38,11 +38,11 @@ Each slice adds its terms to `docs/CONTEXT.md` when it lands.
 2. The user writes a request and sends it. Sending costs a Claude call of a few cents, shown next to *Send* and recorded in Costs; the budget question of #268 applies as for any text call.
 3. A **scene chat job** asks Claude, with the *Scene chat* template, for a proposal or a question. Claude receives:
    - the request and the scene chat's recent messages (the last 12);
-   - the scene: its narration, image prompt, motion prompt, place, cast and objects with their descriptions, the video's visual style and its frame shape;
+   - the scene: its number and time, narration, image prompt, place and cast with their descriptions (the motion prompt too for a clip target), the video's visual style and its frame shape;
    - what it is about: the current image for an image target; for a clip target the image and three frames of the clip (first, middle, last), taken by the media sidecar;
    - which options this target allows now (below) and the price of each.
 4. Claude answers with structured output: a reply in the interface language, then either a question, or the options it proposes with, per option, the English instruction or motion prompt it would send and which option it recommends. The answer is kept in the job's checkpoint until saved in the chat.
-5. The chat shows the reply and one button per option, *Apply · US$0.10*, the recommended one first. Applying asks for budget consent as *Draw again* and *Animate again* do, then starts that option's job. An option whose price or premise changed since (the scene was drawn again, the video model changed) is shown again with the new price before it runs.
+5. The chat shows the reply and one button per option, *Apply · US$0.10*, the recommended one first. Applying asks for budget consent as *Draw again* and *Animate again* do, then starts that option's job. An option proposed for an image the scene no longer shows does not apply, and none applies while a new image waits for review; the price shown counts what applying draws first (missing portraits), as *Draw again*'s does.
 6. The new image or clip waits for review in the inspector and in the chat. The chat notes what happened: applied, used, kept current, failed with why.
 
 Only one scene chat job runs per scene at a time (`Work::SceneChat`), and an option is refused while the scene is being drawn or animated, as *Draw again* is today.
@@ -72,7 +72,7 @@ Each placement works in both layouts (Workspace, Studio), in all ten themes and 
 
 ## Templates and costs
 
-- A new template kind, **Scene chat**, holds Claude's instructions and prompt, with variables for the request, the recent messages, the scene, the target and the options offered. It is versioned and per project like the other kinds; every reply records the version.
+- A new template kind, **Scene chat**, holds Claude's instructions and prompt, with variables for the request, the recent messages, the scene, the target and the options offered. It is versioned and per project like the other kinds; the chat names the version its next reply is written with.
 - Cost purposes: *Scene chat* (Claude); an applied edit is recorded under the purpose of what it makes (scene images, scene clips) on its own job, so Costs lists it with the job that made it.
 - First guesses for the estimate: a chat reply 3,000 input / 600 output tokens; refined by the real-key checks.
 

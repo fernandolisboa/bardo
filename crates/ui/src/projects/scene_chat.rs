@@ -18,6 +18,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, Entity, SharedString, Window, div};
 
 use super::ProjectsScreen;
+use crate::appearance::look;
 use crate::guide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
@@ -26,7 +27,8 @@ use crate::spend::budget_question;
 /// What the chat sends that a budget held back.
 #[derive(Clone)]
 pub(super) enum ChatAsk {
-    Send(String),
+    /// What the text box holds when it is sent.
+    Send,
     Apply(SceneChatMessageId, usize),
 }
 
@@ -135,14 +137,22 @@ impl ProjectsScreen {
         self.scene_chat.ask = None;
         let bardo = self.bardo.read(cx);
         let result = match &action {
-            ChatAsk::Send(text) => bardo.send_scene_chat(id, index, text, consent),
+            ChatAsk::Send => {
+                let text = self
+                    .scene_chat
+                    .input
+                    .as_ref()
+                    .map(|input| input.read(cx).value().to_string())
+                    .unwrap_or_default();
+                bardo.send_scene_chat(id, index, &text, consent)
+            }
             ChatAsk::Apply(message, option) => {
                 bardo.apply_scene_chat_option(id, *message, *option, consent)
             }
         };
         self.scene_chat.error = match result {
             Ok(_) => {
-                if matches!(action, ChatAsk::Send(_))
+                if matches!(action, ChatAsk::Send)
                     && let Some(input) = &self.scene_chat.input
                 {
                     input.update(cx, |input, cx| input.set_value("", window, cx));
@@ -162,11 +172,7 @@ impl ProjectsScreen {
     }
 
     fn send_scene_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(input) = &self.scene_chat.input else {
-            return;
-        };
-        let text = input.read(cx).value().to_string();
-        self.run_scene_chat(ChatAsk::Send(text), BudgetConsent::Ask, window, cx);
+        self.run_scene_chat(ChatAsk::Send, BudgetConsent::Ask, window, cx);
     }
 
     /// The chat part of scene `index`'s inspector: the button that opens
@@ -203,13 +209,21 @@ impl ProjectsScreen {
                 .into_any_element()
             });
         }
-        let busy = self.scenes.as_ref().is_some_and(|view| view.is_busy());
+        // An option is not applied while the scenes are at work, the chat
+        // takes nothing (an out-of-date plan) or the prompt is being typed.
+        let blocked = editing
+            || self.scenes.as_ref().is_some_and(|view| view.is_busy())
+            || self
+                .scene_chat
+                .view
+                .as_ref()
+                .is_some_and(|view| view.availability != ChatAvailability::Open);
         let lines: Vec<AnyElement> = match self.scene_chat.view.as_ref() {
             Some(view) => view
                 .lines
                 .iter()
                 .enumerate()
-                .map(|(n, line)| self.render_chat_line(n, line, view, busy, cx))
+                .map(|(n, line)| self.render_chat_line(n, line, view, blocked, cx))
                 .collect(),
             None => Vec::new(),
         };
@@ -220,6 +234,7 @@ impl ProjectsScreen {
         let header = h_flex()
             .gap_2()
             .items_center()
+            .flex_wrap()
             .child(
                 div()
                     .text_sm()
@@ -277,11 +292,16 @@ impl ProjectsScreen {
             .text_xs()
             .into_any_element()
         });
+        let cancelled = view.is_some_and(SceneChatView::cancelled).then(|| {
+            kit::notice(Tone::Info, tr(bardo, Text::SceneChatReplyCancelled), cx)
+                .text_xs()
+                .into_any_element()
+        });
         let availability = view.map_or(ChatAvailability::Open, |view| view.availability);
         let closed_note = match availability {
             ChatAvailability::Open => None,
             ChatAvailability::NoImage => Some(Text::SceneChatNoImage),
-            ChatAvailability::Composed => Some(Text::SceneChatComposedNote),
+            ChatAvailability::Composed => Some(Text::SceneChatComposed),
             ChatAvailability::OutOfDate => Some(SceneError::PlanOutOfDate.message()),
         }
         .map(|text| {
@@ -318,18 +338,28 @@ impl ProjectsScreen {
                 None => bardo.text(Text::SceneChatSend).to_string(),
             };
             v_flex()
+                .w_full()
+                .min_w_0()
                 .gap_1()
-                .child(Textarea::new(input).disabled(!open || answering))
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .child(Textarea::new(input).disabled(!open || answering)),
+                )
                 .child(
                     h_flex().child(
-                        self.paid(Button::new(("send-scene-chat", index)), cx)
-                            .primary()
-                            .xsmall()
-                            .label(SharedString::from(label))
-                            .disabled(!open || answering)
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.send_scene_chat(window, cx)
-                            })),
+                        // Disabled before `paid`, which may disable it too.
+                        self.paid(
+                            Button::new(("send-scene-chat", index)).disabled(!open || answering),
+                            cx,
+                        )
+                        .primary()
+                        .xsmall()
+                        .label(SharedString::from(label))
+                        .on_click(cx.listener(
+                            |this, _: &ClickEvent, window, cx| this.send_scene_chat(window, cx),
+                        )),
                     ),
                 )
                 .into_any_element()
@@ -340,11 +370,13 @@ impl ProjectsScreen {
                 TourAnchor::Control(Control::SceneChat),
                 kit::card(cx)
                     .p_3()
+                    .min_w_0()
                     .gap_2()
                     .child(header)
                     .child(v_flex().gap_2().children(lines))
                     .children(answering_note)
                     .children(failure)
+                    .children(cancelled)
                     .children(closed_note)
                     .children(error)
                     .children(ask)
@@ -361,7 +393,7 @@ impl ProjectsScreen {
         n: usize,
         line: &ChatLine,
         view: &SceneChatView,
-        busy: bool,
+        blocked: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let bardo = self.bardo.read(cx);
@@ -373,14 +405,22 @@ impl ProjectsScreen {
         } else {
             Text::SceneChatClaude
         };
-        let bubble = div()
-            .p_2()
-            .rounded_md()
-            .text_sm()
-            .when(request, |bubble| bubble.bg(theme.secondary))
-            .when(!request, |bubble| {
-                bubble.border_1().border_color(theme.border)
-            })
+        // The user's words in a well, set in from the left; Claude's in a
+        // frame, set in from the right, as chats read.
+        let tokens = &look(cx).tokens;
+        let bubble = if request {
+            kit::well(cx).ml_6()
+        } else {
+            div()
+                .border(tokens.border_width)
+                .border_color(tokens.border)
+                .rounded(tokens.radius)
+                .px_2p5()
+                .py_1p5()
+                .text_sm()
+                .mr_6()
+        };
+        let bubble = bubble
             .child(
                 div()
                     .text_xs()
@@ -405,6 +445,8 @@ impl ProjectsScreen {
                             let recommended = option == proposal.recommended();
                             let chosen = applied.as_ref().is_some_and(|a| a.option == option);
                             let id = message.id;
+                            // The option's name and whether it is the one
+                            // recommended, what it sends, then its button.
                             v_flex()
                                 .gap_1()
                                 .child(
@@ -413,34 +455,10 @@ impl ProjectsScreen {
                                         .items_center()
                                         .flex_wrap()
                                         .child(
-                                            self.paid(
-                                                Button::new(("apply-scene-chat", n * 10 + option)),
-                                                cx,
-                                            )
-                                            .when(recommended, |button| button.primary())
-                                            .when(!recommended, |button| button.outline())
-                                            .xsmall()
-                                            .label(SharedString::from(format!(
-                                                "{} · {}",
-                                                bardo.text(name),
-                                                bardo.text_with(
-                                                    Text::SceneChatApply,
-                                                    &[("price", &price)]
-                                                )
-                                            )))
-                                            .disabled(!line.applies || busy)
-                                            .on_click(
-                                                cx.listener(
-                                                    move |this, _: &ClickEvent, window, cx| {
-                                                        this.run_scene_chat(
-                                                            ChatAsk::Apply(id, option),
-                                                            BudgetConsent::Ask,
-                                                            window,
-                                                            cx,
-                                                        )
-                                                    },
-                                                ),
-                                            ),
+                                            div()
+                                                .text_sm()
+                                                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                                .child(tr(bardo, name)),
                                         )
                                         .when(recommended, |row| {
                                             row.child(kit::status(
@@ -455,6 +473,34 @@ impl ProjectsScreen {
                                         .text_xs()
                                         .text_color(theme.muted_foreground)
                                         .child(SharedString::from(choice.instruction.clone())),
+                                )
+                                .child(
+                                    h_flex().child(
+                                        self.paid(
+                                            Button::new(("apply-scene-chat", n * 10 + option))
+                                                .disabled(!line.applies || blocked),
+                                            cx,
+                                        )
+                                        .when(recommended, |button| button.primary())
+                                        .when(!recommended, |button| button.outline())
+                                        .xsmall()
+                                        .label(SharedString::from(
+                                            bardo.text_with(
+                                                Text::SceneChatApply,
+                                                &[("price", &price)],
+                                            ),
+                                        ))
+                                        .on_click(
+                                            cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                                this.run_scene_chat(
+                                                    ChatAsk::Apply(id, option),
+                                                    BudgetConsent::Ask,
+                                                    window,
+                                                    cx,
+                                                )
+                                            }),
+                                        ),
+                                    ),
                                 )
                                 .when(chosen, |column| {
                                     column.children(
@@ -500,7 +546,8 @@ fn applied_line(bardo: &bardo_app::Bardo, state: &AppliedState, cx: &App) -> Any
         AppliedState::Failed(None) => (Tone::Info, tr(bardo, Text::SceneChatAppliedStopped)),
         AppliedState::Ended => (Tone::Info, tr(bardo, Text::SceneChatEnded)),
     };
-    kit::status(tone, text, cx).into_any_element()
+    // A notice, not a status pill: it wraps in a narrow inspector.
+    kit::notice(tone, text, cx).text_xs().into_any_element()
 }
 
 /// `lead` followed by what kind of failure it was.

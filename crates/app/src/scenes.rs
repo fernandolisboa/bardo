@@ -1611,7 +1611,8 @@ impl SceneHandler {
                         // The scene has another image since: the edit was
                         // for one that is gone, and nothing is drawn.
                         None => {
-                            failed.push(out_of_date(
+                            failed.push(JobFailure::new(
+                                JobFailureKind::Unexpected,
                                 "the scene's image changed since the edit was asked for",
                             ));
                             step(&mut cx, &mut done, total)?;

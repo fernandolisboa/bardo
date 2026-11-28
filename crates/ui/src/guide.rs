@@ -266,7 +266,7 @@ pub mod refs {
     pub const COSTS_PROJECT_KEYS: GuideRef = at("costs", "project-keys");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 129] = [
+    pub const ALL: [GuideRef; 130] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,

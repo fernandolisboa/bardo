@@ -93,6 +93,9 @@ pub enum SceneChatError {
     /// A composed scene's picture never goes to a model (ADR-0040).
     #[error("a composed scene is not adjusted by a model")]
     Composed,
+    /// A new image waits for review: applying would throw it away.
+    #[error("a new image waits for review")]
+    Pending,
     #[error(transparent)]
     Apply(#[from] ChatApplyError),
     /// The message is gone: the scenes were planned again.
@@ -120,6 +123,7 @@ impl SceneChatError {
             SceneChatError::Busy => Text::SceneChatBusy,
             SceneChatError::NoImage => Text::SceneChatNoImage,
             SceneChatError::Composed => Text::SceneChatComposed,
+            SceneChatError::Pending => Text::SceneChatPending,
             SceneChatError::Apply(ChatApplyError::OutOfDate) => Text::SceneChatOutOfDate,
             SceneChatError::Apply(ChatApplyError::AlreadyUsed) => Text::SceneChatAlreadyUsed,
             SceneChatError::Apply(_) | SceneChatError::MessageNotFound => Text::SceneChatNoOption,
@@ -202,6 +206,17 @@ impl SceneChatView {
         self.job.as_ref().is_some_and(|job| job.state().is_active())
     }
 
+    /// Whether the last reply was cancelled before it came.
+    pub fn cancelled(&self) -> bool {
+        self.job.as_ref().is_some_and(|job| {
+            matches!(job.state(), JobState::Cancelled)
+                && !self
+                    .lines
+                    .iter()
+                    .any(|line| !line.message.is_request() && line.message.job == Some(job.id()))
+        })
+    }
+
     /// Why the last reply did not come, when it failed and nothing came
     /// after.
     pub fn failure(&self) -> Option<&JobFailure> {
@@ -229,6 +244,9 @@ struct ChatPayload {
     plan: String,
     scene: usize,
     request: String,
+    /// The scene's image and image prompt the request was sent about.
+    image: String,
+    scene_prompt: String,
     template: String,
     template_number: u32,
     instructions: String,
@@ -347,8 +365,13 @@ fn cut(text: &str, max: usize) -> String {
     text.trim().chars().take(max).collect()
 }
 
-/// The reply Claude's answer makes for the scene's image `image`.
-fn reply_of(text: &str, image: GenerationId) -> Result<(String, ChatReply), JobFailure> {
+/// The reply Claude's answer makes for the scene's image `image`, whose
+/// prompt was `prompt`.
+fn reply_of(
+    text: &str,
+    image: GenerationId,
+    prompt: &str,
+) -> Result<(String, ChatReply), JobFailure> {
     let unusable = |why: String| {
         JobFailure::new(
             JobFailureKind::UnexpectedAnswer,
@@ -388,7 +411,8 @@ fn reply_of(text: &str, image: GenerationId) -> Result<(String, ChatReply), JobF
             }
             ChatReply::Proposal(
                 Proposal::new(options, recommended, image)
-                    .map_err(|error| unusable(error.to_string()))?,
+                    .map_err(|error| unusable(error.to_string()))?
+                    .with_prompt(prompt),
             )
         }
         other => return Err(unusable(format!("unknown kind {other}"))),
@@ -437,21 +461,26 @@ impl JobHandler for SceneChatHandler {
             Kept::settle(cx);
             return Ok(());
         };
-        let Some(image) = plan
-            .scene(payload.scene)
-            .ok()
-            .and_then(|scene| scene.image().cloned())
-        else {
-            Kept::settle(cx);
-            return Err(JobFailure::new(
-                JobFailureKind::Unexpected,
-                "the scene has no image any more",
-            ));
-        };
+        let asked_about: GenerationId = id(&payload.image)?;
         let generated = match Kept::answer(cx) {
-            // Paid for and recorded when it arrived.
+            // Paid for and recorded when it arrived, about the image the
+            // request was sent about.
             Some(answer) => answer,
             None => {
+                // The request is about the image the user saw: another one
+                // since is not what they asked about.
+                let Some(image) = plan
+                    .scene(payload.scene)
+                    .ok()
+                    .and_then(|scene| scene.image().cloned())
+                    .filter(|image| image.generation.id == asked_about)
+                else {
+                    Kept::settle(cx);
+                    return Err(JobFailure::new(
+                        JobFailureKind::Unexpected,
+                        "the scene's image changed since the request was sent; send it again",
+                    ));
+                };
                 let picture = chat_image(
                     self.files.as_ref(),
                     self.media.as_ref(),
@@ -467,7 +496,7 @@ impl JobHandler for SceneChatHandler {
         };
         // A reply that arrived as the job was cancelled is paid for: it is
         // shown all the same.
-        let (text, reply) = match reply_of(&generated.text, image.generation.id) {
+        let (text, reply) = match reply_of(&generated.text, asked_about, &payload.scene_prompt) {
             Ok(reply) => reply,
             Err(failure) => {
                 // Asked again on a retry rather than failing on it for good.
@@ -557,15 +586,38 @@ impl SceneChatHandler {
 }
 
 impl Bardo {
-    fn chat_jobs(&self, project: VideoProjectId, scene: usize) -> Vec<Job> {
+    /// Scene `scene`'s chat jobs for plan `plan`: those of a plan replaced
+    /// since answer nothing shown now.
+    fn chat_jobs(&self, project: VideoProjectId, plan: ScenePlanId, scene: usize) -> Vec<Job> {
         let work = Work::SceneChat {
             project: project.to_string(),
             scene,
         };
+        let plan = plan.to_string();
         self.jobs()
             .into_iter()
             .filter(|job| Work::of(job).as_ref() == Some(&work))
+            .filter(|job| {
+                serde_json::from_str::<ChatPayload>(job.payload())
+                    .is_ok_and(|payload| payload.plan == plan)
+            })
             .collect()
+    }
+
+    /// What applying *Edit this image* on scene `index` costs: the edit,
+    /// and the portraits and world pictures drawing it draws first, as
+    /// *Draw again* counts them.
+    fn edit_estimate(
+        &self,
+        project: &VideoProject,
+        plan: &ScenePlan,
+        index: usize,
+    ) -> Result<SpendEstimate, SceneChatError> {
+        let style = self.video_style(project)?;
+        let look = self.world_book.look_of(project, style);
+        let first = plan.missing_portraits(&[index], style).len()
+            + self.world_book.missing_pictures(plan, &[index], &look);
+        Ok(self.estimate(&[images_call(1 + first)])?)
     }
 
     fn chat_availability(&self, plan: &ScenePlan, index: usize) -> ChatAvailability {
@@ -610,7 +662,7 @@ impl Bardo {
                 _ => SceneChatError::Scenes(SceneError::ProjectNotFound),
             })?;
         let chat = self.scene_chats.scene_chat(plan.id, index)?;
-        let edit = self.estimate(&[images_call(1)])?;
+        let edit = self.edit_estimate(project, plan, index)?;
         values.insert(TemplateVariable::Scene, scene_text(plan, index)?);
         values.insert(TemplateVariable::SceneRequest, request.trim().to_owned());
         values.insert(TemplateVariable::SceneChatHistory, history_text(&chat));
@@ -640,6 +692,7 @@ impl Bardo {
         let scene = plan.scene(index).map_err(SceneError::from)?;
         let jobs = self.jobs();
         let image = scene.image().map(|image| image.generation.id);
+        let pending = scene.pending().is_some();
         let pending_job = scene.pending().and_then(|image| image.generation.job);
         let lines = self
             .scene_chats
@@ -662,10 +715,12 @@ impl Bardo {
                     },
                 });
                 // An option whose image is being drawn or waits for review
-                // is not applied twice.
+                // is not applied twice, and none is applied over a new
+                // image waiting for review: it would be thrown away.
                 let applies = message
                     .proposal()
                     .is_some_and(|_| message.option_for(0, image).is_ok())
+                    && !pending
                     && !matches!(applied, Some(AppliedState::Working | AppliedState::Review));
                 ChatLine {
                     message,
@@ -678,10 +733,10 @@ impl Bardo {
         Ok(SceneChatView {
             scene: index,
             lines,
-            job: self.chat_jobs(project, index).into_iter().last(),
+            job: self.chat_jobs(project, plan.id, index).into_iter().last(),
             availability: self.chat_availability(&plan, index),
             send_estimate: self.estimate(&[chat_call()])?,
-            edit_estimate: self.estimate(&[images_call(1)])?,
+            edit_estimate: self.edit_estimate(&video, &plan, index)?,
             template: template.number,
         })
     }
@@ -722,6 +777,18 @@ impl Bardo {
             plan: plan.id.to_string(),
             scene: index,
             request: request.id.to_string(),
+            image: plan
+                .scene(index)
+                .map_err(SceneError::from)?
+                .image()
+                .map(|image| image.generation.id.to_string())
+                .ok_or(SceneChatError::NoImage)?,
+            scene_prompt: plan
+                .scene(index)
+                .map_err(SceneError::from)?
+                .prompt()
+                .as_str()
+                .to_owned(),
             template: template.id.to_string(),
             template_number: template.number,
             instructions: rendered.instructions,
@@ -758,6 +825,14 @@ impl Bardo {
             .map(|image| image.generation.id);
         let chosen = reply.option_for(option, image)?.clone();
         let from = image.ok_or(SceneChatError::NoImage)?;
+        if plan
+            .scene(index)
+            .map_err(SceneError::from)?
+            .pending()
+            .is_some()
+        {
+            return Err(SceneChatError::Pending);
+        }
         let job = match chosen.kind {
             ChatOptionKind::EditImage => self.edit_scene_image(
                 &plan,
@@ -798,8 +873,12 @@ impl Bardo {
                 continue;
             }
             if outcome == ChatOutcome::Used {
+                // A prompt the user changed since the proposal is theirs:
+                // it stays.
+                let current = plan.scene(index)?.prompt().as_str().to_owned();
                 let prompt = reply
                     .proposal()
+                    .filter(|proposal| proposal.from_prompt().is_none_or(|from| from == current))
                     .and_then(|proposal| proposal.options().get(applied.option))
                     .and_then(|option| bardo_domain::ScenePrompt::new(&option.prompt).ok());
                 if let Some(prompt) = prompt

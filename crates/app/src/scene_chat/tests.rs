@@ -401,10 +401,59 @@ fn planning_the_scenes_again_takes_their_chats_away() {
 #[test]
 fn the_reply_is_written_in_the_apps_language() {
     let h = Harness::new();
-    let app = h.start();
+    let mut app = h.start();
     let (project, _) = h.drawn_project(&app);
+    app.set_ui_language(bardo_domain::UiLanguage::PtBr).unwrap();
     ask(&h, &app, project.id, WHITE_CUP, proposal_answer());
     let request = h.text.requests().last().unwrap().clone();
     let all = format!("{}\n{}", request.instructions, request.prompt);
-    assert!(all.contains("American English"), "{all}");
+    assert!(all.contains("Brazilian Portuguese"), "{all}");
+}
+
+#[test]
+fn an_option_is_not_applied_over_a_new_image_waiting_for_review() {
+    let h = Harness::new();
+    let app = h.start();
+    let (project, _) = h.drawn_project(&app);
+    ask(&h, &app, project.id, WHITE_CUP, proposal_answer());
+    let reply = last_reply(&app, project.id);
+    done(
+        &app,
+        app.regenerate_scene_image(project.id, 2, BudgetConsent::Ask)
+            .unwrap(),
+    );
+    let drawn = h.images.prompts().len();
+
+    assert!(!app.scene_chat(project.id, 2).unwrap().lines[1].applies);
+    let refused = app
+        .apply_scene_chat_option(project.id, reply.id, 0, BudgetConsent::Ask)
+        .unwrap_err();
+    assert!(matches!(refused, SceneChatError::Pending), "{refused:?}");
+    assert_eq!(refused.message(), Text::SceneChatPending);
+    assert_eq!(h.images.prompts().len(), drawn, "the waiting image stays");
+
+    // Keeping the current image lets the option apply again.
+    app.reject_scene_image(project.id, 2).unwrap();
+    assert!(app.scene_chat(project.id, 2).unwrap().lines[1].applies);
+}
+
+#[test]
+fn a_prompt_the_user_edited_after_the_proposal_is_kept_when_the_edit_is_used() {
+    let h = Harness::new();
+    let app = h.start();
+    let (project, _) = h.drawn_project(&app);
+    ask(&h, &app, project.id, WHITE_CUP, proposal_answer());
+    let reply = last_reply(&app, project.id);
+    let mine = "A control room at night, my own words";
+    app.edit_scene_prompt(project.id, 2, mine).unwrap();
+    done(
+        &app,
+        app.apply_scene_chat_option(project.id, reply.id, 0, BudgetConsent::Ask)
+            .unwrap(),
+    );
+
+    let plan = app.accept_scene_image(project.id, 2).unwrap();
+
+    assert_eq!(plan.scenes()[2].prompt().as_str(), mine);
+    assert_eq!(applied(&app, project.id), Some(AppliedState::Used));
 }

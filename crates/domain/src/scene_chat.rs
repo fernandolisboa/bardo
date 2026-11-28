@@ -103,6 +103,9 @@ pub struct Proposal {
     recommended: usize,
     /// The scene's image the options were proposed for.
     image: GenerationId,
+    /// The scene's image prompt the options' prompts were rewritten from;
+    /// `None` when not known.
+    from_prompt: Option<String>,
 }
 
 /// Why a proposal cannot be made.
@@ -150,7 +153,20 @@ impl Proposal {
             options,
             recommended,
             image,
+            from_prompt: None,
         })
+    }
+
+    /// The proposal, noting the scene prompt its options' prompts were
+    /// rewritten from: a prompt the user changed since is not replaced.
+    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.from_prompt = Some(prompt.into());
+        self
+    }
+
+    /// The scene prompt the options' prompts were rewritten from.
+    pub fn from_prompt(&self) -> Option<&str> {
+        self.from_prompt.as_deref()
     }
 
     pub fn options(&self) -> &[ChatOption] {
@@ -407,6 +423,7 @@ impl SceneChatMessage {
             ChatReply::Proposal(proposal) => json!({
                 "kind": "proposal",
                 "image": proposal.image.to_string(),
+                "from_prompt": proposal.from_prompt,
                 "recommended": proposal.recommended,
                 "options": proposal.options.iter().map(|option| json!({
                     "kind": option.kind.code(),
@@ -445,7 +462,11 @@ impl SceneChatMessage {
                     .collect::<Option<Vec<_>>>()?;
                 let image = uuid::Uuid::parse_str(value["image"].as_str()?).ok()?;
                 let recommended = usize::try_from(value["recommended"].as_u64()?).ok()?;
-                ChatReply::Proposal(Proposal::new(options, recommended, image.into()).ok()?)
+                let proposal = Proposal::new(options, recommended, image.into()).ok()?;
+                ChatReply::Proposal(match value["from_prompt"].as_str() {
+                    Some(prompt) => proposal.with_prompt(prompt),
+                    None => proposal,
+                })
             }
             _ => return None,
         };
