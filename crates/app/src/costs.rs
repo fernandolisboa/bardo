@@ -417,6 +417,10 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         // sentence as JSON out.
         CostPurpose::ClaimsCheck => tokens(1_200, 700),
         // The brief in, one prompt out; then one drawing in a tall frame.
+        // The scene, the chat's last messages and the scene's image (about
+        // 1,600 tokens once Claude scales it) in, a short reply and an
+        // instruction and a prompt per option out.
+        CostPurpose::SceneChat => tokens(4_500, 700),
         CostPurpose::ProductConcept => match provider {
             Provider::Claude => tokens(900, 300),
             _ => Metered {

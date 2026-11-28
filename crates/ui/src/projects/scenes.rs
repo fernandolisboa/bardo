@@ -103,10 +103,12 @@ impl ProjectsScreen {
                     self.scene_field_error = None;
                 }
                 self.scenes = Some(view);
+                self.load_scene_chat(id, cx);
             }
             Err(error) => {
                 self.scenes = None;
                 self.scenes_error = Some(error.message());
+                self.scene_chat.reset();
             }
         }
     }
@@ -658,7 +660,7 @@ impl ProjectsScreen {
 
     /// A button that pays for an image or a clip: off, and saying why,
     /// while the scenes are out of date (#262).
-    fn paid(&self, button: Button, cx: &App) -> Button {
+    pub(super) fn paid(&self, button: Button, cx: &App) -> Button {
         let Some(view) = self.scenes.as_ref().filter(|view| view.stale) else {
             return button;
         };
@@ -1593,6 +1595,7 @@ impl ProjectsScreen {
             });
 
         let media = usize::from(failure.is_some());
+        let chat = self.render_scene_chat(index, scene.image().is_some(), open.is_some(), cx);
         let place = self.render_scene_place(index, scene, open, busy, cx);
         let cast = self.render_scene_cast(index, scene, open, busy, cx);
         let body = failure
@@ -1608,6 +1611,7 @@ impl ProjectsScreen {
             ))
             .chain(old_portrait)
             .chain(redraw)
+            .chain(chat)
             .chain(place)
             .chain(cast)
             .collect();

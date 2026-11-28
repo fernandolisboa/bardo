@@ -1017,6 +1017,8 @@ mod tests {
         TokenUsage, UiLanguage, UserProfile, VideoProject, VoiceRef, WordTimings,
     };
 
+    use bardo_domain::{SceneChatMessage, SceneChatRepository};
+
     use super::*;
 
     const TEXT: &str = "A probe left. It never came back.";
@@ -1255,7 +1257,8 @@ mod tests {
             let mut conn = s.db.conn();
             crate::sharing::undo_for_tests(&conn);
             conn.execute_batch(
-                "DROP INDEX template_version_number;
+                "DROP TABLE scene_chat_message;
+                 DROP INDEX template_version_number;
                  ALTER TABLE template_version DROP COLUMN owner_project_id;
                  DROP INDEX persona_profile_name;
                  ALTER TABLE persona DROP COLUMN owner_project_id;
@@ -1760,6 +1763,86 @@ mod tests {
         assert_eq!(stored.scenes()[1].prompt().as_str(), "Stars.");
         assert_eq!(stored.updated_at, time(1_800_000_021));
         assert!(s.db.save_scene(&plan, 7).is_err());
+    }
+
+    fn chat_reply(plan: &ScenePlan, scene: usize, image: GenerationId) -> SceneChatMessage {
+        let proposal = bardo_domain::Proposal::new(
+            vec![bardo_domain::ChatOption {
+                kind: bardo_domain::ChatOptionKind::EditImage,
+                instruction: "Make the cup white.".into(),
+                prompt: "The engineer, a white cup.".into(),
+            }],
+            0,
+            image,
+        )
+        .unwrap();
+        SceneChatMessage::reply(
+            plan.id,
+            scene,
+            "Vou deixar a xícara branca.",
+            bardo_domain::ChatReply::Proposal(proposal),
+            JobId::new(),
+            time(1_800_000_021),
+        )
+    }
+
+    #[test]
+    fn a_scene_chat_round_trips_in_order_and_stays_with_its_scene() {
+        let s = setup();
+        let plan = plan(&s);
+        s.db.save_scene_plan(&plan).unwrap();
+        let mut request = SceneChatMessage::request(
+            plan.id,
+            0,
+            bardo_domain::ChatTarget::Image,
+            "a xícara branca, por favor",
+            time(1_800_000_020),
+        )
+        .unwrap();
+        request.job = Some(JobId::new());
+        s.db.save_chat_message(&request).unwrap();
+        let mut reply = chat_reply(&plan, 0, GenerationId::new());
+        s.db.save_chat_message(&reply).unwrap();
+        // Another scene's chat is its own.
+        let other = chat_reply(&plan, 1, GenerationId::new());
+        s.db.save_chat_message(&other).unwrap();
+
+        assert_eq!(
+            s.db.scene_chat(plan.id, 0).unwrap(),
+            vec![request.clone(), reply.clone()]
+        );
+        assert_eq!(s.db.scene_chat(plan.id, 1).unwrap(), vec![other]);
+
+        // What was applied is saved over the reply.
+        let job = JobId::new();
+        reply.apply(0, job);
+        reply.settle(job, bardo_domain::ChatOutcome::Kept);
+        s.db.save_chat_message(&reply).unwrap();
+        assert_eq!(s.db.chat_message(reply.id).unwrap(), Some(reply.clone()));
+
+        // Saving the plan again (a fit, an edit) keeps the chat.
+        s.db.save_scene_plan(&plan).unwrap();
+        s.db.save_scene(&plan, 0).unwrap();
+        assert_eq!(s.db.scene_chat(plan.id, 0).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_new_plan_takes_the_old_ones_chats_away_and_none_is_saved_for_it() {
+        let s = setup();
+        let first = plan(&s);
+        s.db.save_scene_plan(&first).unwrap();
+        let reply = chat_reply(&first, 0, GenerationId::new());
+        s.db.save_chat_message(&reply).unwrap();
+
+        let second = plan(&s);
+        s.db.save_scene_plan(&second).unwrap();
+        assert!(s.db.scene_chat(first.id, 0).unwrap().is_empty());
+        assert_eq!(s.db.chat_message(reply.id).unwrap(), None);
+        // A late reply for the plan that is gone is let go.
+        s.db.save_chat_message(&chat_reply(&first, 0, GenerationId::new()))
+            .unwrap();
+        assert!(s.db.scene_chat(first.id, 0).unwrap().is_empty());
+        assert!(s.db.scene_chat(second.id, 0).unwrap().is_empty());
     }
 
     #[test]

@@ -41,6 +41,7 @@ mod removal;
 mod render;
 mod research;
 mod scene;
+mod scene_chat;
 mod script;
 mod secrets;
 mod setup_choices;

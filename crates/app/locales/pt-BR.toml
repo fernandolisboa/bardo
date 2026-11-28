@@ -374,6 +374,7 @@ ad_angle_ranking = "Ranqueamento de ângulos de anúncio"
 claims_check = "Checagem de afirmações"
 shot_backdrop = "Fundo de foto do produto"
 product_concept = "Imagem de conceito"
+scene_chat = "Resposta do chat da cena"
 
 [job.state]
 queued = "Na fila"
@@ -1102,6 +1103,46 @@ no_image = "Sem imagem ainda"
 failed = "Não desenhada:"
 image_record = "{model} · {tokens} tokens · versão {n} do template de prompts de imagem"
 
+[scenes.chat]
+open = "Ajustar com IA"
+close = "Voltar para a cena"
+title = "Ajustar a imagem"
+hint = "Escreva o que deve mudar, com suas palavras. O Claude responde com o que entendeu e quanto custa aplicar; nada é desenhado até você aplicar. As respostas usam a versão {n} do template de chat da cena."
+placeholder = "ex.: deixe a xícara da mesa branca"
+send = "Enviar · {price}"
+answering = "O Claude está olhando a cena…"
+you = "Você"
+claude = "Claude"
+empty = "Nenhuma mensagem ainda. Peça uma mudança nesta imagem."
+apply = "Aplicar · {price}"
+recommended = "Recomendado"
+working = "Desenhando a edição…"
+review = "A nova imagem espera sua revisão."
+used = "Você usou a nova imagem."
+kept = "Você manteve a imagem atual."
+applied_failed = "Não desenhada:"
+applied_stopped = "A edição foi cancelada."
+ended = "Esta edição terminou sem uma nova imagem esperando revisão."
+stale_option = "Propostas para uma imagem anterior. Envie seu pedido de novo para ajustar esta."
+reply_failed = "O Claude não respondeu:"
+reply_cancelled = "A resposta foi cancelada. Envie seu pedido de novo ou tente de novo em Tarefas."
+
+[scenes.chat.option]
+edit_image = "Editar esta imagem"
+
+[scenes.chat.error]
+empty = "Escreva o que deve mudar."
+too_long = "Use no máximo 1.000 caracteres no pedido."
+busy = "O Claude ainda está respondendo sobre esta cena, ou uma resposta cancelada ainda está parando."
+no_image = "Desenhe a imagem desta cena primeiro; o chat ajusta essa imagem."
+pending = "Uma nova imagem espera revisão. Use-a ou mantenha a atual antes."
+composed = "A imagem desta cena é composta pelo Bardo e nunca vai para um modelo."
+out_of_date = "A imagem da cena mudou desde esta proposta. Envie seu pedido de novo."
+already_used = "Você já usou a imagem que esta resposta fez."
+no_option = "Essa opção não existe mais; as cenas podem ter sido planejadas de novo."
+missing_key = "Salve uma chave do Claude em Configurações para usar o chat da cena."
+not_saved = "Não foi possível salvar a mensagem. Tente de novo."
+
 [scenes.pending]
 title = "Nova imagem para revisar"
 hint = "Usá-la substitui a imagem atual."
@@ -1218,11 +1259,17 @@ ad_script = "Roteiro de anúncio"
 ad_scene_plan = "Plano de cenas de anúncio"
 concept_prompt = "Prompt de conceito"
 ad_metadata = "Metadados de anúncio"
+scene_chat = "Chat da cena"
 
 [templates.variable]
 fixed_cast = "Os personagens escolhidos em Quem aparece, cada um com aparência, notas e a instrução deste vídeo, ou uma linha dizendo que nenhum foi escolhido."
 fixed_places = "Os lugares escolhidos em Quem aparece, cada um com descrição, notas e a instrução deste vídeo, ou uma linha dizendo que nenhum foi escolhido."
 fixed_objects = "Os objetos escolhidos em Quem aparece, numerados, cada um com descrição, notas, o personagem a quem pertence e a instrução deste vídeo, ou uma linha dizendo que nenhum foi escolhido."
+scene = "A cena de que o chat trata: número e tempo, a narração sobre ela, o prompt da imagem, o lugar e as pessoas."
+scene_request = "O que o usuário pede para mudar, com as palavras dele."
+scene_chat = "As mensagens recentes do chat da cena, da mais antiga para a mais nova, cada uma marcada como do usuário ou do Claude; \"none yet\" antes da primeira."
+chat_options = "As opções que uma resposta pode propor agora, cada uma com quando serve e o preço."
+reply_language = "O idioma em que você usa o Bardo, no qual a resposta é escrita."
 channel_name = "O nome do canal."
 channel_niche = "O nicho do canal."
 channel_themes = "Os temas recorrentes do canal."
@@ -3242,8 +3289,8 @@ title = "Uma cena"
 body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, o lugar onde ela acontece e as pessoas e os objetos que voltam no vídeo com os retratos e as imagens de referência, para que lugares, pessoas e coisas fiquem iguais em toda cena. Uma cena não é desenhada sem o retrato ou a imagem de tudo o que volta nela, a não ser do que você escolheu desenhar sem, e uma desenhada com uma referência mais antiga fica marcada. Edite o prompt para mudar o que o próximo desenho mostra. Num anúncio, Tipo de cena diz o que a cena é: desenhada, ou uma foto do produto que o Bardo compõe de graça a partir de uma das imagens do próprio produto. O layout, a posição e o fundo de uma foto do produto também mudam de graça; só desenhar um fundo é pago, depois da estimativa, e um fundo novo espera você manter ou descartar. Uma cena do produto em uso é desenhada com a foto do produto e espera você conferir com o produto de verdade, desenhar de novo ou usar a imagem real. O cartão final, a última cena do anúncio, também é composto de graça: digite o título e a segunda linha, mostre ou não a oferta do briefing e escolha o visual e onde ficam o texto e o logo."
 
 [tour.scenes.redraw]
-title = "Desenhe de novo"
-body = "Desenhar de novo faz uma nova imagem a partir do prompt, no estilo visual do vídeo. Ela espera ao lado da atual até você usá-la ou manter a atual. Depois de trocar o estilo, a etapa diz quantas cenas estão em outro estilo e oferece desenhá-las de novo de uma vez, depois de mostrar o custo."
+title = "Desenhe de novo ou ajuste com IA"
+body = "Desenhar de novo faz uma nova imagem a partir do prompt, no estilo visual do vídeo. Ela espera ao lado da atual até você usá-la ou manter a atual. Depois de trocar o estilo, a etapa diz quantas cenas estão em outro estilo e oferece desenhá-las de novo de uma vez, depois de mostrar o custo. Ajustar com IA abre o chat da cena: escreva o que deve mudar (deixe a xícara branca), o Claude responde com o que entendeu e o preço, e aplicar edita a imagem atual, mantendo o resto; a nova imagem espera revisão do mesmo jeito."
 
 [tour.scenes.replan]
 title = "Depois de uma nova narração"

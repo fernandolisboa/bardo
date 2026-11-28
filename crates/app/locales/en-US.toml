@@ -374,6 +374,7 @@ ad_angle_ranking = "Ad angle ranking"
 claims_check = "Claims check"
 shot_backdrop = "Product shot backdrop"
 product_concept = "Concept image"
+scene_chat = "Scene chat reply"
 
 [job.state]
 queued = "Queued"
@@ -1102,6 +1103,46 @@ no_image = "No image yet"
 failed = "Not drawn:"
 image_record = "{model} · {tokens} tokens · image prompt template version {n}"
 
+[scenes.chat]
+open = "Adjust with AI"
+close = "Back to the scene"
+title = "Adjust the image"
+hint = "Write what should change, in your own words. Claude answers with what it understood and what applying it costs; nothing is drawn until you apply it. Replies use scene chat template version {n}."
+placeholder = "e.g. make the cup on the table white"
+send = "Send · {price}"
+answering = "Claude is looking at the scene…"
+you = "You"
+claude = "Claude"
+empty = "No messages yet. Ask for a change to this image."
+apply = "Apply · {price}"
+recommended = "Recommended"
+working = "Drawing the edit…"
+review = "The new image waits for your review."
+used = "You used the new image."
+kept = "You kept the current image."
+applied_failed = "Not drawn:"
+applied_stopped = "The edit was cancelled."
+ended = "This edit ended without a new image waiting for review."
+stale_option = "Proposed for an earlier image. Send your request again to adjust this one."
+reply_failed = "Claude did not answer:"
+reply_cancelled = "The reply was cancelled. Send your request again, or retry it in Jobs."
+
+[scenes.chat.option]
+edit_image = "Edit this image"
+
+[scenes.chat.error]
+empty = "Write what should change."
+too_long = "Keep the request to at most 1,000 characters."
+busy = "Claude is still answering about this scene, or a cancelled reply is still stopping."
+no_image = "Draw this scene's image first; the chat adjusts it."
+pending = "A new image waits for review. Use it or keep the current one first."
+composed = "This scene's picture is composed by Bardo and never goes to a model."
+out_of_date = "The scene's image changed since this was proposed. Send your request again."
+already_used = "You already used the image this reply made."
+no_option = "That option is gone; the scenes may have been planned again."
+missing_key = "Save a Claude key under Settings to use the scene chat."
+not_saved = "Could not save the message. Try again."
+
 [scenes.pending]
 title = "New image to review"
 hint = "Using it replaces the current image."
@@ -1218,11 +1259,17 @@ ad_script = "Ad script"
 ad_scene_plan = "Ad scene plan"
 concept_prompt = "Concept prompt"
 ad_metadata = "Ad metadata"
+scene_chat = "Scene chat"
 
 [templates.variable]
 fixed_cast = "The characters picked under Who appears, each with its appearance, notes and this video's instruction, or a line saying none was picked."
 fixed_places = "The places picked under Who appears, each with its description, notes and this video's instruction, or a line saying none was picked."
 fixed_objects = "The objects picked under Who appears, numbered, each with its description, notes, the character it belongs to and this video's instruction, or a line saying none was picked."
+scene = "The scene the chat is about: its number and time, the narration over it, its image prompt, its place and its people."
+scene_request = "What the user asks to change, in their own words."
+scene_chat = "The scene chat's recent messages, oldest first, each marked as the user's or Claude's; \"none yet\" before the first."
+chat_options = "The options a reply may propose now, each with when it fits and its price."
+reply_language = "The language you read Bardo in, which the reply is written in."
 channel_name = "The channel's name."
 channel_niche = "The channel's niche."
 channel_themes = "The channel's recurring themes."
@@ -3242,8 +3289,8 @@ title = "A scene"
 body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people and objects that come back in the video with their reference portraits and pictures, so places, people and things look the same in every scene. A scene is not drawn without the portrait or picture of everything in it that comes back, except what you chose to draw without one, and one drawn with an older reference is marked. Edit the prompt to change what the next drawing shows. In an ad, Scene kind says what the scene is: drawn, or a product shot that Bardo composes for free from one of the product's own images. A product shot's layout, position and backdrop change for free too; only drawing a backdrop is paid, after its estimate, and a new one waits for you to keep or discard it. A scene of the product in use is drawn with the product's photo and waits for you to check it against the real product, draw it again, or use the real image instead. The end card, the ad's last scene, is composed for free too: type its headline and second line, show the brief's offer or not, and pick its look and where its text and logo sit."
 
 [tour.scenes.redraw]
-title = "Draw again"
-body = "Draw again makes a new image from the prompt, in the video's visual style. It waits beside the current one until you use it or keep the current one. After the style changes, the stage says how many scenes are in another style and offers to draw them again in one run, after showing the cost."
+title = "Draw again or adjust with AI"
+body = "Draw again makes a new image from the prompt, in the video's visual style. It waits beside the current one until you use it or keep the current one. After the style changes, the stage says how many scenes are in another style and offers to draw them again in one run, after showing the cost. Adjust with AI opens the scene's chat: write what should change (make the cup white), Claude answers with what it understood and the price, and applying edits the current image, keeping the rest; the new image waits for review the same way."
 
 [tour.scenes.replan]
 title = "After a new narration"

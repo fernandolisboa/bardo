@@ -1324,6 +1324,7 @@ mod tests {
                 captures: Arc::clone(&self.db) as _,
                 staging: Arc::clone(&self.db) as _,
                 scene_plans: Arc::clone(&self.db) as _,
+                scene_chats: Arc::clone(&self.db) as _,
                 timelines: Arc::clone(&self.db) as _,
                 media_assets: Arc::clone(&self.db) as _,
                 bridges: Arc::clone(&self.db) as _,
