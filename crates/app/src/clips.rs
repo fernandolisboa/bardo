@@ -1372,9 +1372,10 @@ impl Bardo {
     /// first model is the default of channels that keep it, so it is one
     /// that can run (#251).
     pub fn clip_models(&self) -> Vec<ClipModel> {
-        let (keyed, rest): (Vec<_>, Vec<_>) = self.clips.iter().partition(|generator| {
-            self.provider_key(generator.provider()).state != KeyState::NotSet
-        });
+        let (keyed, rest): (Vec<_>, Vec<_>) = self
+            .clips
+            .iter()
+            .partition(|generator| self.work_key_state(generator.provider()) != KeyState::NotSet);
         keyed
             .into_iter()
             .chain(rest)

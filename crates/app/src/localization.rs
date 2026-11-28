@@ -1345,7 +1345,7 @@ impl Bardo {
         {
             return Err(LocalizationError::NoPlan);
         }
-        if self.provider_key(Provider::Claude).state == KeyState::NotSet {
+        if self.work_key_state(Provider::Claude) == KeyState::NotSet {
             return Err(LocalizationError::MissingKey(Provider::Claude));
         }
         let template = self.channel_template(TemplateKind::Localization, project.channel)?;

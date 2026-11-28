@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bardo_domain::{
-    ApiKey, ApiKeyError, KeyCheck, KeyChecker, ProfileId, Provider, Redactor, SecretStore,
-    SecretStoreError,
+    ApiKey, ApiKeyError, KeyCheck, KeyChecker, ProfileId, ProjectId, ProjectKeyRepository,
+    Provider, Redactor, SecretStore, SecretStoreError,
 };
 
 use crate::{Bardo, Text};
@@ -27,6 +27,9 @@ pub enum ProviderKeyError {
     /// Fields of the BytePlus card are not usable; each says why.
     #[error("invalid BytePlus fields")]
     BytePlusFields(Vec<bardo_domain::BytePlusFieldError>),
+    /// The project is not this profile's (or is gone).
+    #[error("no such project")]
+    NoProject,
 }
 
 impl ProviderKeyError {
@@ -38,6 +41,7 @@ impl ProviderKeyError {
             ProviderKeyError::Store(_) => Text::ProviderKeyStoreFailed,
             ProviderKeyError::PrivacyNotAccepted => Text::PrivacyNotAccepted,
             ProviderKeyError::BytePlusFields(_) => Text::BytePlusFieldsInvalid,
+            ProviderKeyError::NoProject => Text::ProjectKeysNoProject,
         }
     }
 }
@@ -65,12 +69,22 @@ pub struct ProviderKeyStatus {
 
 /// What the app tracks per provider.
 #[derive(Debug, Clone)]
-struct Slot {
-    state: KeyState,
-    last_check: Option<KeyCheck>,
+pub(crate) struct Slot {
+    pub(crate) state: KeyState,
+    pub(crate) last_check: Option<KeyCheck>,
     /// Bumped on every save or removal, so a test that finishes after the
     /// key changed does not report on the new key.
-    generation: u64,
+    pub(crate) generation: u64,
+}
+
+impl Slot {
+    fn new(state: KeyState) -> Self {
+        Self {
+            state,
+            last_check: None,
+            generation: 0,
+        }
+    }
 }
 
 pub(crate) struct ProviderKeys {
@@ -78,6 +92,10 @@ pub(crate) struct ProviderKeys {
     checker: Arc<dyn KeyChecker>,
     redactor: Redactor,
     slots: HashMap<Provider, Slot>,
+    /// Which projects keep their own keys (#343).
+    rows: Arc<dyn ProjectKeyRepository>,
+    /// Projects' own keys, as far as the app knows.
+    projects: crate::project_keys::ProjectSlots,
 }
 
 impl ProviderKeys {
@@ -90,6 +108,7 @@ impl ProviderKeys {
         checker: Arc<dyn KeyChecker>,
         redactor: Redactor,
         owner: ProfileId,
+        rows: Arc<dyn ProjectKeyRepository>,
     ) -> Self {
         let slots = Provider::with_keys()
             .map(|provider| {
@@ -108,20 +127,136 @@ impl ProviderKeys {
                         KeyState::Unreadable
                     }
                 };
-                let slot = Slot {
-                    state,
-                    last_check: None,
-                    generation: 0,
-                };
-                (provider, slot)
+                (provider, Slot::new(state))
             })
             .collect();
+        // Every project's own keys are masked from the start too, and a
+        // key noted but missing here (a database restored on another
+        // computer) shows as unreadable.
+        let mut projects = crate::project_keys::ProjectSlots::default();
+        match rows.project_keys(owner) {
+            Ok(noted) => {
+                for noted in noted {
+                    let (project, provider) = (noted.project, noted.provider);
+                    let state = match store.project_key(owner, project, provider) {
+                        Ok(Some(key)) => {
+                            redactor.add(&key);
+                            KeyState::Saved { hint: key.hint() }
+                        }
+                        Ok(None) => KeyState::Unreadable,
+                        Err(error) => {
+                            tracing::warn!(
+                                provider = provider.code(),
+                                error = %redactor.redact(&error.to_string()),
+                                "could not read a project's key"
+                            );
+                            KeyState::Unreadable
+                        }
+                    };
+                    projects.insert(project, provider, Slot::new(state));
+                }
+            }
+            Err(error) => tracing::warn!("could not read which projects have keys: {error}"),
+        }
         Self {
             store,
             checker,
             redactor,
             slots,
+            rows,
+            projects,
         }
+    }
+
+    pub(crate) fn store(&self) -> &Arc<dyn SecretStore> {
+        &self.store
+    }
+
+    pub(crate) fn rows(&self) -> &Arc<dyn ProjectKeyRepository> {
+        &self.rows
+    }
+
+    /// A project's key for the settings screen.
+    pub(crate) fn project_status(
+        &self,
+        project: ProjectId,
+        provider: Provider,
+    ) -> ProviderKeyStatus {
+        match self.projects.get(project, provider) {
+            Some(slot) => ProviderKeyStatus {
+                provider,
+                state: slot.state.clone(),
+                last_check: slot.last_check.clone(),
+            },
+            None => ProviderKeyStatus {
+                provider,
+                state: KeyState::NotSet,
+                last_check: None,
+            },
+        }
+    }
+
+    pub(crate) fn replace_project(
+        &mut self,
+        project: ProjectId,
+        provider: Provider,
+        state: KeyState,
+    ) {
+        if state == KeyState::NotSet {
+            // The generation goes with it: a test still running for the
+            // removed key finds no slot and is dropped.
+            self.projects.remove(project, provider);
+            return;
+        }
+        let generation = self
+            .projects
+            .get(project, provider)
+            .map_or(0, |slot| slot.generation + 1);
+        self.projects.insert(
+            project,
+            provider,
+            Slot {
+                state,
+                last_check: None,
+                generation,
+            },
+        );
+    }
+
+    /// Forgets a deleted project's keys.
+    pub(crate) fn forget_project(&mut self, project: ProjectId) {
+        self.projects.forget(project);
+    }
+
+    /// Every project key noted, with its state.
+    pub(crate) fn project_states(&self) -> impl Iterator<Item = (ProjectId, Provider, &KeyState)> {
+        self.projects.all()
+    }
+
+    pub(crate) fn project_test(
+        &self,
+        owner: ProfileId,
+        project: ProjectId,
+        provider: Provider,
+    ) -> Result<KeyTest, ProviderKeyError> {
+        let slot = self
+            .projects
+            .get(project, provider)
+            .ok_or(ProviderKeyError::NotSet)?;
+        let key = self
+            .store
+            .project_key(owner, project, provider)
+            .map_err(|error| store_failure(&self.redactor, provider, "read", error))?
+            .ok_or(ProviderKeyError::NotSet)?;
+        self.redactor.add(&key);
+        Ok(KeyTest {
+            provider,
+            project: Some(project),
+            key,
+            generation: slot.generation,
+            checker: Arc::clone(&self.checker),
+            redactor: self.redactor.clone(),
+        })
     }
 
     fn slot_mut(&mut self, provider: Provider) -> &mut Slot {
@@ -162,6 +297,8 @@ impl ProviderKeys {
 /// `Bardo::record_key_test`.
 pub struct KeyTest {
     provider: Provider,
+    /// The project whose own key it is; `None` for the app's.
+    project: Option<ProjectId>,
     key: ApiKey,
     generation: u64,
     checker: Arc<dyn KeyChecker>,
@@ -184,6 +321,7 @@ impl KeyTest {
         );
         KeyTestResult {
             provider: self.provider,
+            project: self.project,
             generation: self.generation,
             check,
         }
@@ -203,6 +341,8 @@ impl std::fmt::Debug for KeyTest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyTestResult {
     pub provider: Provider,
+    /// The project whose own key was tested; `None` for the app's.
+    pub project: Option<ProjectId>,
     generation: u64,
     pub check: KeyCheck,
 }
@@ -331,6 +471,7 @@ impl Bardo {
         let key = keys.read(self.profile.id, provider)?;
         Ok(KeyTest {
             provider,
+            project: None,
             key,
             generation: keys.slots[&provider].generation,
             checker: Arc::clone(&keys.checker),
@@ -341,7 +482,17 @@ impl Bardo {
     /// Keeps a finished test's result for the settings screen. Returns false
     /// and drops it when the key was replaced or removed while it ran.
     pub fn record_key_test(&mut self, result: KeyTestResult) -> bool {
-        let slot = self.provider_keys.slot_mut(result.provider);
+        let slot = match result.project {
+            None => self.provider_keys.slot_mut(result.provider),
+            Some(project) => match self
+                .provider_keys
+                .projects
+                .get_mut(project, result.provider)
+            {
+                Some(slot) => slot,
+                None => return false,
+            },
+        };
         if slot.generation != result.generation {
             return false;
         }
@@ -352,7 +503,7 @@ impl Bardo {
 
 /// Logs a secret store failure and returns it with any known key masked,
 /// so no caller can print the original.
-fn store_failure(
+pub(crate) fn store_failure(
     redactor: &Redactor,
     provider: Provider,
     action: &str,
@@ -450,6 +601,7 @@ mod tests {
                 places: crate::test_places(),
                 voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
                 research: Arc::clone(&self.db) as _,
+                project_keys: Arc::clone(&self.db) as _,
                 secrets,
                 connection_secrets: Arc::new(MemorySecretStore::default()),
             };
@@ -496,6 +648,36 @@ mod tests {
         }
 
         fn delete(&self, _: ProfileId, _: Provider) -> Result<(), SecretStoreError> {
+            Err(SecretStoreError("credential store locked".into()))
+        }
+
+        fn project_key(
+            &self,
+            _: ProfileId,
+            _: ProjectId,
+            _: Provider,
+        ) -> Result<Option<ApiKey>, SecretStoreError> {
+            Err(SecretStoreError("credential store locked".into()))
+        }
+
+        fn set_project_key(
+            &self,
+            _: ProfileId,
+            _: ProjectId,
+            _: Provider,
+            key: &ApiKey,
+        ) -> Result<(), SecretStoreError> {
+            Err(SecretStoreError(
+                format!("could not write {}", key.expose()).into(),
+            ))
+        }
+
+        fn delete_project_key(
+            &self,
+            _: ProfileId,
+            _: ProjectId,
+            _: Provider,
+        ) -> Result<(), SecretStoreError> {
             Err(SecretStoreError("credential store locked".into()))
         }
     }

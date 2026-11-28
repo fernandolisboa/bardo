@@ -76,6 +76,7 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("settings"),
     page!("about"),
     page!("storage"),
+    page!("project-keys"),
     page!("backup"),
     page!("data-and-keys"),
     page!("privacy"),

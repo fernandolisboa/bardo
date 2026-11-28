@@ -318,7 +318,7 @@ impl Bardo {
         if self.work_busy(&Work::MusicPrompt(project.id.to_string())) {
             return Err(MusicPromptError::Busy);
         }
-        if self.provider_key(Provider::Claude).state == KeyState::NotSet {
+        if self.work_key_state(Provider::Claude) == KeyState::NotSet {
             return Err(MusicPromptError::MissingKey(Provider::Claude));
         }
         let template = self.channel_template(TemplateKind::MusicPrompt, project.channel)?;

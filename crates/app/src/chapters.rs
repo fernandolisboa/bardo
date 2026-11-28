@@ -585,7 +585,7 @@ impl Bardo {
             .narrations
             .narration(project.id)?
             .ok_or(ChaptersError::NoNarration)?;
-        if self.provider_key(Provider::Claude).state == KeyState::NotSet {
+        if self.work_key_state(Provider::Claude) == KeyState::NotSet {
             return Err(ChaptersError::MissingKey(Provider::Claude));
         }
         let template = self.channel_template(TemplateKind::Chapters, project.channel)?;

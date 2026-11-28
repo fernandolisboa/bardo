@@ -388,16 +388,22 @@ impl Bardo {
         // A product's sheet job belongs to no video: what it still has to
         // pay for is checked against the provider's budget alone.
         if let Some(calls) = self.sheet_calls_left(&job) {
-            return Ok(self.check_budget(&calls, consent)?.err());
+            return Ok(self
+                .check_budget_for(job.origin().project, &calls, consent)?
+                .err());
         }
         // Nor do a product's ad angles: Claude's proposal, when the job
         // has yet to save one, and the ranking of what waits for it.
         if let Some(calls) = self.ad_angle_calls_left(&job) {
-            return Ok(self.check_budget(&calls, consent)?.err());
+            return Ok(self
+                .check_budget_for(job.origin().project, &calls, consent)?
+                .err());
         }
         // Nor does a product's concept image (#280).
         if let Some(calls) = self.concept_calls_left(&job) {
-            return Ok(self.check_budget(&calls, consent)?.err());
+            return Ok(self
+                .check_budget_for(job.origin().project, &calls, consent)?
+                .err());
         }
         let Some((project, calls)) = self
             .images_left(&job)
@@ -2262,6 +2268,7 @@ mod tests {
             places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
             research: Arc::clone(db) as _,
+            project_keys: Arc::clone(db) as _,
             secrets: Arc::new(MemorySecretStore::default()),
             connection_secrets: Arc::new(MemorySecretStore::default()),
         };

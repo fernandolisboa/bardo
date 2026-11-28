@@ -418,6 +418,12 @@ pub enum Control {
     StorageChange,
     /// Settings › Storage: how existing media moves into project folders.
     StorageMove,
+    /// Settings › This project: what a project's own key does.
+    ProjectKeysKept,
+    /// Settings › This project: the first provider's card.
+    ProjectKeyCard,
+    /// Settings › This project: the first own key's budget.
+    ProjectKeyBudget,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -1696,9 +1702,34 @@ pub const STORAGE: Tour = {
     }
 };
 
+pub const PROJECT_KEYS: Tour = {
+    const AT: TourPlace = TourPlace::Settings(SettingsTab::Project);
+    const PAGE: &str = "project-keys";
+    const TAB: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::ProjectKeys,
+        version: 1,
+        place: Some(AT),
+        steps: &[
+            TourStep::at("kept", control(Control::ProjectKeysKept))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "own-keys"),
+            TourStep::at("card", control(Control::ProjectKeyCard))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "own-keys"),
+            TourStep::at("budget", control(Control::ProjectKeyBudget))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "budgets"),
+        ],
+    }
+};
+
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 36] = [
+    pub const ALL: [&'static Tour; 37] = [
         &WELCOME,
         &OVERVIEW,
         &LIBRARY,
@@ -1735,6 +1766,7 @@ impl Tour {
         &ABOUT,
         &BACKUP,
         &STORAGE,
+        &PROJECT_KEYS,
     ];
 
     pub fn get(id: TourId) -> &'static Tour {
@@ -1775,6 +1807,7 @@ impl Tour {
             TourId::About => &ABOUT,
             TourId::Backup => &BACKUP,
             TourId::Storage => &STORAGE,
+            TourId::ProjectKeys => &PROJECT_KEYS,
         }
     }
 
@@ -2835,6 +2868,7 @@ mod tests {
             (SettingsTab::About, TourId::About),
             (SettingsTab::Backup, TourId::Backup),
             (SettingsTab::Storage, TourId::Storage),
+            (SettingsTab::Project, TourId::ProjectKeys),
         ];
         for (tab, tour) in tabs {
             assert_eq!(Tour::of(TourPlace::Settings(tab)).map(|t| t.id), Some(tour));

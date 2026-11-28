@@ -34,6 +34,7 @@ mod product_sheet;
 mod profile;
 mod project;
 mod project_folders;
+mod project_key;
 mod publication;
 mod removal;
 mod render;
@@ -84,7 +85,7 @@ pub use project_folders::{LocalProjectFolders, MemoryProjectFolders, folder_plac
 pub use secrets::CredentialManager;
 pub use secrets::{
     MemorySecretStore, app_credentials_target, credential_target, plan_target,
-    platform_connection_secrets, platform_secret_store, tokens_target,
+    platform_connection_secrets, platform_secret_store, project_credential_target, tokens_target,
 };
 pub use setup_choices::{
     SETUP_CHOICES_FILE, SetupChoices, SetupChoicesError, default_setup_choices_path,

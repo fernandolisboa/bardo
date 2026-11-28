@@ -34,6 +34,11 @@ Provedores gratuitos, como a YouTube Data API, têm uma cota diária em vez de p
 
 A API do X também é um provedor, sem chave: cada post que o Bardo faz no X é cobrado dos créditos do seu app do X e registrado aqui em X (veja [Conectar o X](connect-x.md#costs)). Um orçamento para o X faz um post que chegaria a ele perguntar antes.
 
+<a id="project-keys"></a>
+## Chaves próprias dos projetos
+
+Um projeto pode pagar um provedor com a [chave própria](project-keys.md) e ter o próprio orçamento mensal para ela. O que a chave de um projeto paga aparece no provedor em **Orçamentos** como a parte paga por chaves próprias de projetos, e não conta no orçamento do app ali. **Chaves próprias dos projetos** lista, para cada projeto com chave própria (só o filtrado, com um filtro), quanto ele pagou no mês contra o orçamento do projeto, com os mesmos avisos a partir de 80% e a mesma pergunta em 100%. Cada chamada registra qual chave pagou, então uma chave removida depois ainda mostra o que pagou no mês.
+
 <a id="rates"></a>
 ## Tarifas e modelos sem preço
 

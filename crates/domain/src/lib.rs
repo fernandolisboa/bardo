@@ -100,6 +100,7 @@ mod product_shot;
 mod production;
 mod profile;
 mod project;
+mod project_key;
 mod provider_key;
 mod publication;
 mod redaction;
@@ -375,6 +376,7 @@ pub use project::{
     Project, ProjectColor, ProjectDetails, ProjectDraft, ProjectFieldError, ProjectId, ProjectList,
     ProjectRepository, ProjectState, UnknownProjectState, WorkOrigin, reorder_favorites,
 };
+pub use project_key::{Budgets, KeyPayer, ProjectBudget, ProjectKey, ProjectKeyRepository};
 pub use provider_key::{
     ApiKey, ApiKeyError, BilledUse, KeyCheck, KeyCheckOutcome, KeyChecker, Provider,
     ProviderFailure, ProviderFailureKind, SecretStore, SecretStoreError, UnknownProvider,

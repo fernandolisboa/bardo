@@ -1892,6 +1892,56 @@ mod tests {
     }
 
     #[test]
+    fn a_projects_own_key_and_budget_never_go_into_a_settings_file() {
+        const OWN: &str = "sk-ant-api03-project-own-key-0002";
+        let dir = tempfile::tempdir().unwrap();
+        let h = Harness::new();
+        let mut app = set_up(&h);
+        let channel = app
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.details.same_name("Arquivos do Espaço"))
+            .unwrap();
+        let project = app.project_of_channel(channel.id).unwrap();
+        let app_keys = |app: &Bardo| -> Vec<SettingsItem> {
+            items(&app.settings_to_export())
+                .into_iter()
+                .filter(|item| matches!(item, SettingsItem::Key(_)))
+                .collect()
+        };
+        let before = app_keys(&app);
+        // A provider the app has no key for, and one it has.
+        assert!(!before.contains(&SettingsItem::Key(Provider::BytePlus)));
+        app.save_project_byteplus_key(
+            project,
+            [
+                "project-own-ark-0002",
+                "project-own-ak-0002",
+                "project-own-sk-0002",
+                "own-bucket",
+                "ap-southeast-1",
+            ],
+        )
+        .unwrap();
+        app.save_project_key(project, Provider::Claude, OWN)
+            .unwrap();
+        app.set_project_budget(project, Provider::Claude, "7")
+            .unwrap();
+
+        // Only the app's own keys are offered.
+        assert_eq!(app_keys(&app), before);
+        let choices = app.settings_to_export();
+        let path = export(&app, &items(&choices), dir.path());
+        let file = open(&app, &path);
+        let written = serde_json::to_string(&file.contents).unwrap();
+        for secret in [OWN, "project-own-ark-0002", "project-own-sk-0002"] {
+            assert!(!written.contains(secret), "a project's key in the file");
+        }
+        assert!(!written.contains("7000000"), "no project budget");
+    }
+
+    #[test]
     fn what_was_ticked_arrives_in_another_copy() {
         let dir = tempfile::tempdir().unwrap();
         let source = Harness::new();

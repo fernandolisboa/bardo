@@ -59,6 +59,8 @@ As chaves ficam no Gerenciador de Credenciais do Windows, na sua conta do Window
 
 Remover uma chave nas Configurações apaga ela do Gerenciador de Credenciais. Para desativar a chave de vez, revogue também no painel do próprio provedor.
 
+Um projeto pode usar uma chave própria para um provedor no lugar da salva aqui, com orçamento próprio: veja [As chaves próprias de um projeto](project-keys.md).
+
 <a id="masked"></a>
 ## O que o Bardo mostra de uma chave
 

@@ -1014,6 +1014,21 @@ impl ProjectSwitcher {
                 .gap_1()
                 .flex_wrap()
                 .child(
+                    Button::new("project-keys")
+                        .ghost()
+                        .small()
+                        .icon(IconName::Settings)
+                        .label(tr(bardo, Text::SwitcherProjectKeys))
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.set_open(false, window, cx);
+                            crate::guide::go(
+                                bardo_app::GuidePlace::Settings(bardo_app::SettingsTab::Project),
+                                window,
+                                cx,
+                            );
+                        })),
+                )
+                .child(
                     Button::new("project-export")
                         .ghost()
                         .small()

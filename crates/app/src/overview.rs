@@ -568,6 +568,7 @@ mod tests {
                 spent: Money::default(),
                 budget: None,
                 level: None,
+                paid_by: bardo_domain::KeyPayer::App,
             }],
             ..SpendEstimate::default()
         }
@@ -923,6 +924,7 @@ mod tests {
                 job: None,
                 at: SystemTime::now(),
                 origin: bardo_domain::WorkOrigin::default(),
+                paid_by: bardo_domain::KeyPayer::App,
             })
             .unwrap();
 

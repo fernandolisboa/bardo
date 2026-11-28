@@ -75,6 +75,10 @@ pub enum RemovalError {
     /// so the user can try again.
     #[error("an account could not be disconnected")]
     NotDisconnected,
+    /// One of the project's own keys could not be removed from Windows
+    /// Credential Manager; the records stay, so the user can try again.
+    #[error("a project key could not be removed")]
+    KeysNotRemoved,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -98,6 +102,7 @@ impl RemovalError {
             RemovalError::FolderNotFound => Text::FolderNotFound,
             RemovalError::FolderNotRemoved(_) => Text::DeleteFolderNotRemoved,
             RemovalError::NotDisconnected => Text::DeleteNotDisconnected,
+            RemovalError::KeysNotRemoved => Text::DeleteKeysNotRemoved,
             RemovalError::RecordsNotWritten(_) => Text::DeleteRecordsNotWritten,
             RemovalError::Repository(_) => Text::RemovalNotSaved,
         }
@@ -123,6 +128,8 @@ pub struct DeletePreview {
     /// For a project: its network accounts that are connected, which
     /// deleting disconnects.
     pub connected: usize,
+    /// For a project: its own API keys, which deleting removes (#343).
+    pub keys: usize,
 }
 
 /// An archived project as *Archived projects* lists it.
@@ -191,6 +198,8 @@ pub struct Deletion {
     discard: Discard,
     deleted: Vec<DeletedWork>,
     disconnections: Vec<Disconnection>,
+    /// A project's own keys, removed from the secret store (#343).
+    keys: Option<crate::project_keys::KeyRemoval>,
     trash: Arc<dyn bardo_domain::Trash>,
     removals: Arc<dyn bardo_domain::RemovalRepository>,
     /// Writes a project's records into its folder before it goes to the
@@ -233,6 +242,13 @@ impl Deletion {
         }
         if !disconnected {
             return Err(RemovalError::NotDisconnected);
+        }
+        // Keys never outlive their project: one that will not go keeps the
+        // records, so deleting can be tried again.
+        if let Some(keys) = &self.keys
+            && keys.run().is_err()
+        {
+            return Err(RemovalError::KeysNotRemoved);
         }
         match self.target {
             Removable::Video(video) => {
@@ -523,7 +539,7 @@ impl Bardo {
 
     /// What the delete dialog shows for `target`.
     pub fn delete_preview(&self, target: Removable) -> Result<DeletePreview, RemovalError> {
-        let (name, videos, connected) = match target {
+        let (name, videos, connected, keys) = match target {
             Removable::Project(id) => {
                 let project = self.removable_project(id)?;
                 let videos = self.videos_of(id)?.len();
@@ -531,9 +547,10 @@ impl Bardo {
                     project.name().to_owned(),
                     videos,
                     self.connected_accounts(id)?.len(),
+                    self.project_key_providers(id).len(),
                 )
             }
-            Removable::Video(id) => (self.removable_video(id)?.title, 0, 0),
+            Removable::Video(id) => (self.removable_video(id)?.title, 0, 0, 0),
         };
         let folder = self.folder_to_discard(target)?;
         let size = match &folder {
@@ -552,6 +569,7 @@ impl Bardo {
             blocks: self.removal_blocks(target)?,
             videos,
             connected,
+            keys,
         })
     }
 
@@ -661,12 +679,22 @@ impl Bardo {
                 tracing::warn!("could not prepare disconnecting an account: {error}");
                 RemovalError::NotDisconnected
             })?;
+        let keys = match target {
+            Removable::Project(project) => Some(crate::project_keys::KeyRemoval {
+                owner: self.profile.id,
+                project,
+                providers: self.project_key_providers(project),
+                store: Arc::clone(self.provider_keys.store()),
+            }),
+            Removable::Video(_) => None,
+        };
         Ok(Deletion {
             target,
             folder,
             discard,
             deleted,
             disconnections,
+            keys,
             trash: Arc::clone(&self.folder_book.trash),
             removals: Arc::clone(&self.folder_book.removals),
             packages: Arc::clone(&self.folder_book.packages),
@@ -674,11 +702,21 @@ impl Bardo {
     }
 
     /// Re-reads what jobs wait on after a deletion ran.
-    pub fn after_deletion(&self) {
+    pub fn after_deletion(&mut self) {
         self.check_folders();
+        // A deleted project's keys are gone from the store with it.
+        let gone: Vec<ProjectId> = self
+            .provider_keys
+            .project_states()
+            .map(|(project, _, _)| project)
+            .filter(|project| matches!(self.projects.project(*project), Ok(None)))
+            .collect();
+        for project in gone {
+            self.provider_keys.forget_project(project);
+        }
     }
 
-    fn project_of_channel(&self, channel: bardo_domain::ChannelId) -> Option<ProjectId> {
+    pub(crate) fn project_of_channel(&self, channel: bardo_domain::ChannelId) -> Option<ProjectId> {
         self.channels
             .get(channel)
             .ok()
@@ -916,6 +954,7 @@ mod tests {
                 job: None,
                 at: SystemTime::now(),
                 origin: Default::default(),
+                paid_by: bardo_domain::KeyPayer::App,
             })
             .unwrap();
     }
@@ -1239,6 +1278,58 @@ mod tests {
         assert!(matches!(
             s.app.archive_project(ProjectId::new(), false),
             Err(RemovalError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn deleting_a_project_removes_its_own_keys_and_no_others() {
+        use bardo_domain::{ProjectKeyRepository as _, SecretStore as _};
+
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let store = Arc::new(MemorySecretStore::default());
+        let repositories = Repositories::shared(Arc::clone(&db), Arc::clone(&store) as _);
+        let mut app = Bardo::start(repositories, testing::providers(), Some("en-US")).unwrap();
+        let owner = app.profile().id;
+        app.save_provider_key(Provider::Claude, "sk-ant-api03-app-key-0001")
+            .unwrap();
+        let doomed = project(&app, "Doomed");
+        let kept = project(&app, "Kept");
+        for id in [doomed.id, kept.id] {
+            app.save_project_key(id, Provider::Claude, "sk-ant-api03-own-key-0002")
+                .unwrap();
+        }
+        let preview = app.delete_preview(Removable::Project(doomed.id)).unwrap();
+        assert_eq!(preview.keys, 1);
+        assert_eq!(
+            app.delete_preview(Removable::Project(kept.id))
+                .unwrap()
+                .keys,
+            1
+        );
+
+        app.deletion(Removable::Project(doomed.id), "Doomed", false)
+            .unwrap()
+            .run()
+            .unwrap();
+        app.after_deletion();
+
+        assert!(
+            store
+                .project_key(owner, doomed.id, Provider::Claude)
+                .unwrap()
+                .is_none()
+        );
+        assert!(!db.has_project_key(doomed.id, Provider::Claude).unwrap());
+        assert!(
+            store
+                .project_key(owner, kept.id, Provider::Claude)
+                .unwrap()
+                .is_some()
+        );
+        assert!(store.get(owner, Provider::Claude).unwrap().is_some());
+        assert!(matches!(
+            app.project_keys(kept.id)[0].key.state,
+            crate::KeyState::Saved { .. }
         ));
     }
 

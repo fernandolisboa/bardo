@@ -290,3 +290,45 @@ fn a_deleted_project_with_packed_media_comes_back_archived() {
         .unwrap();
     assert!(!project.is_active(), "Unarchive unpacks its media");
 }
+
+#[test]
+fn a_package_holds_no_key_and_the_imported_project_has_none() {
+    use bardo_domain::Provider;
+
+    const OWN: &str = "sk-ant-api03-project-own-key-0002";
+    let dir = tempfile::tempdir().unwrap();
+    let mut from = on_disk(&dir.path().join("a"));
+    let (bakery, _) = filled(&from, "Bakery");
+    from.save_project_key(bakery.id, Provider::Claude, OWN)
+        .unwrap();
+    from.set_project_budget(bakery.id, Provider::Claude, "7")
+        .unwrap();
+    let package = dir.path().join(bardo_domain::package_file_name("Bakery"));
+    exported(&from, bakery.id, &package);
+
+    // The file and every entry in it, unpacked.
+    let mut contents = vec![std::fs::read(&package).unwrap()];
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(&package).unwrap()).unwrap();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).unwrap();
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut bytes).unwrap();
+        contents.push(bytes);
+    }
+    for bytes in &contents {
+        assert!(
+            !bytes
+                .windows(OWN.len())
+                .any(|window| window == OWN.as_bytes()),
+            "a key reached the package"
+        );
+    }
+
+    let to = on_disk(&dir.path().join("b"));
+    let id = imported(&to, &package);
+    assert!(
+        to.project_keys(id)
+            .iter()
+            .all(|status| status.key.state == crate::KeyState::NotSet && status.budget.is_none())
+    );
+}

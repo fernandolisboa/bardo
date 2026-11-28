@@ -900,7 +900,7 @@ impl Bardo {
     }
 
     fn ensure_angle_key(&self, provider: Provider) -> Result<(), AdAngleError> {
-        match self.provider_key(provider).state {
+        match self.work_key_state(provider) {
             KeyState::NotSet => Err(AdAngleError::MissingKey(provider)),
             _ => Ok(()),
         }

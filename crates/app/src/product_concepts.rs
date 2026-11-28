@@ -113,6 +113,10 @@ struct DrawPayload {
     template_number: u32,
     instructions: String,
     prompt: String,
+    /// The project that owns the item: its job runs for it, so its own
+    /// keys pay (#343). `None` for a global item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner_project: Option<String>,
 }
 
 /// Picks the product out of a drawing job's payload.
@@ -549,7 +553,7 @@ impl Bardo {
             concept: self.stored_concept(self.products.concept(product)),
             pending: self.stored_concept(self.products.pending_concept(product)),
             job: self.product_concept_job(product),
-            estimate: self.estimate(&draw_calls(&rendered))?,
+            estimate: self.estimate_for(found.owner_project, &draw_calls(&rendered))?,
         })
     }
 
@@ -572,14 +576,16 @@ impl Bardo {
             return Err(ConceptError::Busy);
         }
         for provider in [Provider::Claude, Provider::Gemini] {
-            if self.provider_key(provider).state == KeyState::NotSet {
+            if self.key_state_for(found.owner_project, provider) == KeyState::NotSet {
                 return Err(ConceptError::MissingKey(provider));
             }
         }
         let template =
             self.current_template_in(TemplateKind::ConceptPrompt, found.owner_project)?;
         let rendered = self.render_concept_prompt(&found, &template)?;
-        if let Err(estimate) = self.check_budget(&draw_calls(&rendered), consent)? {
+        if let Err(estimate) =
+            self.check_budget_for(found.owner_project, &draw_calls(&rendered), consent)?
+        {
             return Err(ConceptError::OverBudget(estimate));
         }
         let payload = DrawPayload {
@@ -588,6 +594,7 @@ impl Bardo {
             template_number: template.number,
             instructions: rendered.instructions,
             prompt: rendered.prompt,
+            owner_project: found.owner_project.map(|id| id.to_string()),
         };
         let job = Job::new(self.profile.id, JobKind::ProductConcept, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)

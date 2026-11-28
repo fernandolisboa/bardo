@@ -2128,7 +2128,7 @@ impl Bardo {
     }
 
     pub(crate) fn require_key(&self, provider: Provider) -> Result<(), SceneError> {
-        if self.provider_key(provider).state == KeyState::NotSet {
+        if self.work_key_state(provider) == KeyState::NotSet {
             return Err(SceneError::MissingKey(provider));
         }
         Ok(())

@@ -268,6 +268,7 @@ mod tests {
             places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
             research: Arc::clone(db) as _,
+            project_keys: Arc::clone(db) as _,
             secrets: Arc::new(MemorySecretStore::default()),
             connection_secrets: Arc::new(MemorySecretStore::default()),
         };
@@ -528,6 +529,7 @@ mod tests {
             trash: Arc::new(bardo_storage::MemoryTrash::default()),
             places: crate::test_places(),
             voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
+            project_keys: Arc::clone(&db) as _,
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
             connection_secrets: Arc::new(MemorySecretStore::default()),

@@ -59,6 +59,8 @@ Keys are kept in Windows Credential Manager, under your Windows account, never i
 
 Removing a key in Settings deletes it from Credential Manager. To stop a key for good, also revoke it in the provider's own dashboard.
 
+A project can use its own key for a provider instead of the one saved here, with its own budget: see [A project's own keys](project-keys.md).
+
 <a id="masked"></a>
 ## What Bardo shows of a key
 

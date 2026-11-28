@@ -88,10 +88,12 @@ pub enum TourId {
     Backup,
     /// Settings › Storage: the base folder new projects' folders go in.
     Storage,
+    /// Settings › This project: the open project's own keys and budgets.
+    ProjectKeys,
 }
 
 impl TourId {
-    pub const ALL: [TourId; 36] = [
+    pub const ALL: [TourId; 37] = [
         TourId::Welcome,
         TourId::Overview,
         TourId::Library,
@@ -128,6 +130,7 @@ impl TourId {
         TourId::About,
         TourId::Backup,
         TourId::Storage,
+        TourId::ProjectKeys,
     ];
 
     pub fn code(self) -> &'static str {
@@ -168,6 +171,7 @@ impl TourId {
             TourId::About => "about",
             TourId::Backup => "backup",
             TourId::Storage => "storage",
+            TourId::ProjectKeys => "project-keys",
         }
     }
 

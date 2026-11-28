@@ -17,10 +17,10 @@ use std::sync::{Arc, OnceLock};
 use std::time::SystemTime;
 
 use bardo_domain::{
-    Budget, BudgetLevel, ChannelId, Cost, CostPurpose, CostRecord, CostRecordId, CostRepository,
-    JobId, Meter, Metered, Money, MoneyError, Month, ProfileId, ProjectColor, ProjectId, Provider,
-    ProviderFailure, ProviderFailureKind, Rate, RateFieldError, RateTable, RepositoryError, Spend,
-    TextRequest, ThemeRepository, VideoProjectId,
+    Budget, BudgetLevel, Budgets, ChannelId, Cost, CostPurpose, CostRecord, CostRecordId,
+    CostRepository, JobId, KeyPayer, Meter, Metered, Money, MoneyError, Month, ProfileId,
+    ProjectColor, ProjectId, Provider, ProviderFailure, ProviderFailureKind, Rate, RateFieldError,
+    RateTable, RepositoryError, Spend, TextRequest, ThemeRepository, VideoProjectId,
 };
 
 use crate::{Bardo, ProjectFilter, Text};
@@ -108,6 +108,9 @@ pub struct ProviderEstimate {
     pub budget: Option<Money>,
     /// Where the budget stands once the job runs; `None` without one.
     pub level: Option<BudgetLevel>,
+    /// Whose key would pay, so whose budget `spent` and `budget` are: the
+    /// app's, or the project's own (#343).
+    pub paid_by: KeyPayer,
 }
 
 /// What a planned generation would spend, per provider it calls.
@@ -476,6 +479,10 @@ struct InFlight {
     channel: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     project: Option<String>,
+    /// The project whose own key the call was sent with (#343); `None`
+    /// for the app's key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key_project: Option<String>,
 }
 
 impl InFlight {
@@ -614,7 +621,7 @@ impl CostBook {
         channel: Option<ChannelId>,
         project: Option<VideoProjectId>,
     ) {
-        self.record_in(id, call, (channel, project), None);
+        self.record_in(id, call, (channel, project), None, None);
     }
 
     /// Records a call made for no channel or video but for an item a
@@ -625,16 +632,29 @@ impl CostBook {
         call: PaidCall<'_>,
         owner_project: Option<bardo_domain::ProjectId>,
     ) {
-        self.record_in(CostRecordId::new(), call, (None, None), owner_project);
+        self.record_in(CostRecordId::new(), call, (None, None), owner_project, None);
     }
 
+    /// Records `call`, noting whose key paid: `paid_by` when the caller
+    /// knows (a call an earlier run sent), else the key this thread read
+    /// for the provider, else the app's.
     fn record_in(
         &self,
         id: CostRecordId,
         call: PaidCall<'_>,
         (channel, project): (Option<ChannelId>, Option<VideoProjectId>),
         owner_project: Option<bardo_domain::ProjectId>,
+        paid_by: Option<KeyPayer>,
     ) {
+        let paid_by = paid_by
+            .or_else(|| crate::project_keys::payer_used(call.provider))
+            .unwrap_or_default();
+        // Work for no channel or video counts under the project its job
+        // runs for (a narrator's look, a product's sheet), like the job.
+        let owner_project = owner_project.or_else(|| match (channel, project) {
+            (None, None) => crate::project_keys::working_for(),
+            _ => None,
+        });
         let result = self.rates().and_then(|rates| {
             self.costs.record_cost(&CostRecord {
                 id,
@@ -658,6 +678,7 @@ impl CostBook {
                     project: owner_project,
                     ..Default::default()
                 },
+                paid_by,
             })
         });
         if let Err(error) = result {
@@ -707,6 +728,9 @@ impl CostBook {
             cache_read_tokens: usage.cache_read_tokens,
             channel: channel.map(|id| id.to_string()),
             project: project.map(|id| id.to_string()),
+            key_project: crate::project_keys::payer_used(call.provider)
+                .and_then(KeyPayer::project)
+                .map(|id| id.to_string()),
         };
         let text = serde_json::to_string(&note)
             .map_err(|error| bardo_domain::JobFailure::unexpected(error.to_string()))?;
@@ -757,7 +781,12 @@ impl CostBook {
         };
         let usage = note.usage();
         if usage != Metered::default() {
-            self.record(
+            let paid_by = match parse(&note.key_project) {
+                Some(project) => KeyPayer::Project(bardo_domain::ProjectId::from(project)),
+                None => KeyPayer::App,
+            };
+            self.record_in(
+                CostRecordId::new(),
                 PaidCall {
                     provider,
                     model: &note.model,
@@ -766,8 +795,12 @@ impl CostBook {
                     job: Some(job),
                     reported: None,
                 },
-                parse(&note.channel).map(ChannelId::from),
-                parse(&note.project).map(VideoProjectId::from),
+                (
+                    parse(&note.channel).map(ChannelId::from),
+                    parse(&note.project).map(VideoProjectId::from),
+                ),
+                None,
+                Some(paid_by),
             );
         }
         failure(match provider {
@@ -953,12 +986,25 @@ impl CostBook {
         Ok((total, partial))
     }
 
+    /// Every budget a call can count against.
+    pub(crate) fn budgets(&self) -> Result<Budgets, RepositoryError> {
+        Ok(Budgets {
+            app: self.costs.budgets(self.owner)?,
+            projects: self.costs.project_budgets(self.owner)?,
+        })
+    }
+
     /// What `calls` would spend, per provider, against this month's
-    /// budgets.
-    pub(crate) fn estimate(&self, calls: &[PlannedCall]) -> Result<SpendEstimate, RepositoryError> {
+    /// budgets: for each provider, the budget of the key `payer` says
+    /// would pay, against what that key paid this month.
+    pub(crate) fn estimate(
+        &self,
+        calls: &[PlannedCall],
+        payer: &dyn Fn(Provider) -> KeyPayer,
+    ) -> Result<SpendEstimate, RepositoryError> {
         let rates = self.rates()?;
         let spend = self.month_spend(Month::of(SystemTime::now()))?;
-        let budgets = self.costs.budgets(self.owner)?;
+        let budgets = self.budgets()?;
         let mut providers: Vec<ProviderEstimate> = Vec::new();
         let mut unpriced: Vec<(Provider, String)> = Vec::new();
         for call in calls.iter().filter(|call| call.calls > 0) {
@@ -974,18 +1020,26 @@ impl CostBook {
                         .zip(amount)
                         .map(|(a, b)| a.saturating_add(b));
                 }
-                None => providers.push(ProviderEstimate {
-                    provider: call.provider,
-                    amount,
-                    spent: spend.provider(call.provider),
-                    budget: None,
-                    level: None,
-                }),
+                None => {
+                    let paid_by = payer(call.provider);
+                    providers.push(ProviderEstimate {
+                        provider: call.provider,
+                        amount,
+                        spent: spend.paid_by(paid_by, call.provider),
+                        budget: None,
+                        level: None,
+                        paid_by,
+                    });
+                }
             }
         }
         for estimate in &mut providers {
-            if let Some(budget) = budgets.iter().find(|b| b.provider == estimate.provider) {
-                estimate.budget = Some(budget.monthly);
+            if let Some(monthly) = budgets.of(estimate.paid_by, estimate.provider) {
+                let budget = Budget {
+                    provider: estimate.provider,
+                    monthly,
+                };
+                estimate.budget = Some(monthly);
                 estimate.level =
                     Some(budget.level(estimate.spent, estimate.amount.unwrap_or_default()));
             }
@@ -1009,6 +1063,10 @@ pub enum CostError {
     /// The provider is free (a quota), so it has no budget.
     #[error("{0} is not a paid provider")]
     NotPaid(Provider),
+    /// A project's budget counts what its own key pays: without one, it
+    /// has nothing to count.
+    #[error("the project has no {0} key of its own")]
+    NoProjectKey(Provider),
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -1020,15 +1078,40 @@ impl CostError {
             CostError::InvalidBudget(error) => Text::MoneyError(*error),
             CostError::InvalidRate(error) => Text::RateFieldError(*error),
             CostError::NotPaid(_) => Text::CostsNotPaid,
+            CostError::NoProjectKey(_) => Text::ProjectBudgetNeedsKey,
             CostError::Repository(_) => Text::CostsNotSaved,
         }
     }
 }
 
-/// A paid provider's spend in a month, against its budget.
+/// A paid provider's spend in a month, against the app's budget for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderSpend {
     pub provider: Provider,
+    /// Everything spent with the provider, whichever key paid.
+    pub spent: Money,
+    /// Of `spent`, what projects' own keys paid: it counts against their
+    /// budgets, not the app's (#343).
+    pub project_keys: Money,
+    /// The app's budget, for what the app's key paid.
+    pub budget: Option<Money>,
+    /// `None` without a budget.
+    pub level: Option<BudgetLevel>,
+    /// Of the budget, in whole percent; `None` without a budget.
+    pub percent: Option<u64>,
+}
+
+/// What a project's own key paid a provider in a month, against the
+/// project's budget for it (#343).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectKeySpend {
+    pub project: ProjectId,
+    /// `None` once the project is gone.
+    pub name: Option<String>,
+    pub color: Option<ProjectColor>,
+    pub provider: Provider,
+    /// Whether the project still keeps its own key for the provider.
+    pub saved: bool,
     pub spent: Money,
     pub budget: Option<Money>,
     /// `None` without a budget.
@@ -1096,6 +1179,9 @@ pub struct CostsView {
     /// nothing until one is added.
     pub unpriced: Vec<(Provider, String)>,
     pub rates: Vec<RateRow>,
+    /// The projects' own keys and their budgets: the filtered project's
+    /// under a filter, every project's otherwise (#343).
+    pub project_keys: Vec<ProjectKeySpend>,
 }
 
 /// A month at a glance: the spend, how the budgets stand together, and
@@ -1137,7 +1223,10 @@ impl CostsView {
             provider: Provider::Claude,
             monthly: budgeted().map(|(_, budget)| budget).sum(),
         };
-        let spent: Money = budgeted().map(|(spend, _)| spend.spent).sum();
+        // The app's budgets count what the app's key paid.
+        let spent: Money = budgeted()
+            .map(|(spend, _)| spend.spent.saturating_sub(spend.project_keys))
+            .sum();
         let mut alerts: Vec<(Provider, BudgetLevel)> = self
             .providers
             .iter()
@@ -1166,21 +1255,45 @@ impl Bardo {
         Month::of(SystemTime::now())
     }
 
+    /// What `calls` would spend for the open project, where work screens
+    /// queue: against its own keys' budgets where it has its own keys,
+    /// else the app's.
     pub(crate) fn estimate(&self, calls: &[PlannedCall]) -> Result<SpendEstimate, RepositoryError> {
-        self.cost_book.estimate(calls)
+        self.estimate_for(self.open_project_id()?, calls)
     }
 
-    /// Estimates `calls` and, past a budget, returns the estimate unless
-    /// the user confirmed.
+    /// What `calls` would spend for work of `project` (`None` for work of
+    /// no project, paid with the app's keys).
+    pub(crate) fn estimate_for(
+        &self,
+        project: Option<ProjectId>,
+        calls: &[PlannedCall],
+    ) -> Result<SpendEstimate, RepositoryError> {
+        self.cost_book
+            .estimate(calls, &|provider| self.payer_for(project, provider))
+    }
+
+    /// Estimates `calls` for the open project and, past a budget, returns
+    /// the estimate unless the user confirmed.
     pub(crate) fn check_budget(
         &self,
+        calls: &[PlannedCall],
+        consent: BudgetConsent,
+    ) -> Result<Result<(), SpendEstimate>, RepositoryError> {
+        self.check_budget_for(self.open_project_id()?, calls, consent)
+    }
+
+    /// `check_budget` for work of `project`.
+    pub(crate) fn check_budget_for(
+        &self,
+        project: Option<ProjectId>,
         calls: &[PlannedCall],
         consent: BudgetConsent,
     ) -> Result<Result<(), SpendEstimate>, RepositoryError> {
         if consent == BudgetConsent::Confirmed {
             return Ok(Ok(()));
         }
-        let estimate = self.estimate(calls)?;
+        let estimate = self.estimate_for(project, calls)?;
         Ok(if estimate.asks() {
             Err(estimate)
         } else {
@@ -1268,20 +1381,26 @@ impl Bardo {
                 kept_channels.insert(channel.to_string(), name.clone());
             }
         }
-        let budgets = book.costs.budgets(self.profile.id)?;
+        let budgets = book.budgets()?;
         let providers = Provider::paid()
             .map(|provider| {
                 let spent = spend.provider(provider);
-                let budget = budgets.iter().find(|b| b.provider == provider);
+                // The app's budget counts what the app's key paid.
+                let by_app = spend.paid_by(KeyPayer::App, provider);
+                let budget = budgets
+                    .of(KeyPayer::App, provider)
+                    .map(|monthly| Budget { provider, monthly });
                 ProviderSpend {
                     provider,
                     spent,
+                    project_keys: spent.saturating_sub(by_app),
                     budget: budget.map(|b| b.monthly),
-                    level: budget.map(|b| b.level(spent, Money::ZERO)),
-                    percent: budget.map(|b| b.percent_used(spent)),
+                    level: budget.map(|b| b.level(by_app, Money::ZERO)),
+                    percent: budget.map(|b| b.percent_used(by_app)),
                 }
             })
             .collect();
+        let project_keys = self.project_key_spend(&spend, &budgets, &known, filter);
 
         let mut channels = Vec::new();
         for (channel, amount) in &kept.channels {
@@ -1367,7 +1486,87 @@ impl Bardo {
             videos,
             unpriced: spend.unpriced,
             rates,
+            project_keys,
         })
+    }
+
+    /// The projects' own keys that have a budget, are saved, or paid
+    /// something this month, by project name then provider; only the
+    /// filtered project's under a filter.
+    fn project_key_spend(
+        &self,
+        spend: &Spend,
+        budgets: &Budgets,
+        known: &[bardo_domain::Project],
+        filter: ProjectFilter,
+    ) -> Vec<ProjectKeySpend> {
+        let mut keys: Vec<(ProjectId, Provider)> = self
+            .provider_keys
+            .project_states()
+            .map(|(project, provider, _)| (project, provider))
+            .chain(
+                spend
+                    .project_keys
+                    .iter()
+                    .map(|(project, provider, _)| (*project, *provider)),
+            )
+            .chain(
+                budgets
+                    .projects
+                    .iter()
+                    .map(|set| (set.project, set.budget.provider)),
+            )
+            .filter(|(project, provider)| provider.is_paid() && filter.keeps(Some(*project)))
+            .collect();
+        keys.sort();
+        keys.dedup();
+        // A deleted project keeps the name its costs keep (#336).
+        let deletions = self.deleted_work();
+        let kept_name = |project: ProjectId| {
+            deletions
+                .iter()
+                .find(|deleted| deleted.id == project.as_uuid())
+                .and_then(|deleted| crate::DeletedName::from(deleted).name)
+                .or_else(|| {
+                    spend
+                        .owners
+                        .iter()
+                        .find(|(id, _, _)| *id == Some(project))
+                        .and_then(|(_, name, _)| name.clone())
+                })
+        };
+        let mut rows: Vec<ProjectKeySpend> = keys
+            .into_iter()
+            .map(|(project, provider)| {
+                let now = known.iter().find(|known| known.id == project);
+                let spent = spend.paid_by(KeyPayer::Project(project), provider);
+                let budget = budgets
+                    .of(KeyPayer::Project(project), provider)
+                    .map(|monthly| Budget { provider, monthly });
+                ProjectKeySpend {
+                    project,
+                    name: now
+                        .map(|project| project.name().to_owned())
+                        .or_else(|| kept_name(project)),
+                    color: now.map(|project| project.details.color()),
+                    provider,
+                    saved: self.project_has_key(project, provider),
+                    spent,
+                    budget: budget.map(|b| b.monthly),
+                    level: budget.map(|b| b.level(spent, Money::ZERO)),
+                    percent: budget.map(|b| b.percent_used(spent)),
+                }
+            })
+            .collect();
+        rows.sort_by(|a, b| {
+            a.name
+                .as_deref()
+                .map(str::to_lowercase)
+                .cmp(&b.name.as_deref().map(str::to_lowercase))
+                .then(a.project.cmp(&b.project))
+                .then(a.provider.cmp(&b.provider))
+        });
+        rows
     }
 
     /// Sets `provider`'s monthly budget from the typed amount.
@@ -1521,6 +1720,7 @@ pub(crate) mod tests {
         ProviderSpend {
             provider,
             spent,
+            project_keys: Money::ZERO,
             budget: budget.map(|b| b.monthly),
             level: budget.map(|b| b.level(spent, Money::ZERO)),
             percent: budget.map(|b| b.percent_used(spent)),
@@ -1539,6 +1739,7 @@ pub(crate) mod tests {
             videos: Vec::new(),
             unpriced: Vec::new(),
             rates: Vec::new(),
+            project_keys: Vec::new(),
         }
     }
 
@@ -1589,6 +1790,7 @@ pub(crate) mod tests {
                     spent: Money::ZERO,
                     budget: Some(Money::from_cents(500)),
                     level: Some(BudgetLevel::Warning),
+                    paid_by: KeyPayer::App,
                 },
                 ProviderEstimate {
                     provider: Provider::TypeSafe,
@@ -1596,6 +1798,7 @@ pub(crate) mod tests {
                     spent: Money::ZERO,
                     budget: None,
                     level: None,
+                    paid_by: KeyPayer::App,
                 },
             ],
             cap: None,

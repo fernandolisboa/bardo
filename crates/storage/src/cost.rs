@@ -1,8 +1,9 @@
 use std::time::SystemTime;
 
 use bardo_domain::{
-    Budget, ChannelId, Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, JobId, Meter,
-    Metered, Money, ProfileId, Provider, Rate, RepositoryError, VideoProjectId,
+    Budget, ChannelId, Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, JobId,
+    KeyPayer, Meter, Metered, Money, ProfileId, ProjectBudget, ProjectId, Provider, Rate,
+    RepositoryError, VideoProjectId,
 };
 use rusqlite::{Row, params};
 use uuid::Uuid;
@@ -13,7 +14,8 @@ use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 const SELECT_RECORD: &str = "SELECT id, profile_id, provider, model, purpose, input_tokens, \
      output_tokens, image_tokens, characters, basis, amount_micros, channel_id, project_id, \
      job_id, at, video_seconds, audio_seconds, posts, searches, cache_write_tokens, \
-     cache_read_tokens, owner_project_id, project_name, channel_name, video_title FROM cost_record";
+     cache_read_tokens, owner_project_id, project_name, channel_name, video_title, \
+     key_project_id FROM cost_record";
 
 #[derive(Debug, thiserror::Error)]
 #[error("stored cost is invalid: {0}")]
@@ -34,6 +36,7 @@ struct RecordRow {
     job_id: Option<String>,
     at: i64,
     origin: OriginRow,
+    key_project_id: Option<String>,
 }
 
 impl RecordRow {
@@ -63,6 +66,7 @@ impl RecordRow {
             job_id: row.get(13)?,
             at: row.get(14)?,
             origin: OriginRow::read(row, 21)?,
+            key_project_id: row.get(25)?,
         })
     }
 
@@ -121,6 +125,10 @@ impl RecordRow {
                 .transpose()?,
             at: from_unix_millis(self.at),
             origin: self.origin.into_origin()?,
+            paid_by: match self.key_project_id {
+                Some(text) => KeyPayer::Project(ProjectId::from(id(&text)?)),
+                None => KeyPayer::App,
+            },
         })
     }
 }
@@ -166,11 +174,12 @@ impl CostRepository for Database {
                      input_tokens, output_tokens, image_tokens, characters, basis, \
                      amount_micros, channel_id, project_id, job_id, at, video_seconds, \
                      audio_seconds, posts, searches, cache_write_tokens, cache_read_tokens, \
-                     owner_project_id, project_name, channel_name, video_title) \
+                     owner_project_id, project_name, channel_name, video_title, \
+                     key_project_id) \
                      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
                      ?16, ?17, ?18, ?19, ?20, ?21, COALESCE(origin.project_id, whole.id), \
                      COALESCE(origin.project_name, whole.name), \
-                     origin.channel_name, origin.video_title \
+                     origin.channel_name, origin.video_title, ?23 \
                      FROM (SELECT 1) LEFT JOIN {} origin ON 1 \
                      LEFT JOIN project whole ON whole.id = ?22 \
                      WHERE 1 ON CONFLICT (id) DO NOTHING",
@@ -201,6 +210,7 @@ impl CostRepository for Database {
                     // Paid work with no channel (a world picture drawn from
                     // the World screen) names its project itself.
                     record.origin.project.map(|id| id.to_string()),
+                    record.paid_by.project().map(|id| id.to_string()),
                 ],
             )
             .map_err(boxed)?;
@@ -387,6 +397,69 @@ impl CostRepository for Database {
             .map_err(boxed)?;
         Ok(())
     }
+
+    fn project_budgets(&self, owner: ProfileId) -> Result<Vec<ProjectBudget>, RepositoryError> {
+        let conn = self.conn();
+        let rows = conn
+            .prepare(
+                "SELECT b.project_id, b.provider, b.monthly_micros FROM project_budget b \
+                 JOIN project p ON p.id = b.project_id WHERE p.profile_id = ?1 \
+                 ORDER BY b.project_id, b.provider",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_map([owner.to_string()], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .map_err(boxed)?;
+        rows.into_iter()
+            .map(|(project, provider, monthly)| {
+                Ok(ProjectBudget {
+                    project: ProjectId::from(Uuid::parse_str(&project).map_err(boxed)?),
+                    budget: Budget {
+                        provider: provider.parse().map_err(boxed)?,
+                        monthly: Money::from_micros(u64::try_from(monthly).map_err(boxed)?),
+                    },
+                })
+            })
+            .collect()
+    }
+
+    fn save_project_budget(&self, budget: &ProjectBudget) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "INSERT INTO project_budget (project_id, provider, monthly_micros) \
+                 VALUES (?1, ?2, ?3) ON CONFLICT (project_id, provider) \
+                 DO UPDATE SET monthly_micros = excluded.monthly_micros",
+                params![
+                    budget.project.to_string(),
+                    budget.budget.provider.code(),
+                    sql_count(budget.budget.monthly.micros()),
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn remove_project_budget(
+        &self,
+        project: ProjectId,
+        provider: Provider,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "DELETE FROM project_budget WHERE project_id = ?1 AND provider = ?2",
+                params![project.to_string(), provider.code()],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -426,7 +499,60 @@ mod tests {
             job: Some(JobId::new()),
             at,
             origin: Default::default(),
+            paid_by: KeyPayer::App,
         }
+    }
+
+    #[test]
+    fn a_record_keeps_which_projects_key_paid_and_budgets_go_with_the_project() {
+        let (db, owner) = database();
+        let project = crate::project::test_project(&db, owner);
+        let paid = CostRecord {
+            paid_by: KeyPayer::Project(project),
+            ..record(
+                owner,
+                CostPurpose::Script,
+                Cost::Reported(Money::from_cents(42)),
+                at(1_790_916_201),
+            )
+        };
+        db.record_cost(&paid).unwrap();
+        let month = (at(1_790_000_000), at(1_800_000_000));
+        assert_eq!(
+            db.costs_between(owner, month.0, month.1).unwrap(),
+            std::slice::from_ref(&paid)
+        );
+
+        let budget = ProjectBudget {
+            project,
+            budget: Budget {
+                provider: Provider::Claude,
+                monthly: Money::from_cents(1_000),
+            },
+        };
+        db.save_project_budget(&budget).unwrap();
+        db.save_project_budget(&ProjectBudget {
+            budget: Budget {
+                monthly: Money::from_cents(2_000),
+                ..budget.budget
+            },
+            ..budget
+        })
+        .unwrap();
+        assert_eq!(
+            db.project_budgets(owner).unwrap()[0].budget.monthly,
+            Money::from_cents(2_000)
+        );
+        // The app's budgets are apart.
+        assert!(db.budgets(owner).unwrap().is_empty());
+        db.remove_project_budget(project, Provider::Claude).unwrap();
+        assert!(db.project_budgets(owner).unwrap().is_empty());
+
+        db.save_project_budget(&budget).unwrap();
+        bardo_domain::RemovalRepository::delete_project(&db, project, &[]).unwrap();
+        assert!(db.project_budgets(owner).unwrap().is_empty());
+        // Its costs stay, still saying its key paid.
+        assert_eq!(db.costs_between(owner, month.0, month.1).unwrap(), [paid]);
     }
 
     #[test]

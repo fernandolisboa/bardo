@@ -658,7 +658,7 @@ impl Bardo {
         if self.thumbnail_busy(project.id) {
             return Err(ThumbnailError::Busy);
         }
-        if self.provider_key(Provider::Claude).state == KeyState::NotSet {
+        if self.work_key_state(Provider::Claude) == KeyState::NotSet {
             return Err(ThumbnailError::MissingKey(Provider::Claude));
         }
         let template = self.channel_template(TemplateKind::Thumbnail, project.channel)?;
@@ -696,7 +696,7 @@ impl Bardo {
         if thumbnail.prompt.trim().is_empty() {
             return Err(ThumbnailError::NoPrompt);
         }
-        if self.provider_key(Provider::Gemini).state == KeyState::NotSet {
+        if self.work_key_state(Provider::Gemini) == KeyState::NotSet {
             return Err(ThumbnailError::MissingKey(Provider::Gemini));
         }
         if let Err(estimate) = self.check_video_budget(project.id, &[draw_call()], consent)? {
