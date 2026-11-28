@@ -355,6 +355,11 @@ fn a_submission_starts_one_job_with_credits_only() {
     assert_eq!(params["aspect_ratio"], "9:16");
     assert_eq!(params["medias"][0]["role"], "start_image");
     assert_eq!(params["medias"][0]["value"], MEDIA);
+    assert_eq!(
+        params["medias"].as_array().unwrap().len(),
+        1,
+        "no end image"
+    );
     assert_eq!(params["use_unlim"], false, "credits only, never asked");
 }
 
@@ -662,9 +667,49 @@ fn a_last_frame_not_uploaded_or_to_a_model_that_takes_none_is_never_sent() {
         .unwrap_err();
     assert_eq!(refused.kind, ProviderFailureKind::NotAllowed);
     assert!(refused.detail.contains("cannot end a clip"), "{refused:?}");
-    assert!(adapter.check_submit(&key(), &bridge("kling2_6")).is_err());
+    let checked = adapter
+        .check_submit(&key(), &bridge("kling2_6"))
+        .unwrap_err();
+    assert_eq!(checked.kind, ProviderFailureKind::NotAllowed);
     let mut inline = bridge(DEFAULT_MODEL);
     inline.last.as_mut().unwrap().image = StagedImage("inline".into());
     assert!(adapter.submit(&key(), &inline, "1").is_err());
+    let mut inline_to_kling_2_6 = bridge("kling2_6");
+    inline_to_kling_2_6.last.as_mut().unwrap().image = StagedImage("inline".into());
+    let refused = adapter
+        .submit(&key(), &inline_to_kling_2_6, "1")
+        .unwrap_err();
+    assert_eq!(
+        refused.kind,
+        ProviderFailureKind::NotAllowed,
+        "the model's refusal comes first"
+    );
     assert!(adapter.transport().sent().is_empty());
+}
+
+#[test]
+fn a_generation_that_only_ends_on_the_frame_is_not_taken_for_a_lost_one() {
+    let page = serde_json::json!({
+        "items": [
+            {
+                "id": "11111111-2222-4333-8444-555555555555",
+                "params": { "medias": [
+                    { "role": "start_image", "value": LAST_MEDIA },
+                    { "role": "end_image", "value": MEDIA },
+                ] },
+            },
+            {
+                "id": JOB,
+                "params": { "medias": [
+                    { "role": "start_image", "value": MEDIA },
+                    { "role": "end_image", "value": LAST_MEDIA },
+                ] },
+            },
+        ],
+    });
+    assert_eq!(
+        bardo_ai::higgsfield_plan::find_generation(&page, MEDIA),
+        Some(JOB.to_owned()),
+        "the clip that starts on the frame, not the one that ends on it"
+    );
 }

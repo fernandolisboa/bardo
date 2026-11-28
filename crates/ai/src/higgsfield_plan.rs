@@ -235,6 +235,13 @@ fn submit_params(request: &ClipRequest) -> Result<Value, ProviderFailure> {
     if !is_uuid(&request.image.0) {
         return Err(unexpected("the scene's image was not uploaded"));
     }
+    let params = clip_params(request).ok_or_else(|| match spec(&request.model) {
+        Some(_) => bardo_domain::no_last_frame(&request.model),
+        None => ProviderFailure::new(
+            ProviderFailureKind::NotAllowed,
+            format!("{} is not a model of the Higgsfield plan", request.model),
+        ),
+    })?;
     if request
         .last
         .as_ref()
@@ -242,13 +249,7 @@ fn submit_params(request: &ClipRequest) -> Result<Value, ProviderFailure> {
     {
         return Err(unexpected("the last frame was not uploaded"));
     }
-    clip_params(request).ok_or_else(|| match spec(&request.model) {
-        Some(_) => bardo_domain::no_last_frame(&request.model),
-        None => ProviderFailure::new(
-            ProviderFailureKind::NotAllowed,
-            format!("{} is not a model of the Higgsfield plan", request.model),
-        ),
-    })
+    Ok(params)
 }
 
 /// What a tool's own failure message is about.
@@ -325,12 +326,15 @@ pub fn parse_submitted_job(value: &Value) -> Option<String> {
 /// The generation in one page of `show_generations` whose parameters
 /// name `media` (the first frame uploaded for this submission alone):
 /// the job a lost answer started. Nothing else identifies it; a model and
-/// prompt match could be an older clip of the same scene.
+/// prompt match could be an older clip of the same scene. A generation
+/// that only ends on `media` (its `end_image`) did not start from it, so
+/// it is not the one.
 pub fn find_generation(value: &Value, media: &str) -> Option<String> {
     fn names(value: &Value, media: &str) -> bool {
         match value {
             Value::String(text) => text == media,
             Value::Array(items) => items.iter().any(|item| names(item, media)),
+            Value::Object(fields) if fields.get("role") == Some(&json!("end_image")) => false,
             Value::Object(fields) => fields.values().any(|field| names(field, media)),
             _ => false,
         }
@@ -755,7 +759,8 @@ impl<T: Transport> ClipGenerator for HiggsfieldPlan<T> {
 
     /// The generation made from this submission's first frame, in the
     /// newest pages of the library. Each submission uploads its frame
-    /// again, so the frame's id names one submission.
+    /// again, so the frame's id names one submission; a generation that
+    /// only ends on it is another one.
     fn find_submitted(
         &self,
         key: &ApiKey,

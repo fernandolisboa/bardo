@@ -499,3 +499,20 @@ fn a_last_frame_to_a_model_that_takes_none_is_not_sent() {
     }
     assert!(adapter.transport().sent().is_empty());
 }
+
+#[test]
+fn kling_2_6_at_1080p_ends_on_a_frame_with_its_sound_off() {
+    let adapter = clips(&["submit-submitted", "submit-submitted"]);
+    for model in ["kling-2.6/1080p", "kling-2.5-turbo/1080p"] {
+        adapter.submit(&key(), &bridge(model), SUBMISSION).unwrap();
+    }
+    let sent = adapter.transport().sent();
+    for submit in &sent {
+        assert_eq!(submit.body["contents"][2]["type"], "last_frame");
+        assert_eq!(submit.body["settings"]["resolution"], "1080p");
+    }
+    assert_eq!(
+        sent[0].body["settings"]["audio"], "off",
+        "Kling 2.6 makes no sound with a last frame"
+    );
+}

@@ -381,17 +381,18 @@ fn a_model_that_takes_a_frame_shape_gets_the_first_frames() {
         ..request(model)
     };
     assert_eq!(
-        bardo_ai::higgsfield::clip_body(&vertical)["aspect_ratio"],
+        bardo_ai::higgsfield::clip_body(&vertical).unwrap()["aspect_ratio"],
         "9:16"
     );
     assert_eq!(
-        bardo_ai::higgsfield::clip_body(&request(model))["aspect_ratio"],
+        bardo_ai::higgsfield::clip_body(&request(model)).unwrap()["aspect_ratio"],
         "16:9"
     );
     let other = bardo_ai::higgsfield::clip_body(&ClipRequest {
         aspect: AspectRatio::Vertical,
         ..request(bardo_ai::higgsfield::DEFAULT_MODEL)
-    });
+    })
+    .unwrap();
     assert!(
         other.get("aspect_ratio").is_none(),
         "models without one get none"
@@ -462,9 +463,19 @@ fn the_last_frame_goes_in_the_field_each_model_names_and_is_quoted_too() {
 
 #[test]
 fn a_clip_without_a_last_frame_sends_no_last_frame_field() {
-    let body = bardo_ai::higgsfield::clip_body(&request(DEFAULT_MODEL));
-    assert!(body.get("last_image_url").is_none());
-    assert!(body.get("end_image_url").is_none());
+    let body = bardo_ai::higgsfield::clip_body(&request(DEFAULT_MODEL)).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "prompt": "Slow push in on the launch pad, steam rising.",
+            "image_url": PUBLIC_URL,
+            "duration": 8,
+            "sound": "off",
+        }),
+        "a scene's clip is sent as before"
+    );
+    let refused = bardo_ai::higgsfield::clip_body(&bridge("wan/v2.6/image-to-video"));
+    assert_eq!(refused.unwrap_err().kind, ProviderFailureKind::NotAllowed);
 }
 
 #[test]

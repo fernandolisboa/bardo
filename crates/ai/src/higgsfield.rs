@@ -299,8 +299,10 @@ pub fn upload_url_request(key: &ApiKey, mime: &str) -> HttpRequest {
 
 /// The JSON body a model gets: the request's fields and the model's fixed
 /// ones. The same request always makes the same body, as idempotent
-/// resubmission requires.
-pub fn clip_body(request: &ClipRequest) -> Value {
+/// resubmission requires. A last frame goes in the field its model names;
+/// to a model that takes none, there is no body (`no_last_frame`), so it is
+/// never priced or sent without it.
+pub fn clip_body(request: &ClipRequest) -> Result<Value, ProviderFailure> {
     let spec = CATALOG.iter().find(|spec| spec.model == request.model);
     let fixed = spec.map_or_else(|| json!({}), |spec| (spec.fixed)());
     let mut body: Map<String, Value> = fixed.as_object().cloned().unwrap_or_default();
@@ -308,44 +310,47 @@ pub fn clip_body(request: &ClipRequest) -> Value {
     body.insert("prompt".into(), json!(prompt));
     body.insert("image_url".into(), json!(request.image.0));
     body.insert("duration".into(), json!(request.seconds));
-    if let (Some(last), Some(field)) = (&request.last, spec.and_then(|spec| spec.last_frame)) {
+    if let Some(last) = &request.last {
+        let field = spec
+            .and_then(|spec| spec.last_frame)
+            .ok_or_else(|| bardo_domain::no_last_frame(&request.model))?;
         body.insert(field.into(), json!(last.image.0));
     }
     // Models that take a frame shape get the first frame's.
     if body.contains_key("aspect_ratio") {
         body.insert("aspect_ratio".into(), json!(request.aspect.code()));
     }
-    Value::Object(body)
-}
-
-/// Whether `model` takes the frame a clip ends on.
-fn ends_on_frame(model: &str) -> bool {
-    CATALOG
-        .iter()
-        .any(|spec| spec.model == model && spec.last_frame.is_some())
+    Ok(Value::Object(body))
 }
 
 /// The request that starts the clip. `submission` is the idempotency key.
-pub fn submit_request(key: &ApiKey, request: &ClipRequest, submission: &str) -> HttpRequest {
-    auth(
+pub fn submit_request(
+    key: &ApiKey,
+    request: &ClipRequest,
+    submission: &str,
+) -> Result<HttpRequest, ProviderFailure> {
+    Ok(auth(
         HttpRequest::post_json(
             format!("{API_URL}/{}", request.model),
-            clip_body(request).to_string(),
+            clip_body(request)?.to_string(),
         ),
         key,
     )
-    .header("idempotency-key", submission.to_owned())
+    .header("idempotency-key", submission.to_owned()))
 }
 
 /// The request that asks what the clip would cost.
-pub fn estimate_request(key: &ApiKey, request: &ClipRequest) -> HttpRequest {
-    auth(
+pub fn estimate_request(
+    key: &ApiKey,
+    request: &ClipRequest,
+) -> Result<HttpRequest, ProviderFailure> {
+    Ok(auth(
         HttpRequest::post_json(
             format!("{API_URL}/estimate/{}", request.model),
-            clip_body(request).to_string(),
+            clip_body(request)?.to_string(),
         ),
         key,
-    )
+    ))
 }
 
 pub fn status_request(key: &ApiKey, handle: &ClipHandle) -> HttpRequest {
@@ -560,7 +565,7 @@ impl<T: Transport> HiggsfieldClips<T> {
     }
 
     fn quote(&self, key: &ApiKey, request: &ClipRequest) -> Option<Money> {
-        self.estimate(&estimate_request(key, request))
+        self.estimate(&estimate_request(key, request).ok()?)
     }
 
     fn estimate(&self, request: &HttpRequest) -> Option<Money> {
@@ -663,11 +668,11 @@ impl<T: Transport> ClipGenerator for HiggsfieldClips<T> {
         request: &ClipRequest,
         submission: &str,
     ) -> Result<ClipSubmission, ProviderFailure> {
-        if request.last.is_some() && !ends_on_frame(&request.model) {
-            return Err(bardo_domain::no_last_frame(&request.model));
-        }
+        // Refused before the estimate: a last frame to a model that takes
+        // none is never priced or sent.
+        let http = submit_request(key, request, submission)?;
         let quote = self.quote(key, request);
-        let response = self.send(&submit_request(key, request, submission))?;
+        let response = self.send(&http)?;
         if !(200..=299).contains(&response.status) {
             return Err(higgsfield_failure(&response));
         }

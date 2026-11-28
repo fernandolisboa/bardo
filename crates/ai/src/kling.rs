@@ -8,12 +8,12 @@
 //!
 //! There is no staging step: the scene's image goes inline (raw base64)
 //! with the submission, and so does the frame a clip ends on, for the
-//! models that take one (Kling 3.0, and 2.6 and 2.5 Turbo at 1080p). Every submission carries a custom task id
-//! (`external_task_id`) made from the job's submission id and the request
-//! itself; Kling keeps those unique per account, so when the answer to a
-//! submission is lost and the job sends it again, Kling refuses the second
-//! one and the adapter finds the first by its custom id instead of paying
-//! for another clip.
+//! models that take one (Kling 3.0, and 2.6 and 2.5 Turbo at 1080p).
+//! Every submission carries a custom task id (`external_task_id`) made
+//! from the job's submission id and the request itself; Kling keeps those
+//! unique per account, so when the answer to a submission is lost and the
+//! job sends it again, Kling refuses the second one and the adapter finds
+//! the first by its custom id instead of paying for another clip.
 //!
 //! Kling quotes no price before starting; the rate table prices each clip.
 //! The key goes as `Authorization: Bearer {key}`.
@@ -186,6 +186,7 @@ fn task_body(request: &ClipRequest) -> Option<Value> {
 /// The custom task id of a submission: the same submission of the same
 /// request always gets the same id, and anything else (another job, another
 /// install on the same Kling account, an edited prompt) gets another.
+/// `None` where `clip_body` is.
 pub fn external_task_id(request: &ClipRequest, submission: &str) -> Option<String> {
     Some(task_id_for(&task_body(request)?, submission))
 }
@@ -204,7 +205,7 @@ pub(crate) fn task_id_for(body: &Value, submission: &str) -> String {
 }
 
 /// The JSON body a submission sends; `None` for a model Kling does not
-/// offer here.
+/// offer here, or a last frame to a model that takes none.
 pub fn clip_body(request: &ClipRequest, submission: &str) -> Option<Value> {
     let mut body = task_body(request)?;
     body["options"] = json!({

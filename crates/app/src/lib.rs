@@ -2585,6 +2585,15 @@ pub(crate) mod testing {
         ) -> Result<ClipSubmission, ProviderFailure> {
             self.keys.lock().unwrap().push(key.expose().to_owned());
             self.refused()?;
+            // As every adapter does: a last frame goes only to a model
+            // that ends on one.
+            let ends_on_frame = self
+                .models()
+                .iter()
+                .any(|model| model.id.model() == request.model && model.ends_on_frame);
+            if request.last.is_some() && !ends_on_frame {
+                return Err(bardo_domain::no_last_frame(&request.model));
+            }
             if let Some(failure) = self.submit_failure.lock().unwrap().clone() {
                 return Err(failure);
             }
