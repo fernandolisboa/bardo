@@ -79,6 +79,10 @@ pub enum JobKind {
     /// each to the video provider, then polls them all, saving each clip as
     /// it is ready. A scene that fails does not stop the others.
     SceneClips,
+    /// Makes one bridge over a cut in the editor (#363): reads the frames
+    /// on both sides of it, submits them to the video provider and polls
+    /// until the clip is ready, which then waits for the user's review.
+    BridgeClip,
     /// Builds the editor's preview proxies of a project's media (small
     /// copies of clips and images, waveform peaks of the narration), one
     /// file after another. A file that fails does not stop the others.
@@ -232,7 +236,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 48] = [
+    pub const ALL: [JobKind; 49] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -243,6 +247,7 @@ impl JobKind {
         JobKind::ScenePlan,
         JobKind::SceneImages,
         JobKind::SceneClips,
+        JobKind::BridgeClip,
         JobKind::Proxies,
         JobKind::MusicPrompt,
         JobKind::Music,
@@ -296,6 +301,7 @@ impl JobKind {
             JobKind::ScenePlan => "scene_plan",
             JobKind::SceneImages => "scene_images",
             JobKind::SceneClips => "scene_clips",
+            JobKind::BridgeClip => "bridge_clip",
             JobKind::Proxies => "proxies",
             JobKind::MusicPrompt => "music_prompt",
             JobKind::Music => "music",

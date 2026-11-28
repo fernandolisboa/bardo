@@ -1639,6 +1639,39 @@ fn a_frame_of_a_video_is_taken_as_a_jpeg() {
 }
 
 #[test]
+fn a_bridges_ends_are_taken_as_jpegs_of_one_shape() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("bridge-frame");
+    let source = fixture("clip-a.mp4");
+    let info = ffmpeg.probe(&source).unwrap();
+    let video = info.video.unwrap();
+    let first = dir.join("first.jpg");
+    ffmpeg
+        .bridge_frame(&source, Some(info.duration / 2), None, &first, 5_000_000)
+        .unwrap();
+    let first = std::fs::read(&first).unwrap();
+    let (width, height) = bardo_domain::image_dimensions(&first).unwrap();
+    assert_eq!((width, height), (video.width / 2 * 2, video.height / 2 * 2));
+    // A still of another shape, cut to the first one's from the middle.
+    let still = dir.join("still.png");
+    let made = std::process::Command::new(ffmpeg.ffmpeg_path())
+        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+        .arg("color=c=orange:s=400x700")
+        .args(["-frames:v", "1"])
+        .arg(&still)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let last = dir.join("last.jpg");
+    ffmpeg
+        .bridge_frame(&still, None, Some((width, height)), &last, 5_000_000)
+        .unwrap();
+    let last = std::fs::read(&last).unwrap();
+    assert!(last.starts_with(&[0xFF, 0xD8, 0xFF]), "a JPEG");
+    assert_eq!(bardo_domain::image_dimensions(&last), Some((width, height)));
+}
+
+#[test]
 fn a_recordings_sound_is_extracted_as_mono_wav_at_cd_rate() {
     let ffmpeg = ffmpeg();
     let dir = scratch("extract-sound");

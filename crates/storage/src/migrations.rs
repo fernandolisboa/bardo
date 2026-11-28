@@ -93,6 +93,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0089_video_summary.sql"),
     include_str!("../migrations/0090_recurring_objects.sql"),
     include_str!("../migrations/0091_scene_chat.sql"),
+    include_str!("../migrations/0092_bridges.sql"),
 ];
 
 /// The schema version this build migrates every database to (SQLite's

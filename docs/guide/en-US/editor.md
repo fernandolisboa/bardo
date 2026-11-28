@@ -8,7 +8,7 @@ tour: editor
 
 # The editor
 
-The editor is where the scenes and the narration become a cut: you trim it, mix its sound, caption it and frame it, then send it to the render. It opens over the whole window from the [Edit](bardo:go/videos/edit) stage of a project, once the scenes are planned and narrated, and **Videos** at its top left takes you back. The cut saves itself after every edit. [Show me the editor](bardo:tour/editor), or [part 2 of the tour](bardo:tour/editor-more) for the mix, captions, framing, motion on stills, performed clips and cut suggestions.
+The editor is where the scenes and the narration become a cut: you trim it, mix its sound, caption it and frame it, then send it to the render. It opens over the whole window from the [Edit](bardo:go/videos/edit) stage of a project, once the scenes are planned and narrated, and **Videos** at its top left takes you back. The cut saves itself after every edit. [Show me the editor](bardo:tour/editor), or [part 2 of the tour](bardo:tour/editor-more) for the mix, captions, framing, motion on stills, performed clips, AI bridges and cut suggestions.
 
 F1 opens this guide over the editor, and **Back to the editor** returns to it as you left it. Esc closes a tour; the **Editor tour** button in the top bar (Shift+F1) takes it back to the step it closed on.
 
@@ -63,7 +63,18 @@ A cut goes straight from one clip to the next. A transition blends them instead,
 
 A transition is centered on its cut: the clip before plays on for half of it and the clip after starts half of it early. The cut does not move, so the video stays as long as it was and in sync with the narration. Where a clip's file has no picture past its edge, its edge frame holds for that half. A transition never runs longer than the clips beside it: next to a short clip it plays shorter, and the inspector says for how long. The first clip opens the video and has no transition in. Splitting a clip leaves a plain cut between the halves, and a transition moves with its clip when you reorder.
 
-The preview and the render draw transitions the same way.
+The preview and the render draw transitions the same way. When two clips jump between places and a transition still reads as a jump, ask for an [AI bridge](#bridge) over the cut.
+
+<a id="bridge"></a>
+## AI bridge over a cut
+
+When two clips show the same subject in two very different places, even a transition reads as a jump. An **AI bridge** asks a video model for a short clip that starts on the last frame before the cut and ends on the first frame after it, so the picture moves from one to the other.
+
+Select the clip after the cut and click **Smooth with AI** in the inspector's **AI bridge**. Pick a **Model** (only models that can end a clip on a given frame show: Kling, and Higgsfield with its API key or its plan), a **Length** in whole seconds and, if you like, a **Note for the model**, such as "a slow pan across the room". The price shows before you ask, from the [rate table](costs.md); over a budget or the video's cap, Bardo asks first. **Make bridge** sends it once, as a job you follow in Jobs, and it is billed as a *bridge clip* only when the provider takes it.
+
+The bridge goes over the cut, half its length on each side, replacing that much of the clip before and of the clip after. It never adds time, so the narration, captions and music stay in sync. A length that would leave either clip without a frame of its own is not offered; when none fits, the panel says the clips around the cut are too short.
+
+While it is made, and once it is, the bridge waits on V1 as a band over the cut, and nothing on the cut changes. **Preview on the cut** plays it in place from a second before; **Use** lays it over the cut in one edit that **Ctrl+Z** takes back, and it joins the **Media** tab as an AI bridge; **Discard** drops it. A bridge the provider failed says so: **Try again** asks anew, and the failed one costs nothing. A bridge still being made is cancelled from Jobs. If the clips around the cut change after you asked (a trim, a move, a new clip), the bridge no longer fits and can only be discarded; discarding one still being made cancels it. A cut takes one bridge, and a bridge that would reach into a neighboring one is refused.
 
 <a id="snapping"></a>
 ## Snapping to words

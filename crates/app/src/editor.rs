@@ -330,6 +330,8 @@ pub struct EditorView {
     pub has_performed: bool,
     /// Whether a new rough cut puts each take's performed clip on.
     pub performed_in_rough_cut: bool,
+    /// The AI bridges asked for over cuts (#363), oldest first.
+    pub bridges: Vec<crate::bridges::BridgeView>,
 }
 
 impl EditorView {
@@ -402,6 +404,9 @@ impl EditorView {
             .map(|scene| scene.index)
     }
 }
+
+/// How long before a bridge its preview starts, to see the cut into it.
+const BRIDGE_LEAD_IN: Duration = Duration::from_secs(1);
 
 /// What the user asks of the timeline. `reach` is how far a cut may move to
 /// land on a word (zero, or snapping off, keeps it where it is).
@@ -569,6 +574,9 @@ pub struct Editor {
     /// Whether opening found the saved cut left behind, until the next
     /// edit.
     cut_reset: bool,
+    /// The made bridge the preview plays on its cut, without placing it
+    /// (#363).
+    trial: Option<bardo_domain::BridgeId>,
 }
 
 impl Editor {
@@ -1019,7 +1027,60 @@ impl Editor {
     /// where there is no proxy, the narration as recorded.
     pub fn preview_plan(&self) -> Option<RenderPlan> {
         let aspect = self.view.timeline.as_ref()?.aspect();
-        timeline_plan(&self.view, &*self.files, aspect, PlanMedia::Proxies)
+        match self.trial_timeline() {
+            Some(timeline) => {
+                let view = EditorView {
+                    timeline: Some(timeline),
+                    ..self.view.clone()
+                };
+                timeline_plan(&view, &*self.files, aspect, PlanMedia::Proxies)
+            }
+            None => timeline_plan(&self.view, &*self.files, aspect, PlanMedia::Proxies),
+        }
+    }
+
+    /// The made bridge the preview plays on its cut, if any.
+    pub fn previewed_bridge(&self) -> Option<bardo_domain::BridgeId> {
+        self.trial
+    }
+
+    /// Plays made bridge `bridge` on its cut in the preview, from a little
+    /// before it, without placing it; `None` plays the cut as it is.
+    pub fn preview_bridge(&mut self, bridge: Option<bardo_domain::BridgeId>) {
+        let start = bridge.and_then(|id| {
+            let view = self
+                .view
+                .bridges
+                .iter()
+                .find(|view| view.id == id && view.is_ready())?;
+            view.span()?;
+            Some(view.from)
+        });
+        let trial = start.and(bridge);
+        if trial == self.trial {
+            return;
+        }
+        self.trial = trial;
+        if let Some(start) = start {
+            self.playhead = start.saturating_sub(BRIDGE_LEAD_IN);
+        }
+        self.restart();
+    }
+
+    /// The timeline with the previewed bridge on its cut.
+    fn trial_timeline(&self) -> Option<Timeline> {
+        let id = self.trial?;
+        let bridge = self.view.bridges.iter().find(|view| view.id == id)?;
+        let file = bridge.file.as_deref()?;
+        let mut timeline = self.view.timeline.clone()?;
+        let (edit, _) = timeline
+            .put_bridge(
+                &bridge.span()?,
+                crate::bridges::bridge_item(file, bridge.seconds),
+            )
+            .ok()?;
+        timeline.apply(&edit).ok()?;
+        Some(timeline)
     }
 
     /// Plays from the playhead (from the start when it is at the end).
@@ -1241,10 +1302,15 @@ impl Editor {
     /// Takes a fresh view, keeping the playhead and selection where they
     /// still fit, and shows the picture again if the timeline changed.
     fn update(&mut self, view: EditorView) {
-        let changed =
+        let mut changed =
             view.timeline != self.view.timeline || view.proxies_ready != self.view.proxies_ready;
         let was_unready = !self.can_play();
         self.view = view;
+        // A previewed bridge used, discarded or off its cut since.
+        if self.trial.is_some() && self.trial_timeline().is_none() {
+            self.trial = None;
+            changed = true;
+        }
         if self
             .selection
             .is_some_and(|item| self.view.span(item).is_none())
@@ -1870,7 +1936,9 @@ impl Bardo {
             narration.as_ref(),
             plan.as_ref(),
         )?;
+        let bridges = self.bridge_views(project.id, timeline.as_ref())?;
         Ok(EditorView {
+            bridges,
             suggestions,
             has_performed: !performed.places.is_empty(),
             performed_in_rough_cut,
@@ -1922,6 +1990,7 @@ impl Bardo {
             history: History::default(),
             snapping: true,
             cut_reset,
+            trial: None,
         };
         editor.show_still();
         Ok(editor)
@@ -1995,6 +2064,19 @@ impl Bardo {
                 text: text.to_owned(),
             }),
         )
+    }
+
+    /// Makes `edit` on the editor's timeline, saved and undoable like any
+    /// other, and selects `selection`.
+    pub(crate) fn apply_edit(
+        &self,
+        editor: &mut Editor,
+        edit: Edit,
+        selection: Option<ItemRef>,
+    ) -> Result<(), EditorError> {
+        self.change(editor, Change::Edit(edit))?;
+        editor.select(selection);
+        Ok(())
     }
 
     fn change(&self, editor: &mut Editor, change: Change) -> Result<(), EditorError> {
@@ -2097,8 +2179,15 @@ impl Bardo {
             held_back(view.job.as_ref())
         };
         let assets: Vec<MediaAsset> = view.media.iter().map(|media| media.asset.clone()).collect();
+        // A made bridge plays in the preview on its cut, before it is used.
+        let bridges = view
+            .bridges
+            .iter()
+            .filter(|bridge| bridge.is_ready())
+            .filter_map(|bridge| Some((bridge.file.clone()?, ProxyKind::Clip)));
         let files: Vec<ProxyOrder> = proxy_orders(view.timeline.as_ref(), &assets)
             .into_iter()
+            .chain(bridges)
             .filter(|(file, kind)| {
                 self.files.exists(project, file)
                     && !self.files.exists(project, &proxy_name(file, *kind))
@@ -2289,7 +2378,13 @@ pub(crate) mod testing {
         pub(crate) covered: Mutex<Vec<PathBuf>>,
         /// The frames taken as pictures: from what, when and within what.
         pub(crate) frames: Mutex<Vec<(PathBuf, Duration, u64)>>,
+        /// The ends of bridges taken: from what, when (none for a still)
+        /// and at what size.
+        pub(crate) bridge_frames: Mutex<Vec<BridgeFrame>>,
     }
+
+    /// One end of a bridge taken: from what, when and at what size.
+    pub(crate) type BridgeFrame = (PathBuf, Option<Duration>, Option<(u32, u32)>);
 
     /// A stretch decoded for a control video: from, length, frame rate and
     /// size.
@@ -2617,6 +2712,29 @@ pub(crate) mod testing {
             let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08];
             jpeg.extend(720u16.to_be_bytes());
             jpeg.extend(1280u16.to_be_bytes());
+            std::fs::write(destination, jpeg)?;
+            Ok(())
+        }
+
+        fn bridge_frame(
+            &self,
+            source: &Path,
+            at: Option<Duration>,
+            size: Option<(u32, u32)>,
+            destination: &Path,
+            _max_bytes: u64,
+        ) -> Result<(), MediaError> {
+            self.check(source)?;
+            self.bridge_frames
+                .lock()
+                .unwrap()
+                .push((source.to_path_buf(), at, size));
+            // A baseline JPEG header: a 1280 × 720 frame, or the size
+            // asked for.
+            let (width, height) = size.unwrap_or((1280, 720));
+            let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08];
+            jpeg.extend((height as u16).to_be_bytes());
+            jpeg.extend((width as u16).to_be_bytes());
             std::fs::write(destination, jpeg)?;
             Ok(())
         }

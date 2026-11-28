@@ -115,6 +115,8 @@ As palavras que o Bardo usa, em termos simples.
 
 **Transição**: como a imagem passa de um clipe para o seguinte em volta de um corte: uma fusão, uma passagem pelo preto ou pelo branco, uma cortina, um deslize ou um zoom. Fica centrada no corte, então o corte e a narração ficam onde estão.
 
+**Ponte de IA**: um clipe curto que um modelo de vídeo faz sobre um corte, do último quadro antes dele ao primeiro depois, para um salto entre dois lugares parecer um movimento só. Cobre metade da duração de cada lado do corte e nunca soma tempo ([Ponte de IA sobre um corte](editor.md#bridge)).
+
 **Movimento (Ken Burns)**: um zoom ou pan lento sobre uma imagem parada enquanto ela aparece, para um vídeo de imagens não virar um slideshow. Definido por imagem, com uma intensidade; os cortes novos de um canal variam o movimento de cena em cena.
 
 **Em sincronia**: um clipe interpretado que toca onde o corte toca a narração que ele interpreta, quadro a quadro. Aparar, mover ou remover um clipe antes dele o deixa adiantado ou atrasado; **Voltar à sincronia** o traz de volta.

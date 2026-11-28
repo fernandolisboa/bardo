@@ -17,6 +17,7 @@
 //! the design's tokens are below, and amber marks only the playhead, the
 //! selection and the primary button.
 
+mod bridge;
 mod retention;
 mod suggestions;
 
@@ -191,6 +192,10 @@ pub struct EditorScreen {
     cover_scene: Option<(usize, usize)>,
     /// How long a cover over a performed clip runs.
     cover_length: Duration,
+    /// The AI bridge panel, while open on a cut.
+    bridge: bridge::BridgeForm,
+    /// The note for the model the bridge panel sends.
+    bridge_note: Entity<InputState>,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -222,6 +227,7 @@ impl EditorScreen {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         let caption_input = cx.new(|cx| InputState::new(window, cx));
+        let bridge_note = cx.new(|cx| InputState::new(window, cx));
         let subscriptions = vec![cx.subscribe_in(
             &caption_input,
             window,
@@ -253,6 +259,8 @@ impl EditorScreen {
             inspector_scroll: ScrollHandle::new(),
             cover_scene: None,
             cover_length: COVER_LENGTH,
+            bridge: bridge::BridgeForm::default(),
+            bridge_note,
             _poll: poll,
             _subscriptions: subscriptions,
         };
@@ -507,7 +515,9 @@ impl EditorScreen {
 
     fn on_key(&mut self, event: &KeyDownEvent, window: &Window, cx: &mut Context<Self>) {
         // Keys typed into the caption's text are the text's.
-        if self.caption_input.focus_handle(cx).is_focused(window) {
+        if self.caption_input.focus_handle(cx).is_focused(window)
+            || self.bridge_note.focus_handle(cx).is_focused(window)
+        {
             return;
         }
         let modifiers = event.keystroke.modifiers;
@@ -1896,6 +1906,12 @@ impl EditorScreen {
                             .as_ref()
                             .and_then(Editor::selected_clip)
                             .and_then(|index| self.render_transition_controls(index, cx)),
+                    )
+                    .children(
+                        self.editor
+                            .as_ref()
+                            .and_then(Editor::selected_clip)
+                            .and_then(|index| self.render_bridge_controls(index, cx)),
                     )
                     .children(
                         self.editor

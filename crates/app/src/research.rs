@@ -459,6 +459,7 @@ mod tests {
                 scene_chats: Arc::clone(&self.db) as _,
                 timelines: Arc::clone(&self.db) as _,
                 media_assets: Arc::clone(&self.db) as _,
+                bridges: Arc::clone(&self.db) as _,
                 music_prompts: Arc::clone(&self.db) as _,
                 music_tracks: Arc::clone(&self.db) as _,
                 thumbnails: Arc::clone(&self.db) as _,

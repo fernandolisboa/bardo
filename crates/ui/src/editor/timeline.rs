@@ -362,6 +362,9 @@ impl EditorScreen {
         video
             .get_or_insert_default()
             .extend(self.render_transition_marks(view, selection, cx));
+        video
+            .get_or_insert_default()
+            .extend(self.render_bridge_marks(view, cx));
         let mut narration = Some(self.render_narration(view, selection, cx));
         let mut music = Some(self.render_music(view, selection, cx));
         let mut sfx = Some(self.render_sfx(view, selection, cx));

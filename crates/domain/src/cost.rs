@@ -527,6 +527,8 @@ pub enum CostPurpose {
     SceneImage,
     /// A video provider animating a scene's image.
     SceneClip,
+    /// A video provider making a bridge over a cut in the editor (#363).
+    BridgeClip,
     /// A provider timing the words of a narration the user recorded.
     NarrationAlignment,
     /// Claude writing the prompt for a video's music.
@@ -642,7 +644,7 @@ fn holds_link(text: &str) -> bool {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 34] = [
+    pub const ALL: [CostPurpose; 35] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -650,6 +652,7 @@ impl CostPurpose {
         CostPurpose::ScenePlan,
         CostPurpose::SceneImage,
         CostPurpose::SceneClip,
+        CostPurpose::BridgeClip,
         CostPurpose::NarrationAlignment,
         CostPurpose::MusicPrompt,
         CostPurpose::Music,
@@ -689,6 +692,7 @@ impl CostPurpose {
             CostPurpose::ScenePlan => "scene_plan",
             CostPurpose::SceneImage => "scene_image",
             CostPurpose::SceneClip => "scene_clip",
+            CostPurpose::BridgeClip => "bridge_clip",
             CostPurpose::NarrationAlignment => "narration_alignment",
             CostPurpose::MusicPrompt => "music_prompt",
             CostPurpose::Music => "music",

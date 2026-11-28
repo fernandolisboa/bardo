@@ -8,7 +8,7 @@ tour: editor
 
 # O editor
 
-É no editor que as cenas e a narração viram um corte: você apara, mixa o som, legenda e enquadra, e depois manda para o render. Ele abre sobre a janela inteira a partir da etapa [Edição](bardo:go/videos/edit) de um projeto, quando as cenas estão planejadas e narradas, e **Vídeos**, no canto superior esquerdo, leva você de volta. O corte se salva sozinho a cada edição. [Mostre o editor para mim](bardo:tour/editor), ou [a parte 2 do tour](bardo:tour/editor-more) para a mixagem, as legendas, o enquadramento, o movimento nas imagens, os clipes interpretados e as sugestões de corte.
+É no editor que as cenas e a narração viram um corte: você apara, mixa o som, legenda e enquadra, e depois manda para o render. Ele abre sobre a janela inteira a partir da etapa [Edição](bardo:go/videos/edit) de um projeto, quando as cenas estão planejadas e narradas, e **Vídeos**, no canto superior esquerdo, leva você de volta. O corte se salva sozinho a cada edição. [Mostre o editor para mim](bardo:tour/editor), ou [a parte 2 do tour](bardo:tour/editor-more) para a mixagem, as legendas, o enquadramento, o movimento nas imagens, os clipes interpretados, as pontes de IA e as sugestões de corte.
 
 F1 abre este guia sobre o editor, e **Voltar ao editor** devolve você a ele como estava. Esc fecha um tour; o botão **Tour do editor** na barra de cima (Shift+F1) volta ao passo em que ele fechou.
 
@@ -63,7 +63,18 @@ Um corte vai direto de um clipe para o seguinte. Uma transição mistura os dois
 
 A transição fica centrada no corte: o clipe anterior continua por metade dela e o seguinte começa metade dela antes. O corte não sai do lugar, então o vídeo continua com a mesma duração e sincronizado com a narração. Onde o arquivo de um clipe não tem imagem além da borda, o quadro da borda fica parado durante essa metade. Uma transição nunca dura mais que os clipes vizinhos: ao lado de um clipe curto ela toca mais curta, e o inspetor diz por quanto tempo. O primeiro clipe abre o vídeo e não tem transição de entrada. Dividir um clipe deixa um corte simples entre as metades, e a transição acompanha o clipe quando você reordena.
 
-A prévia e o render desenham as transições do mesmo jeito.
+A prévia e o render desenham as transições do mesmo jeito. Quando dois clipes pulam de um lugar para outro e uma transição ainda parece um salto, peça uma [ponte de IA](#bridge) sobre o corte.
+
+<a id="bridge"></a>
+## Ponte de IA sobre um corte
+
+Quando dois clipes mostram o mesmo assunto em lugares muito diferentes, até uma transição parece um salto. Uma **ponte de IA** pede a um modelo de vídeo um clipe curto que começa no último quadro antes do corte e termina no primeiro quadro depois dele, para a imagem ir de um ao outro.
+
+Selecione o clipe depois do corte e clique em **Suavizar com IA** na seção **Ponte de IA** do inspetor. Escolha um **Modelo** (só aparecem modelos que conseguem terminar um clipe num quadro dado: Kling, e Higgsfield com a chave de API ou o plano), uma **Duração** em segundos inteiros e, se quiser, uma **Nota para o modelo**, como "uma panorâmica lenta pela sala". O preço aparece antes de pedir, pela [tabela de preços](costs.md); acima de um orçamento ou do teto do vídeo, o Bardo pergunta antes. **Fazer ponte** envia uma única vez, como uma tarefa que você acompanha em **Tarefas**, e é cobrada como *clipe de ponte* só quando o provedor aceita.
+
+A ponte vai sobre o corte, metade da duração de cada lado, substituindo esse tanto do clipe anterior e do seguinte. Ela nunca soma tempo, então a narração, as legendas e a música continuam sincronizadas. Uma duração que deixaria um dos clipes sem nenhum quadro próprio não é oferecida; quando nenhuma cabe, o painel diz que os clipes em volta do corte são curtos demais.
+
+Enquanto é feita, e depois de pronta, a ponte espera na V1 como uma faixa sobre o corte, e nada no corte muda. **Prévia no corte** a toca no lugar, a partir de um segundo antes; **Usar** a coloca sobre o corte numa edição que o **Ctrl+Z** desfaz, e ela entra na aba **Mídia** como ponte de IA; **Descartar** a remove. Uma ponte que o provedor não fez diz isso: **Tentar de novo** pede outra vez, e a que falhou não custa nada. Uma ponte ainda sendo feita é cancelada em **Tarefas**. Se os clipes em volta do corte mudarem depois do pedido (um corte, uma mudança de lugar, um clipe novo), a ponte deixa de caber e só pode ser descartada; descartar uma ainda sendo feita a cancela. Cada corte leva uma ponte, e uma ponte que entraria numa vizinha é recusada.
 
 <a id="snapping"></a>
 ## Encaixar nas palavras
