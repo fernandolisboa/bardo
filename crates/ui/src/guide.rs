@@ -217,6 +217,7 @@ pub mod refs {
     pub const TEMPLATES_FIELDS: GuideRef = at("templates", "fields");
     pub const TEMPLATES_VARIABLES: GuideRef = at("templates", "variables");
     pub const RENDER_TARGETS: GuideRef = at("render", "targets");
+    pub const RENDER_SETTINGS: GuideRef = at("render", "settings");
     pub const RENDER_LAST: GuideRef = at("render", "last");
     pub const CHANNELS_PERSONA: GuideRef = at("channels", "persona");
     pub const CHANNELS_FORMAT: GuideRef = at("channels", "format");
@@ -264,7 +265,7 @@ pub mod refs {
     pub const COSTS_PROJECT_KEYS: GuideRef = at("costs", "project-keys");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 128] = [
+    pub const ALL: [GuideRef; 129] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -349,6 +350,7 @@ pub mod refs {
         TEMPLATES_FIELDS,
         TEMPLATES_VARIABLES,
         RENDER_TARGETS,
+        RENDER_SETTINGS,
         RENDER_LAST,
         CHANNELS_PERSONA,
         CHANNELS_PRODUCTION,

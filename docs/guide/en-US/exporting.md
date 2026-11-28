@@ -11,7 +11,7 @@ An export is a ready-to-post package: for each network, the rendered file and a 
 <a id="choose"></a>
 ## Choosing the networks
 
-Each network's row has a box: tick the networks to export. Networks not exported yet, or whose last export is out of date, come ticked. A network can be exported once it has a rendered file and its metadata is written and within the network's limits ([Metadata and its limits](uploading.md#metadata)); until then its row says what it still needs, and saving or reverting unsaved edits comes first.
+The networks listed are the channel's accounts, and every network with no account that has a rendered file ([Networks and presets](render.md#targets)): a file you post yourself, so its row says it is never uploaded. Each network's row has a box: tick the networks to export. Networks not exported yet, or whose last export is out of date, come ticked. A network can be exported once it has a rendered file and its metadata is written and within the network's limits ([Metadata and its limits](uploading.md#metadata)); until then its row says what it still needs, and saving or reverting unsaved edits comes first.
 
 <a id="export"></a>
 ## Exporting

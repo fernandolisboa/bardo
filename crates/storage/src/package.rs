@@ -27,10 +27,10 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    FolderImport, PACKAGE_FORMAT, PACKED_VIDEOS, PROJECT_MANIFEST, PROJECT_RECORDS,
-    PackageContents, PackageError, PackageExport, PackageImport, PackageImported, PackageManifest,
-    ProjectColor, ProjectId, ProjectManifest, ProjectPackages, TemplateKind, VIDEOS_DIR, WORLD_DIR,
-    free_name, rewrite_ids, video_folder_name,
+    FolderImport, Network, NetworkAccount, PACKAGE_FORMAT, PACKED_VIDEOS, PROJECT_MANIFEST,
+    PROJECT_RECORDS, PackageContents, PackageError, PackageExport, PackageImport, PackageImported,
+    PackageManifest, ProjectColor, ProjectId, ProjectManifest, ProjectPackages, TemplateKind,
+    VIDEOS_DIR, VideoProjectId, WORLD_DIR, free_name, rewrite_ids, video_folder_name,
 };
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
@@ -1002,6 +1002,31 @@ fn prepare(live: &Database, path: &Path, bringing: &Bringing<'_>) -> Result<Plan
                     ids.entry(old).or_insert_with(Uuid::new_v4);
                 }
             }
+        }
+    }
+    // A network no account stands behind (#360) goes by an id made from
+    // its video's: it follows the video's new one.
+    let video_ids: Vec<(Uuid, Uuid)> = ids
+        .iter()
+        .map(|(old, new)| (*old, *new))
+        .filter(|(old, _)| {
+            conn.query_row(
+                "SELECT 1 FROM video_project WHERE id = ?1",
+                [old.to_string()],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some()
+        })
+        .collect();
+    for (old, new) in video_ids {
+        for network in Network::ALL {
+            ids.insert(
+                NetworkAccount::file_target_id(VideoProjectId::from(old), network).as_uuid(),
+                NetworkAccount::file_target_id(VideoProjectId::from(new), network).as_uuid(),
+            );
         }
     }
     if let Ok(old) = Uuid::parse_str(&old_project) {

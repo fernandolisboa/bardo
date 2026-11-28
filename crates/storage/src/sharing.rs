@@ -460,7 +460,8 @@ fn fingerprint_trigger(sql: &str) -> String {
 pub(crate) fn undo_for_tests(conn: &Connection) {
     drop_mirrors(conn).unwrap();
     conn.execute_batch(
-        "DROP TABLE project_budget; DROP TABLE project_key;
+        "DROP TABLE render_setting;
+         DROP TABLE project_budget; DROP TABLE project_key;
          ALTER TABLE cost_record DROP COLUMN key_project_id;
          DROP TABLE video_settings;
          DROP TRIGGER network_account_renders;

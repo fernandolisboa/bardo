@@ -244,6 +244,64 @@ impl From<&NetworkAccountDetails> for NetworkAccountDraft {
     }
 }
 
+/// What the user sets for one video's render on one network (#360), over
+/// the account's or the network's preset: the same fields as an account's
+/// overrides, blank or `None` keeping the value underneath.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RenderSettingsDraft {
+    pub aspect: Option<AspectRatio>,
+    pub resolution: Option<Resolution>,
+    pub codec: Option<VideoCodec>,
+    /// Mbps, e.g. `12` or `7.5`.
+    pub bitrate: String,
+    /// `m:ss`, `h:mm:ss` or seconds.
+    pub max_duration: String,
+    /// LUFS, e.g. `-14`.
+    pub loudness: String,
+}
+
+impl RenderSettingsDraft {
+    /// The settings, or every field that does not parse.
+    pub fn validate(&self) -> Result<PresetOverrides, Vec<NetworkAccountFieldError>> {
+        let bitrate = optional(&self.bitrate, NetworkAccountFieldError::BitrateInvalid);
+        let max_duration = optional(
+            &self.max_duration,
+            NetworkAccountFieldError::MaxDurationInvalid,
+        );
+        let loudness = optional(&self.loudness, NetworkAccountFieldError::LoudnessInvalid);
+        match (bitrate, max_duration, loudness) {
+            (Ok(bitrate), Ok(max_duration), Ok(loudness)) => Ok(PresetOverrides {
+                aspect: self.aspect,
+                resolution: self.resolution,
+                codec: self.codec,
+                bitrate,
+                max_duration,
+                loudness,
+            }),
+            (bitrate, max_duration, loudness) => Err(bitrate
+                .err()
+                .into_iter()
+                .chain(max_duration.err())
+                .chain(loudness.err())
+                .collect()),
+        }
+    }
+}
+
+impl From<&PresetOverrides> for RenderSettingsDraft {
+    fn from(settings: &PresetOverrides) -> Self {
+        let text = |value: Option<String>| value.unwrap_or_default();
+        Self {
+            aspect: settings.aspect,
+            resolution: settings.resolution,
+            codec: settings.codec,
+            bitrate: text(settings.bitrate.map(|v| v.to_string())),
+            max_duration: text(settings.max_duration.map(|v| v.to_string())),
+            loudness: text(settings.loudness.map(|v| v.to_string())),
+        }
+    }
+}
+
 /// Blank text keeps the built-in value; anything else must parse.
 fn optional<T: std::str::FromStr>(
     text: &str,
@@ -287,15 +345,8 @@ impl NetworkAccount {
     /// publishes through it. Its id is the same for the same video and
     /// network, so its render and export are found again.
     pub fn file_target(owner: ProfileId, video: crate::VideoProjectId, network: Network) -> Self {
-        let index = Network::ALL
-            .iter()
-            .position(|other| *other == network)
-            .unwrap_or_default() as u128;
-        // Apart from every other video's, and from every account's (random
-        // ids): the video's id with its last bits turned for the network.
-        let id = uuid::Uuid::from_u128(video.as_uuid().as_u128() ^ (0xF11E_0000 | (index + 1)));
         Self {
-            id: NetworkAccountId::from(id),
+            id: Self::file_target_id(video, network),
             owner,
             channel: ChannelId::from(video.as_uuid()),
             network,
@@ -310,6 +361,28 @@ impl NetworkAccount {
                 overrides: PresetOverrides::default(),
             },
         }
+    }
+
+    /// The id of `video`'s [`file_target`](Self::file_target) on
+    /// `network`: apart from every other video's, and from every
+    /// account's (random ids), the video's id with its last bits turned
+    /// for the network. A copy of the video under a new id (a project
+    /// package) maps one to the other.
+    pub fn file_target_id(video: crate::VideoProjectId, network: Network) -> NetworkAccountId {
+        let index = Network::ALL
+            .iter()
+            .position(|other| *other == network)
+            .unwrap_or_default() as u128;
+        let id = uuid::Uuid::from_u128(video.as_uuid().as_u128() ^ (0xF11E_0000 | (index + 1)));
+        NetworkAccountId::from(id)
+    }
+
+    /// Whether this is a [`file_target`](Self::file_target): a network a
+    /// video renders and exports for with no account behind it, which
+    /// never uploads.
+    pub fn is_file_target(&self) -> bool {
+        let video = crate::VideoProjectId::from(self.channel.as_uuid());
+        self.id == Self::file_target(self.owner, video, self.network).id
     }
 
     pub fn new(
@@ -381,6 +454,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn render_settings_parse_or_report_each_field_and_round_trip() {
+        let draft = RenderSettingsDraft {
+            aspect: Some(AspectRatio::Landscape),
+            resolution: None,
+            codec: Some(VideoCodec::Hevc),
+            bitrate: "7.5".into(),
+            max_duration: "10:00".into(),
+            loudness: " ".into(),
+        };
+        let settings = draft.validate().unwrap();
+        assert_eq!(settings.aspect, Some(AspectRatio::Landscape));
+        assert_eq!(settings.bitrate.map(Bitrate::kbps), Some(7_500));
+        assert_eq!(settings.max_duration.map(MaxDuration::seconds), Some(600));
+        assert_eq!(settings.loudness, None);
+        assert_eq!(
+            RenderSettingsDraft::from(&settings).validate(),
+            Ok(settings)
+        );
+        assert_eq!(
+            RenderSettingsDraft::default().validate(),
+            Ok(PresetOverrides::default())
+        );
+        let wrong = RenderSettingsDraft {
+            bitrate: "fast".into(),
+            max_duration: "soon".into(),
+            loudness: "loud".into(),
+            ..RenderSettingsDraft::default()
+        };
+        assert_eq!(
+            wrong.validate(),
+            Err(vec![
+                NetworkAccountFieldError::BitrateInvalid,
+                NetworkAccountFieldError::MaxDurationInvalid,
+                NetworkAccountFieldError::LoudnessInvalid,
+            ])
+        );
+    }
+
+    #[test]
     fn a_loose_video_renders_for_each_network_with_its_built_in_preset() {
         let owner = ProfileId::new();
         let video = crate::VideoProjectId::new();
@@ -397,6 +509,7 @@ mod tests {
                 "the same video and network give the same target"
             );
             assert_ne!(target.id.as_uuid(), video.as_uuid());
+            assert!(target.is_file_target());
             assert_eq!(target.details.handle(), "");
             assert_eq!(
                 target.render_preset(VideoFormat::Long),
@@ -405,6 +518,13 @@ mod tests {
         }
         let other = NetworkAccount::file_target(owner, crate::VideoProjectId::new(), Network::X);
         assert!(!ids.contains(&other.id));
+        let saved = NetworkAccount::new(
+            owner,
+            ChannelId::new(),
+            Network::X,
+            NetworkAccountDetails::validate(Network::X, draft("handle")).unwrap(),
+        );
+        assert!(!saved.is_file_target(), "a saved account is not a file");
     }
     use crate::{Bitrate, Loudness, MaxDuration};
 

@@ -192,7 +192,11 @@ pub enum ExportBlock {
 pub struct ExportTarget {
     pub account: NetworkAccountId,
     pub network: Network,
+    /// Empty for a file target.
     pub handle: String,
+    /// No account stands behind this network (#341, #360): it exports a
+    /// file the user posts, and is never uploaded or linked.
+    pub file_only: bool,
     /// The account's default visibility, written in the metadata file.
     pub visibility: Visibility,
     /// The account's description footer, added to the text.
@@ -255,7 +259,10 @@ impl ExportTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExportView {
     pub project: VideoProjectId,
-    /// Every network account of the channel, in `Network::ALL` order.
+    /// A loose video (#341): no channel, so nothing it exports uploads.
+    pub loose: bool,
+    /// The channel's network accounts, and the networks with no account
+    /// that have a rendered file (#360), in `Network::ALL` order.
     pub targets: Vec<ExportTarget>,
     /// Whether the narrator's voice needs a synthetic-content disclosure.
     pub disclosure: bool,
@@ -1106,10 +1113,28 @@ impl Bardo {
         }
     }
 
+    /// What `project` exports for (#360): its channel's accounts, and the
+    /// networks no account stands behind once a file was rendered for
+    /// them, so a network nobody rendered for adds no metadata to write.
+    fn export_accounts(
+        &self,
+        project: &VideoProject,
+    ) -> Result<Vec<NetworkAccount>, RepositoryError> {
+        let renders = self.renders.renders(project.id)?;
+        Ok(self
+            .target_accounts(project)?
+            .into_iter()
+            .filter(|account| {
+                !account.is_file_target()
+                    || renders.iter().any(|render| render.account == account.id)
+            })
+            .collect())
+    }
+
     /// The project's Publishing stage.
     pub fn export_view(&self, project: VideoProjectId) -> Result<ExportView, ExportError> {
         let project = self.export_project(project)?;
-        let accounts = self.target_accounts(&project)?;
+        let accounts = self.export_accounts(&project)?;
         let renders = self.renders.renders(project.id)?;
         let current: Vec<NetworkAccountId> = match self.render_review(project.id) {
             Ok(review) => review
@@ -1188,6 +1213,7 @@ impl Bardo {
                     account: account.id,
                     network: account.network,
                     handle: account.details.handle().to_owned(),
+                    file_only: account.is_file_target(),
                     visibility,
                     footer,
                     chapters,
@@ -1198,9 +1224,12 @@ impl Bardo {
                     problems,
                     last,
                     last_current,
+                    // A file is never posted from Bardo, nor linked (#360):
+                    // a post on its network was an account's, since removed.
                     posted: posted
                         .iter()
                         .position(|post| post.publication.network() == account.network)
+                        .filter(|_| !account.is_file_target())
                         .map(|at| posted.remove(at)),
                 }
             })
@@ -1214,6 +1243,7 @@ impl Bardo {
             .and_then(|metadata| self.generation_cost(project.id, metadata.generation().job));
         Ok(ExportView {
             project: project.id,
+            loose: project.is_loose(),
             disclosure,
             metadata_job,
             export_job: self.latest_job_of(JobKind::Export, project.id),
@@ -1246,7 +1276,7 @@ impl Bardo {
         if self.work_busy(&Work::Metadata(project.id.to_string())) {
             return Err(ExportError::Busy);
         }
-        let accounts = self.target_accounts(&project)?;
+        let accounts = self.export_accounts(&project)?;
         if accounts.is_empty() {
             return Err(ExportError::NoAccounts);
         }
