@@ -13,7 +13,7 @@ Um projeto de vídeo é um vídeo no caminho entre uma ideia aprovada e uma publ
 <a id="switch"></a>
 ## Escolher um projeto
 
-O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos do canal; escolha um para trocar. Um projeto de anúncio aparece marcado como **Anúncio** nesse menu, e a linha sob o nome dele começa com **Anúncio de** e o produto que ele anuncia. Um anúncio cujo produto era uma *ideia* quando o projeto começou é um conceito: ele aparece marcado como **Conceito** nesse menu e ao lado do nome, e continua com essa marca mesmo que o produto mude de tipo depois ([Uma imagem de conceito para uma ideia](products.md#concept)). O seletor de canal ao lado de **Vídeos** lista os projetos de outro canal. **Mostrar na pasta**, no menu **⋯** à direita, abre a pasta do vídeo no Explorer, onde ficam a narração, as imagens, os clipes e os renders ([A pasta de um projeto](storage.md#project-folder)).
+O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos do canal; escolha um para trocar. Um projeto de anúncio aparece marcado como **Anúncio** nesse menu, e a linha sob o nome dele começa com **Anúncio de** e o produto que ele anuncia. Um anúncio cujo produto era uma *ideia* quando o projeto começou é um conceito: ele aparece marcado como **Conceito** nesse menu e ao lado do nome, e continua com essa marca mesmo que o produto mude de tipo depois ([Uma imagem de conceito para uma ideia](products.md#concept)). O seletor de canal ao lado de **Vídeos** lista os projetos de outro canal. **Mostrar pasta**, no menu **⋯** à direita, abre a pasta do vídeo no Explorer, onde ficam a narração, as imagens, os clipes e os renders ([A pasta de um projeto](storage.md#project-folder)).
 
 <a id="archive"></a>
 ## Arquivar ou excluir um vídeo
@@ -35,7 +35,7 @@ Sob o nome do projeto, uma linha resume o que o vídeo é e como ele é feito: q
 
 **Editar**, no fim da linha, abre as configurações numa janela por cima da tela. **Vídeo** tem o [narrador](#narrator), o [formato](#format), a [duração](#length) e o [estilo visual](#style); **Produção e gasto** tem o [modo](#mode), o [teto](#mode) e quanto o vídeo inteiro vai custar. Cada configuração tem o rótulo em cima e um ⓘ que a explica. A linha de resumo acompanha cada mudança; **Fechar** ou Esc fecham a janela, e ela também fecha quando você troca de vídeo, vai para outra tela ou começa um tour.
 
-A seta à direita do título recolhe o resumo, e a linha com o nicho e o gasto junto, para sobrar mais espaço para as etapas; ela vale para todos os vídeos e o Bardo lembra dela. O que o teto tem a dizer e precisa de você (o teto padrão oferecido a um vídeo antigo, um vídeo acima do teto) aparece sob o título mesmo com o resumo recolhido.
+A seta no fim dos botões à direita do título recolhe o resumo, e junto a linha com o nicho, o gasto e, num anúncio, o produto, para sobrar mais espaço para as etapas; ela vale para todos os vídeos e o Bardo lembra dela. O que o teto tem a dizer e precisa de você (o teto padrão oferecido a um vídeo antigo, um vídeo acima do teto) aparece sob o título mesmo com o resumo recolhido.
 
 <a id="narrator"></a>
 ## O narrador

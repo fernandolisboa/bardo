@@ -3068,7 +3068,7 @@ body = "The video you are working on, with the menu that switches to another vid
 
 [tour.projects.narrator]
 title = "Who narrates it"
-body = "The narrator reads this video's narration and shapes its script. It is the channel's default persona unless you pick another one for this video only. The summary under the title shows who it is."
+body = "The narrator reads this video's narration and shapes its script. It is the channel's default persona unless you pick another one for this video only. The summary under the title, when shown, says who it is."
 
 [tour.projects.format]
 title = "Short or long, and how long"
@@ -3076,11 +3076,11 @@ body = "A Short is a vertical video of 45 to 60 seconds; a long video is 16:9 an
 
 [tour.projects.mode]
 title = "How it is produced, and what it costs"
-body = "The mode says which scenes become AI clips and with which model: Economy keeps stills with motion, Animated hook animates the first 10 seconds, All animated and premium animate every scene. Each choice shows what the whole video would cost before anything is generated, and the cap makes Bardo ask before a step that would pass it: US$ 5 for a Short and US$ 20 for a long video unless you set your own. The line under the video's name adds up what it has cost so far; Costs has the details."
+body = "The mode says which scenes become AI clips and with which model: Economy keeps stills with motion, Animated hook animates the first 10 seconds, All animated and premium animate every scene. Each choice shows what the whole video would cost before anything is generated, and the cap makes Bardo ask before a step that would pass it: US$ 5 for a Short and US$ 20 for a long video unless you set your own. With the summary shown, the line under the video's name adds up what it has cost so far; Costs has the details."
 
 [tour.projects.edit]
 title = "Change the settings"
-body = "Edit opens this video's settings in a popup: narrator, format, length, visual style, mode and spend cap, each with its ⓘ. The summary updates as you change them. The arrow beside the title collapses the summary for every video, to give the stages more room."
+body = "Edit opens this video's settings in a popup: narrator, format, length, visual style, mode and spend cap, each with its ⓘ. The summary updates as you change them. The arrow at the end of the buttons on the right collapses the summary for every video, to give the stages more room."
 
 [tour.projects.stages]
 title = "Its stages"

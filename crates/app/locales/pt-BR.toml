@@ -3068,7 +3068,7 @@ body = "O vídeo em que você está trabalhando, com o menu que troca para outro
 
 [tour.projects.narrator]
 title = "Quem narra"
-body = "O narrador lê a narração deste vídeo e dá forma ao roteiro. É a persona padrão do canal, a menos que você escolha outra só para este vídeo. O resumo sob o título mostra quem é."
+body = "O narrador lê a narração deste vídeo e dá forma ao roteiro. É a persona padrão do canal, a menos que você escolha outra só para este vídeo. O resumo sob o título, quando aberto, mostra quem é."
 
 [tour.projects.format]
 title = "Short ou longo, e quanto dura"
@@ -3076,11 +3076,11 @@ body = "Um Short é um vídeo vertical de 45 a 60 segundos; um vídeo longo é 1
 
 [tour.projects.mode]
 title = "Como é produzido, e quanto custa"
-body = "O modo diz quais cenas viram clipes de IA e com qual modelo: Econômico mantém imagens com movimento, Gancho animado anima os primeiros 10 segundos, Tudo animado e premium animam todas as cenas. Cada opção mostra quanto o vídeo inteiro custaria antes de gerar qualquer coisa, e o teto faz o Bardo perguntar antes de um passo que passaria dele: US$ 5 para um Short e US$ 20 para um vídeo longo, a não ser que você defina o seu. A linha sob o nome do vídeo soma quanto ele já custou; Custos tem os detalhes."
+body = "O modo diz quais cenas viram clipes de IA e com qual modelo: Econômico mantém imagens com movimento, Gancho animado anima os primeiros 10 segundos, Tudo animado e premium animam todas as cenas. Cada opção mostra quanto o vídeo inteiro custaria antes de gerar qualquer coisa, e o teto faz o Bardo perguntar antes de um passo que passaria dele: US$ 5 para um Short e US$ 20 para um vídeo longo, a não ser que você defina o seu. Com o resumo aberto, a linha sob o nome do vídeo soma quanto ele já custou; Custos tem os detalhes."
 
 [tour.projects.edit]
 title = "Mudar as configurações"
-body = "Editar abre as configurações deste vídeo numa janela: narrador, formato, duração, estilo visual, modo e teto de gasto, cada um com o seu ⓘ. O resumo acompanha o que você muda. A seta ao lado do título recolhe o resumo de todos os vídeos, para sobrar mais espaço para as etapas."
+body = "Editar abre as configurações deste vídeo numa janela: narrador, formato, duração, estilo visual, modo e teto de gasto, cada um com o seu ⓘ. O resumo acompanha o que você muda. A seta no fim dos botões à direita recolhe o resumo de todos os vídeos, para sobrar mais espaço para as etapas."
 
 [tour.projects.stages]
 title = "As etapas"

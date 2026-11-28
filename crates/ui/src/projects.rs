@@ -2371,9 +2371,20 @@ impl ProjectsScreen {
         cx.notify();
     }
 
-    fn close_settings(&mut self, cx: &mut Context<Self>) {
+    /// Closes the popup; a cap typed and not saved goes back to the saved
+    /// one, as the summary shows it.
+    fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.bardo
             .update(cx, |bardo, _| bardo.close_video_settings());
+        let saved = self
+            .production
+            .as_ref()
+            .and_then(|view| view.cap)
+            .map(|cap| cap.to_string())
+            .unwrap_or_default();
+        self.spend_cap_input
+            .update(cx, |input, cx| input.set_value(saved, window, cx));
+        self.spend_cap_note = None;
         cx.notify();
     }
 
@@ -2576,7 +2587,17 @@ impl ProjectsScreen {
             .text_xs()
             .into_any_element()
         });
-        offer.into_iter().chain(over).collect()
+        // What answering the offer said shows here; the popup shows its
+        // own saves.
+        let note = self
+            .spend_cap_note
+            .filter(|_| !bardo.video_settings_open(self.project))
+            .map(|(tone, text)| {
+                kit::notice(tone, tr(bardo, text), cx)
+                    .text_xs()
+                    .into_any_element()
+            });
+        offer.into_iter().chain(over).chain(note).collect()
     }
 
     /// The video's settings in a popup over the screen (#366): what the
@@ -2587,10 +2608,14 @@ impl ProjectsScreen {
             return None;
         }
         let production = self.production_form(cx);
-        let close = cx.listener(|this, _: &ClickEvent, _, cx| this.close_settings(cx));
+        let close = cx.listener(|this, _: &ClickEvent, window, cx| this.close_settings(window, cx));
         let bardo = self.bardo.read(cx);
         let t = look(cx).tokens;
         let muted = cx.theme().muted_foreground;
+        // A change that failed says so here, not only behind the popup.
+        let error = self
+            .error
+            .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx).text_xs());
         let setting = |label: Text,
                        info: (&'static str, Text, bardo_app::GuideRef),
                        width: f32,
@@ -2701,6 +2726,7 @@ impl ProjectsScreen {
                     .min_h_0()
                     .overflow_y_scroll()
                     .gap_4()
+                    .children(error)
                     .child(video)
                     .children(production),
             );
@@ -2712,9 +2738,9 @@ impl ProjectsScreen {
                 .inset_0()
                 .occlude()
                 .track_focus(&self.settings_focus)
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                     if event.keystroke.key == "escape" {
-                        this.close_settings(cx);
+                        this.close_settings(window, cx);
                         cx.stop_propagation();
                     }
                 }))

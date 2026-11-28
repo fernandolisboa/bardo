@@ -35,7 +35,7 @@ Under the project's name, one line sums up what the video is and how it is made:
 
 **Edit**, at the end of the line, opens the settings in a popup over the screen. **Video** has the [narrator](#narrator), the [format](#format), the [length](#length) and the [visual style](#style); **Production and spend** has the [mode](#mode), the [cap](#mode) and what the whole video will cost. Each setting has its label above it and an ⓘ that explains it. The summary follows every change; **Close** or Esc closes the popup, and so does switching videos, going to another screen or starting a tour.
 
-The arrow on the right of the title collapses the summary, and the line with the niche and the spend with it, to give the stages more room; it applies to every video and Bardo remembers it. What the cap has to say that needs you (the default cap offered to an older video, a video over its cap) shows under the title with the summary collapsed too.
+The arrow at the end of the buttons on the right of the title collapses the summary, and with it the line with the niche, the spend and, for an ad, the product, to give the stages more room; it applies to every video and Bardo remembers it. What the cap has to say that needs you (the default cap offered to an older video, a video over its cap) shows under the title with the summary collapsed too.
 
 <a id="narrator"></a>
 ## The narrator
