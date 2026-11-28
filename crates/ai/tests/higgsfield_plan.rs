@@ -9,8 +9,8 @@ use bardo_ai::http::{HttpResponse, Method, TransportError};
 use bardo_ai::mcp::PROTOCOL_VERSION;
 use bardo_domain::{
     ApiKey, AspectRatio, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest,
-    ClipStatus, Credits, ImageFormat, PlanSignIn, Provider, ProviderFailureKind, SecretText,
-    SignInFailureKind, StagedImage,
+    ClipStatus, Credits, ImageFormat, LastFrame, PlanSignIn, Provider, ProviderFailureKind,
+    SecretText, SignInFailureKind, StagedImage,
 };
 use common::{Scripted, fixture};
 
@@ -57,6 +57,7 @@ fn request(model: &str) -> ClipRequest {
         },
         seconds: 8,
         aspect: AspectRatio::Vertical,
+        last: None,
     }
 }
 
@@ -592,4 +593,78 @@ fn the_clip_downloads_without_the_token() {
             .download(&key(), "http://cdn.higgsfield.example/x.mp4")
             .is_err()
     );
+}
+
+const LAST_MEDIA: &str = "5b1d9e0a-77c2-4f3e-8a1b-0c9d8e7f6a5b";
+
+/// `request` ending on another uploaded image.
+fn bridge(model: &str) -> ClipRequest {
+    ClipRequest {
+        last: Some(LastFrame {
+            image: StagedImage(LAST_MEDIA.into()),
+            frame: ClipImage {
+                bytes: IMAGE.to_vec(),
+                format: ImageFormat::Png,
+            },
+        }),
+        ..request(model)
+    }
+}
+
+#[test]
+fn every_plan_model_but_kling_2_6_ends_on_a_given_frame() {
+    let ends: Vec<(String, bool)> = plan(&[])
+        .models()
+        .into_iter()
+        .map(|model| (model.id.model().to_owned(), model.ends_on_frame))
+        .collect();
+    assert_eq!(
+        ends,
+        [
+            (DEFAULT_MODEL.to_owned(), true),
+            ("kling3_0/pro".to_owned(), true),
+            ("kling2_6".to_owned(), false),
+            ("seedance_2_0/1080p".to_owned(), true),
+            ("wan2_7/1080p".to_owned(), true),
+            ("minimax_hailuo/2.3".to_owned(), true),
+        ]
+    );
+}
+
+#[test]
+fn the_last_frame_is_the_end_image_media_and_is_priced_too() {
+    let adapter = plan(&["estimate", "balance-plus", "submitted"]);
+    adapter
+        .check_submit(&key(), &bridge(DEFAULT_MODEL))
+        .unwrap();
+    adapter
+        .submit(&key(), &bridge(DEFAULT_MODEL), "41-2-1")
+        .unwrap();
+    let calls = tool_calls(&adapter);
+    let params = &calls[2].1["requests"][0]["params"];
+    let medias = params["medias"].as_array().unwrap();
+    assert_eq!(medias.len(), 2);
+    assert_eq!(medias[0]["role"], "start_image");
+    assert_eq!(medias[0]["value"], MEDIA);
+    assert_eq!(medias[1]["role"], "end_image");
+    assert_eq!(medias[1]["value"], LAST_MEDIA);
+    assert_eq!(
+        calls[0].1["params"], *params,
+        "the estimate prices the bridge"
+    );
+}
+
+#[test]
+fn a_last_frame_not_uploaded_or_to_a_model_that_takes_none_is_never_sent() {
+    let adapter = plan(&[]);
+    let refused = adapter
+        .submit(&key(), &bridge("kling2_6"), "1")
+        .unwrap_err();
+    assert_eq!(refused.kind, ProviderFailureKind::NotAllowed);
+    assert!(refused.detail.contains("cannot end a clip"), "{refused:?}");
+    assert!(adapter.check_submit(&key(), &bridge("kling2_6")).is_err());
+    let mut inline = bridge(DEFAULT_MODEL);
+    inline.last.as_mut().unwrap().image = StagedImage("inline".into());
+    assert!(adapter.submit(&key(), &inline, "1").is_err());
+    assert!(adapter.transport().sent().is_empty());
 }

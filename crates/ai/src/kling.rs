@@ -7,7 +7,8 @@
 //! after 30 days; Bardo downloads each clip as soon as it is ready.
 //!
 //! There is no staging step: the scene's image goes inline (raw base64)
-//! with the submission. Every submission carries a custom task id
+//! with the submission, and so does the frame a clip ends on, for the
+//! models that take one (Kling 3.0, and 2.6 and 2.5 Turbo at 1080p). Every submission carries a custom task id
 //! (`external_task_id`) made from the job's submission id and the request
 //! itself; Kling keeps those unique per account, so when the answer to a
 //! submission is lost and the job sends it again, Kling refuses the second
@@ -59,6 +60,9 @@ struct Spec {
     name: [&'static str; 3],
     durations: fn() -> ClipDurations,
     fixed: fn() -> Value,
+    /// Whether it takes a last frame: Kling 3.0 at any resolution, the
+    /// older models at 1080p only (Kling's API reference).
+    ends_on_frame: bool,
 }
 
 fn kling_3() -> ClipDurations {
@@ -87,36 +91,42 @@ const CATALOG: &[Spec] = &[
         name: ["Kling", "3.0", "720p"],
         durations: kling_3,
         fixed: kling_3_settings,
+        ends_on_frame: true,
     },
     Spec {
         id: "kling-3.0/1080p",
         name: ["Kling", "3.0", "1080p"],
         durations: kling_3,
         fixed: kling_3_settings,
+        ends_on_frame: true,
     },
     Spec {
         id: "kling-2.6/720p",
         name: ["Kling", "2.6", "720p"],
         durations: five_or_ten,
         fixed: kling_2_6_settings,
+        ends_on_frame: false,
     },
     Spec {
         id: "kling-2.6/1080p",
         name: ["Kling", "2.6", "1080p"],
         durations: five_or_ten,
         fixed: kling_2_6_settings,
+        ends_on_frame: true,
     },
     Spec {
         id: "kling-2.5-turbo/720p",
         name: ["Kling", "2.5 Turbo", "720p"],
         durations: five_or_ten,
         fixed: no_settings,
+        ends_on_frame: false,
     },
     Spec {
         id: "kling-2.5-turbo/1080p",
         name: ["Kling", "2.5 Turbo", "1080p"],
         durations: five_or_ten,
         fixed: no_settings,
+        ends_on_frame: true,
     },
 ];
 
@@ -128,6 +138,7 @@ pub fn models() -> Vec<ClipModel> {
             id: ClipModelRef::new(Provider::Kling, spec.id).expect("catalog models are valid"),
             name: bardo_domain::ModelName::new(spec.name[0], spec.name[1], spec.name[2]),
             durations: (spec.durations)(),
+            ends_on_frame: spec.ends_on_frame,
         })
         .collect()
 }
@@ -148,19 +159,26 @@ pub(crate) fn unexpected(detail: impl Into<String>) -> ProviderFailure {
 }
 
 /// The submission without its custom task id; `None` for a model Kling
-/// does not offer here.
+/// does not offer here, or a last frame to a model that takes none.
 fn task_body(request: &ClipRequest) -> Option<Value> {
     let (spec, _, resolution) = spec(&request.model)?;
+    if request.last.is_some() && !spec.ends_on_frame {
+        return None;
+    }
     let prompt: String = request.prompt.chars().take(MAX_PROMPT_CHARS).collect();
-    let image = base64::engine::general_purpose::STANDARD.encode(&request.first_frame.bytes);
+    let inline = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
     let mut settings: Map<String, Value> = (spec.fixed)().as_object().cloned().unwrap_or_default();
     settings.insert("resolution".into(), json!(resolution));
     settings.insert("duration".into(), json!(request.seconds));
+    let mut contents = vec![
+        json!({ "type": "prompt", "text": prompt }),
+        json!({ "type": "first_frame", "url": inline(&request.first_frame.bytes) }),
+    ];
+    if let Some(last) = &request.last {
+        contents.push(json!({ "type": "last_frame", "url": inline(&last.frame.bytes) }));
+    }
     Some(json!({
-        "contents": [
-            { "type": "prompt", "text": prompt },
-            { "type": "first_frame", "url": image },
-        ],
+        "contents": contents,
         "settings": settings,
     }))
 }
@@ -477,11 +495,12 @@ impl<T: Transport> ClipGenerator for KlingClips<T> {
         request: &ClipRequest,
         submission: &str,
     ) -> Result<ClipSubmission, ProviderFailure> {
-        let not_offered = || {
-            ProviderFailure::new(
+        let not_offered = || match spec(&request.model) {
+            Some(_) => bardo_domain::no_last_frame(&request.model),
+            None => ProviderFailure::new(
                 ProviderFailureKind::NotAllowed,
                 format!("{} is not a Kling video model", request.model),
-            )
+            ),
         };
         let http = submit_request(key, request, submission).ok_or_else(not_offered)?;
         let response = self.send(&http)?;

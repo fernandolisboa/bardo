@@ -8,7 +8,7 @@ use bardo_ai::http::Method;
 use bardo_ai::kling::{API_URL, DEFAULT_MODEL, external_task_id};
 use bardo_domain::{
     ApiKey, AspectRatio, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest,
-    ClipStatus, ImageFormat, Provider, ProviderFailureKind, StagedImage,
+    ClipStatus, ImageFormat, LastFrame, Provider, ProviderFailureKind, StagedImage,
 };
 use base64::Engine as _;
 use common::{Scripted, fixture, recording_sleeper};
@@ -40,6 +40,7 @@ fn request(model: &str) -> ClipRequest {
         },
         seconds: 8,
         aspect: AspectRatio::Landscape,
+        last: None,
     }
 }
 
@@ -410,4 +411,91 @@ fn offline_is_unreachable() {
     let adapter = KlingClips::with_transport(Scripted::offline()).with_sleeper(sleeper);
     let failure = adapter.status(&key(), &handle()).unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unreachable);
+}
+
+const LAST: [u8; 7] = [0x89, b'P', b'N', b'G', 7, 8, 9];
+
+/// `request` ending on another image.
+fn bridge(model: &str) -> ClipRequest {
+    ClipRequest {
+        last: Some(LastFrame {
+            image: StagedImage("inline".into()),
+            frame: ClipImage {
+                bytes: LAST.to_vec(),
+                format: ImageFormat::Png,
+            },
+        }),
+        ..request(model)
+    }
+}
+
+#[test]
+fn kling_3_and_the_older_models_at_1080p_end_on_a_given_frame() {
+    let ends: Vec<(String, bool)> = clips(&[])
+        .models()
+        .into_iter()
+        .map(|model| (model.id.model().to_owned(), model.ends_on_frame))
+        .collect();
+    assert_eq!(
+        ends,
+        [
+            ("kling-3.0/720p".to_owned(), true),
+            ("kling-3.0/1080p".to_owned(), true),
+            ("kling-2.6/720p".to_owned(), false),
+            ("kling-2.6/1080p".to_owned(), true),
+            ("kling-2.5-turbo/720p".to_owned(), false),
+            ("kling-2.5-turbo/1080p".to_owned(), true),
+        ],
+        "Kling takes a last frame on 2.6 and 2.5 Turbo at 1080p only"
+    );
+}
+
+#[test]
+fn a_last_frame_goes_inline_after_the_first() {
+    let adapter = clips(&["submit-submitted"]);
+    adapter
+        .submit(&key(), &bridge(DEFAULT_MODEL), SUBMISSION)
+        .unwrap();
+    let sent = adapter.transport().sent();
+    let contents = sent[0].body["contents"].as_array().unwrap();
+    assert_eq!(contents.len(), 3);
+    assert_eq!(contents[1]["type"], "first_frame");
+    assert_eq!(contents[2]["type"], "last_frame");
+    assert_eq!(
+        contents[2]["url"],
+        base64::engine::general_purpose::STANDARD.encode(LAST)
+    );
+    let external = external_task_id(&bridge(DEFAULT_MODEL), SUBMISSION).unwrap();
+    assert_eq!(
+        sent[0].body["options"]["external_task_id"],
+        external.as_str()
+    );
+    assert_ne!(
+        external,
+        external_task_id(&request(DEFAULT_MODEL), SUBMISSION).unwrap(),
+        "the last frame is part of the request, so of its custom id"
+    );
+}
+
+#[test]
+fn a_clip_without_a_last_frame_keeps_its_custom_task_id() {
+    // Pinned: a scene's clip sent again after an update must find the
+    // task it started before.
+    assert_eq!(
+        external_task_id(&request(DEFAULT_MODEL), SUBMISSION).unwrap(),
+        "bardo-26555605ed45d20526c9a8308d56efc9"
+    );
+}
+
+#[test]
+fn a_last_frame_to_a_model_that_takes_none_is_not_sent() {
+    let adapter = clips(&[]);
+    for model in ["kling-2.6/720p", "kling-2.5-turbo/720p"] {
+        let failure = adapter
+            .submit(&key(), &bridge(model), SUBMISSION)
+            .unwrap_err();
+        assert_eq!(failure.kind, ProviderFailureKind::NotAllowed);
+        assert!(failure.detail.contains("cannot end a clip"), "{failure:?}");
+    }
+    assert!(adapter.transport().sent().is_empty());
 }

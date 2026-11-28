@@ -242,6 +242,9 @@ pub struct ClipModel {
     /// How people call it, in parts: Kling · 3.0 · Standard.
     pub name: ModelName,
     pub durations: ClipDurations,
+    /// Whether it can end the clip on a given frame as well as start it on
+    /// one ([`ClipRequest::last`]): what a bridge between two clips needs.
+    pub ends_on_frame: bool,
 }
 
 /// A model a provider stopped serving, and the one it offers in its place.
@@ -310,6 +313,14 @@ impl ClipImage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StagedImage(pub String);
 
+/// The frame a clip must end on, for a model that can
+/// ([`ClipModel::ends_on_frame`]): staged and inline like the first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LastFrame {
+    pub image: StagedImage,
+    pub frame: ClipImage,
+}
+
 /// What to animate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipRequest {
@@ -323,6 +334,18 @@ pub struct ClipRequest {
     pub seconds: u32,
     /// The clip's frame shape: its first frame's (#179).
     pub aspect: AspectRatio,
+    /// The frame the clip ends on; `None` lets the model end where the
+    /// motion takes it. A scene's clip has none.
+    pub last: Option<LastFrame>,
+}
+
+/// Why a request with a last frame goes nowhere: the model cannot end on
+/// a given frame. Nothing was sent.
+pub fn no_last_frame(model: &str) -> ProviderFailure {
+    ProviderFailure::new(
+        crate::ProviderFailureKind::NotAllowed,
+        format!("{model} cannot end a clip on a given frame"),
+    )
 }
 
 /// The provider's id for submitted work.
@@ -551,6 +574,7 @@ mod tests {
             id: model(id),
             name: id.to_uppercase().as_str().into(),
             durations: ClipDurations::Range { min: 3, max: 15 },
+            ends_on_frame: false,
         };
         let retire = |id: &str, replacement: &str| RetiredClipModel {
             id: model(id),

@@ -33,3 +33,9 @@ funded key.
 Synthetic, for edge cases: `status-completed-no-video.http`,
 `upload-expired.http`, `download-expired.http`, and `download-clip.http`
 (not a real video: just the `ftyp` box marker an MP4 starts with).
+
+A clip that ends on a given frame (#362) sends the staged image in the field
+each model page names: `last_image_url` for Kling 3.0 Standard,
+`end_image_url` for Seedance 2.0 and MiniMax H3 (checked on 2026-11-28; the
+other models in the catalog take none). Its answers are the same as any
+submission's, so it reuses `estimate.http` and `submit-queued.http`.

@@ -2542,11 +2542,13 @@ pub(crate) mod testing {
                     id: ClipModelRef::new(self.provider(), "fake/range").unwrap(),
                     name: "Fake Range".into(),
                     durations: ClipDurations::Range { min: 3, max: 15 },
+                    ends_on_frame: true,
                 },
                 ClipModel {
                     id: ClipModelRef::new(self.provider(), "fake/choices").unwrap(),
                     name: "Fake Choices".into(),
                     durations: ClipDurations::Choices(vec![5, 10]),
+                    ends_on_frame: false,
                 },
             ];
             if self.nameless.load(std::sync::atomic::Ordering::SeqCst) {
@@ -2554,6 +2556,7 @@ pub(crate) mod testing {
                     id: ClipModelRef::new(self.provider(), "nameless/one").unwrap(),
                     name: "Nameless One".into(),
                     durations: ClipDurations::Range { min: 3, max: 15 },
+                    ends_on_frame: false,
                 });
             }
             models

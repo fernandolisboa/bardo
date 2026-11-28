@@ -839,6 +839,7 @@ impl ClipJob<'_> {
             aspect: first_frame.aspect(),
             first_frame,
             seconds: run.seconds,
+            last: None,
         };
         let submission = format!("{}-{}-{}", self.job, order.scene, run.submission);
         if !generator.dedupes_submissions() {
@@ -2022,6 +2023,7 @@ mod tests {
                 },
                 seconds,
                 aspect: bardo_domain::AspectRatio::Landscape,
+                last: None,
             }],
             "the image prompt moves the image until a motion prompt is written; \
              the image also goes inline for providers that take it so"

@@ -4,7 +4,8 @@
 //! status endpoint says when the clip is ready and where to download it.
 //!
 //! The scene's image goes first to Higgsfield's storage (a presigned upload
-//! URL) and the model reads it from the public URL it gets. Submissions
+//! URL) and the model reads it from the public URL it gets; so does the
+//! frame a clip ends on, for the models that take one. Submissions
 //! carry an `Idempotency-Key`, so sending the same request again after a
 //! lost answer returns the first request instead of paying for a second.
 //! Before submitting, the adapter asks the estimate endpoint what the clip
@@ -53,6 +54,9 @@ struct Spec {
     name: [&'static str; 3],
     durations: fn() -> ClipDurations,
     fixed: fn() -> Value,
+    /// The field that takes the frame the clip ends on, for a model that
+    /// takes one (Higgsfield's model pages, checked on 2026-11-28).
+    last_frame: Option<&'static str>,
 }
 
 const CATALOG: &[Spec] = &[
@@ -61,42 +65,49 @@ const CATALOG: &[Spec] = &[
         name: ["Kling", "3.0", "Standard"],
         durations: || ClipDurations::Range { min: 3, max: 15 },
         fixed: || json!({ "sound": "off" }),
+        last_frame: Some("last_image_url"),
     },
     Spec {
         model: "kling-video/v2.6/pro/image-to-video",
         name: ["Kling", "2.6", "Pro"],
         durations: || ClipDurations::Choices(vec![5, 10]),
         fixed: || json!({ "sound": "off", "aspect_ratio": "16:9" }),
+        last_frame: None,
     },
     Spec {
         model: "kling-video/v2.5-turbo/standard/image-to-video",
         name: ["Kling", "2.5 Turbo", "Standard"],
         durations: || ClipDurations::Choices(vec![5, 10]),
         fixed: || json!({}),
+        last_frame: None,
     },
     Spec {
         model: "bytedance/seedance-2.0/image-to-video",
         name: ["Seedance", "2.0", ""],
         durations: || ClipDurations::Range { min: 4, max: 15 },
         fixed: || json!({ "resolution": "1080p", "generate_audio": false }),
+        last_frame: Some("end_image_url"),
     },
     Spec {
         model: "wan/v2.6/image-to-video",
         name: ["Wan", "2.6", ""],
         durations: || ClipDurations::Choices(vec![5, 10, 15]),
         fixed: || json!({ "resolution": "1080p" }),
+        last_frame: None,
     },
     Spec {
         model: "minimax/h3/image-to-video",
         name: ["MiniMax", "H3", ""],
         durations: || ClipDurations::Range { min: 5, max: 15 },
         fixed: || json!({}),
+        last_frame: Some("end_image_url"),
     },
     Spec {
         model: "minimax/hailuo-2.3/standard/image-to-video",
         name: ["Hailuo", "2.3", "Standard"],
         durations: || ClipDurations::Choices(vec![6, 10]),
         fixed: || json!({}),
+        last_frame: None,
     },
 ];
 
@@ -109,6 +120,7 @@ pub fn models() -> Vec<ClipModel> {
                 .expect("catalog models are valid"),
             name: bardo_domain::ModelName::new(spec.name[0], spec.name[1], spec.name[2]),
             durations: (spec.durations)(),
+            ends_on_frame: spec.last_frame.is_some(),
         })
         .collect()
 }
@@ -289,20 +301,28 @@ pub fn upload_url_request(key: &ApiKey, mime: &str) -> HttpRequest {
 /// ones. The same request always makes the same body, as idempotent
 /// resubmission requires.
 pub fn clip_body(request: &ClipRequest) -> Value {
-    let fixed = CATALOG
-        .iter()
-        .find(|spec| spec.model == request.model)
-        .map_or_else(|| json!({}), |spec| (spec.fixed)());
+    let spec = CATALOG.iter().find(|spec| spec.model == request.model);
+    let fixed = spec.map_or_else(|| json!({}), |spec| (spec.fixed)());
     let mut body: Map<String, Value> = fixed.as_object().cloned().unwrap_or_default();
     let prompt: String = request.prompt.chars().take(MAX_PROMPT_CHARS).collect();
     body.insert("prompt".into(), json!(prompt));
     body.insert("image_url".into(), json!(request.image.0));
     body.insert("duration".into(), json!(request.seconds));
+    if let (Some(last), Some(field)) = (&request.last, spec.and_then(|spec| spec.last_frame)) {
+        body.insert(field.into(), json!(last.image.0));
+    }
     // Models that take a frame shape get the first frame's.
     if body.contains_key("aspect_ratio") {
         body.insert("aspect_ratio".into(), json!(request.aspect.code()));
     }
     Value::Object(body)
+}
+
+/// Whether `model` takes the frame a clip ends on.
+fn ends_on_frame(model: &str) -> bool {
+    CATALOG
+        .iter()
+        .any(|spec| spec.model == model && spec.last_frame.is_some())
 }
 
 /// The request that starts the clip. `submission` is the idempotency key.
@@ -643,6 +663,9 @@ impl<T: Transport> ClipGenerator for HiggsfieldClips<T> {
         request: &ClipRequest,
         submission: &str,
     ) -> Result<ClipSubmission, ProviderFailure> {
+        if request.last.is_some() && !ends_on_frame(&request.model) {
+            return Err(bardo_domain::no_last_frame(&request.model));
+        }
         let quote = self.quote(key, request);
         let response = self.send(&submit_request(key, request, submission))?;
         if !(200..=299).contains(&response.status) {

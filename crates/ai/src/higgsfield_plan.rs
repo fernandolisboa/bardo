@@ -10,7 +10,8 @@
 //! tokens with PKCE. Access tokens are refreshed with the refresh token
 //! (`offline_access`).
 //!
-//! **Clips** go through the server's tools: the scene's image is uploaded
+//! **Clips** go through the server's tools: the scene's image (and the
+//! frame a clip ends on, for the models that take one) is uploaded
 //! (`media_upload`, a presigned PUT, `media_confirm`), the clip is started
 //! with `generate_video_batch` (one request, no widget), and its state is
 //! read with `jobs_wait` without waiting. `generate_video_batch` takes no
@@ -75,6 +76,9 @@ struct Spec {
     name: [&'static str; 3],
     durations: fn() -> ClipDurations,
     fixed: fn() -> Value,
+    /// Whether it takes an `end_image`, the frame the clip ends on (the
+    /// server's `models_explore`, checked on 2026-11-28).
+    ends_on_frame: bool,
 }
 
 const CATALOG: &[Spec] = &[
@@ -84,6 +88,7 @@ const CATALOG: &[Spec] = &[
         name: ["Kling", "3.0", "Standard"],
         durations: || ClipDurations::Range { min: 3, max: 15 },
         fixed: || json!({ "mode": "std", "sound": "off" }),
+        ends_on_frame: true,
     },
     Spec {
         id: "kling3_0/pro",
@@ -91,6 +96,7 @@ const CATALOG: &[Spec] = &[
         name: ["Kling", "3.0", "Pro"],
         durations: || ClipDurations::Range { min: 3, max: 15 },
         fixed: || json!({ "mode": "pro", "sound": "off" }),
+        ends_on_frame: true,
     },
     Spec {
         id: "kling2_6",
@@ -98,6 +104,7 @@ const CATALOG: &[Spec] = &[
         name: ["Kling", "2.6", ""],
         durations: || ClipDurations::Choices(vec![5, 10]),
         fixed: || json!({ "sound": false }),
+        ends_on_frame: false,
     },
     Spec {
         id: "seedance_2_0/1080p",
@@ -105,6 +112,7 @@ const CATALOG: &[Spec] = &[
         name: ["Seedance", "2.0", ""],
         durations: || ClipDurations::Range { min: 4, max: 15 },
         fixed: || json!({ "resolution": "1080p", "generate_audio": false }),
+        ends_on_frame: true,
     },
     Spec {
         id: "wan2_7/1080p",
@@ -112,6 +120,7 @@ const CATALOG: &[Spec] = &[
         name: ["Wan", "2.7", ""],
         durations: || ClipDurations::Range { min: 2, max: 15 },
         fixed: || json!({ "resolution": "1080p" }),
+        ends_on_frame: true,
     },
     Spec {
         id: "minimax_hailuo/2.3",
@@ -119,6 +128,7 @@ const CATALOG: &[Spec] = &[
         name: ["Hailuo", "2.3", ""],
         durations: || ClipDurations::Choices(vec![6, 10]),
         fixed: || json!({ "variant": "minimax-2.3", "resolution": "768" }),
+        ends_on_frame: true,
     },
 ];
 
@@ -135,6 +145,7 @@ pub fn models() -> Vec<ClipModel> {
                 .expect("catalog models are valid"),
             name: bardo_domain::ModelName::new(spec.name[0], spec.name[1], spec.name[2]),
             durations: (spec.durations)(),
+            ends_on_frame: spec.ends_on_frame,
         })
         .collect()
 }
@@ -142,19 +153,24 @@ pub fn models() -> Vec<ClipModel> {
 /// The `params` of a generation: the request's fields and the model's
 /// fixed ones. Credits only: the plan's free-trial allowance is never
 /// spent without the user asking, and leaving the field out makes the
-/// server ask instead of starting.
+/// server ask instead of starting. `None` for a model the plan does not
+/// offer here, or a last frame to a model that takes none.
 pub fn clip_params(request: &ClipRequest) -> Option<Value> {
     let spec = spec(&request.model)?;
+    if request.last.is_some() && !spec.ends_on_frame {
+        return None;
+    }
     let mut params: Map<String, Value> = (spec.fixed)().as_object().cloned().unwrap_or_default();
     let prompt: String = request.prompt.chars().take(MAX_PROMPT_CHARS).collect();
     params.insert("model".into(), json!(spec.model));
     params.insert("prompt".into(), json!(prompt));
     params.insert("duration".into(), json!(request.seconds));
     params.insert("aspect_ratio".into(), json!(request.aspect.code()));
-    params.insert(
-        "medias".into(),
-        json!([{ "role": "start_image", "value": request.image.0 }]),
-    );
+    let mut medias = vec![json!({ "role": "start_image", "value": request.image.0 })];
+    if let Some(last) = &request.last {
+        medias.push(json!({ "role": "end_image", "value": last.image.0 }));
+    }
+    params.insert("medias".into(), Value::Array(medias));
     params.insert("use_unlim".into(), json!(false));
     Some(Value::Object(params))
 }
@@ -219,11 +235,19 @@ fn submit_params(request: &ClipRequest) -> Result<Value, ProviderFailure> {
     if !is_uuid(&request.image.0) {
         return Err(unexpected("the scene's image was not uploaded"));
     }
-    clip_params(request).ok_or_else(|| {
-        ProviderFailure::new(
+    if request
+        .last
+        .as_ref()
+        .is_some_and(|last| !is_uuid(&last.image.0))
+    {
+        return Err(unexpected("the last frame was not uploaded"));
+    }
+    clip_params(request).ok_or_else(|| match spec(&request.model) {
+        Some(_) => bardo_domain::no_last_frame(&request.model),
+        None => ProviderFailure::new(
             ProviderFailureKind::NotAllowed,
             format!("{} is not a model of the Higgsfield plan", request.model),
-        )
+        ),
     })
 }
 
