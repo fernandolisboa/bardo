@@ -155,6 +155,9 @@ pub enum Control {
     ScenesPlace,
     /// Scenes: drawing a scene's image again, or the new one to review.
     SceneRedraw,
+    /// Scenes: the picked scene's chat, to adjust its image in words
+    /// (#368).
+    SceneChat,
     /// Scenes: how an ad's picked product shot looks: its layout,
     /// position and backdrop (#285).
     ShotLook,
@@ -908,7 +911,7 @@ pub const SCENES: Tour = {
     const TOOLBAR: WhenMissing = WhenMissing::LightPart(TourAnchor::Toolbar);
     Tour {
         id: TourId::Scenes,
-        version: 12,
+        version: 13,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             // Before the plan: the characters it gets as fixed cast.

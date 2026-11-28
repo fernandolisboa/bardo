@@ -52,6 +52,12 @@ pub(crate) enum Work {
     Backdrop(String),
     /// A concept image drawn for the product (#280).
     Concept(String),
+    /// Claude's reply to a request in a scene's chat (#368): the project
+    /// and the scene's position.
+    SceneChat {
+        project: String,
+        scene: usize,
+    },
 }
 
 /// The fields the payloads of these jobs name what they work on with.
@@ -72,6 +78,9 @@ struct WorksOn {
     /// A claims check of an ad's post texts, rather than its script.
     #[serde(default)]
     posts: bool,
+    /// The scene a scene chat reply is about.
+    #[serde(default)]
+    scene: Option<usize>,
 }
 
 impl Work {
@@ -98,6 +107,7 @@ impl Work {
                 | JobKind::AdAngleRanking
                 | JobKind::ShotBackdrop
                 | JobKind::ProductConcept
+                | JobKind::SceneChat
         ) {
             return None;
         }
@@ -130,6 +140,10 @@ impl Work {
             },
             JobKind::ShotBackdrop => Self::Backdrop(on.project?),
             JobKind::ProductConcept => Self::Concept(on.product?),
+            JobKind::SceneChat => Self::SceneChat {
+                project: on.project?,
+                scene: on.scene?,
+            },
             _ => return None,
         })
     }
@@ -255,6 +269,17 @@ mod tests {
                 })
             );
         }
+        // One reply at a time per scene, each scene on its own.
+        assert_eq!(
+            work(
+                JobKind::SceneChat,
+                serde_json::json!({"project": "p", "plan": "l", "scene": 2, "request": "r"})
+            ),
+            Some(Work::SceneChat {
+                project: "p".into(),
+                scene: 2,
+            })
+        );
     }
 
     #[test]

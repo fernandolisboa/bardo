@@ -66,6 +66,7 @@ mod music;
 mod narration_ask;
 mod placements;
 mod render;
+mod scene_chat;
 mod scenes;
 mod upload;
 mod versions;
@@ -202,6 +203,8 @@ pub struct ProjectsScreen {
     editing_scene: Option<(ScenePlanId, usize, scenes::ScenePromptField)>,
     scene_editor: Entity<TextareaState>,
     scene_field_error: Option<SceneFieldError>,
+    /// The picked scene's chat, while open (#368).
+    scene_chat: scene_chat::SceneChat,
     /// "Plan again" was clicked on scenes that have images: the panel asks
     /// before discarding them.
     confirm_replan: bool,
@@ -668,6 +671,7 @@ impl ProjectsScreen {
             editing_scene: None,
             scene_editor,
             scene_field_error: None,
+            scene_chat: scene_chat::SceneChat::new(),
             confirm_replan: false,
             scenes_ask: None,
             script_ask: None,
@@ -986,6 +990,7 @@ impl ProjectsScreen {
         self.scenes_error = None;
         self.editing_scene = None;
         self.scene_field_error = None;
+        self.scene_chat.reset();
         self.confirm_replan = false;
         self.scenes_ask = None;
         self.script_ask = None;

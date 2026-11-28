@@ -63,10 +63,14 @@ pub enum TemplateKind {
     /// opened by the hook, from the Brief stage's claims only, ending on
     /// the call to action. Every other project's come from `Metadata`.
     AdMetadata,
+    /// Claude's answer to the user's request about a scene's image in its
+    /// scene chat (#368): a question, or a proposal of options, each with
+    /// the English instruction it would send.
+    SceneChat,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 14] = [
+    pub const ALL: [TemplateKind; 15] = [
         TemplateKind::Script,
         TemplateKind::ImagePrompt,
         TemplateKind::MusicPrompt,
@@ -81,6 +85,7 @@ impl TemplateKind {
         TemplateKind::AdScenePlan,
         TemplateKind::ConceptPrompt,
         TemplateKind::AdMetadata,
+        TemplateKind::SceneChat,
     ];
 
     /// Stable name stored in the database.
@@ -100,6 +105,7 @@ impl TemplateKind {
             TemplateKind::AdScenePlan => "ad_scene_plan",
             TemplateKind::ConceptPrompt => "concept_prompt",
             TemplateKind::AdMetadata => "ad_metadata",
+            TemplateKind::SceneChat => "scene_chat",
         }
     }
 
@@ -249,6 +255,15 @@ impl TemplateKind {
             TemplateKind::ConceptPrompt => {
                 &[TemplateVariable::Product, TemplateVariable::ProductAudience]
             }
+            TemplateKind::SceneChat => &[
+                TemplateVariable::ReplyLanguage,
+                TemplateVariable::VisualStyle,
+                TemplateVariable::FrameShape,
+                TemplateVariable::Scene,
+                TemplateVariable::SceneChatHistory,
+                TemplateVariable::SceneRequest,
+                TemplateVariable::ChatOptions,
+            ],
             TemplateKind::AdMetadata => &[
                 TemplateVariable::ChannelName,
                 TemplateVariable::ChannelNiche,
@@ -402,10 +417,22 @@ pub enum TemplateVariable {
     /// The objects the video picked from the world (#338), numbered as a
     /// scene's `objects` names them, with the character each belongs to.
     FixedObjects,
+    /// The scene a scene chat is about (#368): its number and time, the
+    /// narration over it, its image prompt, place, people and objects.
+    Scene,
+    /// The user's request in a scene chat.
+    SceneRequest,
+    /// The scene chat's recent messages, oldest first.
+    SceneChatHistory,
+    /// The options a scene chat's request may be answered with now, each
+    /// with when it fits and its price.
+    ChatOptions,
+    /// The language the user reads Bardo in, which a reply is written in.
+    ReplyLanguage,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 47] = [
+    pub const ALL: [TemplateVariable; 52] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -453,6 +480,11 @@ impl TemplateVariable {
         TemplateVariable::FixedCast,
         TemplateVariable::FixedPlaces,
         TemplateVariable::FixedObjects,
+        TemplateVariable::Scene,
+        TemplateVariable::SceneRequest,
+        TemplateVariable::SceneChatHistory,
+        TemplateVariable::ChatOptions,
+        TemplateVariable::ReplyLanguage,
     ];
 
     /// The name written between the braces.
@@ -505,6 +537,11 @@ impl TemplateVariable {
             TemplateVariable::FixedCast => "fixed_cast",
             TemplateVariable::FixedPlaces => "fixed_places",
             TemplateVariable::FixedObjects => "fixed_objects",
+            TemplateVariable::Scene => "scene",
+            TemplateVariable::SceneRequest => "scene_request",
+            TemplateVariable::SceneChatHistory => "scene_chat",
+            TemplateVariable::ChatOptions => "chat_options",
+            TemplateVariable::ReplyLanguage => "reply_language",
         }
     }
 

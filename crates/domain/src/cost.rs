@@ -589,6 +589,9 @@ pub enum CostPurpose {
     /// The image provider drawing a world character's reference picture
     /// from the World screen (#337), under the character's project.
     WorldPicture,
+    /// Claude answering the user's request about a scene in its scene chat
+    /// (#368), with the scene's image attached.
+    SceneChat,
 }
 
 /// The rate-table model of a post X bills without a link in its text.
@@ -639,7 +642,7 @@ fn holds_link(text: &str) -> bool {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 33] = [
+    pub const ALL: [CostPurpose; 34] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -673,6 +676,7 @@ impl CostPurpose {
         CostPurpose::ShotBackdrop,
         CostPurpose::ProductConcept,
         CostPurpose::WorldPicture,
+        CostPurpose::SceneChat,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -711,6 +715,7 @@ impl CostPurpose {
             CostPurpose::ShotBackdrop => "shot_backdrop",
             CostPurpose::ProductConcept => "product_concept",
             CostPurpose::WorldPicture => "world_picture",
+            CostPurpose::SceneChat => "scene_chat",
         }
     }
 }

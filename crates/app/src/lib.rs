@@ -65,6 +65,7 @@ mod removal;
 mod render;
 mod research;
 mod retention;
+mod scene_chat;
 mod scenes;
 mod scheduler;
 mod schedules;
@@ -234,6 +235,7 @@ pub use render::{
 };
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
 pub use retention::{CutRetention, DropView, PostedRetention};
+pub use scene_chat::{AppliedState, ChatAvailability, ChatLine, SceneChatError, SceneChatView};
 pub use scenes::{SceneError, ScenesView};
 pub use scheduler::{MissedPost, MissedPostError};
 pub use schedules::{ScheduleError, ScheduleResult, ScheduleUpdate};
@@ -345,6 +347,8 @@ pub struct Repositories {
     pub staging: Arc<dyn StagingRepository>,
     /// Scene plans, their prompts and images. Shared with the job queue.
     pub scene_plans: Arc<dyn ScenePlanRepository>,
+    /// Each scene's chat (#368). Shared with the job queue.
+    pub scene_chats: Arc<dyn bardo_domain::SceneChatRepository>,
     /// The cuts made in the editor.
     pub timelines: Arc<dyn TimelineRepository>,
     /// Each project's imported media.
@@ -505,6 +509,7 @@ impl Repositories {
             captures: Arc::clone(&db) as _,
             staging: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
+            scene_chats: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
@@ -725,6 +730,7 @@ pub struct Bardo {
     captures: Arc<dyn CaptureRepository>,
     staging: Arc<dyn StagingRepository>,
     scene_plans: Arc<dyn ScenePlanRepository>,
+    scene_chats: Arc<dyn bardo_domain::SceneChatRepository>,
     timelines: Arc<dyn TimelineRepository>,
     media_assets: Arc<dyn MediaAssetRepository>,
     music_prompts: Arc<dyn MusicPromptRepository>,
@@ -856,6 +862,7 @@ impl Bardo {
             captures,
             staging,
             scene_plans,
+            scene_chats,
             timelines,
             media_assets,
             music_prompts,
@@ -1164,6 +1171,16 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let scene_chat_handler = crate::scene_chat::SceneChatHandler {
+            owner: profile.id,
+            plans: Arc::clone(&scene_plans),
+            chats: Arc::clone(&scene_chats),
+            files: Arc::clone(&files),
+            media: Arc::clone(&providers.media),
+            text: Arc::clone(&providers.text),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let concept_handler = crate::product_concepts::ProductConceptHandler {
             owner: profile.id,
             products: Arc::clone(&products),
@@ -1318,6 +1335,7 @@ impl Bardo {
                     looks: look_handler,
                     sheets: sheet_handler,
                     concepts: concept_handler,
+                    scene_chats: scene_chat_handler,
                     ad_angles: ad_angle_handler,
                     chapters: chapters_handler,
                     renders: render_handler,
@@ -1362,6 +1380,7 @@ impl Bardo {
             captures,
             staging,
             scene_plans,
+            scene_chats,
             timelines,
             media_assets,
             music_prompts,
@@ -3776,6 +3795,7 @@ mod tests {
             captures: Arc::clone(&db) as _,
             staging: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
+            scene_chats: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,

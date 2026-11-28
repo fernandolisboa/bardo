@@ -63,6 +63,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) looks: PersonaLookHandler,
     pub(crate) sheets: crate::product_sheets::ProductSheetHandler,
     pub(crate) concepts: crate::product_concepts::ProductConceptHandler,
+    pub(crate) scene_chats: crate::scene_chat::SceneChatHandler,
     pub(crate) ad_angles: crate::ad_angles::AdAngleHandler,
     pub(crate) chapters: ChaptersHandler,
     pub(crate) renders: RenderHandler,
@@ -109,6 +110,7 @@ pub(crate) fn built_in_handlers(
         looks,
         sheets,
         concepts,
+        scene_chats,
         ad_angles,
         chapters,
         renders,
@@ -160,6 +162,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::PersonaLook, Arc::new(looks));
     handlers.insert(JobKind::ProductResearch, Arc::new(sheets));
     handlers.insert(JobKind::ProductConcept, Arc::new(concepts));
+    handlers.insert(JobKind::SceneChat, Arc::new(scene_chats));
     let ad_angles = Arc::new(ad_angles);
     handlers.insert(JobKind::AdAngleSuggestion, Arc::clone(&ad_angles) as _);
     handlers.insert(JobKind::AdAngleRanking, ad_angles);
@@ -2245,6 +2248,7 @@ mod tests {
             captures: Arc::clone(db) as _,
             staging: Arc::clone(db) as _,
             scene_plans: Arc::clone(db) as _,
+            scene_chats: Arc::clone(db) as _,
             timelines: Arc::clone(db) as _,
             media_assets: Arc::clone(db) as _,
             music_prompts: Arc::clone(db) as _,
