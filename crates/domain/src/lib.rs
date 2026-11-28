@@ -417,13 +417,14 @@ pub use runner::{
     UnknownRunnerRole, running_since,
 };
 pub use scene::{
-    CastDraft, CastMember, CastRecord, MAX_CAST, MAX_CAST_NAME_CHARS, MAX_PLACES,
-    MAX_SCENE_OBJECTS, MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes,
-    NoSuchCastMember, NoSuchPlace, NoSuchScene, OtherShot, OtherText, PRODUCT_MOTION_RULE,
-    PRODUCT_REFERENCE_RULE, PaidPictures, Place, PlaceDraft, PlaceRecord, PlanDraft, PortraitsUsed,
-    ProductCheckError, ProductChecks, Scene, SceneClip, SceneDraft, SceneFieldError, SceneImage,
-    SceneObject, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt,
-    SceneRecord, SceneSetting, Sentence, scene_image_prompt, sentences,
+    CastDraft, CastKind, CastMember, CastRecord, MAX_CAST, MAX_CAST_NAME_CHARS, MAX_PLACES,
+    MAX_PROPS, MAX_SCENE_OBJECTS, MAX_SCENE_PROPS, MAX_SENTENCE_WORDS, NoPendingClip,
+    NoPendingImage, NoScenes, NoSuchCastMember, NoSuchPlace, NoSuchScene, OtherShot, OtherText,
+    PRODUCT_MOTION_RULE, PRODUCT_REFERENCE_RULE, PaidPictures, Place, PlaceDraft, PlaceRecord,
+    PlanDraft, PortraitsUsed, ProductCheckError, ProductChecks, Scene, SceneClip, SceneDraft,
+    SceneFieldError, SceneImage, SceneObject, ScenePlan, ScenePlanId, ScenePlanRecord,
+    ScenePlanRepository, ScenePrompt, SceneRecord, SceneSetting, Sentence, scene_image_prompt,
+    sentences,
 };
 pub use scene_kind::{ComposedShot, KindChange, ProductPictures, SceneKind, SceneKindError};
 pub use scene_plan_size::ScenePlanSize;

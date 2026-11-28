@@ -2296,6 +2296,18 @@ pub enum Text {
     CastDescribedOnlyHint,
     CastDrawWithoutPortrait,
     CastUsePortrait,
+    /// A recurring object's texts on Scenes (#361), beside the people's.
+    SceneProps,
+    ScenePropsHint,
+    PropPictureLater,
+    EditPropDescription,
+    RedrawPropPicture,
+    PropPictureFailed,
+    PropDescribedOnly,
+    PropDescribedOnlyHint,
+    PropDrawWithoutPicture,
+    PropUsePicture,
+    PropSaveHint,
     ScenePlace,
     ScenePlaceHint,
     EditPlaceDescription,
@@ -6120,6 +6132,17 @@ impl Text {
             Text::CastDescribedOnlyHint => "scenes.cast.described_only_hint",
             Text::CastDrawWithoutPortrait => "scenes.cast.draw_without",
             Text::CastUsePortrait => "scenes.cast.use_portrait",
+            Text::SceneProps => "scenes.props.title",
+            Text::ScenePropsHint => "scenes.props.hint",
+            Text::PropPictureLater => "scenes.props.later",
+            Text::EditPropDescription => "scenes.props.edit",
+            Text::RedrawPropPicture => "scenes.props.redraw",
+            Text::PropPictureFailed => "scenes.props.failed",
+            Text::PropDescribedOnly => "scenes.props.described_only",
+            Text::PropDescribedOnlyHint => "scenes.props.described_only_hint",
+            Text::PropDrawWithoutPicture => "scenes.props.draw_without",
+            Text::PropUsePicture => "scenes.props.use_picture",
+            Text::PropSaveHint => "scenes.props.save_hint",
             Text::ScenePlace => "scenes.same_place.title",
             Text::ScenePlaceHint => "scenes.same_place.hint",
             Text::EditPlaceDescription => "scenes.same_place.edit",
@@ -9957,6 +9980,17 @@ mod tests {
         texts.push(Text::CastDescribedOnlyHint);
         texts.push(Text::CastDrawWithoutPortrait);
         texts.push(Text::CastUsePortrait);
+        texts.push(Text::SceneProps);
+        texts.push(Text::ScenePropsHint);
+        texts.push(Text::PropPictureLater);
+        texts.push(Text::EditPropDescription);
+        texts.push(Text::RedrawPropPicture);
+        texts.push(Text::PropPictureFailed);
+        texts.push(Text::PropDescribedOnly);
+        texts.push(Text::PropDescribedOnlyHint);
+        texts.push(Text::PropDrawWithoutPicture);
+        texts.push(Text::PropUsePicture);
+        texts.push(Text::PropSaveHint);
         texts.push(Text::ScenePlace);
         texts.push(Text::ScenePlaceHint);
         texts.push(Text::EditPlaceDescription);

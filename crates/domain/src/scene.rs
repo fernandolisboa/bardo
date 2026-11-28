@@ -159,9 +159,59 @@ pub const MAX_CAST: usize = 3;
 /// The longest name of a cast member, in characters.
 pub const MAX_CAST_NAME_CHARS: usize = 60;
 
-/// One of the video's recurring characters (#246) as the planner proposed
-/// them: what the scene prompts call them and their fixed appearance.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The most recurring objects a plan keeps (#361): a cup, a lantern, a
+/// notebook that comes back from scene to scene.
+pub const MAX_PROPS: usize = 4;
+
+/// The most recurring objects one scene is drawn with, each with its
+/// reference picture.
+pub const MAX_SCENE_PROPS: usize = 3;
+
+/// What a recurring member of a plan is (#361): someone, drawn with a
+/// reference portrait, or a thing, drawn with a reference picture of it
+/// alone. Both keep one look from scene to scene the same way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum CastKind {
+    #[default]
+    Person,
+    Object,
+}
+
+impl CastKind {
+    pub const ALL: [CastKind; 2] = [CastKind::Person, CastKind::Object];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            CastKind::Person => "person",
+            CastKind::Object => "object",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.code() == code)
+    }
+
+    /// How many of this kind a plan keeps.
+    pub fn max_planned(self) -> usize {
+        match self {
+            CastKind::Person => MAX_CAST,
+            CastKind::Object => MAX_PROPS,
+        }
+    }
+
+    /// How many of this kind one scene is drawn with.
+    pub fn max_in_scene(self) -> usize {
+        match self {
+            CastKind::Person => MAX_CAST,
+            CastKind::Object => MAX_SCENE_PROPS,
+        }
+    }
+}
+
+/// One of the video's recurring characters (#246) or objects (#361) as the
+/// planner proposed them: what the scene prompts call them and their fixed
+/// appearance.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CastDraft {
     pub name: String,
     pub description: String,
@@ -169,6 +219,8 @@ pub struct CastDraft {
     /// with its fixed appearance as the description. `None` for an extra
     /// the planner made up.
     pub character: Option<WorldItemId>,
+    /// A person or a recurring object.
+    pub kind: CastKind,
 }
 
 /// A recurring character of the video: the planner names them once with a
@@ -194,6 +246,9 @@ pub struct CastMember {
     /// picture for the video's look is their portrait. `None` for an extra
     /// of this video only.
     character: Option<WorldItemId>,
+    /// A person, or a recurring object whose "portrait" is a picture of it
+    /// alone (#361).
+    kind: CastKind,
 }
 
 /// Every stored field of a cast member, for adapters that rebuild one.
@@ -216,7 +271,19 @@ impl CastMember {
             failure: record.failure,
             described_only: false,
             character: None,
+            kind: CastKind::Person,
         }
+    }
+
+    /// The member as a person or an object, as an adapter rebuilds it.
+    pub fn with_kind(mut self, kind: CastKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    /// Whether this is a person or a recurring object.
+    pub fn kind(&self) -> CastKind {
+        self.kind
     }
 
     /// The member drawn from the description alone or not, as an adapter
@@ -261,6 +328,7 @@ impl CastMember {
             failure: None,
             described_only: false,
             character: draft.character,
+            kind: draft.kind,
         })
     }
 
@@ -356,6 +424,17 @@ impl CastMember {
     /// angle, and the portrait is what every scene with the person is
     /// drawn from, so after the style it says again what a portrait keeps.
     pub fn portrait_prompt(&self, style: StyleChoice) -> String {
+        if self.kind == CastKind::Object {
+            // The same words as a world object's picture, so one saved to
+            // the world is the picture it would have drawn (#361).
+            return style.applied(&format!(
+                "A reference picture of one object of a video, {name}: {description}\n\n\
+                 The object alone and whole, centered, against a plain, evenly lit background. \
+                 No people, no text, logos or watermarks.",
+                name = self.name,
+                description = self.description.as_str(),
+            ));
+        }
         let portrait = style.applied(&format!(
             "A reference portrait of one character of a video, {name}: {description}\n\n\
              Exactly one person, from the waist up, the whole head in frame, facing the \
@@ -376,6 +455,12 @@ const PORTRAIT_IN_A_STYLE: &str = "In this portrait the style decides only the m
     the texture and the palette: keep the framing, the neutral expression and the plain, evenly \
     lit background asked for above, with the whole face clearly lit.";
 
+/// What an image request says of an object's reference picture, after
+/// its name and description: a world object's (#338) or a recurring
+/// object's of the plan (#361).
+const OBJECT_REFERENCE_RULE: &str = "It must look exactly as in this reference: its shape, \
+colors, materials and markings. Do not copy the reference's framing or background.";
+
 /// The prompt an image of a scene is drawn from: the scene's prompt, who
 /// each cast member it shows is, where it happens, and what each other
 /// scene sent with it is for. `referenced` are the members whose portrait
@@ -389,20 +474,32 @@ pub fn scene_image_prompt(
     setting: SceneSetting<'_>,
 ) -> String {
     let mut text = prompt.to_owned();
-    let with: Vec<&CastMember> = shown
+    // The people first, then the recurring objects (#361): their pictures
+    // go with the request in that order.
+    let mut members: Vec<(&CastMember, bool)> = shown
         .iter()
-        .zip(referenced.iter().chain(std::iter::repeat(&false)))
-        .filter(|(_, referenced)| **referenced)
+        .copied()
+        .zip(referenced.iter().copied().chain(std::iter::repeat(false)))
+        .collect();
+    members.sort_by_key(|(member, _)| member.kind);
+    let with: Vec<&CastMember> = members
+        .iter()
+        .filter(|(_, referenced)| *referenced)
         .map(|(member, _)| *member)
         .collect();
-    if !with.is_empty() {
+    let people: Vec<&CastMember> = with
+        .iter()
+        .copied()
+        .filter(|member| member.kind == CastKind::Person)
+        .collect();
+    if !people.is_empty() {
         text.push_str(
             "\n\nThe reference images show the people in this scene, in this order. Each \
              person must look exactly as in their reference: the same face, skin tone, age, \
              hair, build and clothes. Do not copy the reference's pose, framing or \
              background.",
         );
-        for (number, member) in with.iter().enumerate() {
+        for (number, member) in people.iter().enumerate() {
             text.push_str(&format!(
                 "\nReference {}: {}, {}",
                 number + 1,
@@ -411,15 +508,40 @@ pub fn scene_image_prompt(
             ));
         }
     }
-    let described: Vec<&&CastMember> = shown
-        .iter()
-        .zip(referenced.iter().chain(std::iter::repeat(&false)))
-        .filter(|(_, referenced)| !**referenced)
-        .map(|(member, _)| member)
-        .collect();
-    if !described.is_empty() {
+    let described = |kind: CastKind| -> Vec<&CastMember> {
+        members
+            .iter()
+            .filter(|(member, referenced)| !*referenced && member.kind == kind)
+            .map(|(member, _)| *member)
+            .collect()
+    };
+    let described_people = described(CastKind::Person);
+    if !described_people.is_empty() {
         text.push_str("\n\nThe people in this scene look like this:");
-        for member in described {
+        for member in described_people {
+            text.push_str(&format!(
+                "\n{}: {}",
+                member.name,
+                member.description.as_str()
+            ));
+        }
+    }
+    for (offset, member) in with
+        .iter()
+        .filter(|member| member.kind == CastKind::Object)
+        .enumerate()
+    {
+        text.push_str(&format!(
+            "\n\nReference {}: {}, {}. {OBJECT_REFERENCE_RULE}",
+            people.len() + offset + 1,
+            member.name,
+            member.description.as_str()
+        ));
+    }
+    let described_props = described(CastKind::Object);
+    if !described_props.is_empty() {
+        text.push_str("\n\nThe recurring objects in this scene look like this:");
+        for member in described_props {
             text.push_str(&format!(
                 "\n{}: {}",
                 member.name,
@@ -456,8 +578,7 @@ pub fn scene_image_prompt(
     for object in setting.objects.iter().filter(|object| object.referenced) {
         object_refs += 1;
         text.push_str(&format!(
-            "\n\nReference {}: {}, {}. It must look exactly as in this reference: its shape, \
-             colors, materials and markings. Do not copy the reference's framing or background.",
+            "\n\nReference {}: {}, {}. {OBJECT_REFERENCE_RULE}",
             with.len() + product_refs + place_refs + object_refs,
             object.name,
             object.description
@@ -1689,10 +1810,31 @@ impl ScenePlan {
             .enumerate()
             .filter_map(|(index, draft)| Some((index, CastMember::planned(draft)?)))
             .collect();
+        // Each scene keeps at most three recurring objects, in the order
+        // it lists them (#361), so an object only a cut-off slot shows
+        // takes no room in the plan. (A scene holds as many people as the
+        // plan, and the picked characters among them go first below.)
+        for start in &mut starts {
+            let mut objects = 0;
+            start.cast.retain(|drafted| {
+                let object = usable
+                    .iter()
+                    .any(|(index, member)| index == drafted && member.kind == CastKind::Object);
+                objects += usize::from(object);
+                !object || objects <= MAX_SCENE_PROPS
+            });
+        }
         usable.retain(|(index, _)| starts.iter().any(|start| start.cast.contains(index)));
-        // The characters the video picked stay before any extra.
-        usable.sort_by_key(|(_, member)| member.character.is_none());
-        usable.truncate(MAX_CAST);
+        // People come first, then the recurring objects (#361), each kind
+        // cut to its own limit. The characters the video picked stay
+        // before any extra.
+        usable.sort_by_key(|(_, member)| (member.kind, member.character.is_none()));
+        let mut counted = [0; CastKind::ALL.len()];
+        usable.retain(|(_, member)| {
+            let count = &mut counted[member.kind as usize];
+            *count += 1;
+            *count <= member.kind.max_planned()
+        });
         // The usable places, likewise.
         let mut somewhere: Vec<(usize, Place)> = places
             .iter()
@@ -1735,11 +1877,16 @@ impl ScenePlan {
         }
         for start in &mut starts {
             let mut kept: Vec<usize> = Vec::new();
+            let mut counted = [0; CastKind::ALL.len()];
             for drafted in &start.cast {
                 if let Some(at) = usable.iter().position(|(index, _)| index == drafted)
                     && !kept.contains(&at)
                 {
-                    kept.push(at);
+                    let kind = usable[at].1.kind;
+                    counted[kind as usize] += 1;
+                    if counted[kind as usize] <= kind.max_in_scene() {
+                        kept.push(at);
+                    }
                 }
             }
             start.cast = kept;
@@ -1995,9 +2142,13 @@ impl ScenePlan {
     /// the cast: the ones it shows, and once the user edited its prompt,
     /// only those the prompt still names, so writing a person out of a
     /// scene takes them out of its image.
+    ///
+    /// The people come first and the recurring objects after them (#361),
+    /// each in the scene's order: their pictures go with the image request
+    /// in this order.
     pub fn scene_cast(&self, index: usize) -> Vec<usize> {
         let drawn = self.scenes.get(index).filter(|scene| !scene.is_composed());
-        drawn.map_or_else(Vec::new, |scene| {
+        let mut members: Vec<usize> = drawn.map_or_else(Vec::new, |scene| {
             let prompt = scene.prompt.as_str().to_lowercase();
             scene
                 .cast
@@ -2009,7 +2160,9 @@ impl ScenePlan {
                     })
                 })
                 .collect()
-        })
+        });
+        members.sort_by_key(|&member| self.cast[member].kind);
+        members
     }
 
     /// Cast members without a portrait in the video's `style` that drawing
@@ -2874,6 +3027,7 @@ mod tests {
             name: name.into(),
             description: description.into(),
             character: None,
+            kind: CastKind::Person,
         }
     }
 
@@ -3333,6 +3487,170 @@ mod tests {
                 .portrait_prompt(StyleChoice::FromNotes)
                 .contains("the chef: A man in his fifties")
         );
+    }
+
+    fn prop(name: &str, description: &str) -> CastDraft {
+        CastDraft {
+            kind: CastKind::Object,
+            ..member(name, description)
+        }
+    }
+
+    #[test]
+    fn recurring_objects_follow_the_people_each_cut_to_its_own_limit() {
+        let n = narration(STORY, 0);
+        let mut cast: Vec<CastDraft> = (0..MAX_PROPS + 1)
+            .map(|i| prop(&format!("object {i}"), "A thing."))
+            .collect();
+        cast.extend((0..MAX_CAST + 1).map(|i| member(&format!("person {i}"), "A person.")));
+        let all: Vec<usize> = (0..cast.len()).collect();
+        let plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            cast,
+            vec![
+                cast_draft(0, "Everyone with everything.", all),
+                cast_draft(2, "The last object alone.", vec![MAX_PROPS - 1]),
+            ],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let kinds: Vec<CastKind> = plan.cast().iter().map(CastMember::kind).collect();
+        let mut expected = vec![CastKind::Person; MAX_CAST];
+        expected.extend(vec![CastKind::Object; MAX_PROPS]);
+        assert_eq!(kinds, expected, "people first, then objects, each cut");
+        assert_eq!(plan.cast()[MAX_CAST].name, "object 0");
+        let first = plan.scene_cast(0);
+        assert_eq!(
+            first.len(),
+            MAX_CAST + MAX_SCENE_PROPS,
+            "a scene holds three objects"
+        );
+        assert!(
+            first[..MAX_CAST]
+                .iter()
+                .all(|&m| plan.cast()[m].kind() == CastKind::Person),
+            "the people's pictures go first"
+        );
+        assert_eq!(plan.scene_cast(1), [MAX_CAST + MAX_PROPS - 1]);
+        assert_eq!(
+            plan.missing_portraits(&[1], StyleChoice::FromNotes),
+            [MAX_CAST + MAX_PROPS - 1],
+            "an object's picture is drawn like a portrait"
+        );
+        // A fourth object of one scene, shown nowhere else, is not kept.
+        let plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            (0..MAX_SCENE_PROPS + 1)
+                .map(|i| prop(&format!("object {i}"), "A thing."))
+                .collect(),
+            vec![cast_draft(
+                0,
+                "Everything.",
+                (0..=MAX_SCENE_PROPS).collect(),
+            )],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(plan.cast().len(), MAX_SCENE_PROPS);
+    }
+
+    #[test]
+    fn a_scene_prompt_holds_its_recurring_objects_to_their_pictures() {
+        let n = narration(STORY, 0);
+        let plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            vec![
+                prop(
+                    "the cup",
+                    "A squat white porcelain cup with a thin gold rim.",
+                ),
+                member("the barista", "A woman in her thirties, short black hair."),
+                prop("the kettle", "A matte black gooseneck kettle."),
+            ],
+            vec![cast_draft(
+                0,
+                "The barista pours into the cup.",
+                vec![0, 1, 2],
+            )],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let shown: Vec<&CastMember> = plan
+            .scene_cast(0)
+            .into_iter()
+            .map(|m| &plan.cast()[m])
+            .collect();
+        assert_eq!(shown[0].name, "the barista");
+        let place = Place::planned(&somewhere("the counter", "A marble counter.")).unwrap();
+        let world = [SceneObject {
+            name: "Brass lamp",
+            description: "An old brass lamp.",
+            referenced: true,
+        }];
+        let prompt = scene_image_prompt(
+            "The barista pours into the cup.",
+            &shown,
+            &[true, true, false],
+            SceneSetting {
+                place: Some(&place),
+                place_picture: true,
+                objects: &world,
+                ..SceneSetting::default()
+            },
+        );
+        assert!(prompt.contains("Reference 1: the barista, A woman in her thirties"));
+        assert!(prompt.contains(
+            "Reference 2: the cup, A squat white porcelain cup with a thin gold rim.. It must \
+             look exactly as in this reference"
+        ));
+        assert!(prompt.contains(
+            "The recurring objects in this scene look like this:\nthe kettle: A matte black"
+        ));
+        assert!(
+            prompt.contains("Reference 3: this place itself."),
+            "{prompt}"
+        );
+        assert!(prompt.contains("Reference 4: Brass lamp"));
+        assert!(!prompt.contains("The people in this scene look like this"));
+        let picture = shown[1].portrait_prompt(StyleChoice::FromNotes);
+        assert!(picture.starts_with("A reference picture of one object of a video, the cup:"));
+        assert!(!picture.contains("waist up"));
+    }
+
+    #[test]
+    fn an_object_drawn_with_an_older_picture_marks_its_scenes() {
+        let n = narration(STORY, 0);
+        let mut plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            vec![prop("the cup", "A white cup.")],
+            vec![
+                cast_draft(0, "The cup on a table.", vec![0]),
+                cast_draft(2, "The cup in a hand.", vec![0]),
+            ],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let picture = image(&n, "cup.png");
+        let used = vec![(0, Some(picture.generation.id))];
+        plan.cast_mut(0, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .set_portrait(picture.clone());
+        for index in [0, 1] {
+            plan.scene_mut(index, SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .add_image_drawn_with(image(&n, &format!("s{index}.png")), Some(used.clone()));
+        }
+        assert!(plan.with_old_portraits().is_empty());
+        let (changed, dropped) = plan
+            .cast_mut(0, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .edit_description(ScenePrompt::new("A tall blue mug.").unwrap());
+        assert!(changed && dropped.is_some());
+        assert_eq!(plan.with_old_portraits(), [0, 1]);
     }
 
     fn somewhere(name: &str, description: &str) -> PlaceDraft {

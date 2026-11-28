@@ -75,7 +75,7 @@ Abaixo das ações, **Compartilhamento** marca um item como **Compartilhável** 
 <a id="save"></a>
 ## Salvar uma pessoa do vídeo no mundo
 
-Uma pessoa do elenco de um vídeo pode virar personagem: na etapa [Cenas](scenes.md#cast), **Salvar em Mundo** a guarda no mundo do projeto e **Salvar na biblioteca global** na biblioteca global, com o retrato dela no visual do vídeo. A pessoa do vídeo passa a ser esse personagem.
+Uma pessoa do elenco de um vídeo pode virar personagem: na etapa [Cenas](scenes.md#cast), **Salvar em Mundo** a guarda no mundo do projeto e **Salvar na biblioteca global** na biblioteca global, com o retrato dela no visual do vídeo. A pessoa do vídeo passa a ser esse personagem. Um [objeto que volta](scenes.md#props) é salvo do mesmo jeito, como objeto com a imagem dele.
 
 <a id="save-place"></a>
 ## Salvar um lugar do vídeo no mundo
